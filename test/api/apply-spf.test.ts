@@ -366,3 +366,18 @@ describe('POST /api/spf-lookup-count', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ── Zone targeting (characterization) ─────────────────────────
+
+describe('apply-spf zone targeting', () => {
+  // KNOWN BUG (fixed later in this lane): the write goes to the single cached zone
+  // even when the domain belongs to another zone.
+  it('BUG: writes to the default zone regardless of which zone the domain lives in', async () => {
+    const fetchMock = mockFetch([]);
+    const env = makeEnv();
+    (env.DB as any).sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (2, ?, ?)').run('other-company.org', 'rua@reports.test.com');
+    await handleApi(req('POST', '/api/domains/2/apply-spf', { record: 'v=spf1 -all' }), env, ctx);
+    const [url] = fetchMock.mock.calls[1] as [string];
+    expect(url).toBe('https://api.cloudflare.com/client/v4/zones/zone-test-123/dns_records');
+  });
+});
