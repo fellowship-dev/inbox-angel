@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error plain ESM, no types
 import { parseWranglerJson } from '../src/adopt.js';
 
 describe('parseWranglerJson', () => {
