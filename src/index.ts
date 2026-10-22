@@ -134,7 +134,7 @@ export default {
         .catch(e => console.warn(`[monitor] SPF lookup refresh failed for ${d.domain}:`, e));
     }
 
-    // Rollback regression check — for domains actively in a pct= rollout
+    // Rollback regression check — for domains actively in a staged rollout
     for (const d of allDomains) {
       if (!d.rollout_rec_policy || d.rollout_rec_pct == null) continue;
       try {
@@ -153,7 +153,7 @@ export default {
         const currRate = rate(currRows);
         const prevRate = rate(prevRows);
         if (detectRollbackRisk(currRate, prevRate)) {
-          console.warn(`[rollout] ${d.domain}: pass rate dropped from ${prevRate}% to ${currRate}% after step ${d.rollout_rec_policy}/${d.rollout_rec_pct}% — rollback recommended`);
+          console.warn(`[rollout] ${d.domain}: pass rate dropped from ${prevRate}% to ${currRate}% after step ${d.rollout_rec_policy}${d.rollout_rec_pct === 0 ? ' (t=y)' : ''} — rollback recommended`);
         }
       } catch (e) {
         console.error(`[rollout] regression check failed for ${d.domain}:`, e);

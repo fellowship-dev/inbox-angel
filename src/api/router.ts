@@ -28,7 +28,7 @@
 //   GET    /api/domains/:id/anomalies         — failing sources with Active/Older split
 //   GET    /api/domains/:id/export            — CSV export
 //   GET    /api/domains/:id/dns-check         — check _dmarc TXT record in DNS
-//   GET    /api/domains/:id/rollout-next      — current pct= step, next step, DNS preview, safety
+//   GET    /api/domains/:id/rollout-next      — current rollout step, next step, DNS preview, safety
 //   POST   /api/domains/:id/rollout-advance   — persist recommended rollout step
 //   PUT    /api/domains/:id/set-default       — designate domain as default (infrastructure hub)
 //   GET    /api/zones                         — list CF account zones (for zone picker)
@@ -110,7 +110,7 @@ import { track } from '../telemetry';
 import { reportsDomain, fromEmail, enrichEnv, getZoneId, getAccountId, getBaseDomain, resetEnvCache } from '../env-utils';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
-import { getNextStep, getCurrentStepIndex, buildStepRecord, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
+import { getNextStep, buildStepRecord, parseDmarcTags, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
 import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
 import { getAllDkimSelectors } from '../../dashboard/src/email-service-providers';
@@ -1456,7 +1456,7 @@ async function _handleApi(
       });
     }
 
-    // GET /api/domains/:id/rollout-next — current pct= step, next step, DNS preview, safety checks
+    // GET /api/domains/:id/rollout-next — current rollout step, next step, DNS preview, safety checks
     const rolloutNextMatch = path.match(/^\/api\/domains\/([^/]+)\/rollout-next$/);
     if (rolloutNextMatch && method === 'GET') {
       const id = parseInt(rolloutNextMatch[1], 10);
@@ -1464,19 +1464,20 @@ async function _handleApi(
       const domain = await getDomainById(env.DB, id);
       if (!domain) return err('domain not found', 404);
 
-      // Fetch live DMARC record to get current pct=
+      // Fetch live DMARC record to get current p= / t= (and legacy pct=)
       let currentRecord: string | null = null;
       let livePct: number | null = null;
       let livePolicy: string | null = null;
+      let liveTesting = false;
       try {
         const txt = await createResolver().txt(`_dmarc.${domain.domain}`);
         if (txt.status === 'error') throw new Error(txt.error); // unknown, not "no record": fall through without live data
         currentRecord = txt.records.find(isDmarcRecord) ?? null;
         if (currentRecord) {
-          const pMatch = currentRecord.match(/\bp=(\w+)/);
-          const pctMatch = currentRecord.match(/\bpct=(\d+)/);
-          livePolicy = pMatch?.[1] ?? null;
-          livePct = pctMatch ? parseInt(pctMatch[1], 10) : 100;
+          const tags = parseDmarcTags(currentRecord);
+          livePolicy = tags.get('p')?.toLowerCase() ?? null;
+          livePct = tags.has('pct') ? parseInt(tags.get('pct')!, 10) : 100; // legacy; RFC 9989 removed pct
+          liveTesting = tags.get('t')?.toLowerCase() === 'y';
         }
       } catch {
         // DNS unavailable — proceed without live data
@@ -1497,8 +1498,10 @@ async function _handleApi(
         (s: any) => !s.spf_domain && !s.dkim_domain
       ).length;
 
-      const nextStep = getNextStep(livePolicy, livePct);
-      const currentStepIndex = getCurrentStepIndex(livePolicy, livePct);
+      const currentStepIndex = currentRecord ? stepIndexForRecord(currentRecord) : 0;
+      const nextStep = currentStepIndex === -1 || currentStepIndex === ROLLOUT_SEQUENCE.length - 1
+        ? null
+        : ROLLOUT_SEQUENCE[currentStepIndex + 1];
 
       // Safety: block if pass rate is below threshold
       const blocked = passRate !== null && passRate < PASS_RATE_THRESHOLD;
@@ -1514,16 +1517,13 @@ async function _handleApi(
         : null;
 
       // Behind schedule: recommended step is ahead of live step
-      const recStepIndex = domain.rollout_rec_policy && domain.rollout_rec_pct != null
-        ? ROLLOUT_SEQUENCE.findIndex(
-            (s) => s.policy === domain.rollout_rec_policy && s.pct === domain.rollout_rec_pct
-          )
-        : -1;
+      const recStepIndex = stepIndexFromStored(domain.rollout_rec_policy, domain.rollout_rec_pct);
       const behindSchedule = recStepIndex > currentStepIndex;
 
       return json({
         current_policy: livePolicy,
         current_pct: livePct,
+        current_testing: liveTesting,
         current_record: currentRecord,
         current_step_index: currentStepIndex,
         total_steps: ROLLOUT_SEQUENCE.length,
@@ -1547,17 +1547,23 @@ async function _handleApi(
       const domain = await getDomainById(env.DB, id);
       if (!domain) return err('domain not found', 404);
 
-      const body = await parseBody<{ policy: string; pct: number }>(request);
-      const { policy, pct } = body;
+      // New clients send { policy, testing }. Legacy clients send { policy, pct }: pct is
+      // migrated onto the new sequence and never weakens the policy (see stepIndexFor).
+      const body = await parseBody<{ policy: string; testing?: boolean; pct?: number }>(request);
+      const { policy, testing, pct } = body;
       if (!policy || !['quarantine', 'reject'].includes(policy)) {
         return err('policy must be quarantine or reject', 400);
       }
-      if (typeof pct !== 'number' || ![10, 50, 100].includes(pct)) {
+      if (pct !== undefined && (typeof pct !== 'number' || ![10, 50, 100].includes(pct))) {
         return err('pct must be 10, 50, or 100', 400);
       }
+      if (testing !== undefined && typeof testing !== 'boolean') {
+        return err('testing must be a boolean', 400);
+      }
 
-      await updateDomainRollout(env.DB, id, policy, pct);
-      return json({ ok: true, rollout_rec_policy: policy, rollout_rec_pct: pct });
+      const stored = toStored(ROLLOUT_SEQUENCE[stepIndexFor(policy, pct ?? null, testing === true)]);
+      await updateDomainRollout(env.DB, id, stored.policy, stored.pct);
+      return json({ ok: true, rollout_rec_policy: stored.policy, rollout_rec_pct: stored.pct, rollout_rec_testing: stored.pct === 0 });
     }
 
     // DELETE /api/domains/:id

@@ -47,7 +47,7 @@ function spfSeverity(was: string, now: string, permerror?: string): DomainChange
 
 // Rollback regression detection — called from daily cron for domains in active rollout.
 // Returns true if the current week pass rate dropped more than ROLLBACK_THRESHOLD_PP
-// compared to the previous week, indicating a possible regression after a pct= step change.
+// compared to the previous week, indicating a possible regression after a rollout step change.
 export const ROLLBACK_THRESHOLD_PP = 10;
 
 export function detectRollbackRisk(

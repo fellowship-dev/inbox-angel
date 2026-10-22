@@ -76,36 +76,60 @@ function req(method: string, path: string, body?: unknown): Request {
 // ── POST /api/domains/:id/rollout-advance ─────────────────────
 
 describe('POST /api/domains/:id/rollout-advance', () => {
-  it('returns 200 ok with persisted recommended step', async () => {
-    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', pct: 50 }), makeEnv(), ctx);
+  it('persists a testing (t=y) step', async () => {
+    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', testing: true }), makeEnv(), ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.ok).toBe(true);
     expect(body.rollout_rec_policy).toBe('quarantine');
-    expect(body.rollout_rec_pct).toBe(50);
+    expect(body.rollout_rec_pct).toBe(0);
+    expect(body.rollout_rec_testing).toBe(true);
+  });
+
+  it('persists an enforced step', async () => {
+    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'reject', testing: false }), makeEnv(), ctx);
+    const body = await res.json() as any;
+    expect(body.rollout_rec_policy).toBe('reject');
+    expect(body.rollout_rec_pct).toBe(100);
+    expect(body.rollout_rec_testing).toBe(false);
+  });
+
+  it('maps legacy pct requests to the fully enforced step (never weaker)', async () => {
+    for (const pct of [10, 50, 100]) {
+      const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', pct }), makeEnv(), ctx);
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.rollout_rec_policy).toBe('quarantine');
+      expect(body.rollout_rec_pct).toBe(100);
+    }
   });
 
   it('returns 404 when domain not found', async () => {
-    const res = await handleApi(req('POST', '/api/domains/999/rollout-advance', { policy: 'quarantine', pct: 10 }), makeEnv(null), ctx);
+    const res = await handleApi(req('POST', '/api/domains/999/rollout-advance', { policy: 'quarantine', testing: true }), makeEnv(null), ctx);
     expect(res.status).toBe(404);
   });
 
   it('returns 400 for invalid policy', async () => {
-    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'none', pct: 10 }), makeEnv(), ctx);
+    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'none', testing: true }), makeEnv(), ctx);
     expect(res.status).toBe(400);
     const body = await res.json() as any;
     expect(body.error).toContain('quarantine or reject');
   });
 
-  it('returns 400 for invalid pct', async () => {
+  it('returns 400 for invalid legacy pct', async () => {
     const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', pct: 75 }), makeEnv(), ctx);
     expect(res.status).toBe(400);
     const body = await res.json() as any;
     expect(body.error).toContain('pct must be 10, 50, or 100');
   });
 
+  it('returns 400 for non-boolean testing', async () => {
+    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', testing: 'yes' }), makeEnv(), ctx);
+    expect(res.status).toBe(400);
+  });
+
   it('returns 400 for invalid domain id', async () => {
-    const res = await handleApi(req('POST', '/api/domains/abc/rollout-advance', { policy: 'quarantine', pct: 10 }), makeEnv(), ctx);
+    const res = await handleApi(req('POST', '/api/domains/abc/rollout-advance', { policy: 'quarantine', testing: true }), makeEnv(), ctx);
     expect(res.status).toBe(400);
   });
 });
