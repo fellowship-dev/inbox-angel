@@ -14,6 +14,10 @@ export interface CheckSummary {
   dmarcPass: boolean;
   dmarcPolicy: string | null;
   dkimPresent: boolean;
+  /** DNS lookups that FAILED (as opposed to finding nothing); results for these are "unknown" */
+  spfLookupFailed?: boolean;
+  dmarcLookupFailed?: boolean;
+  dkimLookupFailed?: boolean;
 }
 
 export function buildSummary(
@@ -36,7 +40,12 @@ export function buildSummary(
     status = 'at_risk';    // DMARC exists but this email still failed
   }
 
-  return { status, domain, spfPass, dkimPass, dmarcPass, dkimPresent, dmarcPolicy };
+  return {
+    status, domain, spfPass, dkimPass, dmarcPass, dkimPresent, dmarcPolicy,
+    ...(dns.errors?.spf ? { spfLookupFailed: true } : {}),
+    ...(dns.errors?.dmarc ? { dmarcLookupFailed: true } : {}),
+    ...(dns.errors?.dkim ? { dkimLookupFailed: true } : {}),
+  };
 }
 
 // ── Plain text email report ───────────────────────────────────
@@ -55,12 +64,14 @@ const STATUS_HEADING: Record<OverallStatus, string> = {
 
 function spfLine(s: CheckSummary): string {
   if (s.spfPass) return '✅ SPF — Your email server is verified as an authorized sender.';
+  if (s.spfLookupFailed) return '⚠️  SPF — We could not look up your SPF record right now (temporary DNS problem).';
   return '❌ SPF — No record found, or this email came from an unauthorized server.';
 }
 
 function dkimLine(s: CheckSummary): string {
   if (s.dkimPass) return '✅ DKIM — Your email has a valid digital signature.';
   if (s.dkimPresent) return '❌ DKIM — A signing key exists but this email was not signed.';
+  if (s.dkimLookupFailed) return '⚠️  DKIM — We could not look up your signing key right now (temporary DNS problem).';
   return '❌ DKIM — No signing key configured for your domain.';
 }
 
@@ -77,6 +88,7 @@ function dmarcLine(s: CheckSummary): string {
   if (s.dmarcPolicy) {
     return `⚠️  DMARC — Policy "${s.dmarcPolicy}" exists but this email failed the check.`;
   }
+  if (s.dmarcLookupFailed) return '⚠️  DMARC — We could not look up your DMARC record right now (temporary DNS problem).';
   return '❌ DMARC — No policy set. Nothing stops scammers from impersonating your domain.';
 }
 
@@ -95,9 +107,13 @@ Nothing urgent. Keep your DNS records as-is and monitor your DMARC reports regul
   }
 
   const steps: string[] = [];
-  if (!s.spfPass) steps.push('1. Add an SPF record to your DNS (takes 5 minutes with your domain registrar).');
-  if (!s.dkimPass) steps.push(`${steps.length + 1}. Enable DKIM signing in your email provider's settings.`);
-  if (!s.dmarcPolicy) steps.push(`${steps.length + 1}. Add a DMARC record starting with p=none to begin monitoring.`);
+  if (s.spfLookupFailed || s.dmarcLookupFailed || s.dkimLookupFailed) {
+    steps.push('0. Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.');
+  }
+  if (!s.spfPass && !s.spfLookupFailed) steps.push('1. Add an SPF record to your DNS (takes 5 minutes with your domain registrar).');
+  if (!s.dkimPass && !s.dkimLookupFailed) steps.push(`${steps.length + 1}. Enable DKIM signing in your email provider's settings.`);
+  if (!s.dmarcPolicy && s.dmarcLookupFailed) { /* unknown – don't tell them to add a record that may exist */ }
+  else if (!s.dmarcPolicy) steps.push(`${steps.length + 1}. Add a DMARC record starting with p=none to begin monitoring.`);
   else if (s.dmarcPolicy === 'none') steps.push(`${steps.length + 1}. Upgrade your DMARC policy from p=none to p=quarantine, then p=reject.`);
 
   return `
@@ -140,15 +156,17 @@ export function formatCheckReport(
     lines.push(`SPF record:   ${dns.spf.raw}`);
     lines.push(`              Enforcement: ${dns.spf.verdict}`);
   } else {
-    lines.push('SPF record:   (none found)');
+    lines.push(dns.errors?.spf ? 'SPF record:   (could not be checked — DNS lookup failed)' : 'SPF record:   (none found)');
   }
   if (dns.dmarc) {
     lines.push(`DMARC record: ${dns.dmarc.raw}`);
   } else {
-    lines.push('DMARC record: (none found)');
+    lines.push(dns.errors?.dmarc ? 'DMARC record: (could not be checked — DNS lookup failed)' : 'DMARC record: (none found)');
   }
   if (dns.dkim) {
     lines.push(`DKIM key:     found (selector used: ${auth?.dkim?.selector ?? 'unknown'})`);
+  } else if (dns.errors?.dkim) {
+    lines.push('DKIM key:     (could not be checked — DNS lookup failed)');
   } else if (auth?.dkim?.selector) {
     lines.push(`DKIM key:     not found at selector "${auth.dkim.selector}"`);
   } else {

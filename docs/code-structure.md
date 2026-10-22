@@ -119,3 +119,22 @@ Fire-and-forget. Never throws. Silently no-ops if telemetry is disabled or if th
 | `report.received` / `tls-rpt.received` | DMARC or TLS report ingested |
 
 The opt-in state is cached in a module-level variable to avoid a D1 query on every event call.
+
+---
+
+## packages/dns-checks
+
+Pure DNS and email-authentication logic (SPF, DKIM, DMARC, MTA-STS, BIMI, MX, provider detection,
+`checkDomain()` with a Levels 0–3 grade). No D1, no Cloudflare zone API, no env globals; `fetch` is
+injectable. See `packages/dns-checks/README.md`.
+
+The worker imports it by relative path and only adds the Cloudflare/D1 side:
+
+| Worker module | Role |
+|---------------|------|
+| `src/email/dns-check.ts` | Adapter: binds the package to global `fetch`. `null` = authoritatively absent; a DNS failure **throws** `DnsLookupError` |
+| `src/email/spf-flattener.ts` | `collectIps` (throws on incomplete resolution) + Cloudflare DNS PATCH/restore |
+| `src/email/mta-sts.ts` | `discoverMxHosts` / `detectExistingMtaStsMode` (throw on DNS error) + Cloudflare provisioning |
+| `src/monitor/check.ts` | Diffs baselines; a failed lookup keeps the old baseline and reports no change |
+
+Public Suffix List data comes from the `tldts` dependency; update it with `npm update tldts`.

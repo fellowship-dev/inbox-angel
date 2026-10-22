@@ -295,7 +295,7 @@ describe('POST /api/spf-lookup-count', () => {
   it('counts lookups for a simple record with only ip4 mechanisms', async () => {
     // No fetch calls needed — ip4 doesn't trigger DNS lookups
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ Answer: [] }), { status: 200 }),
+      new Response(JSON.stringify({ Status: 0, Answer: [] }), { status: 200 }),
     ));
     const env = makeEnv();
     const res = await handleApi(
@@ -310,7 +310,7 @@ describe('POST /api/spf-lookup-count', () => {
   it('counts includes and mx mechanisms', async () => {
     // Mock DoH responses for include resolution
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ Answer: [{ type: 16, data: '"v=spf1 ip4:1.2.3.4 ~all"' }] }), { status: 200 }),
+      new Response(JSON.stringify({ Status: 0, Answer: [{ type: 16, data: '"v=spf1 ip4:1.2.3.4 ~all"' }] }), { status: 200 }),
     ));
     const env = makeEnv();
     const res = await handleApi(
@@ -328,16 +328,18 @@ describe('POST /api/spf-lookup-count', () => {
       // Level 1: provider.com has a nested include
       if (url.includes('name=provider.com')) {
         return Promise.resolve(new Response(JSON.stringify({
+          Status: 0,
           Answer: [{ type: 16, data: '"v=spf1 include:nested.com ip4:1.2.3.4 ~all"' }],
         })));
       }
       // Level 2: nested.com is a leaf
       if (url.includes('name=nested.com')) {
         return Promise.resolve(new Response(JSON.stringify({
+          Status: 0,
           Answer: [{ type: 16, data: '"v=spf1 ip4:5.6.7.8 ~all"' }],
         })));
       }
-      return Promise.resolve(new Response(JSON.stringify({ Answer: [] })));
+      return Promise.resolve(new Response(JSON.stringify({ Status: 0, Answer: [] })));
     });
     vi.stubGlobal('fetch', fetchMock);
     const env = makeEnv();
@@ -349,6 +351,24 @@ describe('POST /api/spf-lookup-count', () => {
     const body = await res.json() as any;
     // 1 (include:provider.com) + 1 (include:nested.com inside provider) = 2
     expect(body.lookup_count).toBe(2);
+  });
+
+  it('returns 502 (not a bogus count) when DNS fails during the walk', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ Status: 2 }), { status: 200 })));
+    const res = await handleApi(
+      req('POST', '/api/spf-lookup-count', { record: 'v=spf1 include:provider.com ~all' }),
+      makeEnv(), ctx,
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it('counts RFC 7208 mechanisms only: a, ptr and exists count, ip6 does not', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: '1.2.3.4' }] }), { status: 200 })));
+    const res = await handleApi(
+      req('POST', '/api/spf-lookup-count', { record: 'v=spf1 a ptr exists:x.example.com ip6:2001:db8::/32 -all' }),
+      makeEnv(), ctx,
+    );
+    expect(((await res.json()) as any).lookup_count).toBe(3);
   });
 
   it('rejects missing record', async () => {

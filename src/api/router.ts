@@ -112,6 +112,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { getNextStep, getCurrentStepIndex, buildStepRecord, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
+import { createResolver, isDmarcRecord, isSpfRecord } from '../../packages/dns-checks/src';
 import { getAllDkimSelectors } from '../../dashboard/src/email-service-providers';
 import {
   provisionMtaSts,
@@ -239,14 +240,18 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
   if (domainRow?.parent_id) {
     const parentRow = await getDomainById(env.DB, domainRow.parent_id);
     if (parentRow) {
-      const parentDmarc = await lookupDmarc(parentRow.domain).catch(() => null);
-      parent_context = {
-        domain: parentRow.domain,
-        dmarc_policy: parentDmarc?.policy ?? null,
-        // sp= tag: null means not explicitly set (frontend distinguishes sp=none vs absent)
-        dmarc_sp: parentDmarc ? (parentDmarc.subdomainPolicy ?? null) : null,
-        has_dmarc: parentDmarc !== null,
-      };
+      // A failed lookup leaves parent_context unset: "unknown" must not be reported as "parent has no DMARC".
+      const parentDmarc = await lookupDmarc(parentRow.domain).then(r => ({ ok: true as const, r }), () => ({ ok: false as const, r: null }));
+      if (parentDmarc.ok) {
+        const pd = parentDmarc.r;
+        parent_context = {
+          domain: parentRow.domain,
+          dmarc_policy: pd?.policy ?? null,
+          // sp= tag: null means not explicitly set (frontend distinguishes sp=none vs absent)
+          dmarc_sp: pd ? (pd.subdomainPolicy ?? null) : null,
+          has_dmarc: pd !== null,
+        };
+      }
     }
   }
 
@@ -957,14 +962,15 @@ async function _handleApi(
       if (!domain) return err('domain not found', 404);
 
       try {
-        const dohUrl = `https://cloudflare-dns.com/dns-query?name=_dmarc.${domain.domain}&type=TXT`;
-        const dohRes = await fetch(dohUrl, { headers: { Accept: 'application/dns-json' } });
-        const doh = await dohRes.json() as { Status: number; Answer?: { data: string }[] };
-        const records = doh.Answer ?? [];
+        const txt = await createResolver().txt(`_dmarc.${domain.domain}`);
+        // SERVFAIL / timeout / HTTP error / malformed answer: we don't know, so don't say "not found"
+        if (txt.status === 'error') {
+          return json({ found: false, has_rua: false, current_record: null, cf_managed: false, error: 'dns lookup failed' });
+        }
+        const records = txt.records;
         const found = records.length > 0;
-        const has_rua = records.some(r => r.data.includes(domain.rua_address));
-        // Strip surrounding quotes that DoH JSON wraps TXT content in
-        const current_record = records[0]?.data?.replace(/^"|"$/g, '') ?? null;
+        const has_rua = records.some(r => r.includes(domain.rua_address));
+        const current_record = records[0] ?? null;
         const cf_managed = !!domain.dns_record_id;
         if (found) track(env, { event: 'domain.dns_verified' }); // fire-and-forget
         return json({ found, has_rua, current_record, cf_managed });
@@ -1025,37 +1031,34 @@ async function _handleApi(
       const rd = reportsDomain();
       const DKIM_SELECTORS = getAllDkimSelectors();
 
-      const [spfLiveData, dmarcData, routingData, dkimData, nullSenderData, authRecordData] = await Promise.all([
-        // SPF: DoH lookup for {domain} TXT records → find v=spf1
-        fetch(`https://cloudflare-dns.com/dns-query?name=${domain.domain}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-          .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>)
-          .then(d => {
-            const records = d.Answer ?? [];
-            for (const r of records) {
-              const clean = r.data?.replace(/^"|"$/g, '') ?? '';
-              if (clean.startsWith('v=spf1')) return clean;
-            }
-            return null;
-          })
-          .catch(() => null),
+      // Live DNS goes through the shared resolver: a DNS *error* is reported as such
+      // (`dns_errors`), never as "record not found".
+      const dnsResolver = createResolver();
+      const dns_errors: string[] = [];
 
-        // DMARC: DoH lookup for _dmarc.{domain}
-        fetch(`https://cloudflare-dns.com/dns-query?name=_dmarc.${domain.domain}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-          .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>)
-          .then(d => {
-            const records = d.Answer ?? [];
-            const current_record = records[0]?.data?.replace(/^"|"$/g, '') ?? null;
-            return { found: records.length > 0, has_our_rua: records.some(r => r.data.includes(domain.rua_address)), current_record };
-          })
-          .catch(() => ({ found: false, has_our_rua: false, current_record: null })),
+      const [spfLiveData, dmarcData, routingData, dkimData, nullSenderData, authRecordData] = await Promise.all([
+        // SPF: TXT lookup for {domain} → find v=spf1
+        dnsResolver.txt(domain.domain).then(t => {
+          if (t.status === 'error') { dns_errors.push(`spf: ${t.error}`); return null; }
+          return t.records.find(isSpfRecord) ?? null;
+        }),
+
+        // DMARC: TXT lookup for _dmarc.{domain}
+        dnsResolver.txt(`_dmarc.${domain.domain}`).then(t => {
+          if (t.status === 'error') {
+            dns_errors.push(`dmarc: ${t.error}`);
+            return { found: false, has_our_rua: false, current_record: null as string | null, error: t.error };
+          }
+          return { found: t.records.length > 0, has_our_rua: t.records.some(r => r.includes(domain.rua_address)), current_record: t.records[0] ?? null };
+        }),
 
         // Routing: MX check + destination email verification
         (async () => {
           const mxResult = rd
-            ? await fetch(`https://cloudflare-dns.com/dns-query?name=${rd}&type=MX`, { headers: { Accept: 'application/dns-json' } })
-                .then(r => r.json() as Promise<{ Answer?: unknown[] }>)
-                .then(d => ({ mx_found: (d.Answer ?? []).length > 0 }))
-                .catch(() => ({ mx_found: false }))
+            ? await dnsResolver.resolve(rd, 'MX').then(r => {
+                if (r.status === 'error') { dns_errors.push(`mx: ${r.error}`); return { mx_found: false }; }
+                return { mx_found: r.status === 'ok' };
+              })
             : { mx_found: false };
 
           // Check if the admin's email is verified as a CF Email Routing destination
@@ -1119,12 +1122,9 @@ async function _handleApi(
           }
           // DoH fallback
           const hits = await Promise.all(DKIM_SELECTORS.map(async sel => {
-            try {
-              const d = await fetch(`https://cloudflare-dns.com/dns-query?name=${sel}._domainkey.${domain.domain}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-                .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>);
-              if ((d.Answer ?? []).length > 0)
-                return { name: `${sel}._domainkey.${domain.domain}`, record: d.Answer![0].data.replace(/^"|"$/g, '') };
-            } catch {}
+            const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
+            if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
+            if (t.records.length > 0) return { name: `${sel}._domainkey.${domain.domain}`, record: t.records[0] };
             return null;
           }));
           return { selectors: hits.filter(Boolean) as { name: string; record: string }[], source: 'doh' as const };
@@ -1134,14 +1134,14 @@ async function _handleApi(
         (async () => {
           if (!rd) return { spf: false, dmarc: false };
           const [spfRes, dmarcRes] = await Promise.all([
-            fetch(`https://cloudflare-dns.com/dns-query?name=${rd}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-              .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>)
-              .then(d => !!(d.Answer ?? []).some(r => r.data?.replace(/^"|"$/g, '').startsWith('v=spf1')))
-              .catch(() => false),
-            fetch(`https://cloudflare-dns.com/dns-query?name=_dmarc.${rd}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-              .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>)
-              .then(d => !!(d.Answer ?? []).some(r => r.data?.replace(/^"|"$/g, '').startsWith('v=DMARC1')))
-              .catch(() => false),
+            dnsResolver.txt(rd).then(t => {
+              if (t.status === 'error') { dns_errors.push(`null-sender spf: ${t.error}`); return false; }
+              return t.records.some(isSpfRecord);
+            }),
+            dnsResolver.txt(`_dmarc.${rd}`).then(t => {
+              if (t.status === 'error') { dns_errors.push(`null-sender dmarc: ${t.error}`); return false; }
+              return t.records.some(isDmarcRecord);
+            }),
           ]);
           return { spf: spfRes, dmarc: dmarcRes };
         })(),
@@ -1150,14 +1150,12 @@ async function _handleApi(
         (async () => {
           if (!rd) return { found: false, record_name: null };
           const authName = `${domain.domain}._report._dmarc.${rd}`;
-          try {
-            const d = await fetch(`https://cloudflare-dns.com/dns-query?name=${authName}&type=TXT`, { headers: { Accept: 'application/dns-json' } })
-              .then(r => r.json() as Promise<{ Answer?: { data: string }[] }>);
-            const found = (d.Answer ?? []).some(r => r.data?.replace(/^"|"$/g, '').startsWith('v=DMARC1'));
-            return { found, record_name: authName };
-          } catch {
+          const t = await dnsResolver.txt(authName);
+          if (t.status === 'error') {
+            dns_errors.push(`auth record: ${t.error}`);
             return { found: false, record_name: authName };
           }
+          return { found: t.records.some(isDmarcRecord), record_name: authName };
         })(),
       ]);
 
@@ -1171,6 +1169,8 @@ async function _handleApi(
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },
         dkim: dkimData,
         routing: { ...routingData, reports_domain: rd ?? null, null_sender_spf: nullSenderData.spf, null_sender_dmarc: nullSenderData.dmarc },
+        // Checks whose DNS lookup failed; their values above are "unknown", not "absent".
+        ...(dns_errors.length ? { dns_errors } : {}),
       });
     }
 
@@ -1281,8 +1281,12 @@ async function _handleApi(
       const body = await parseBody<{ record?: string }>(request);
       if (!body.record) return err('record is required', 400);
       if (!body.record.startsWith('v=spf1')) return err('SPF record must start with v=spf1', 400);
-      const lookup_count = await countSpfLookupsFromRecord(body.record);
-      return json({ lookup_count });
+      try {
+        const lookup_count = await countSpfLookupsFromRecord(body.record);
+        return json({ lookup_count });
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'DNS lookup failed', 502);
+      }
     }
 
     // POST /api/domains/:id/apply-spf — create or update SPF TXT record in CF DNS
@@ -1465,12 +1469,9 @@ async function _handleApi(
       let livePct: number | null = null;
       let livePolicy: string | null = null;
       try {
-        const dohRes = await fetch(
-          `https://cloudflare-dns.com/dns-query?name=_dmarc.${domain.domain}&type=TXT`,
-          { headers: { Accept: 'application/dns-json' } }
-        );
-        const doh = await dohRes.json() as { Answer?: { data: string }[] };
-        currentRecord = doh.Answer?.[0]?.data?.replace(/^"|"$/g, '') ?? null;
+        const txt = await createResolver().txt(`_dmarc.${domain.domain}`);
+        if (txt.status === 'error') throw new Error(txt.error); // unknown, not "no record": fall through without live data
+        currentRecord = txt.records.find(isDmarcRecord) ?? null;
         if (currentRecord) {
           const pMatch = currentRecord.match(/\bp=(\w+)/);
           const pctMatch = currentRecord.match(/\bpct=(\d+)/);
