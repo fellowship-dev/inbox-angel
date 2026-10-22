@@ -1,0 +1,18 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": ["es2022", "dom", "dom.iterable"],
+		"module": "es2022",
+		"moduleResolution": "Bundler",
+		"jsx": "react-jsx",
+		"types": ["node", "vitest/globals", "vite/client"],
+		"noEmit": true,
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"isolatedModules": true,
+		"paths": { "@inbox-angel/ui": ["./src/index.ts"] },
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": ["src", "test", "gallery", "scripts/*.ts"]
+}

@@ -24,3 +24,4 @@ jobs:
       - run: npm ci
       - run: npm test -- --run
       - run: npx tsc -p packages/dns-checks
+      - run: npm run test:ui

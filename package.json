@@ -11,6 +11,7 @@
     "build:dashboard": "npm --prefix dashboard run build",
     "start": "wrangler dev",
     "test": "vitest --config vitest.node.config.mts",
+    "test:ui": "npm test --workspace @inbox-angel/ui",
     "test:workers": "vitest --config vitest.config.mts",
     "cf-typegen": "wrangler types",
     "seed:local": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --local  --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
