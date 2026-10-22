@@ -58,10 +58,14 @@ export const ADOPTION_RULES: readonly ColumnRule[] = [
 	},
 ];
 
-/** Rows: `{ tbl, col }` for every column of every user table. */
-export const INTROSPECT_COLUMNS_SQL =
-	"SELECT m.name AS tbl, p.name AS col FROM sqlite_master m, pragma_table_info(m.name) p " +
-	"WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'";
+/**
+ * Rows `{ tbl, col }` for the columns adoption cares about. Built from literal
+ * table names: D1 rejects `sqlite_master m, pragma_table_info(m.name)` with
+ * SQLITE_AUTH, but allows `pragma_table_info('literal')`.
+ */
+export const INTROSPECT_COLUMNS_SQL = [...new Set(ADOPTION_RULES.map((r) => r.table))]
+	.map((t) => `SELECT '${t}' AS tbl, name AS col FROM pragma_table_info('${t}')`)
+	.join(' UNION ALL ');
 
 export const D1_MIGRATIONS_DDL =
 	'CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, ' +

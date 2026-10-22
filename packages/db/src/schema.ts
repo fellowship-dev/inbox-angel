@@ -214,7 +214,7 @@ export const mtaStsConfig = sqliteTable(
 	{
 		domain_id: integer('domain_id').primaryKey().references(() => domains.id, { onDelete: 'cascade' }),
 		enabled: integer('enabled').notNull().default(1),
-		mode: text('mode').notNull().default('testing'),
+		mode: text('mode', { enum: ['testing', 'enforce'] }).notNull().default('testing'),
 		mx_hosts: text('mx_hosts').notNull().default('[]'),
 		max_age: integer('max_age').notNull().default(86400),
 		policy_id: text('policy_id').notNull(),
@@ -242,7 +242,7 @@ export const monitorSubscriptions = sqliteTable(
 		dmarc_policy: text('dmarc_policy'),
 		dmarc_pct: integer('dmarc_pct'),
 		dmarc_record: text('dmarc_record'),
-		active: integer('active').notNull().default(1),
+		active: integer('active').$type<0 | 1>().notNull().default(1),
 		last_checked_at: integer('last_checked_at'),
 		created_at: integer('created_at').notNull().default(now),
 		account_id: text('account_id').notNull().default(IMPLICIT_ACCOUNT_ID).references(() => accounts.id, { onDelete: 'cascade' }),
