@@ -7,12 +7,12 @@
 // judge the last 30 days, so the advice does not flip when someone switches the chart to 7 days.
 
 import { createResolver, isDmarcRecord } from '@inbox-angel/dns-checks';
-import type { TrendRow } from '@inbox-angel/db';
+import type { SenderRow, TrendRow } from '@inbox-angel/db';
 import { parseDmarcTags } from '../dmarc/rollout';
 import type { TenantContext } from '../tenancy/context';
 import { buildFixes, fixScore, type Fix } from './fixes';
-import { assessReadiness, type Readiness } from './readiness';
-import { buildSenders, pct } from './senders';
+import { assessReadiness, type PolicyState, type Readiness } from './readiness';
+import { buildSenders, pct, type AlignModes } from './senders';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number) => json({ error: message }, status);
@@ -81,58 +81,52 @@ export async function handleAnalyticsRoutes(request: Request, tenant: TenantCont
     const domain = await tenant.scope.domains.getById(id);
     if (!domain) return err('domain not found', 404);
 
-    const [rows, adviceRows, trendRows, adviceTrend, earliest, live] = await Promise.all([
-      q.senderRows(id, since, now),
-      days === ADVICE_DAYS ? Promise.resolve(null) : q.senderRows(id, adviceSince, now),
-      q.trend(id, since),
-      days === ADVICE_DAYS ? Promise.resolve(null) : q.trend(id, adviceSince),
+    // One pass over the rows and one over the trend serve both the requested window and the 30-day advice window.
+    const [allRows, allTrend, earliest, live] = await Promise.all([
+      q.senderRows(id, since, adviceSince, now),
+      q.trend(id, Math.min(since, adviceSince)),
       q.earliestReport(id, now),
       (deps.lookupDmarc ?? liveDmarc)(domain.domain),
     ]);
-    const senders = buildSenders(rows, { now, earliest });
-    const adviceSenders = adviceRows ? buildSenders(adviceRows, { now, earliest }) : senders;
-    const fixes = buildFixes({ id, domain: domain.domain, spf_record: domain.spf_record }, adviceSenders);
-    const trend = fillTrend(trendRows, since, now);
-    const advice = sum(fillTrend(adviceTrend ?? trendRows, adviceSince, now));
+    // Strict alignment only when the published record says so; otherwise relaxed, and the response says which.
+    const tags = typeof live === 'string' ? parseDmarcTags(live) : null;
+    const align: AlignModes = { spf: tags?.get('aspf')?.toLowerCase() === 's' ? 's' : 'r', dkim: tags?.get('adkim')?.toLowerCase() === 's' ? 's' : 'r' };
+    const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest, align });
+    const adviceSenders = buildSenders(inWindow(allRows, 'advice_messages'), { now, earliest, align });
+    const fixes = buildFixes({ id, domain: domain.domain, spf_record: domain.spf_record, spf_lookup_count: domain.spf_lookup_count }, adviceSenders);
+    const trend = fillTrend(allTrend.filter((r) => r.day >= dayOf(since)), since, now);
+    const advice = sum(fillTrend(allTrend.filter((r) => r.day >= dayOf(adviceSince)), adviceSince, now));
 
-    let policy: string | null;
-    let testing = false;
-    let source: 'dns' | 'stored';
-    if (live === undefined) {
-      policy = domain.dmarc_policy; source = 'stored';
-    } else if (live === null) {
-      policy = null; source = 'dns';
-    } else {
-      const tags = parseDmarcTags(live);
-      policy = tags.get('p')?.toLowerCase() ?? null; testing = tags.get('t')?.toLowerCase() === 'y'; source = 'dns';
-    }
+    // Live record when readable; otherwise the stored policy and pct, and the response says so.
+    const state: PolicyState = live === undefined ? { policy: domain.dmarc_policy, pct: domain.dmarc_pct } : { record: live };
     const readiness = assessReadiness({
-      policy, testing, messages: advice.messages, passed: advice.passed, daysWithReports: advice.days_with_reports, windowDays: ADVICE_DAYS,
+      state, messages: advice.messages, passed: advice.passed, daysWithReports: advice.days_with_reports, windowDays: ADVICE_DAYS,
       fixes, newSenders: adviceSenders.filter((s) => s.is_new).length, inherits: domain.parent_id !== null,
     });
 
     return json({
       days, domain: { id, domain: domain.domain }, totals: sum(trend), trend,
-      senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes, readiness: { ...readiness, policy_source: source },
+      alignment: { spf: align.spf === 's' ? 'strict' : 'relaxed', dkim: align.dkim === 's' ? 'strict' : 'relaxed', basis: tags ? 'dns' : 'assumed', estimated: true },
+      senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes, readiness: { ...readiness, policy_source: live === undefined ? 'stored' : 'dns' },
     });
   }
 
-  const [rows, adviceRows, trendRows, earliest, totals] = await Promise.all([
-    q.senderRows(null, since, now),
-    q.senderRows(null, adviceSince, now),
-    q.trend(null, since),
+  const [allRows, allTrend, earliest, totals] = await Promise.all([
+    q.senderRows(null, since, adviceSince, now),
+    q.trend(null, Math.min(since, adviceSince)),
     q.earliestReport(null, now),
     q.domainTotals(adviceSince),
   ]);
-  const senders = buildSenders(rows, { now, earliest });
-  const trend = fillTrend(trendRows, since, now);
+  const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest });
+  const adviceRows = inWindow(allRows, 'advice_messages');
+  const trend = fillTrend(allTrend.filter((r) => r.day >= dayOf(since)), since, now);
 
   const perDomain = totals.map((d) => {
-    const own = adviceRows.filter((r) => r.domain_id === d.domain_id);
-    const ds = buildSenders(own, { now, earliest });
-    const fixes = buildFixes({ id: d.domain_id, domain: d.domain, spf_record: d.spf_record }, ds);
+    const ds = buildSenders(adviceRows.filter((r) => r.domain_id === d.domain_id), { now, earliest });
+    const fixes = buildFixes({ id: d.domain_id, domain: d.domain, spf_record: d.spf_record, spf_lookup_count: d.spf_lookup_count }, ds);
+    // No DNS fan-out here: the stored policy and pct (pct 0 = testing mode, as rollout.ts stores it).
     const readiness: Readiness = assessReadiness({
-      policy: d.dmarc_policy, testing: false, messages: d.total, passed: d.passed, daysWithReports: d.days_with_reports, windowDays: ADVICE_DAYS,
+      state: { policy: d.dmarc_policy, pct: d.dmarc_pct }, messages: d.total, passed: d.passed, daysWithReports: d.days_with_reports, windowDays: ADVICE_DAYS,
       fixes, newSenders: ds.filter((s) => s.is_new).length,
     });
     return { d, fixes, readiness };
@@ -141,10 +135,16 @@ export async function handleAnalyticsRoutes(request: Request, tenant: TenantCont
   const fixes: Fix[] = perDomain.flatMap((p) => p.fixes).sort((a, b) => fixScore(b) - fixScore(a) || a.id.localeCompare(b.id)).slice(0, MAX_ACCOUNT_FIXES);
 
   return json({
-    days, totals: sum(trend), trend, senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes,
+    days, totals: sum(trend), trend, alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },
+    senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes,
     domains: perDomain.map(({ d, readiness }) => ({
       domain_id: d.domain_id, domain: d.domain, dmarc_policy: d.dmarc_policy, messages: d.total, pass_rate: d.total > 0 ? pct(d.passed, d.total) : null,
       readiness: { status: readiness.status, headline: readiness.headline, next: readiness.next, policy_source: 'stored' as const },
     })),
   });
+}
+
+/** The rows that saw mail in the window, with `messages` set to that window's count. */
+function inWindow(rows: SenderRow[], key: 'messages' | 'advice_messages'): SenderRow[] {
+  return rows.map((r) => ({ ...r, messages: r[key] })).filter((r) => r.messages > 0);
 }

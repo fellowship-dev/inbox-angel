@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+
+const dns = vi.hoisted(() => ({ dmarc: undefined as string | null | undefined }));
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { forAccount } from '@inbox-angel/db';
 import { call, makeEnv, inviteAndAccept, setupOwner } from '../auth/helpers';
@@ -22,7 +24,8 @@ async function world() {
 // The live DMARC lookup is a network call: tests stub it through the same seam the route exposes.
 vi.mock('@inbox-angel/dns-checks', async (orig) => ({
   ...(await orig<typeof import('@inbox-angel/dns-checks')>()),
-  createResolver: () => ({ txt: async () => ({ status: 'error', error: 'offline' }) }),
+  // undefined = the lookup failed; null = no record; a string = that record.
+  createResolver: () => ({ txt: async () => (dns.dmarc === undefined ? { status: 'error', records: [], error: 'offline' } : { status: 'ok', records: dns.dmarc === null ? [] : [dns.dmarc] }) }),
 }));
 
 describe('GET /api/domains/:id/analytics', () => {
@@ -118,11 +121,12 @@ describe('analytics queries', () => {
     const t = await world();
     const now = Math.floor(Date.now() / 1000);
     const q = forAccount(t.db, 'acct_default');
-    const rows = await q.analytics.senderRows(t.id, Math.floor(now / 86400) * 86400 - 5 * 86400, now);
+    const rows = await q.analytics.senderRows(t.id, Math.floor(now / 86400) * 86400 - 5 * 86400, Math.floor(now / 86400) * 86400 - 30 * 86400, now);
     const g = rows.find((r) => r.source_ip === '209.85.220.41')!;
     expect(g.messages).toBe(5 * 80); // days 1..5 only
+    expect(g.advice_messages).toBe(20 * 80); // the 30-day advice window comes from the same pass
     expect(g.last_seen - g.first_seen).toBeGreaterThanOrEqual(18 * 86400); // but it was first seen ~20 days ago
-    expect(await q.analytics.senderRows(t.id, now + 86400, now)).toEqual([]); // nothing in a future window
+    expect(await q.analytics.senderRows(t.id, now + 86400, now + 86400, now)).toEqual([]); // nothing in a future window
   });
 
   it('never reaches another account’s domain, even by id', async () => {
@@ -130,10 +134,72 @@ describe('analytics queries', () => {
     t.db.sqlite.exec("INSERT INTO accounts (id, name) VALUES ('acct_b', 'B')");
     const now = Math.floor(Date.now() / 1000);
     const other = forAccount(t.db, 'acct_b');
-    expect(await other.analytics.senderRows(t.id, 0, now)).toEqual([]);
+    expect(await other.analytics.senderRows(t.id, 0, 0, now)).toEqual([]);
     expect(await other.analytics.trend(t.id, 0)).toEqual([]);
     expect(await other.analytics.earliestReport(t.id, now)).toBeNull();
     expect(await other.analytics.domainTotals(0)).toEqual([]);
-    expect(await other.analytics.senderRows(null, 0, now)).toEqual([]);
+    expect(await other.analytics.senderRows(null, 0, 0, now)).toEqual([]);
+  });
+});
+
+describe('readiness parity with rollout-next', () => {
+  const LIVE = [
+    'v=DMARC1; p=none; rua=mailto:rua@r.test',
+    'v=DMARC1; p=none; sp=reject',
+    'v=DMARC1; p=quarantine; t=y',
+    'v=DMARC1; p=quarantine; t=y; sp=reject',
+    'v=DMARC1; p=quarantine; pct=25',
+    'v=DMARC1; p=quarantine; pct=0',
+    'v=DMARC1; p=quarantine',
+    'v=DMARC1; p=reject; pct=50',
+    'v=DMARC1; p=reject; t=y',
+  ];
+
+  it.each(LIVE)('offers the step rollout-next offers: %s', async (record) => {
+    const t = await world();
+    dns.dmarc = record;
+    const next = await (await call(t.env, 'GET', `/api/domains/${t.id}/rollout-next`, { key: t.owner })).json() as any;
+    const a = await (await call(t.env, 'GET', `/api/domains/${t.id}/analytics`, { key: t.owner })).json() as any;
+    expect(a.readiness.policy_source).toBe('dns');
+    expect(a.readiness.current.step).toBe(next.current_step_index);
+    expect(a.readiness.next ? { policy: a.readiness.next.policy, testing: a.readiness.next.testing } : null).toEqual(next.next_step);
+    dns.dmarc = undefined;
+  });
+
+  it('with DNS down, a stored pct of 0 means testing mode: the next step is full quarantine, not reject;t=y', async () => {
+    const t = await world();
+    dns.dmarc = undefined;
+    t.db.sqlite.prepare("UPDATE domains SET dmarc_policy = 'quarantine', dmarc_pct = 0 WHERE id = ?").run(t.id);
+    const a = await (await call(t.env, 'GET', `/api/domains/${t.id}/analytics`, { key: t.owner })).json() as any;
+    expect(a.readiness).toMatchObject({ policy_source: 'stored', current: { policy: 'quarantine', testing: true }, next: { policy: 'quarantine', testing: false } });
+  });
+
+  it('the account-wide view reads the stored pct too', async () => {
+    const t = await world();
+    t.db.sqlite.prepare("UPDATE domains SET dmarc_policy = 'quarantine', dmarc_pct = 0 WHERE id = ?").run(t.id);
+    const body = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
+    expect(body.domains[0].readiness.next).toMatchObject({ policy: 'quarantine', testing: false });
+    t.db.sqlite.prepare("UPDATE domains SET dmarc_pct = 100 WHERE id = ?").run(t.id);
+    const full = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
+    expect(full.domains[0].readiness.next).toMatchObject({ policy: 'reject', testing: true });
+  });
+});
+
+describe('estimated alignment', () => {
+  it('says relaxed and assumed when DNS is unreadable, and applies strict alignment from the published record', async () => {
+    const t = await world();
+    dns.dmarc = undefined;
+    const relaxed = await (await call(t.env, 'GET', `/api/domains/${t.id}/analytics`, { key: t.owner })).json() as any;
+    expect(relaxed.alignment).toEqual({ spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true });
+    const sg = (b: any) => b.senders.find((x: any) => x.source_ip === '167.89.1.1');
+    expect(sg(relaxed).spf_aligned_pct).toBe(100); // spf domain em.acme.com is under acme.com
+    dns.dmarc = 'v=DMARC1; p=none; aspf=s; adkim=r';
+    const strict = await (await call(t.env, 'GET', `/api/domains/${t.id}/analytics`, { key: t.owner })).json() as any;
+    expect(strict.alignment).toEqual({ spf: 'strict', dkim: 'relaxed', basis: 'dns', estimated: true });
+    expect(sg(strict).spf_aligned_pct).toBe(0); // em.acme.com is not acme.com
+    expect(sg(strict).dkim_aligned_pct).toBe(100);
+    dns.dmarc = undefined;
+    const account = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
+    expect(account.alignment).toMatchObject({ basis: 'assumed', estimated: true });
   });
 });

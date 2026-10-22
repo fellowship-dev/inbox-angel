@@ -4,7 +4,10 @@
 // (only the report totals use that). So alignment here is derived the way DMARC defines relaxed alignment:
 // the authenticated domain shares the organizational domain of the From domain, and the check passed.
 // Limits: only the first SPF and first DKIM result of each record are stored, so a message signed twice
-// (an ESP's domain first, yours second) can read as "DKIM not aligned" here though DMARC passed it.
+// (an ESP's domain first, yours second) can read as "DKIM not aligned" here though DMARC passed it. Strict
+// alignment (adkim=s / aspf=s) is applied only when the caller knows the published record; otherwise relaxed is
+// assumed. Every number derived from this is an ESTIMATE and is labelled so: only the reports' own pass/fail
+// totals (trend, pass rate) are exact, and only those may block a rollout step.
 
 import { organizationalDomain } from '@inbox-angel/dns-checks/org-domain';
 import { identifySender, type SenderProvider } from '@inbox-angel/dns-checks/sender-providers';
@@ -42,18 +45,26 @@ export interface Sender {
 
 export const pct = (part: number, whole: number): number => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
 
-const same = (a: string | null, b: string | null): boolean => {
+export type AlignMode = 'r' | 's';
+export interface AlignModes { spf: AlignMode; dkim: AlignMode }
+export const RELAXED = { spf: 'r', dkim: 'r' } as const;
+
+const norm = (d: string) => d.trim().toLowerCase().replace(/\.$/, '');
+
+/** Do the two domains align? Relaxed: same organizational domain. Strict: the same domain. */
+export function aligned(a: string | null, b: string | null, mode: AlignMode = 'r'): boolean {
   if (!a || !b) return false;
+  if (mode === 's') return norm(a) === norm(b);
   const x = organizationalDomain(a);
   return x !== null && x === organizationalDomain(b);
-};
+}
 
 /** Relaxed DMARC alignment of one record against the From domain it was sent as. */
-export function recordAlignment(r: Pick<SenderRow, 'header_from' | 'domain' | 'spf_domain' | 'spf_result' | 'dkim_domain' | 'dkim_result'>): { spf: boolean; dkim: boolean } {
+export function recordAlignment(r: Pick<SenderRow, 'header_from' | 'domain' | 'spf_domain' | 'spf_result' | 'dkim_domain' | 'dkim_result'>, modes: AlignModes = RELAXED): { spf: boolean; dkim: boolean } {
   const from = r.header_from || r.domain;
   return {
-    spf: r.spf_result === 'pass' && same(r.spf_domain, from),
-    dkim: r.dkim_result === 'pass' && same(r.dkim_domain, from),
+    spf: r.spf_result === 'pass' && aligned(r.spf_domain, from, modes.spf),
+    dkim: r.dkim_result === 'pass' && aligned(r.dkim_domain, from, modes.dkim),
   };
 }
 
@@ -61,10 +72,12 @@ export interface BuildOptions {
   now: number;
   /** Unix seconds of the earliest report in scope; "new" only means something when history predates the window. */
   earliest: number | null;
+  /** Alignment modes from the published DMARC record (adkim / aspf); relaxed when unknown. */
+  align?: AlignModes;
 }
 
 /** Rolls rows up per source IP, biggest first. */
-export function buildSenders(rows: SenderRow[], { now, earliest }: BuildOptions): Sender[] {
+export function buildSenders(rows: SenderRow[], { now, earliest, align = RELAXED }: BuildOptions): Sender[] {
   const total = rows.reduce((n, r) => n + r.messages, 0);
   const newCutoff = now - NEW_SENDER_DAYS * 86400;
   // Without anything older than the cutoff, every sender is "first seen" in the window and flagging all of them is noise.
@@ -84,7 +97,7 @@ export function buildSenders(rows: SenderRow[], { now, earliest }: BuildOptions)
   const byIp = new Map<string, Acc>();
   for (const r of rows) {
     const a: Acc = byIp.get(r.source_ip) ?? { rows: [], messages: 0, spf: 0, dkim: 0, pass: 0, first: r.first_seen, last: r.last_seen, spfBy: new Map(), dkimBy: new Map() };
-    const al = recordAlignment(r);
+    const al = recordAlignment(r, align);
     a.rows.push(r);
     a.messages += r.messages;
     if (al.spf) a.spf += r.messages;
@@ -133,3 +146,6 @@ export function buildSenders(rows: SenderRow[], { now, earliest }: BuildOptions)
     })
     .sort((x, y) => y.messages - x.messages || x.source_ip.localeCompare(y.source_ip));
 }
+
+/** Is `host` the same organizational domain as `domain`? (What SPF alignment needs from an envelope domain under relaxed mode.) */
+export const underOrg = (host: string, domain: string): boolean => aligned(host, domain, 'r');

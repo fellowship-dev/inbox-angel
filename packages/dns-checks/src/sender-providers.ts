@@ -1,6 +1,13 @@
 // Who is behind a sending IP? Matches what a DMARC aggregate report tells us about a source (reverse DNS,
 // the IP's network owner, and the domains it authenticated as) against the same provider registry the SPF and
 // DKIM checks use (`email-service-providers`), so "add the include / set up DKIM" advice names real records.
+//
+// Sources: `include` links an entry to the registry (which carries each provider's published SPF include and
+// setup guide). `hosts` are the providers' own sending / bounce / reverse-DNS domains (the registry includes, and
+// the domains in their delivery documentation). `orgs` match the network owner and are used only for networks
+// that exist to send mail: never for general cloud networks (Google Cloud, Azure, AWS), whose servers would be
+// mislabelled as Workspace, Microsoft 365 or SES. These are matching heuristics, not authoritative; we do not
+// ship DKIM record values here, because providers issue them per account (their guide is linked instead).
 
 import { SPF_PROVIDERS, type EmailProvider } from './email-service-providers';
 
@@ -19,8 +26,6 @@ export interface SenderProvider {
 	registry: EmailProvider | null;
 	/** What matched, strongest first: the domain it authenticated as, then reverse DNS, then the network owner. */
 	evidence: string;
-	/** A static DKIM CNAME the customer can copy as is. Most providers issue account-specific values, so this is rare. */
-	dkimCname?: { selector: string; target: string };
 }
 
 interface Signature {
@@ -32,16 +37,15 @@ interface Signature {
 	hosts: string[];
 	/** Network owner names; weaker than hosts (a cloud ASN hosts many unrelated senders). */
 	orgs?: RegExp[];
-	dkimCname?: { selector: string; target: string };
 }
 
 const SIGNATURES: Signature[] = [
-	{ id: 'google-workspace', name: 'Google Workspace', include: '_spf.google.com', hosts: ['google.com', 'googlemail.com', 'gmail.com'], orgs: [/^google\b/i] },
-	{ id: 'microsoft-365', name: 'Microsoft 365', include: 'spf.protection.outlook.com', hosts: ['outlook.com', 'protection.outlook.com', 'microsoft.com', 'office365.com'], orgs: [/^microsoft\b/i] },
+	{ id: 'google-workspace', name: 'Google Workspace', include: '_spf.google.com', hosts: ['google.com', 'googlemail.com'] },
+	{ id: 'microsoft-365', name: 'Microsoft 365', include: 'spf.protection.outlook.com', hosts: ['outlook.com', 'protection.outlook.com', 'office365.com'] },
 	{ id: 'sendgrid', name: 'SendGrid', include: 'sendgrid.net', hosts: ['sendgrid.net', 'sendgrid.com'], orgs: [/sendgrid/i] },
 	{ id: 'amazon-ses', name: 'Amazon SES', include: 'amazonses.com', hosts: ['amazonses.com'] },
 	{ id: 'mailgun', name: 'Mailgun', include: 'mailgun.org', hosts: ['mailgun.org', 'mailgun.net'], orgs: [/mailgun/i] },
-	{ id: 'mailchimp', name: 'Mailchimp', include: 'servers.mcsv.net', hosts: ['mcsv.net', 'mailchimp.com', 'rsgsv.net', 'mcdlv.net'], orgs: [/mailchimp|rocket science/i], dkimCname: { selector: 'k1', target: 'dkim.mcsv.net' } },
+	{ id: 'mailchimp', name: 'Mailchimp', include: 'servers.mcsv.net', hosts: ['mcsv.net', 'mailchimp.com', 'rsgsv.net', 'mcdlv.net'], orgs: [/mailchimp|rocket science/i] },
 	{ id: 'mandrill', name: 'Mandrill (Mailchimp)', include: 'mandrillapp.com', hosts: ['mandrillapp.com', 'mandrill.com'] },
 	{ id: 'brevo', name: 'Brevo', include: 'spf.brevo.com', hosts: ['brevo.com', 'sendinblue.com', 'sendibt.com'], orgs: [/sendinblue|brevo/i] },
 	{ id: 'mailjet', name: 'Mailjet', include: 'mailjet.com', hosts: ['mailjet.com'], orgs: [/mailjet/i] },
@@ -83,5 +87,5 @@ export function identifySender(s: SenderSignals): SenderProvider | null {
 
 function toProvider(sig: Signature, evidence: string): SenderProvider {
 	const registry = sig.include ? (SPF_PROVIDERS.find((p) => p.include === sig.include) ?? null) : null;
-	return { id: sig.id, name: sig.name, registry, evidence, ...(sig.dkimCname ? { dkimCname: sig.dkimCname } : {}) };
+	return { id: sig.id, name: sig.name, registry, evidence };
 }

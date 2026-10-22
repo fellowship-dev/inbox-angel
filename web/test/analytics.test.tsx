@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router';
@@ -26,7 +26,7 @@ const fix = (o: Partial<Fix> = {}): Fix => ({
 	id: 'authorize:1:p:mailchimp', kind: 'authorize-sender', severity: 'high', domain: 'acme.com', domain_id: 1, sender: { name: 'Mailchimp', provider_id: 'mailchimp', ips: ['198.2.180.1'] },
 	title: 'Mailchimp sends 12% of your mail and fails DMARC', detail: '100% of what Mailchimp sent failed.', share_pct: 12, affected_pct: 12, affected_messages: 240,
 	steps: ['Add include:servers.mcsv.net to the SPF record of acme.com.', 'Turn on custom-domain DKIM signing.'],
-	records: [{ type: 'CNAME', name: 'k1._domainkey.acme.com', value: 'dkim.mcsv.net' }], guide_url: 'https://mailchimp.com/help/', ...o,
+	records: [{ type: 'TXT', name: 'acme.com', value: 'v=spf1 include:_spf.google.com include:servers.mcsv.net ~all' }], guide_url: 'https://mailchimp.com/help/', ...o,
 });
 
 const readiness = (o: Partial<Readiness> = {}): Readiness => ({
@@ -90,11 +90,23 @@ describe('SenderInventory', () => {
 		const table = await screen.findByRole('table', { name: 'Sender inventory' });
 		const rows = within(table).getAllByRole('row');
 		expect(within(rows[1]!).getByText('New sender')).toBeInTheDocument();
-		expect(within(rows[1]!).getByText('Fails DMARC')).toBeInTheDocument();
+		expect(within(rows[1]!).getByText('Likely failing')).toBeInTheDocument();
+		expect(within(rows[1]!).queryByText('Fails DMARC')).not.toBeInTheDocument();
 		expect(within(rows[1]!).getByText(/SPF aligned, failing/)).toBeInTheDocument();
 		expect(within(rows[2]!).getByText(/DKIM aligned, passing/)).toBeInTheDocument();
-		expect(within(rows[2]!).queryByText('Fails DMARC')).not.toBeInTheDocument();
+		expect(within(rows[2]!).queryByText('Likely failing')).not.toBeInTheDocument();
 		expect(within(rows[1]!).getByText('12% of mail')).toBeInTheDocument();
+	});
+	it('says the figures are estimates, why, and what was checked', async () => {
+		await renderReady(<SenderInventory senders={[sender()]} alignment={alignment} />);
+		expect(screen.getByText('These alignment figures are estimates.')).toBeInTheDocument();
+		expect(screen.getByText(/signed twice/)).toBeInTheDocument();
+		expect(screen.getByText(/relaxed alignment only: we could not read your record, so adkim=s \/ aspf=s would not be applied/)).toBeInTheDocument();
+		expect(screen.getByRole('columnheader', { name: 'SPF aligned (est.)' })).toBeInTheDocument();
+		expect(screen.getByText('Scroll sideways to see every column.')).toBeInTheDocument();
+		cleanup();
+		await renderReady(<SenderInventory senders={[sender()]} alignment={{ ...alignment, spf: 'strict', basis: 'dns' }} />);
+		expect(screen.getByText(/Checked with strict SPF and relaxed DKIM alignment, from your published DMARC record/)).toBeInTheDocument();
 	});
 	it('has an empty state', async () => {
 		await renderReady(<SenderInventory senders={[]} />);
@@ -110,7 +122,7 @@ describe('FixList', () => {
 		expect(within(items[0]!).getByRole('heading')).toHaveTextContent(/Mailchimp sends 12% of your mail and fails DMARC/);
 		expect(within(items[0]!).getByText('High impact')).toBeInTheDocument();
 		expect(within(items[0]!).getByRole('link', { name: 'acme.com' })).toHaveAttribute('href', '/domains/1/analytics');
-		expect(within(items[0]!).getByText('k1._domainkey.acme.com')).toBeInTheDocument();
+		expect(within(items[0]!).getByText('v=spf1 include:_spf.google.com include:servers.mcsv.net ~all')).toBeInTheDocument();
 		expect(within(items[0]!).getByRole('button', { name: 'Copy value' })).toBeInTheDocument();
 		expect(within(items[0]!).getByRole('link', { name: /Mailchimp setup guide/ })).toHaveAttribute('href', 'https://mailchimp.com/help/');
 		expect(within(items[1]!).getByText('Low impact')).toBeInTheDocument();
@@ -138,7 +150,9 @@ describe('ReadinessCard', () => {
 	});
 });
 
+const alignment = { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true } as const;
 const domainData = {
+	alignment,
 	days: 30, domain: { id: 1, domain: 'acme.com' }, totals: { messages: 1910, passed: 1610, failed: 300, pass_rate: 84.3, days_with_reports: 20 }, trend: trend(20),
 	senders: [sender()], sender_count: 1, fixes: [fix()], readiness: readiness(),
 };

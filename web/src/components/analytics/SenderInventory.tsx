@@ -1,8 +1,12 @@
 import { Badge, EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
 import { CheckCircle2, Sparkles, XCircle, AlertTriangle } from 'lucide-react';
-import { fmtPct, senderName, type Sender } from '../../lib/analytics';
+import { fmtPct, senderName, type Alignment, type Sender } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
 import { formatDay, isoDay } from '../../lib/reports';
+
+/** Scroll shadows at the table's edges (they show only while there is more to scroll to), so a cut-off column is never silent. */
+const SCROLL_SHADOWS =
+	'[background-image:linear-gradient(to_right,var(--surface-1),var(--surface-1)),linear-gradient(to_left,var(--surface-1),var(--surface-1)),linear-gradient(to_right,rgb(0_0_0/0.22),transparent),linear-gradient(to_left,rgb(0_0_0/0.22),transparent)] [background-position:left_center,right_center,left_center,right_center] [background-repeat:no-repeat] [background-size:2rem_100%,2rem_100%,0.9rem_100%,0.9rem_100%] [background-attachment:local,local,scroll,scroll]';
 
 /** A rate with an icon and the number, so pass/partial/fail never rests on colour. */
 function Rate({ pct, label }: { pct: number; label: string }) {
@@ -21,20 +25,21 @@ function Rate({ pct, label }: { pct: number; label: string }) {
 }
 
 /** Every source that sent as this domain: who it is, how much, whether SPF and DKIM line up, and when it appeared. */
-export function SenderInventory({ senders, showDomains }: { senders: Sender[]; showDomains?: boolean }) {
+export function SenderInventory({ senders, showDomains, alignment }: { senders: Sender[]; showDomains?: boolean; alignment?: Alignment }) {
 	if (senders.length === 0) {
 		return <EmptyState title="No senders in this window" description="Senders appear once receivers report mail sent as your domain." />;
 	}
 	return (
 		<div className="space-y-2">
-			<Table label="Sender inventory">
+			<p className="text-xs text-ink-2 sm:hidden">Scroll sideways to see every column.</p>
+			<Table label="Sender inventory" containerClassName={SCROLL_SHADOWS}>
 				<caption className="sr-only">Sender inventory</caption>
 				<TableHeader>
 					<TableRow>
 						<TableHead scope="col">Sender</TableHead>
 						<TableHead scope="col" className="text-right">Volume</TableHead>
-						<TableHead scope="col">SPF aligned</TableHead>
-						<TableHead scope="col">DKIM aligned</TableHead>
+						<TableHead scope="col">SPF aligned (est.)</TableHead>
+						<TableHead scope="col">DKIM aligned (est.)</TableHead>
 						<TableHead scope="col">Seen</TableHead>
 					</TableRow>
 				</TableHeader>
@@ -54,7 +59,7 @@ export function SenderInventory({ senders, showDomains }: { senders: Sender[]; s
 										{s.dmarc_pass_pct < 50 ? (
 											<Badge variant="danger">
 												<XCircle aria-hidden />
-												Fails DMARC
+												Likely failing
 											</Badge>
 										) : null}
 									</span>
@@ -79,7 +84,9 @@ export function SenderInventory({ senders, showDomains }: { senders: Sender[]; s
 				</TableBody>
 			</Table>
 			<p className="text-xs text-ink-2">
-				Alignment is worked out from each report's SPF and DKIM results and the domains they authenticated: a pass only counts when that domain shares your organizational domain. “First seen” looks back at most 180 days.
+				<strong className="font-semibold">These alignment figures are estimates.</strong> Reports keep each message's raw SPF and DKIM results, not the receiver's DMARC verdict, so we work alignment out from the domains they authenticated. Mail signed twice (by the sender's domain and by yours) can read as failing here although DMARC passed it.{' '}
+				{alignment ? (alignment.spf === 'strict' || alignment.dkim === 'strict' ? `Checked with ${alignment.spf} SPF and ${alignment.dkim} DKIM alignment, from your published DMARC record.` : alignment.basis === 'dns' ? 'Checked with relaxed alignment, as your published DMARC record asks.' : 'Checked with relaxed alignment only: we could not read your record, so adkim=s / aspf=s would not be applied.') : 'Checked with relaxed alignment only: adkim=s / aspf=s are not applied.'}{' '}
+				The pass-rate trend and totals come from the reports' own DMARC results and are exact. "First seen" looks back at most 180 days.
 			</p>
 		</div>
 	);

@@ -12,7 +12,7 @@ function row(o: Partial<SenderRow> = {}): SenderRow {
   return {
     source_ip: '1.1.1.1', domain_id: 1, domain: 'acme.com', header_from: 'acme.com',
     spf_domain: 'acme.com', spf_result: 'pass', dkim_domain: 'acme.com', dkim_result: 'pass',
-    messages: 100, first_seen: NOW - 20 * DAY, last_seen: NOW - DAY,
+    messages: 100, advice_messages: 100, first_seen: NOW - 20 * DAY, last_seen: NOW - DAY,
     reverse_dns: null, base_domain: null, org: null, country_code: null, ...o,
   };
 }
@@ -21,8 +21,17 @@ describe('identifySender', () => {
   it('recognises providers by authenticated domain, reverse DNS, then network owner', () => {
     expect(identifySender({ spf_domain: 'bounce.mcsv.net' })?.name).toBe('Mailchimp');
     expect(identifySender({ reverse_dns: 'o1.em.sendgrid.net' })?.name).toBe('SendGrid');
-    expect(identifySender({ org: 'Google LLC' })?.name).toBe('Google Workspace');
+    expect(identifySender({ reverse_dns: 'mail-sor-f41.google.com' })?.name).toBe('Google Workspace');
+    expect(identifySender({ org: 'SendGrid, Inc.' })?.name).toBe('SendGrid');
     expect(identifySender({ reverse_dns: 'smtp.example.org', org: 'Example Hosting' })).toBeNull();
+  });
+  it('never labels a general cloud network as Workspace or Microsoft 365', () => {
+    for (const org of ['Google LLC', 'Google Cloud', 'Microsoft Corporation', 'Microsoft Azure']) expect(identifySender({ org })).toBeNull();
+    expect(identifySender({ reverse_dns: '34.1.2.3.bc.googleusercontent.com', org: 'Google LLC' })).toBeNull();
+    expect(identifySender({ reverse_dns: 'vm1.cloudapp.azure.com', org: 'Microsoft Corporation' })).toBeNull();
+  });
+  it('ships no DKIM record values: they are per account', () => {
+    expect(identifySender({ reverse_dns: 'a.mcsv.net' })).not.toHaveProperty('dkimCname');
   });
   it('matches whole labels, not substrings', () => {
     expect(identifySender({ reverse_dns: 'notgoogle.com' })).toBeNull();
@@ -71,33 +80,79 @@ describe('buildSenders', () => {
   });
 });
 
+import { ROLLOUT_SEQUENCE, planNextStep, stepIndexForRecord, stepIndexFromStored } from '../../src/dmarc/rollout';
+import { recordFromStored, resolveStep } from '../../src/analytics/readiness';
+import { aligned } from '../../src/analytics/senders';
+
+describe('strict alignment', () => {
+  it('needs the same domain, not just the same organization', () => {
+    expect(aligned('em.acme.com', 'acme.com', 'r')).toBe(true);
+    expect(aligned('em.acme.com', 'acme.com', 's')).toBe(false);
+    expect(aligned('ACME.com.', 'acme.com', 's')).toBe(true);
+  });
+  it('changes the derived rates when the record says adkim=s / aspf=s', () => {
+    const r = [row({ spf_domain: 'em.acme.com', dkim_domain: 'em.acme.com' })];
+    expect(buildSenders(r, { now: NOW, earliest: null })[0]).toMatchObject({ spf_aligned_pct: 100, dkim_aligned_pct: 100 });
+    expect(buildSenders(r, { now: NOW, earliest: null, align: { spf: 's', dkim: 'r' } })[0]).toMatchObject({ spf_aligned_pct: 0, dkim_aligned_pct: 100 });
+  });
+});
+
 const dom = { id: 1, domain: 'acme.com', spf_record: 'v=spf1 include:_spf.google.com ~all' };
 const send = (rows: SenderRow[]) => buildSenders(rows, { now: NOW, earliest: NOW - 60 * DAY });
+/** Mailchimp with its own envelope domain (mcsv.net): SPF can never align, only DKIM can. */
 const mailchimp = (o: Partial<SenderRow> = {}) => row({ source_ip: '198.2.180.1', reverse_dns: 'mail1.mcsv.net', spf_domain: 'mcsv.net', dkim_domain: 'mcsv.net', ...o });
+/** The same provider sending with a return-path on the customer's domain: SPF could align if it were authorized. */
+const ownEnvelope = (o: Partial<SenderRow> = {}) => mailchimp({ spf_domain: 'bounce.acme.com', spf_result: 'fail', ...o });
 
 describe('buildFixes', () => {
-  it('ranks a failing provider first and names the SPF include and DKIM setup', () => {
-    const fixes = buildFixes(dom, send([row({ messages: 880 }), mailchimp({ messages: 120 })]));
+  it('ranks a failing provider first and, when SPF can align, names the include with a ready record', () => {
+    const fixes = buildFixes({ ...dom, spf_lookup_count: 3 }, send([row({ messages: 880 }), ownEnvelope({ messages: 120 })]));
     expect(fixes[0]).toMatchObject({ kind: 'authorize-sender', severity: 'high', sender: { name: 'Mailchimp' }, share_pct: 12, affected_pct: 12 });
     expect(fixes[0]!.title).toBe('Mailchimp sends 12% of your mail and fails DMARC');
+    expect(fixes[0]!.detail).toMatch(/^Estimated from the reports/);
     expect(fixes[0]!.steps[0]).toContain('include:servers.mcsv.net');
-    expect(fixes[0]!.records).toContainEqual({ type: 'TXT', name: 'acme.com', value: 'v=spf1 include:_spf.google.com include:servers.mcsv.net ~all' });
-    expect(fixes[0]!.records).toContainEqual({ type: 'CNAME', name: 'k1._domainkey.acme.com', value: 'dkim.mcsv.net' });
+    expect(fixes[0]!.records).toEqual([{ type: 'TXT', name: 'acme.com', value: 'v=spf1 include:_spf.google.com include:servers.mcsv.net ~all' }]);
     expect(fixes[0]!.guide_url).toContain('mailchimp.com');
   });
 
-  it('says "fails DKIM alignment" for a provider that passes through SPF alone', () => {
-    const fixes = buildFixes(dom, send([row({ messages: 880 }), mailchimp({ messages: 120, spf_domain: 'bounce.acme.com' })]));
-    expect(fixes[0]).toMatchObject({ kind: 'fix-dkim-alignment', severity: 'medium' });
+  it('recommends DKIM only when the sender uses its own envelope domain (SPF cannot align)', () => {
+    const [fix] = buildFixes({ ...dom, spf_lookup_count: 3 }, send([row({ messages: 880 }), mailchimp({ messages: 120 })]));
+    expect(fix!.kind).toBe('authorize-sender');
+    expect(fix!.steps.join(' ')).toMatch(/SPF cannot align for Mailchimp: it sends with its own envelope domain \(mcsv\.net\)/);
+    expect(fix!.steps.join(' ')).not.toContain('Add include:');
+    expect(fix!.records).toEqual([]);
+    expect(fix!.steps.join(' ')).toMatch(/DKIM/);
+  });
+
+  it('never publishes a static DKIM record for any provider', () => {
+    const fixes = buildFixes(dom, send([row({ messages: 880 }), mailchimp({ messages: 120 }), ownEnvelope({ source_ip: '1.2.3.4', messages: 50 })]));
+    expect(fixes.flatMap((f) => f.records).every((r) => r.type !== 'CNAME')).toBe(true);
+  });
+
+  it('refuses to add an include that would push SPF past 10 lookups, and says to flatten', () => {
+    const rows = [row({ messages: 880 }), ownEnvelope({ messages: 120 })];
+    const over = buildFixes({ ...dom, spf_lookup_count: 9 }, send(rows))[0]!;
+    expect(over.records).toEqual([]);
+    expect(over.steps[0]).toMatch(/Do not add include:servers\.mcsv\.net yet.*9 of the 10.*Flatten/);
+    const near = buildFixes({ ...dom, spf_lookup_count: 7 }, send(rows))[0]!;
+    expect(near.steps.join(' ')).toMatch(/about 8 of the 10/);
+    expect(near.records).toHaveLength(1);
+    const unknown = buildFixes({ ...dom, spf_lookup_count: null }, send(rows))[0]!;
+    expect(unknown.steps.join(' ')).toMatch(/do not know how many DNS lookups/);
+    expect(unknown.records).toHaveLength(1);
+  });
+
+  it('says "fails DKIM alignment" for a provider that passes through SPF alone, with no invented record', () => {
+    const fixes = buildFixes(dom, send([row({ messages: 880 }), mailchimp({ messages: 120, spf_domain: 'bounce.acme.com', spf_result: 'pass' })]));
+    expect(fixes[0]).toMatchObject({ kind: 'fix-dkim-alignment', severity: 'medium', records: [] });
     expect(fixes[0]!.title).toBe('Mailchimp sends 12% of your mail and fails DKIM alignment');
-    expect(fixes[0]!.records).toEqual([{ type: 'CNAME', name: 'k1._domainkey.acme.com', value: 'dkim.mcsv.net' }]);
   });
 
   it('does not tell you to add an include that is already there, and never invents a record without one', () => {
     const withInclude = { ...dom, spf_record: 'v=spf1 include:servers.mcsv.net ~all' };
-    const [fix] = buildFixes(withInclude, send([row({ messages: 880 }), mailchimp({ messages: 120 })]));
+    const [fix] = buildFixes(withInclude, send([row({ messages: 880 }), ownEnvelope({ messages: 120 })]));
     expect(fix!.steps[0]).toContain('already includes servers.mcsv.net');
-    expect(fix!.records.every((r) => r.type !== 'TXT')).toBe(true);
+    expect(fix!.records).toEqual([]);
     expect(spfWithInclude('v=spf1 redirect=_spf.x.com', 'a.com')).toBeNull();
     expect(spfWithInclude(null, 'a.com')).toBeNull();
   });
@@ -118,7 +173,8 @@ describe('buildFixes', () => {
   it('is empty with no mail', () => expect(buildFixes(dom, [])).toEqual([]));
 });
 
-const base = { policy: 'none', testing: false, messages: 5000, passed: 4990, daysWithReports: 28, windowDays: 30, fixes: [], newSenders: 0 };
+const stored = (policy: string | null, pct: number | null = null) => ({ policy, pct });
+const base = { state: stored('none'), messages: 5000, passed: 4990, daysWithReports: 28, windowDays: 30, fixes: [], newSenders: 0 };
 
 describe('assessReadiness', () => {
   it('is ready for the next step on clean data, and names the step', () => {
@@ -132,32 +188,96 @@ describe('assessReadiness', () => {
     expect(assessReadiness({ ...base, messages: 40, passed: 40 }).status).toBe('insufficient_data');
     expect(assessReadiness({ ...base, daysWithReports: 3 }).status).toBe('insufficient_data');
   });
-  it('blocks below the rollout pass-rate threshold, cautions between 90 and 98', () => {
+  it('blocks below the rollout pass-rate threshold (the reports\' own totals), cautions between 90 and 98', () => {
     const low = assessReadiness({ ...base, passed: 4000 });
     expect(low.status).toBe('blocked');
     expect(low.reasons.find((x) => x.level === 'block')!.text).toMatch(/80%.*at least 90%/);
     expect(assessReadiness({ ...base, passed: 4700 }).status).toBe('caution');
   });
-  it('a recognised service failing blocks real enforcement but only warns before testing mode', () => {
-    const fix = buildFixes(dom, send([row({ messages: 880 }), mailchimp({ messages: 120 })]));
+  it('estimated per-sender failures only ever warn, even before a real enforcement step', () => {
+    const fix = buildFixes(dom, send([row({ messages: 880 }), ownEnvelope({ messages: 120 })]));
+    expect(fix[0]!.kind).toBe('authorize-sender');
     const early = assessReadiness({ ...base, passed: 4900, fixes: fix });
     expect(early.status).toBe('caution');
-    const enforcing = assessReadiness({ ...base, policy: 'quarantine', testing: true, passed: 4900, fixes: fix });
+    const enforcing = assessReadiness({ ...base, state: stored('quarantine', 0), passed: 4900, fixes: fix });
     expect(enforcing.next).toMatchObject({ policy: 'quarantine', testing: false });
-    expect(enforcing.status).toBe('blocked');
-    expect(enforcing.reasons.some((x) => x.level === 'block' && x.text.includes('Mailchimp'))).toBe(true);
+    expect(enforcing.status).toBe('caution');
+    expect(enforcing.reasons.some((x) => x.level === 'block')).toBe(false);
+    expect(enforcing.reasons.some((x) => x.level === 'warn' && x.text.includes('Mailchimp') && x.text.includes('estimated'))).toBe(true);
   });
   it('cautions on new senders', () => {
     expect(assessReadiness({ ...base, newSenders: 2 }).status).toBe('caution');
   });
   it('knows the end of the sequence, a missing record and a subdomain that inherits', () => {
-    expect(assessReadiness({ ...base, policy: 'reject' }).status).toBe('complete');
-    expect(assessReadiness({ ...base, policy: null }).status).toBe('no_policy');
-    const sub = assessReadiness({ ...base, policy: null, inherits: true });
+    expect(assessReadiness({ ...base, state: stored('reject', 100) }).status).toBe('complete');
+    expect(assessReadiness({ ...base, state: stored(null) }).status).toBe('no_policy');
+    expect(assessReadiness({ ...base, state: { record: null } }).status).toBe('no_policy');
+    const sub = assessReadiness({ ...base, state: { record: null }, inherits: true });
     expect(sub.status).toBe('no_policy');
     expect(sub.headline).toMatch(/parent/);
   });
   it('steps on from t=y to the enforcing step', () => {
-    expect(assessReadiness({ ...base, policy: 'reject', testing: true }).next).toMatchObject({ policy: 'reject', testing: false });
+    expect(assessReadiness({ ...base, state: stored('reject', 0) }).next).toMatchObject({ policy: 'reject', testing: false });
   });
+  it('legacy partial pct: the next step is the same policy fully enforced, with a warning that pct is dropped', () => {
+    const r = assessReadiness({ ...base, state: stored('quarantine', 50) });
+    expect(r.next).toMatchObject({ policy: 'quarantine', testing: false });
+    expect(r.status).toBe('caution');
+    expect(r.reasons.some((x) => x.level === 'warn' && /pct=50/.test(x.text))).toBe(true);
+  });
+  it('skips the t=y step when a stricter sp= is published, and says so', () => {
+    const r = assessReadiness({ ...base, state: { record: 'v=DMARC1; p=none; sp=reject' } });
+    expect(r.next).toMatchObject({ policy: 'quarantine', testing: false });
+    expect(r.reasons.some((x) => /Skipping the t=y step/.test(x.text))).toBe(true);
+  });
+});
+
+// Parity with src/dmarc/rollout.ts: the step readiness reports must be the step rollout-next would offer for the same state.
+const expectedNext = (record: string | null) => {
+  const idx = record === null ? 0 : stepIndexForRecord(record);
+  const plan = record === null ? planNextStep(null) : idx === -1 ? null : planNextStep(record);
+  return { idx, step: plan?.step ?? null };
+};
+
+describe('readiness follows rollout.ts for every stored state', () => {
+  const STATES: Array<[string, number | null]> = [];
+  for (const p of ['none', 'quarantine', 'reject']) for (const pct of [null, 0, 10, 50, 100]) STATES.push([p, pct]);
+
+  it.each(STATES)('stored p=%s pct=%s', (policy, pct) => {
+    const record = recordFromStored(policy, pct)!;
+    const want = expectedNext(record);
+    const r = assessReadiness({ ...base, state: stored(policy, pct) });
+    expect(r.next ? { policy: r.next.policy, testing: r.next.testing } : null).toEqual(want.step);
+    expect(r.current.step).toBe(want.idx);
+    // The stored form agrees with the stored-state helper rollout.ts itself ships, where it defines one (pct known).
+    if (pct !== null) expect(resolveStep(stored(policy, pct)).index).toBe(stepIndexFromStored(policy, pct));
+  });
+
+  it('pct 0 is testing mode: quarantine;t=y offers full quarantine, not reject;t=y', () => {
+    const r = assessReadiness({ ...base, state: stored('quarantine', 0) });
+    expect(r.current).toMatchObject({ policy: 'quarantine', testing: true, label: 'p=quarantine; t=y' });
+    expect(r.next).toMatchObject({ policy: 'quarantine', testing: false });
+  });
+
+  const LIVE = [
+    'v=DMARC1; p=none; rua=mailto:r@x.io',
+    'v=DMARC1; p=none; sp=reject',
+    'v=DMARC1; p=none; sp=quarantine; np=reject',
+    'v=DMARC1; p=quarantine; t=y',
+    'v=DMARC1; p=quarantine; t=y; sp=reject',
+    'v=DMARC1; p=quarantine; pct=25',
+    'v=DMARC1; p=quarantine; pct=0',
+    'v=DMARC1; p=reject; pct=10',
+    'v=DMARC1; p=reject; t=y',
+    'v=DMARC1; p=reject',
+    'v=DMARC1; p=banana',
+  ];
+  it.each(LIVE)('live record %s', (record) => {
+    const want = expectedNext(record);
+    const r = assessReadiness({ ...base, state: { record } });
+    expect(r.current.step).toBe(Math.max(want.idx, 0));
+    expect(r.next ? { policy: r.next.policy, testing: r.next.testing } : null).toEqual(want.step);
+  });
+
+  it('covers the whole sequence', () => expect(ROLLOUT_SEQUENCE).toHaveLength(5));
 });

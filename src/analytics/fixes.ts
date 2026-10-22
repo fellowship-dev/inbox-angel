@@ -2,9 +2,9 @@
 // the domain's mail it touches, and the concrete change (SPF include, DKIM setup with the provider's guide).
 // Provider facts (SPF include, DKIM selectors, guide URLs) come from the same registry the DNS checks use.
 
-import { extractIncludes, extractOtherMechanisms, existingQualifier, buildSpfRecord } from '@inbox-angel/dns-checks/spf-record';
+import { extractIncludes, extractOtherMechanisms, existingQualifier, buildSpfRecord, lookupLevel } from '@inbox-angel/dns-checks/spf-record';
 import { identifySender } from '@inbox-angel/dns-checks/sender-providers';
-import { pct, type Sender } from './senders';
+import { pct, underOrg, type Sender } from './senders';
 
 export type FixKind = 'authorize-sender' | 'fix-dkim-alignment' | 'investigate-sender' | 'review-new-sender';
 export type FixSeverity = 'high' | 'medium' | 'low';
@@ -39,6 +39,8 @@ export interface FixDomain {
   id: number;
   domain: string;
   spf_record: string | null;
+  /** Stored count of DNS lookups the SPF record needs, when known. */
+  spf_lookup_count?: number | null;
 }
 
 /** Below both of these a problem is noise, not a to-do. */
@@ -115,20 +117,34 @@ export function buildFixes(domain: FixDomain, senders: Sender[]): Fix[] {
     if (g.providerId && failShare >= AUTHORIZE_AT && material(g.dmarcFail)) {
       const steps: string[] = [];
       const records: FixRecord[] = [];
-      if (include && !hasInclude(domain.spf_record, include)) {
-        steps.push(`Add include:${include} to the SPF record of ${domain.domain}${domain.spf_record ? '' : ' (there is none yet: publish one)'}.`);
-        const next = spfWithInclude(domain.spf_record, include);
-        if (next) records.push({ type: 'TXT', name: domain.domain, value: next });
+      // SPF can only help DMARC if the sender's envelope (MAIL FROM) domain is under yours. Most ESPs use their own
+      // (Mailchimp: mcsv.net), so SPF cannot align however it is configured, and only DKIM can.
+      const spfDomain = g.senders.find((s) => s.spf_domain && underOrg(s.spf_domain, domain.domain))?.spf_domain ?? null;
+      const spfCanAlign = spfDomain !== null;
+      if (include && spfCanAlign && !hasInclude(domain.spf_record, include)) {
+        const lookups = domain.spf_lookup_count == null ? null : domain.spf_lookup_count + 1; // at least one lookup for the include itself
+        const level = lookups === null ? null : lookupLevel(lookups);
+        if (level === 'over') {
+          steps.push(`Do not add include:${include} yet: your SPF already uses ${domain.spf_lookup_count} of the 10 DNS lookups allowed, and this include would take it to ${lookups} or more, which makes SPF fail for everything. Flatten your SPF first (Inbox Angel's SPF flattening, or hosted SPF), then add it.`);
+        } else {
+          steps.push(`Add include:${include} to the SPF record of ${domain.domain}${domain.spf_record ? '' : ' (there is none yet: publish one)'}.`);
+          if (level === 'near') steps.push(`Careful: that brings SPF to about ${lookups} of the 10 lookups allowed (the include can cost more than one). Flatten SPF if it goes over.`);
+          else if (level === null) steps.push('We do not know how many DNS lookups your SPF uses: check it stays under 10 after adding this.');
+          const next = spfWithInclude(domain.spf_record, include);
+          if (next) records.push({ type: 'TXT', name: domain.domain, value: next });
+        }
+      } else if (include && spfCanAlign) {
+        steps.push(`SPF already includes ${include}. If mail still fails, check the envelope sender: it must be on ${domain.domain}.`);
       } else if (include) {
-        steps.push(`SPF already includes ${include}. Check that ${g.name} sends with an envelope domain under ${domain.domain}, or rely on DKIM.`);
+        const used = g.senders.find((s) => s.spf_domain)?.spf_domain;
+        steps.push(`SPF cannot align for ${g.name}${used ? `: it sends with its own envelope domain (${used})` : ''}, so adding it to your SPF record would not make DMARC pass. DKIM is what has to align.`);
       }
-      steps.push(`Turn on custom-domain DKIM signing for ${domain.domain} in ${g.name}${guide ? ` (their guide is linked below)` : ''}, and publish the DNS records it gives you.`);
-      if (sig?.dkimCname) records.push({ type: 'CNAME', name: `${sig.dkimCname.selector}._domainkey.${domain.domain}`, value: sig.dkimCname.target });
+      steps.push(`Turn on custom-domain DKIM signing for ${domain.domain} in ${g.name}${guide ? ' (their guide is linked below)' : ''}, and publish the DNS records it gives you. Those values are specific to your account.`);
       steps.push('Send a test message, then check the Sender inventory again in a day or two.');
       fixes.push({
         ...base, id: `authorize:${domain.id}:${g.key}`, kind: 'authorize-sender', severity: pct(g.dmarcFail, total) >= 5 ? 'high' : 'medium',
         title: `${g.name} sends ${fmtPct(share)} of your mail and fails DMARC`,
-        detail: `${fmtPct(pct(g.dmarcFail, g.messages))} of what ${g.name} sent as ${domain.domain} passed neither SPF nor DKIM aligned with your domain. Once DMARC enforces, receivers will quarantine or reject it.`,
+        detail: `Estimated from the reports: ${fmtPct(pct(g.dmarcFail, g.messages))} of what ${g.name} sent as ${domain.domain} passed neither SPF nor DKIM aligned with your domain. Once DMARC enforces, receivers may quarantine or reject it.`,
         affected_pct: pct(g.dmarcFail, total), affected_messages: g.dmarcFail, steps, records, guide_url: guide,
       });
       continue;
@@ -138,12 +154,11 @@ export function buildFixes(domain: FixDomain, senders: Sender[]): Fix[] {
       const missed = g.messages - g.dkimAligned;
       const steps = [`Turn on custom-domain DKIM signing for ${domain.domain} in ${g.name}${guide ? ' (guide linked below)' : ''}, so mail stays aligned even when forwarding breaks SPF.`];
       const records: FixRecord[] = [];
-      if (sig?.dkimCname) records.push({ type: 'CNAME', name: `${sig.dkimCname.selector}._domainkey.${domain.domain}`, value: sig.dkimCname.target });
       steps.push('Send a test message, then check the Sender inventory again in a day or two.');
       fixes.push({
         ...base, id: `dkim:${domain.id}:${g.key}`, kind: 'fix-dkim-alignment', severity: 'medium',
         title: `${g.name} sends ${fmtPct(share)} of your mail and fails DKIM alignment`,
-        detail: `It passes today only through SPF. Forwarded mail loses SPF, so those messages would then fail DMARC.`,
+        detail: `Estimated from the reports: it passes today only through SPF. Forwarded mail loses SPF, so those messages would then fail DMARC.`,
         affected_pct: pct(missed, total), affected_messages: missed, steps, records, guide_url: guide,
       });
       continue;
@@ -154,7 +169,7 @@ export function buildFixes(domain: FixDomain, senders: Sender[]): Fix[] {
       fixes.push({
         ...base, id: `investigate:${domain.id}:${g.key}`, kind: 'investigate-sender', severity: pct(g.dmarcFail, total) >= 5 ? 'high' : 'medium',
         title: `${fmtPct(share)} of your mail comes from ${g.name}, which we do not recognise`,
-        detail: `${fmtPct(pct(g.dmarcFail, g.messages))} of it fails DMARC. If it is a service you use, authorize it. If not, it is likely spoofing, and enforcing DMARC will block it.`,
+        detail: `Estimated from the reports: ${fmtPct(pct(g.dmarcFail, g.messages))} of it fails DMARC. If it is a service you use, authorize it. If not, it is likely spoofing, and enforcing DMARC may block it.`,
         affected_pct: pct(g.dmarcFail, total), affected_messages: g.dmarcFail,
         steps: [
           `Find out what ${s0?.reverse_dns || s0?.source_ip || 'this server'} is${s0?.org ? ` (network owner: ${s0.org})` : ''}.`,

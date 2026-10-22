@@ -69,7 +69,16 @@ export interface Totals {
 	days_with_reports: number;
 }
 
+/** How per-sender alignment was worked out. It is always an estimate; `basis` says whether the published record was read. */
+export interface Alignment {
+	spf: 'relaxed' | 'strict';
+	dkim: 'relaxed' | 'strict';
+	basis: 'dns' | 'assumed';
+	estimated: true;
+}
+
 export interface DomainAnalytics {
+	alignment: Alignment;
 	days: number;
 	domain: { id: number; domain: string };
 	totals: Totals;
@@ -81,6 +90,7 @@ export interface DomainAnalytics {
 }
 
 export interface AccountAnalytics {
+	alignment: Alignment;
 	days: number;
 	totals: Totals;
 	trend: TrendDay[];

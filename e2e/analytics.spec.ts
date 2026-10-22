@@ -23,17 +23,19 @@ test('sender inventory, what to fix next and readiness from seeded reports', asy
 	await expect(inventory.getByRole('row')).toHaveCount(1 + 4);
 	const mailchimp = inventory.getByRole('row', { name: /Mailchimp/ });
 	await expect(mailchimp).toContainText('198.2.180.1');
-	await expect(mailchimp).toContainText('Fails DMARC');
+	await expect(mailchimp).toContainText('Likely failing');
 	await expect(mailchimp.getByText(/SPF aligned, failing/)).toBeAttached();
 	await expect(inventory.getByRole('row', { name: /SendGrid/ })).toContainText('New sender');
-	await expect(inventory.getByRole('row', { name: /Google Workspace/ })).not.toContainText('Fails DMARC');
+	await expect(inventory.getByRole('row', { name: /Google Workspace/ })).not.toContainText('Likely failing');
 
 	// What to fix next: ranked, with the concrete change and a copyable record.
 	const fixes = page.getByRole('list', { name: 'What to fix next' });
 	await expect(fixes.getByRole('heading').first()).toContainText(/Mailchimp sends \d+(\.\d)?% of your mail and fails DMARC/);
-	await expect(fixes).toContainText('include:servers.mcsv.net');
-	await expect(fixes).toContainText('k1._domainkey.' + DOMAIN);
-	await expect(fixes.getByRole('button', { name: 'Copy value' }).first()).toBeVisible();
+	// Mailchimp authenticates as mcsv.net, so SPF cannot align: DKIM only, and no SPF record to paste.
+	await expect(fixes).toContainText('SPF cannot align for Mailchimp');
+	await expect(fixes).toContainText('custom-domain DKIM');
+	await expect(fixes.getByRole('link', { name: /Mailchimp setup guide/ })).toBeVisible();
+	await expect(page.getByText('These alignment figures are estimates.')).toBeVisible();
 
 	// Readiness gives a verdict and its reasons in words. The live DMARC lookup decides which verdict (a .test domain has
 	// no record, so "Publish a DMARC record first"), so assert the shape, not the outcome.
