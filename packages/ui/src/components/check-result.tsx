@@ -1,8 +1,10 @@
+"use client";
+
 import { cva } from "class-variance-authority";
 import { AlertTriangle, CheckCircle2, CircleHelp, CircleSlash, RefreshCw, XCircle, type LucideIcon } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { Button } from "./button";
+import { cn } from "../lib/cn.js";
+import { Button } from "./button.js";
 
 /**
  * - pass / warn / fail: we looked up the record and judged it.

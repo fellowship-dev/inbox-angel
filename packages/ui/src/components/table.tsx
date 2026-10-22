@@ -1,6 +1,6 @@
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { EmptyState, type EmptyStateProps } from "./empty-state";
+import { cn } from "../lib/cn.js";
+import { EmptyState, type EmptyStateProps } from "./empty-state.js";
 
 export interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {
 	/** When set, the scroll container becomes a labelled, keyboard-focusable region (needed for horizontal scroll). */

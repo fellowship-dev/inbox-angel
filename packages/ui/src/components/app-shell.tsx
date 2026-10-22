@@ -1,9 +1,11 @@
+"use client";
+
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { IconButton } from "./icon-button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
+import { cn } from "../lib/cn.js";
+import { IconButton } from "./icon-button.js";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip.js";
 
 export interface NavItem {
 	label: string;

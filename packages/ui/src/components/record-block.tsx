@@ -1,7 +1,9 @@
+"use client";
+
 import { Check, Copy } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { IconButton } from "./icon-button";
+import { cn } from "../lib/cn.js";
+import { IconButton } from "./icon-button.js";
 
 export interface DnsRecord {
 	/** TXT, CNAME, MX … */
@@ -33,26 +35,41 @@ async function copyText(text: string): Promise<boolean> {
 
 function CopyButton({ text, label }: { text: string; label: string }) {
 	const [copied, setCopied] = React.useState(false);
-	const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-	React.useEffect(() => () => clearTimeout(timer.current), []);
+	const [announcement, setAnnouncement] = React.useState("");
+	const resetTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const announceTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	React.useEffect(
+		() => () => {
+			clearTimeout(resetTimer.current);
+			clearTimeout(announceTimer.current);
+		},
+		[],
+	);
 	return (
 		<>
+			{/* The button name stays fixed; the live region does the announcing (once per copy). */}
 			<IconButton
 				size="sm"
 				variant="ghost"
-				label={copied ? "Copied" : label}
+				label={label}
 				onClick={async () => {
-					if (await copyText(text)) {
-						setCopied(true);
-						clearTimeout(timer.current);
-						timer.current = setTimeout(() => setCopied(false), 2000);
-					}
+					if (!(await copyText(text))) return;
+					setCopied(true);
+					// Clear, then set on a later tick, so a repeat copy is announced again.
+					setAnnouncement("");
+					clearTimeout(announceTimer.current);
+					announceTimer.current = setTimeout(() => setAnnouncement("Copied to clipboard"), 50);
+					clearTimeout(resetTimer.current);
+					resetTimer.current = setTimeout(() => {
+						setCopied(false);
+						setAnnouncement("");
+					}, 2000);
 				}}
 			>
 				{copied ? <Check aria-hidden className="text-success" /> : <Copy aria-hidden />}
 			</IconButton>
 			<span role="status" aria-live="polite" className="sr-only">
-				{copied ? "Copied to clipboard" : ""}
+				{announcement}
 			</span>
 		</>
 	);

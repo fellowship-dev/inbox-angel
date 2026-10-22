@@ -1,7 +1,9 @@
+"use client";
+
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { buttonVariants } from "./button";
+import { cn } from "../lib/cn.js";
+import { buttonVariants } from "./button-variants.js";
 
 const iconSize = cva("p-0 [&_svg]:size-4", {
 	variants: { size: { sm: "size-8", md: "size-10", lg: "size-12 [&_svg]:size-5" } },

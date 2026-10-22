@@ -1,7 +1,9 @@
+"use client";
+
 import * as ToastPrimitive from "@radix-ui/react-toast";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
+import { cn } from "../lib/cn.js";
 
 export const ToastProvider = ToastPrimitive.Provider;
 export const ToastAction = ToastPrimitive.Action;

@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, CircleSlash, XCircle } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { Card, CardContent, CardHeader } from "./card";
+import { cn } from "../lib/cn.js";
+import { Card, CardContent, CardHeader } from "./card.js";
 
 export type Level = 0 | 1 | 2;
 

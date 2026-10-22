@@ -18,7 +18,7 @@ import { colors } from "@inbox-angel/ui/tokens"; // JS consumers
 
 - Light by default, follows `prefers-color-scheme`. Force a theme with `data-theme="light|dark"` on `<html>` or any wrapper.
 - Fonts (Geist Sans / Geist Mono, OFL-1.1) ship through `@fontsource-variable/*`: no CDN at runtime.
-- Components are ESM and expect a bundler (Vite etc.).
+- Components are ESM (`.js` specifiers, loadable in Node). Interactive ones carry `"use client"`; for React Server Components import pure pieces (Badge, Card, StatusDot, LevelCard, Alert, Table, Stat, tokens …) from `@inbox-angel/ui/server`.
 - Utilities: `bg-surface-1`, `text-ink-2`, `border-line`, `bg-brand text-brand-fg`, `text-brand-ink`, `shadow-soft|lift|pop|float`, `font-mono`.
 
 ## Rules baked in
@@ -34,10 +34,10 @@ import { colors } from "@inbox-angel/ui/tokens"; // JS consumers
 
 ```
 npm run build          # tsc → dist/ (+ CSS)
-npm test               # vitest: render, axe, token sync, contrast
+npm test               # build, then vitest: render, axe, token sync, contrast, built-dist Node smoke test
 npm run dev:gallery    # gallery on http://127.0.0.1:5199
 npm run build:gallery
 npm run screenshots    # needs Chromium: PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers npx playwright install chromium
 ```
 
-`gallery/screenshots/` holds the latest light/dark × desktop/375px captures.
+Only the desktop overview and wizard shots (light + dark, WebP) are committed in `gallery/screenshots/`; `npm run screenshots` regenerates all of them locally.

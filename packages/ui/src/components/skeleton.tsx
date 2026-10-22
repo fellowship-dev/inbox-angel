@@ -1,5 +1,5 @@
 import * as React from "react";
-import { cn } from "../lib/cn";
+import { cn } from "../lib/cn.js";
 
 /** Loading placeholder. Decorative (aria-hidden): mark the loading region with aria-busy="true". */
 export const Skeleton = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (

@@ -5,7 +5,10 @@
 		"declaration": true,
 		"outDir": "dist",
 		"rootDir": "src",
-		"types": ["vite/client"]
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"paths": {},
+		"types": []
 	},
 	"include": ["src"]
 }

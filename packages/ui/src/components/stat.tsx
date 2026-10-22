@@ -1,7 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import * as React from "react";
-import { cn } from "../lib/cn";
-import { Badge } from "./badge";
+import { cn } from "../lib/cn.js";
+import { Badge } from "./badge.js";
 
 export interface StatDelta {
 	/** Display text, e.g. "+4%" or "2 fewer". */

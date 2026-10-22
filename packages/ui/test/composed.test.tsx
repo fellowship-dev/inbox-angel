@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Inbox, Settings } from "lucide-react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AppShell, Button, CheckResult, CheckResultList, EmptyState, LevelCard, LogoMark, PageHeader, RecordBlock, Skeleton, Stat,
 	StatGroup, StatusDot, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow, Toaster, dismissToast, toast,
@@ -122,6 +122,17 @@ describe("StatusDot / Stat", () => {
 		render(<StatusDot status="fail" label="Failing" hideLabel />);
 		expect(screen.getByText("Failing")).toHaveClass("sr-only");
 	});
+	it("each StatusDot status has its own shape, so it works without colour or label", () => {
+		const shapes = (["ok", "warn", "fail", "unknown", "info"] as const).map((status) => {
+			const { container, unmount } = render(<StatusDot status={status} label={status} hideLabel />);
+			const svg = container.querySelector("svg");
+			expect(svg).not.toBeNull();
+			const html = svg!.innerHTML;
+			unmount();
+			return html;
+		});
+		expect(new Set(shapes).size).toBe(5);
+	});
 	it("Stat shows value, label, sample marker and a delta with direction text", async () => {
 		const { container } = render(
 			<StatGroup><Stat sample label="Messages" value="1,234" delta={{ value: "+4%", direction: "up", good: true }} deltaLabel="vs. last week" /></StatGroup>,
@@ -134,18 +145,50 @@ describe("StatusDot / Stat", () => {
 });
 
 describe("RecordBlock", () => {
-	it("shows type/name/value in monospace and copies the value", async () => {
+	const value = "v=DMARC1; p=none; rua=mailto:reports@example.test";
+	const setup = () => {
+		vi.useFakeTimers({ shouldAdvanceTime: true });
+		// userEvent.setup() installs its own clipboard stub, so override it afterwards.
+		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 		const writeText = vi.fn().mockResolvedValue(undefined);
-		const user = userEvent.setup();
 		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-		const { container } = render(<RecordBlock title="Sample record" record={{ type: "TXT", name: "_dmarc", value: "v=DMARC1; p=none; rua=mailto:reports@example.test" }} />);
+		return { writeText, user };
+	};
+	afterEach(() => vi.useRealTimers());
+
+	it("shows type/name/value in monospace and copies the value", async () => {
+		const { writeText, user } = setup();
+		const { container } = render(<RecordBlock title="Sample record" record={{ type: "TXT", name: "_dmarc", value }} />);
 		expect(screen.getByText("TXT")).toBeInTheDocument();
 		expect(screen.getByText("_dmarc")).toHaveClass("font-mono");
 		await user.click(screen.getByRole("button", { name: "Copy value" }));
-		expect(writeText).toHaveBeenCalledWith("v=DMARC1; p=none; rua=mailto:reports@example.test");
-		expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+		expect(writeText).toHaveBeenCalledWith(value);
+		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
 		expect(screen.getByText("Copied to clipboard")).toHaveAttribute("aria-live", "polite");
 		await expectNoViolations(container);
+	});
+	it("keeps the button name fixed (no double announcement)", async () => {
+		const { user } = setup();
+		render(<RecordBlock record={{ type: "TXT", name: "_dmarc", value }} />);
+		await user.click(screen.getByRole("button", { name: "Copy value" }));
+		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
+		expect(screen.getByRole("button", { name: "Copy value" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+	});
+	it("announces again on a repeat copy within 2s (live region is cleared first)", async () => {
+		const { user } = setup();
+		render(<RecordBlock record={{ type: "TXT", name: "_dmarc", value }} />);
+		const live = () => screen.getAllByRole("status")[1]!; // [0] is the name field's region
+		await user.click(screen.getByRole("button", { name: "Copy value" }));
+		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
+		expect(live()).toHaveTextContent("Copied to clipboard");
+		await act(async () => void (await vi.advanceTimersByTimeAsync(500)));
+		await user.click(screen.getByRole("button", { name: "Copy value" }));
+		expect(live()).toBeEmptyDOMElement();
+		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
+		expect(live()).toHaveTextContent("Copied to clipboard");
+		await act(async () => void (await vi.advanceTimersByTimeAsync(2100)));
+		expect(live()).toBeEmptyDOMElement();
 	});
 });
 

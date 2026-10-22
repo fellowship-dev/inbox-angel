@@ -94,7 +94,7 @@ export const fonts = {
 export const cssVar = (token: ColorToken): string =>
 	token === "control-border" ? "var(--control-border)" : `var(--${token})`;
 
-/** Contrast pairs the design commits to (checked in test/contrast.test.ts). */
+/** Contrast pairs the design commits to (checked in test/tokens.test.ts). */
 export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min: number; note: string }> = [
 	{ fg: "ink-1", bg: "surface-0", min: 4.5, note: "body on page" },
 	{ fg: "ink-1", bg: "surface-1", min: 4.5, note: "body on card" },

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { cn } from "../lib/cn";
+import { cn } from "../lib/cn.js";
 
 export const controlClasses =
 	"w-full rounded-md border border-control bg-surface-1 px-3 text-sm text-ink-1 placeholder:text-ink-3 transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-danger aria-[invalid=true]:border-2";

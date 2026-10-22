@@ -1,6 +1,8 @@
+"use client";
+
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as React from "react";
-import { cn } from "../lib/cn";
+import { cn } from "../lib/cn.js";
 
 export const TooltipProvider = ({ delayDuration = 200, ...props }: React.ComponentProps<typeof TooltipPrimitive.Provider>) => (
 	<TooltipPrimitive.Provider delayDuration={delayDuration} {...props} />

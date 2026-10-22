@@ -14,6 +14,10 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
+		"./server": {
+			"types": "./dist/server.d.ts",
+			"import": "./dist/server.js"
+		},
 		"./tokens": {
 			"types": "./dist/tokens/tokens.d.ts",
 			"import": "./dist/tokens/tokens.js"
@@ -30,10 +34,10 @@
 	"scripts": {
 		"build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-styles.mjs",
 		"typecheck": "tsc -p .",
-		"test": "vitest run",
+		"test": "npm run build && vitest run",
 		"dev:gallery": "vite --config gallery/vite.config.ts",
 		"build:gallery": "vite build --config gallery/vite.config.ts",
-		"screenshots": "node scripts/screenshots.mjs"
+		"screenshots": "npm run build:gallery && node scripts/screenshots.mjs"
 	},
 	"peerDependencies": {
 		"react": "^19.0.0",
