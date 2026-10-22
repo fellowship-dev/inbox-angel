@@ -50,7 +50,8 @@
   },
   "workspaces": [
     "packages/*",
-    "tools/*"
+    "tools/*",
+    "web"
   ],
   "engines": {
     "node": ">=20"
