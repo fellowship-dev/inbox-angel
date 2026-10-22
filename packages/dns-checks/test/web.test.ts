@@ -89,3 +89,27 @@ describe('bimi', () => {
     expect(l.logo.status).toBe('unreachable');
   });
 });
+
+describe('detectExistingMtaStsMode with a stale policy host', () => {
+  const txt = { 'TXT _mta-sts.x.com': ['v=STSv1; id=1'] };
+  it.each([
+    ['TLS/DNS failure', new Error('getaddrinfo ENOTFOUND mta-sts.x.com')],
+    ['HTTP 404', resp(404, 'nf')],
+    ['HTTP 500', resp(500, 'boom')],
+  ])('%s on the policy fetch → null and reported, not thrown', async (_n, h) => {
+    const seen: string[] = [];
+    const mode = await detectExistingMtaStsMode(fakeResolver(txt, [], { [URL_]: h }), 'x.com', r => seen.push(r));
+    expect(mode).toBeNull();
+    expect(seen).toHaveLength(1);
+  });
+  it('a failed _mta-sts TXT lookup is still fatal', async () => {
+    await expect(detectExistingMtaStsMode(fakeResolver({ 'TXT _mta-sts.x.com': 'SERVFAIL' }), 'x.com')).rejects.toThrow(/lookup failed/);
+  });
+  it('a hung policy host is aborted after the timeout', async () => {
+    const base = fakeResolver(txt);
+    const resolver = { ...base, fetch: (_u: string, init?: { signal?: AbortSignal }) => new Promise<never>((_r, rej) => init!.signal!.addEventListener('abort', () => rej(new Error('aborted')))) };
+    const l = await lookupMtaSts(resolver as never, 'x.com', 20);
+    expect(l.status).toBe('error');
+    expect(l.error).toMatch(/timed out after 20ms/);
+  });
+});

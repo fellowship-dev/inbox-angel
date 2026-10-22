@@ -212,9 +212,22 @@ describe('lookupSpf', () => {
     expect(r!.lookup_count).toBe(2); // include + mx (ip4/all free)
   });
 
-  it('flags multiple SPF records as an error rather than picking one', async () => {
+  it('multiple SPF records is a typed permerror result, NOT a DNS failure', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['v=spf1 -all', 'v=spf1 +all']));
-    await expect(lookupSpf('example.com')).rejects.toThrow(/SPF lookup/);
+    const r = await lookupSpf('example.com');
+    expect(r).not.toBeNull();
+    expect(r!.permerror).toMatch(/2 SPF records/);
+    expect(r!.raw).toContain('v=spf1 -all');
+    expect(r!.raw).toContain('v=spf1 +all');
+    expect(r!.verdict).toBe('missing');
+  });
+
+  it('lookup-limit permerror returns the record with permerror set', async () => {
+    const rec = 'v=spf1 ' + Array.from({ length: 11 }, (_, i) => `ip4:1.1.1.${i}`).join(' ') + ' ' + Array.from({ length: 11 }, (_, i) => `exists:e${i}.test`).join(' ') + ' -all';
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      url.toString().includes('name=example.com') ? makeDohResponse([rec]) : ({ ok: true, status: 200, json: () => Promise.resolve({ Status: 0, Answer: [{ type: 1, data: '1.2.3.4' }] }) } as unknown as Response));
+    const r = await lookupSpf('example.com');
+    expect(r!.permerror).toMatch(/More than 10/);
   });
 
   it('strips quotes from DoH response', async () => {
@@ -249,6 +262,30 @@ describe('lookupDkim', () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['k=rsa; p=MIIB']));
     const r = await lookupDkim('example.com', 'sel');
     expect(r).not.toBeNull();
+  });
+});
+
+describe('lookupDmarc multiple records', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+  it('returns a permerror record with effective policy none instead of throwing', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['v=DMARC1; p=reject', 'v=DMARC1; p=none']));
+    const r = await lookupDmarc('example.com');
+    expect(r!.permerror).toMatch(/2 DMARC records/);
+    expect(r!.policy).toBe('none');
+    expect(r!.valid).toBe(false);
+  });
+  it('checkDomain reports it under problems, not errors', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const name = new URL(url.toString()).searchParams.get('name')!;
+      if (name === '_dmarc.example.com') return makeDohResponse(['v=DMARC1; p=reject', 'v=DMARC1; p=none']);
+      if (name === 'example.com') return makeDohResponse(['v=spf1 -all', 'v=spf1 ~all']);
+      return dohStatus(3);
+    });
+    const r = await checkDomain('example.com');
+    expect(r.errors).toBeUndefined();
+    expect(r.problems?.dmarc).toMatch(/DMARC records/);
+    expect(r.problems?.spf).toMatch(/SPF records/);
   });
 });
 

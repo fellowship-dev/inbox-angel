@@ -62,7 +62,7 @@ export function mtaStsPolicyUrl(domain: string): string {
   return `https://mta-sts.${normalizeName(domain)}/.well-known/mta-sts.txt`;
 }
 
-export async function lookupMtaSts(resolver: Resolver, domain: string): Promise<MtaStsLookup> {
+export async function lookupMtaSts(resolver: Resolver, domain: string, timeoutMs = 5000): Promise<MtaStsLookup> {
   const name = normalizeName(domain);
   const policyUrl = mtaStsPolicyUrl(name);
   const out: MtaStsLookup = { status: 'none', txt: null, policy: null, policyUrl, issues: [] };
@@ -79,11 +79,18 @@ export async function lookupMtaSts(resolver: Resolver, domain: string): Promise<
   out.txt = { raw, id };
 
   let res;
+  let body: string;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // RFC 8461 §3.3: redirects MUST NOT be followed.
-    res = await resolver.fetch(policyUrl, { redirect: 'manual', headers: { Accept: 'text/plain' } });
+    res = await resolver.fetch(policyUrl, { redirect: 'manual', headers: { Accept: 'text/plain' }, signal: controller.signal });
+    if (res.ok) body = await res.text();
   } catch (e) {
-    return { ...out, status: 'error', error: `could not fetch policy: ${e instanceof Error ? e.message : String(e)}` };
+    const msg = controller.signal.aborted ? `timed out after ${timeoutMs}ms` : e instanceof Error ? e.message : String(e);
+    return { ...out, status: 'error', error: `could not fetch policy: ${msg}` };
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     const redirected = res.status >= 300 && res.status < 400;
@@ -93,13 +100,7 @@ export async function lookupMtaSts(resolver: Resolver, domain: string): Promise<
       issues: [redirected ? `Policy URL redirects (HTTP ${res.status}); MTA-STS forbids redirects` : `Policy URL returned HTTP ${res.status}`],
     };
   }
-  let body: string;
-  try {
-    body = await res.text();
-  } catch (e) {
-    return { ...out, status: 'error', error: `could not read policy: ${e instanceof Error ? e.message : String(e)}` };
-  }
-  const policy = parseMtaStsPolicy(body);
+  const policy = parseMtaStsPolicy(body!);
   const issues = validateMtaStsPolicy(policy);
   const ctype = res.headers.get('content-type');
   if (ctype && !/^text\/plain/i.test(ctype)) issues.push(`Policy Content-Type is "${ctype}", expected text/plain`);
@@ -118,12 +119,22 @@ export function buildPolicyFile(mode: 'testing' | 'enforce', mxHosts: string[], 
 
 /**
  * Mode of the policy a domain already publishes, for "preserve existing" on first enable.
- * Returns null when no policy exists. Throws on DNS/network failure so a transient error
- * can never be mistaken for "no policy" (which would silently reset an enforce policy to testing).
+ * Returns null when no policy can be read.
+ *
+ * Only a failed `_mta-sts` TXT lookup is fatal (throws): that means we don't know whether the domain
+ * has MTA-STS, and guessing "testing" could downgrade an enforce policy. A policy host that is dead
+ * (NXDOMAIN, TLS failure, timeout, HTTP error) is a stale/broken setup that must not block re-enabling,
+ * so it yields null and is reported through `onPolicyUnavailable`.
  */
-export async function detectExistingMtaStsMode(resolver: Resolver, domain: string): Promise<'testing' | 'enforce' | null> {
+export async function detectExistingMtaStsMode(
+  resolver: Resolver,
+  domain: string,
+  onPolicyUnavailable?: (reason: string) => void,
+): Promise<'testing' | 'enforce' | null> {
   const r = await lookupMtaSts(resolver, domain);
-  if (r.status === 'error') throw new Error(`MTA-STS lookup failed for ${domain}: ${r.error}`);
+  if (r.status === 'error' && r.txt === null) throw new Error(`MTA-STS lookup failed for ${domain}: ${r.error}`);
   const mode = r.policy?.mode;
-  return mode === 'testing' || mode === 'enforce' ? mode : null;
+  if (mode === 'testing' || mode === 'enforce') return mode;
+  if (r.txt) onPolicyUnavailable?.(r.error ?? r.issues.join('; ') ?? 'policy unreadable');
+  return null;
 }

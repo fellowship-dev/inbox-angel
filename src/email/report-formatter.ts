@@ -18,6 +18,9 @@ export interface CheckSummary {
   spfLookupFailed?: boolean;
   dmarcLookupFailed?: boolean;
   dkimLookupFailed?: boolean;
+  /** Records exist but are broken (e.g. two v=spf1 records) */
+  spfProblem?: string;
+  dmarcProblem?: string;
 }
 
 export function buildSummary(
@@ -42,6 +45,8 @@ export function buildSummary(
 
   return {
     status, domain, spfPass, dkimPass, dmarcPass, dkimPresent, dmarcPolicy,
+    ...(dns.problems?.spf ? { spfProblem: dns.problems.spf } : {}),
+    ...(dns.problems?.dmarc ? { dmarcProblem: dns.problems.dmarc } : {}),
     ...(dns.errors?.spf ? { spfLookupFailed: true } : {}),
     ...(dns.errors?.dmarc ? { dmarcLookupFailed: true } : {}),
     ...(dns.errors?.dkim ? { dkimLookupFailed: true } : {}),
@@ -64,6 +69,7 @@ const STATUS_HEADING: Record<OverallStatus, string> = {
 
 function spfLine(s: CheckSummary): string {
   if (s.spfPass) return '✅ SPF — Your email server is verified as an authorized sender.';
+  if (s.spfProblem) return `❌ SPF — Your SPF record is broken: ${s.spfProblem}. Receivers will treat it as an error.`;
   if (s.spfLookupFailed) return '⚠️  SPF — We could not look up your SPF record right now (temporary DNS problem).';
   return '❌ SPF — No record found, or this email came from an unauthorized server.';
 }
@@ -88,6 +94,7 @@ function dmarcLine(s: CheckSummary): string {
   if (s.dmarcPolicy) {
     return `⚠️  DMARC — Policy "${s.dmarcPolicy}" exists but this email failed the check.`;
   }
+  if (s.dmarcProblem) return `❌ DMARC — Your DMARC record is broken: ${s.dmarcProblem}.`;
   if (s.dmarcLookupFailed) return '⚠️  DMARC — We could not look up your DMARC record right now (temporary DNS problem).';
   return '❌ DMARC — No policy set. Nothing stops scammers from impersonating your domain.';
 }
@@ -110,7 +117,8 @@ Nothing urgent. Keep your DNS records as-is and monitor your DMARC reports regul
   if (s.spfLookupFailed || s.dmarcLookupFailed || s.dkimLookupFailed) {
     steps.push('0. Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.');
   }
-  if (!s.spfPass && !s.spfLookupFailed) steps.push('1. Add an SPF record to your DNS (takes 5 minutes with your domain registrar).');
+  if (s.spfProblem) steps.push('1. Fix your SPF record: publish exactly one v=spf1 record and keep it within 10 DNS lookups.');
+  else if (!s.spfPass && !s.spfLookupFailed) steps.push('1. Add an SPF record to your DNS (takes 5 minutes with your domain registrar).');
   if (!s.dkimPass && !s.dkimLookupFailed) steps.push(`${steps.length + 1}. Enable DKIM signing in your email provider's settings.`);
   if (!s.dmarcPolicy && s.dmarcLookupFailed) { /* unknown – don't tell them to add a record that may exist */ }
   else if (!s.dmarcPolicy) steps.push(`${steps.length + 1}. Add a DMARC record starting with p=none to begin monitoring.`);

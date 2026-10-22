@@ -7,19 +7,25 @@
 // folded into `null`, so callers can't mistake "couldn't check" for "doesn't exist".
 
 import {
+  parseDmarcRecord,
+  parseSpfRecord,
   analyzeSpf,
   analyzeSpfRecord,
   createResolver,
   lookupDkim as pkgLookupDkim,
   lookupDmarc as pkgLookupDmarc,
   type DkimRecord,
-  type DmarcRecord,
+  type DmarcRecord as PkgDmarcRecord,
   type SpfAnalysis,
-  type SpfRecord,
+  type SpfRecord as PkgSpfRecord,
 } from '../../packages/dns-checks/src';
 
 export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '../../packages/dns-checks/src';
-export type { SpfRecord, DkimRecord, DmarcRecord };
+export type { DkimRecord };
+
+/** Returned lookups may carry `permerror`: the record(s) exist but receivers will treat them as an error. */
+export type SpfRecord = PkgSpfRecord & { permerror?: string };
+export type DmarcRecord = PkgDmarcRecord & { permerror?: string };
 
 export interface DnsRecord {
   type: string;
@@ -33,6 +39,9 @@ export class DnsLookupError extends Error {
   }
 }
 
+/** Typed RFC permerrors: the records exist but are unusable. Not a DNS outage. */
+export type RecordProblem = string;
+
 export interface DnsCheckResult {
   domain: string;
   spf: SpfRecord | null;
@@ -40,26 +49,35 @@ export interface DnsCheckResult {
   dmarc: DmarcRecord | null;
   /** Set per check when the lookup FAILED (as opposed to finding no record). */
   errors?: { spf?: string; dkim?: string; dmarc?: string };
+  /** Set per check when records were found but are broken (multiple records, SPF permerror…). */
+  problems?: { spf?: string; dmarc?: string };
 }
 
-function spfProblem(a: SpfAnalysis): string | null {
-  if (a.status === 'temperror') return a.issues.find(i => i.code === 'dns-error')?.message ?? 'DNS error';
-  if (a.record === null && a.status === 'permerror') return a.issues[0]?.message ?? 'invalid SPF';
-  return null;
+function spfDnsError(a: SpfAnalysis): string | null {
+  return a.status === 'temperror' ? (a.issues.find(i => i.code === 'dns-error')?.message ?? 'DNS error') : null;
 }
 
+/**
+ * `null` = no SPF record (authoritative). Throws DnsLookupError ONLY on a real DNS failure.
+ * A permerror (multiple records, too many lookups, loop…) returns the record with `permerror` set.
+ */
 export async function lookupSpf(domain: string): Promise<SpfRecord | null> {
   const a = await analyzeSpf(domain, createResolver());
-  const problem = spfProblem(a);
-  if (problem) throw new DnsLookupError(`SPF lookup for ${domain} failed: ${problem}`);
+  const dnsErr = spfDnsError(a);
+  if (dnsErr) throw new DnsLookupError(`SPF lookup for ${domain} failed: ${dnsErr}`);
   if (a.status === 'none') return null;
+  if (a.rawRecords) {
+    // multiple v=spf1 records: expose all of them so the change is visible, flagged as permerror
+    return { ...parseSpfRecord(a.rawRecords[0]), raw: a.rawRecords.join('  |  '), verdict: 'missing', permerror: a.issues[0]?.message ?? 'multiple SPF records' };
+  }
+  if (a.status === 'permerror') return { ...a.record!, permerror: a.issues.find(i => i.code !== 'dns-error')?.message ?? 'SPF permerror' };
   return a.record;
 }
 
 /** Count RFC 7208 lookups for an unpublished SPF record. Throws DnsLookupError if DNS failed mid-walk. */
 export async function countSpfLookupsFromRecord(record: string): Promise<number> {
   const a = await analyzeSpfRecord(record, createResolver());
-  if (a.status === 'temperror') throw new DnsLookupError(`SPF lookup count failed: ${spfProblem(a)}`);
+  if (a.status === 'temperror') throw new DnsLookupError(`SPF lookup count failed: ${spfDnsError(a)}`);
   return a.lookupCount;
 }
 
@@ -72,7 +90,11 @@ export async function lookupDkim(domain: string, selector: string): Promise<Dkim
 export async function lookupDmarc(domain: string): Promise<DmarcRecord | null> {
   const r = await pkgLookupDmarc(createResolver(), domain);
   if (r.status === 'error') throw new DnsLookupError(`DMARC lookup for ${domain} failed: ${r.error}`);
-  if (r.status === 'multiple') throw new DnsLookupError(`${r.foundAt} has multiple DMARC records`);
+  if (r.status === 'multiple') {
+    // RFC 7489 §6.6.3: with several records DMARC does not apply, i.e. effectively no policy.
+    const msg = `${r.foundAt} has ${r.rawRecords!.length} DMARC records; receivers ignore DMARC`;
+    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join('  |  '), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg };
+  }
   return r.record;
 }
 
@@ -93,11 +115,15 @@ export async function checkDomain(domain: string, dkimSelector?: string | null):
   if (spf.err) errors.spf = spf.err;
   if (dmarc.err) errors.dmarc = dmarc.err;
   if (dkim.err) errors.dkim = dkim.err;
+  const problems: NonNullable<DnsCheckResult['problems']> = {};
+  if (spf.v?.permerror) problems.spf = spf.v.permerror;
+  if (dmarc.v?.permerror) problems.dmarc = dmarc.v.permerror;
   return {
     domain,
     spf: spf.v,
     dkim: dkim.v,
     dmarc: dmarc.v,
     ...(Object.keys(errors).length ? { errors } : {}),
+    ...(Object.keys(problems).length ? { problems } : {}),
   };
 }

@@ -1703,7 +1703,12 @@ async function _handleApi(
         };
 
         // Walk lookup count first (for display)
-        const spfRecord = await lookupSpf(domain.domain);
+        let spfRecord;
+        try {
+          spfRecord = await lookupSpf(domain.domain);
+        } catch (e) {
+          return err(`DNS lookup failed: ${e instanceof Error ? e.message : String(e)}`, 502);
+        }
         const lookup_count = spfRecord?.lookup_count ?? null;
 
         // Do initial flatten
@@ -1866,7 +1871,12 @@ async function _handleApi(
 
         if (body.refresh_mx) {
           const oldMxHosts = config.mx_hosts ? config.mx_hosts.split(',').filter(Boolean) : [];
-          const mxHosts = await discoverMxHosts(domain.domain);
+          let mxHosts: string[];
+          try {
+            mxHosts = await discoverMxHosts(domain.domain);
+          } catch (e) {
+            return err(`DNS lookup failed: ${e instanceof Error ? e.message : String(e)}`, 502);
+          }
           if (mxHosts.length === 0) return err('No MX records found', 400);
           const newPolicyId = generatePolicyId();
           await updateMtaStsTxtRecord(config.mta_sts_record_id!, newPolicyId, patchEnv);

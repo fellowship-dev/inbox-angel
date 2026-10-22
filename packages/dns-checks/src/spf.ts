@@ -69,6 +69,8 @@ export interface SpfAnalysis {
   lookupLimitExceeded: boolean;
   voidLimitExceeded: boolean;
   issues: SpfIssue[];
+  /** the competing records when the domain publishes more than one (status 'permerror') */
+  rawRecords?: string[];
   /** every include:/redirect= domain reached, depth-first */
   includes: string[];
 }
@@ -184,7 +186,7 @@ interface Ctx {
 type TxtFetch =
   | { kind: 'record'; raw: string }
   | { kind: 'none' }
-  | { kind: 'multiple'; count: number }
+  | { kind: 'multiple'; count: number; records: string[] }
   | { kind: 'error'; error: string };
 
 function fetchSpfTxt(ctx: Ctx, domain: string): Promise<TxtFetch> {
@@ -195,7 +197,7 @@ function fetchSpfTxt(ctx: Ctx, domain: string): Promise<TxtFetch> {
       if (r.status === 'error') return { kind: 'error', error: r.error ?? 'DNS error' };
       const spf = r.records.filter(isSpfRecord);
       if (spf.length === 0) return { kind: 'none' };
-      if (spf.length > 1) return { kind: 'multiple', count: spf.length };
+      if (spf.length > 1) return { kind: 'multiple', count: spf.length, records: spf.map(r => r.trim()) };
       return { kind: 'record', raw: spf[0].trim() };
     });
     ctx.cache.set(key, p);
@@ -289,6 +291,16 @@ async function walk(ctx: Ctx, domain: string, raw: string, path: string[], depth
         else if (mx.status !== 'ok') countVoid(ctx, target, `MX ${target}`);
         else if (mx.answers.length > SPF_MX_NAME_LIMIT) {
           addIssue(ctx, 'mx-name-limit', target, `${t.raw} resolves ${mx.answers.length} MX hosts; more than ${SPF_MX_NAME_LIMIT} is a permerror (RFC 7208 §4.6.4)`);
+        } else {
+          // Each MX host is then resolved to addresses; an empty answer there is a void lookup too.
+          for (const ans of mx.answers) {
+            const host = ans.data.trim().split(/\s+/)[1]?.replace(/\.$/, '').toLowerCase();
+            if (!host) continue; // null MX ("0 .")
+            const [a, aaaa] = await Promise.all([ctx.resolver.resolve(host, 'A'), ctx.resolver.resolve(host, 'AAAA')]);
+            if (a.status === 'error') noteDnsError(ctx, host, `${a.error} resolving A for MX host ${host}`);
+            else if (aaaa.status === 'error') noteDnsError(ctx, host, `${aaaa.error} resolving AAAA for MX host ${host}`);
+            else if (a.status !== 'ok' && aaaa.status !== 'ok') countVoid(ctx, host, `A/AAAA ${host} (MX host of ${target})`);
+          }
         }
       }
     } else if (t.name === 'exists') {
@@ -308,7 +320,7 @@ const FATAL_CODES = new Set<SpfIssueCode>([
   'include-no-record', 'redirect-no-record', 'depth-limit', 'syntax',
 ]);
 
-function finish(ctx: Ctx, domain: string, record: SpfRecord | null, hardStatus?: SpfStatus): SpfAnalysis {
+function finish(ctx: Ctx, domain: string, record: SpfRecord | null, hardStatus?: SpfStatus, rawRecords?: string[]): SpfAnalysis {
   let status: SpfStatus;
   if (hardStatus) status = hardStatus;
   else if (ctx.issues.some(i => FATAL_CODES.has(i.code))) status = 'permerror';
@@ -324,6 +336,7 @@ function finish(ctx: Ctx, domain: string, record: SpfRecord | null, hardStatus?:
     voidLimitExceeded: ctx.voids > SPF_VOID_LIMIT,
     issues: ctx.issues,
     includes: ctx.includes,
+    ...(rawRecords ? { rawRecords } : {}),
   };
 }
 
@@ -342,7 +355,7 @@ export async function analyzeSpf(domain: string, resolver: Resolver): Promise<Sp
   if (root.kind === 'none') return finish(ctx, name, null, 'none');
   if (root.kind === 'multiple') {
     addIssue(ctx, 'multiple-records', name, `${name} publishes ${root.count} SPF records; RFC 7208 §4.5 requires permerror`);
-    return finish(ctx, name, null, 'permerror');
+    return finish(ctx, name, null, 'permerror', root.records);
   }
   await walk(ctx, name, root.raw, [name], 0);
   return finish(ctx, name, parseSpfRecord(root.raw));
@@ -389,6 +402,7 @@ export async function collectIps(domain: string, resolver: Resolver): Promise<Co
 
   // Returns the effective terminal `all` token of the policy chain (record + redirects), or null.
   // `policy` is false while walking include: targets, whose `all` never defines the policy.
+  const rootName = normalizeName(domain);
   async function visit(d: string, path: string[], policy: boolean): Promise<string | null> {
     const res = await fetchSpfTxt(ctx, d);
     if (res.kind === 'error') { addIssue(ctx, 'dns-error', d, res.error); return null; }
@@ -402,7 +416,8 @@ export async function collectIps(domain: string, resolver: Resolver): Promise<Co
     const hasAll = rec.terms.some(t => t.kind === 'mechanism' && t.name === 'all');
     let allToken: string | null = null;
     const keep = (raw: string) => {
-      const k = raw.toLowerCase();
+      // Macros are case-sensitive (%{i} vs %{I}); everything else is case-insensitive.
+      const k = raw.includes('%') ? raw : raw.toLowerCase();
       if (!seenExtra.has(k)) { seenExtra.add(k); out.extra.push(k); }
     };
     for (const t of rec.terms) {
@@ -427,13 +442,17 @@ export async function collectIps(domain: string, resolver: Resolver): Promise<Co
       } else if (t.name === 'all') {
         if (policy) allToken = t.raw.toLowerCase();
       } else if (['a', 'mx', 'ptr', 'exists'].includes(t.name)) {
-        keep(t.raw);
+        if (t.value === null && d !== rootName) {
+          // A bare a/mx/ptr means "the current domain". Copied verbatim from an include target it would
+          // point at the customer's domain instead, so pin it to the domain it came from.
+          const cidr = (t.cidr4 !== undefined ? `/${t.cidr4}` : '') + (t.cidr6 !== undefined ? `//${t.cidr6}` : '');
+          keep(`${t.qualifier === '+' ? '' : t.qualifier}${t.name}:${d}${cidr}`);
+        } else keep(t.raw);
       }
     }
     return allToken;
   }
 
-  const rootName = normalizeName(domain);
   const all = await visit(rootName, [rootName], true);
   if (all) out.allQualifier = all;
   return out;

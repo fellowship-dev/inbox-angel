@@ -63,7 +63,8 @@ export interface MtaStsDeprovisionEnv {
  * an enforce policy to testing.
  */
 export async function detectExistingMtaStsMode(domain: string): Promise<MtaStsMode | null> {
-  return detectExistingMtaStsModePure(createResolver(), domain);
+  return detectExistingMtaStsModePure(createResolver(), domain, reason =>
+    console.warn(`[mta-sts] ${domain}: existing policy unreadable (${reason}); defaulting to testing`));
 }
 
 /**

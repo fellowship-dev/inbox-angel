@@ -33,7 +33,8 @@ function dmarcSeverity(was: string, now: string): DomainChange['severity'] {
   return 'changed';
 }
 
-function spfSeverity(was: string, now: string): DomainChange['severity'] {
+function spfSeverity(was: string, now: string, permerror?: string): DomainChange['severity'] {
+  if (permerror) return 'degraded'; // record exists but receivers will fail it
   // Softfail→fail = improved, fail→softfail = degraded, any removal = degraded
   if (!now && was) return 'degraded';
   if (now && !was) return 'improved';
@@ -87,7 +88,7 @@ export async function checkSubscription(sub: MonitorSubscription): Promise<Check
       field: 'SPF record',
       was: wasSpf,
       now: nowSpf,
-      severity: spfSeverity(wasSpf, nowSpf),
+      severity: spfSeverity(wasSpf, nowSpf, spf?.permerror),
     });
   }
 

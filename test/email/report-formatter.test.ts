@@ -266,3 +266,13 @@ describe('DNS lookup failures are not reported as missing records', () => {
     expect(text).toContain('No policy set');
   });
 });
+
+describe('broken (permerror) records are not described as lookup failures', () => {
+  it('multiple SPF records → "broken", not "could not look up"', () => {
+    const dns: DnsCheckResult = { domain: 'example.com', spf: { raw: 'v=spf1 -all  |  v=spf1 +all', mechanisms: [], terms: [], verdict: 'missing', permerror: 'x publishes 2 SPF records' } as any, dkim: null, dmarc: null, problems: { spf: 'x publishes 2 SPF records' } };
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
+    expect(text).toContain('Your SPF record is broken: x publishes 2 SPF records');
+    expect(text).toContain('Fix your SPF record: publish exactly one');
+    expect(text).not.toContain('could not look up your SPF');
+  });
+});

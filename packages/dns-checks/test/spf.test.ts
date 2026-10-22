@@ -276,3 +276,42 @@ describe('flatten preview', () => {
     expect(buildFlatRecord(['ip4:1.1.1.1', 'ip4:1.1.1.1'], ['mx'], '~all')).toBe('v=spf1 ip4:1.1.1.1 mx ~all');
   });
 });
+
+describe('void lookups on MX hosts (RFC 7208 §4.6.4)', () => {
+  it('MX hosts without addresses count as void lookups', async () => {
+    const z: Zone = { 'TXT x.com': txt('v=spf1 mx -all'), 'MX x.com': ['10 a.x.com.', '20 b.x.com.', '30 c.x.com.'] };
+    const a = await analyzeSpf('x.com', fakeResolver(z));
+    expect(a.voidLookupCount).toBe(3);
+    expect(a.status).toBe('permerror');
+    expect(a.issues.some(i => i.code === 'void-lookup-limit')).toBe(true);
+  });
+  it('MX hosts with A or AAAA records are not void; DNS errors on them are errors', async () => {
+    const z: Zone = { 'TXT x.com': txt('v=spf1 mx -all'), 'MX x.com': ['10 a.x.com.', '20 b.x.com.'], 'A a.x.com': ['1.2.3.4'], 'AAAA b.x.com': ['2001:db8::1'] };
+    expect((await analyzeSpf('x.com', fakeResolver(z))).voidLookupCount).toBe(0);
+    const e = await analyzeSpf('x.com', fakeResolver({ ...z, 'A b.x.com': 'SERVFAIL' }));
+    expect(e.status).toBe('temperror');
+  });
+  it('multiple SPF records expose rawRecords', async () => {
+    const a = await analyzeSpf('x.com', fakeResolver({ 'TXT x.com': txt('v=spf1 -all', 'v=spf1 ~all') }));
+    expect(a.rawRecords).toEqual(['v=spf1 -all', 'v=spf1 ~all']);
+  });
+});
+
+describe('flatten: terms copied from include targets', () => {
+  it('pins bare a/mx/ptr (and cidr) to the include domain, not the customer domain', async () => {
+    const r = await collectIps('x.com', fakeResolver({
+      'TXT x.com': txt('v=spf1 include:vendor.com a -all'),
+      'TXT vendor.com': txt('v=spf1 a mx/24 ~ptr ip4:1.1.1.1 -all'),
+    }));
+    expect(r.extra).toEqual(['a:vendor.com', 'mx:vendor.com/24', '~ptr:vendor.com', 'a']);
+    expect(r.errors).toEqual([]);
+  });
+  it('keeps explicit targets and the root bare a untouched', async () => {
+    const r = await collectIps('x.com', fakeResolver({ 'TXT x.com': txt('v=spf1 a mx:mail.x.com -all') }));
+    expect(r.extra).toEqual(['a', 'mx:mail.x.com']);
+  });
+  it('does not lowercase macros', async () => {
+    const r = await collectIps('x.com', fakeResolver({ 'TXT x.com': txt('v=spf1 exists:%{I}._spf.Vendor.com -all') }));
+    expect(r.extra).toEqual(['exists:%{I}._spf.Vendor.com']);
+  });
+});

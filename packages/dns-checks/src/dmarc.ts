@@ -102,6 +102,8 @@ export interface DmarcLookup {
   /** true when the record came from the organizational domain, not the queried domain */
   inherited: boolean;
   organizationalDomain: string | null;
+  /** the competing records when status is 'multiple' */
+  rawRecords?: string[];
   error?: string;
 }
 
@@ -124,7 +126,7 @@ export async function lookupDmarc(resolver: Resolver, domain: string): Promise<D
     const r = await resolver.txt(at);
     if (r.status === 'error') return { ...base, status: 'error', error: r.error ?? 'DNS error' };
     const matches = r.records.filter(isDmarcRecord);
-    if (matches.length > 1) return { ...base, status: 'multiple', foundAt: at, inherited: i > 0 };
+    if (matches.length > 1) return { ...base, status: 'multiple', foundAt: at, inherited: i > 0, rawRecords: matches.map(m => m.trim()) };
     if (matches.length === 1) {
       return { ...base, status: 'found', record: parseDmarcRecord(matches[0].trim()), foundAt: at, inherited: i > 0 };
     }
