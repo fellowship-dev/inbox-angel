@@ -26,6 +26,9 @@ export interface Env {
   API_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };  // global rate limiting (200/min)
 }
 
+/** Env after the DB-bound guard: entry points serve the setup page / bail out when DB is unbound. */
+export type BoundEnv = Env & { DB: D1Database };
+
 // HTTP API (dashboard calls, DNS provisioning)
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -51,7 +54,7 @@ export default {
     }
 
     if (pathname === '/health' || pathname.startsWith('/api/')) {
-      return handleApi(request, env, ctx);
+      return handleApi(request, env as BoundEnv, ctx);
     }
     return env.ASSETS.fetch(request);
   },
@@ -60,11 +63,11 @@ export default {
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.DB) { console.error('[email] DB binding missing — D1 not configured'); return; }
     await ensureMigrated(env.DB);
-    await handleEmail(message, env, ctx);
+    await handleEmail(message, env as BoundEnv, ctx);
   },
 
   // Cron dispatcher — routes by schedule expression
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.DB) { console.error('[cron] DB binding missing — D1 not configured'); return; }
     await ensureMigrated(env.DB);
     await enrichEnv(env, env.DB);
@@ -82,7 +85,7 @@ export default {
 
     // Weekly digest — every Monday 9am UTC
     if (event.cron === '0 9 * * 1') {
-      await sendWeeklyDigests(env);
+      await sendWeeklyDigests(env as BoundEnv);
       return;
     }
 

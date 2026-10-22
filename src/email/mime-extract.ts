@@ -133,14 +133,14 @@ function escapeRe(s: string): string {
 // Read the full email as a UTF-8 string. Used for TLS-RPT reports (plain JSON body).
 export async function extractTextBody(raw: ReadableStream<Uint8Array>): Promise<string> {
   const allBytes = await readStream(raw);
-  return new TextDecoder('utf-8', { fatal: false }).decode(allBytes);
+  return new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(allBytes);
 }
 
 export async function extractAttachmentBytes(
   raw: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
   const allBytes = await readStream(raw);
-  const text = new TextDecoder('utf-8', { fatal: false }).decode(allBytes);
+  const text = new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(allBytes);
 
   // Split top-level headers from body
   const blankLine = text.search(/\r?\n\r?\n/);

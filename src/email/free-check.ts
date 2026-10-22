@@ -3,7 +3,7 @@
 // The token ties the inbound email to a browser session for front-end polling.
 // Parses auth headers, does live DNS lookup, replies with plain-English report, stores result in D1.
 
-import { Env } from '../index';
+import type { BoundEnv as Env } from '../index';
 import { extractAuthResults } from './parse-headers';
 import { checkDomain } from './dns-check';
 import { buildSummary, formatCheckReport } from './report-formatter';
@@ -76,7 +76,7 @@ export async function handleFreeCheck(
   if (!resolvedFrom) throw new Error('FROM_EMAIL not configured — complete the setup wizard first');
   const replyFrom = `InboxAngel <${resolvedFrom}>`;
   const subject = `Email security check — ${domain}`;
-  await message.reply(buildMimeReply(replyFrom, fromEmail, subject, reportText, reportHtml));
+  await message.reply(buildMimeReply(replyFrom, fromEmail, subject, reportText, reportHtml) as unknown as EmailMessage);
 
   // 6. Store result in D1 (best-effort — don't let DB failure break the email flow)
   try {

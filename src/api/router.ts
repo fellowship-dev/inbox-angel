@@ -49,7 +49,7 @@
 // Self-hosted lazy init: if base domain is configured (via wizard/D1) and no domain exists yet,
 // the first authenticated request auto-provisions the domain (no bootstrap call needed).
 
-import { Env } from '../index';
+import type { BoundEnv as Env } from '../index';
 import { requireAuth, AuthError } from './auth';
 import { version } from '../../package.json';
 import {
@@ -292,7 +292,7 @@ async function deleteDomain(env: Env, domainId: string, actor?: { id?: string; e
       resource_type: 'dns_record', resource_id: domain.dns_record_id, resource_name: recordName,
       before_value: { type: 'TXT', name: recordName, content: 'v=DMARC1;', ttl: 3600 },
     }, ctx);
-    await deprovisionDomain(env, domain.dns_record_id).catch(e =>
+    await deprovisionDomain({ CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN ?? '' }, domain.dns_record_id).catch(e =>
       console.warn(`deprovisionDomain failed for domain ${id}:`, e)
     );
   }
@@ -692,7 +692,7 @@ async function _handleApi(
       const resetUrl = `${origin}/#/reset/${token}`;
       const emailBody = `Hi ${user.name},\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
 
-      const fe = fromEmail(env);
+      const fe = fromEmail();
       if (env.SEND_EMAIL && fe) {
         try {
           await env.SEND_EMAIL.send({
@@ -1258,7 +1258,7 @@ async function _handleApi(
       const rd = reportsDomain();
       if (rd && !domain.dns_record_id) {
         try {
-          const authResult = await provisionDomain(env, domain.domain, {
+          const authResult = await provisionDomain({ CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN ?? '' }, domain.domain, {
             db: env.DB!, actor_id: userBySession?.id ?? null,
             actor_email: userBySession?.email ?? null, actor_type: 'user', ctx,
           });

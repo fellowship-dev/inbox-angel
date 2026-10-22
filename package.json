@@ -18,7 +18,7 @@
     "seed:remote": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --remote --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
     "unseed:local": "wrangler d1 execute inbox-angel --local  --file=scripts/unseed-demo.sql",
     "unseed:remote": "wrangler d1 execute inbox-angel --remote --file=scripts/unseed-demo.sql",
-    "typecheck": "tsc -p packages/dns-checks"
+    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.15.0",
