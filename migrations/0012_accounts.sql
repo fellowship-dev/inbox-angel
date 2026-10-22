@@ -18,6 +18,20 @@ SELECT CASE WHEN
 THEN 1 ELSE 0 END;
 DROP TABLE _baseline_guard;
 
+-- ── Data fix-ups ensureMigrated() used to run on every cold start ──
+-- The legacy auto-generated API key is no longer a credential; drop the stored value.
+DELETE FROM settings WHERE key = 'auto_api_key';
+
+-- v0.9.x kept the single login in settings; move it to the users table (first run only).
+INSERT OR IGNORE INTO users (id, email, name, password_hash, role, session_token)
+SELECT lower(hex(randomblob(16))), e.value, COALESCE(NULLIF(n.value, ''), e.value), p.value, 'admin', s.value
+FROM settings p
+JOIN settings e ON e.key = 'user_email'
+LEFT JOIN settings n ON n.key = 'user_name'
+LEFT JOIN settings s ON s.key = 'session_token'
+WHERE p.key = 'password_hash' AND p.value != '' AND e.value != ''
+  AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');
+
 -- ── Accounts + memberships ────────────────────────────────────
 CREATE TABLE accounts (
   id TEXT PRIMARY KEY,

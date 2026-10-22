@@ -13,7 +13,7 @@
 import type { Env } from './index';
 import { version } from '../package.json';
 import { getAccountId } from './env-utils';
-import { getSetting } from './db/queries';
+import { scope } from './db/scope';
 
 const TELEMETRY_URL = 'https://telemetry.inboxangel.io/v1/events';
 
@@ -51,7 +51,7 @@ let _telemetryEnabled: boolean | undefined;
 async function isTelemetryEnabled(env: Env): Promise<boolean> {
   if (_telemetryEnabled !== undefined) return _telemetryEnabled;
   if (!env.DB) { _telemetryEnabled = false; return false; }
-  const row = await getSetting(env.DB, 'telemetry_opted_in');
+  const row = await scope(env.DB).settings.get('telemetry_opted_in');
   _telemetryEnabled = row?.value === 'true';
   return _telemetryEnabled;
 }

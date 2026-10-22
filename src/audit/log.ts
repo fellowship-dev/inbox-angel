@@ -8,6 +8,8 @@
 // before_value / after_value are serialised to JSON strings at insert time.
 // Reads parse them back. Callers pass raw objects — no pre-serialisation needed.
 
+import { scope } from '../db/scope';
+
 export interface AuditEntry {
   actor_id?: string | null;
   actor_email?: string | null;
@@ -26,26 +28,21 @@ export function logAudit(
   entry: AuditEntry,
   ctx?: ExecutionContext,
 ): void {
-  const run = db
-    .prepare(
-      `INSERT INTO audit_log
-        (actor_id, actor_email, actor_type, action,
-         resource_type, resource_id, resource_name, before_value, after_value, meta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  const run = Promise.resolve()
+    .then(() =>
+      scope(db).audit.insert({
+        actor_id: entry.actor_id,
+        actor_email: entry.actor_email,
+        actor_type: entry.actor_type,
+        action: entry.action,
+        resource_type: entry.resource_type,
+        resource_id: entry.resource_id,
+        resource_name: entry.resource_name,
+        before_value: entry.before_value != null ? JSON.stringify(entry.before_value) : null,
+        after_value: entry.after_value != null ? JSON.stringify(entry.after_value) : null,
+        meta: entry.meta ? JSON.stringify(entry.meta) : null,
+      }),
     )
-    .bind(
-      entry.actor_id ?? null,
-      entry.actor_email ?? null,
-      entry.actor_type ?? 'user',
-      entry.action,
-      entry.resource_type ?? null,
-      entry.resource_id ?? null,
-      entry.resource_name ?? null,
-      entry.before_value != null ? JSON.stringify(entry.before_value) : null,
-      entry.after_value != null ? JSON.stringify(entry.after_value) : null,
-      entry.meta ? JSON.stringify(entry.meta) : null,
-    )
-    .run()
     .catch((e: unknown) => console.error('[audit] log failed:', e));
 
   if (ctx) {

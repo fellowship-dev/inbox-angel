@@ -2,7 +2,7 @@
 // Accepts a list of domains, inserts valid/new ones, provisions DNS for each.
 // Returns per-domain status without throwing on partial failure.
 
-import { insertDomain, getDomainByName } from '../db/queries';
+import { scope } from '../db/scope';
 import { provisionDomain } from '../dns/provision';
 import { reportsDomain } from '../env-utils';
 import { logAudit } from '../audit/log';
@@ -69,7 +69,7 @@ export async function bulkInsertDomains(
     }
 
     // Dedup check
-    const existing = await getDomainByName(env.DB, domain);
+    const existing = await scope(env.DB).domains.getByName(domain);
     if (existing) {
       results.push({ domain, status: 'duplicate' });
       continue;
@@ -79,7 +79,7 @@ export async function bulkInsertDomains(
 
     let domainId: number;
     try {
-      const result = await insertDomain(env.DB, { domain, rua_address: ruaAddress });
+      const result = await scope(env.DB).domains.insert({ domain, rua_address: ruaAddress });
       domainId = result.meta.last_row_id as number;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -116,9 +116,7 @@ export async function bulkInsertDomains(
       manual = dnsResult.manual;
 
       if (dnsRecordId) {
-        await env.DB.prepare('UPDATE domains SET dns_record_id = ?, updated_at = unixepoch() WHERE id = ?')
-          .bind(dnsRecordId, domainId)
-          .run();
+        await scope(env.DB).domains.setDnsRecord(domainId, dnsRecordId, { touch: true });
       }
     } catch (e: unknown) {
       // DNS provisioning failure is non-fatal — domain is inserted, user can provision later

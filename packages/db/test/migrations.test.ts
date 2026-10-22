@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { REQUIRED_MIGRATION } from '../src/ready';
 import { createTestD1, applyMigrations, appliedMigrations, migrationFiles } from '../src/testing';
 import { IMPLICIT_ACCOUNT_ID, ACCOUNT_OWNED_TABLES } from '../src/schema';
 import { F, applyHistorical, freshDb, renameApplied, runLegacyRuntime, schemaSnapshot, tableExists } from './helpers';
@@ -147,6 +148,27 @@ describe('upgrade from every historical state', () => {
 	});
 });
 
+describe('data fix-ups formerly done by ensureMigrated()', () => {
+	it('drops the legacy auto_api_key and promotes settings-based login to an owner membership', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0011_report_records_enrichment.sql' });
+		d.sqlite.exec(`INSERT INTO settings (key, value) VALUES ('auto_api_key','k'), ('password_hash','h'), ('user_email','old@x.test'), ('user_name','Old'), ('session_token','s1')`);
+		applyMigrations(d.sqlite);
+		expect(d.sqlite.prepare("SELECT value FROM settings WHERE key = 'auto_api_key'").get()).toBeUndefined();
+		const u = d.sqlite.prepare('SELECT id, email, name, password_hash, role, session_token FROM users').all() as any[];
+		expect(u).toEqual([expect.objectContaining({ email: 'old@x.test', name: 'Old', password_hash: 'h', role: 'admin', session_token: 's1' })]);
+		expect(d.sqlite.prepare('SELECT user_id, role FROM memberships').all()).toEqual([{ user_id: u[0].id, role: 'owner' }]);
+	});
+
+	it('does not create a second admin when one already exists', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0011_report_records_enrichment.sql' });
+		d.sqlite.exec(`INSERT INTO users (id, email, name, role) VALUES ('u1','a@x.test','A','admin'); INSERT INTO settings (key, value) VALUES ('password_hash','h'), ('user_email','old@x.test')`);
+		applyMigrations(d.sqlite);
+		expect(d.sqlite.prepare('SELECT COUNT(*) n FROM users').get()).toEqual({ n: 1 });
+	});
+});
+
 describe('why the adoption step exists', () => {
 	it('plain `wrangler d1 migrations apply` re-runs a renamed migration and fails', () => {
 		const d = createTestD1();
@@ -182,4 +204,8 @@ describe('why the adoption step exists', () => {
 		applyMigrations(d.sqlite);
 		expect(schemaSnapshot(d.sqlite)).toEqual(fresh);
 	});
+});
+
+it('the runtime schema guard names the newest migration', () => {
+	expect(REQUIRED_MIGRATION).toBe(migrationFiles().at(-1));
 });
