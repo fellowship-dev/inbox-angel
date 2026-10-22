@@ -8,13 +8,14 @@ vi.mock('cloudflare:email', () => ({
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import { handleHostedEmail } from '../../src/hosted/intake';
-import { CANARY_PER_DOMAIN_LIMIT, CANARY_TTL_SECONDS } from '../../src/hosted/canary';
+import { CANARY_GLOBAL_LIMIT, CANARY_PER_DOMAIN_LIMIT, CANARY_TTL_SECONDS, CANARY_UNAUTHENTICATED_LIMIT } from '../../src/hosted/canary';
 import { hashToken } from '../../src/hosted/tokens';
 import { call, makeEnv } from '../auth/helpers';
 import { fakeMessage } from '../helpers/mail';
 import { HOSTED_ENV, nxdomain, quiet } from './world';
 
-const AUTH = 'mx.google.com; dkim=pass header.d=example.com header.s=s1; spf=pass smtp.mailfrom=u@example.com; dmarc=pass header.from=example.com';
+const authFor = (d: string) => `mx.google.com; dkim=pass header.d=${d} header.s=s1; spf=pass smtp.mailfrom=u@${d}; dmarc=pass header.from=${d}`;
+const AUTH = authFor('example.com');
 
 function setup() {
   const db = createMigratedD1();
@@ -25,8 +26,8 @@ function setup() {
     expect(res.status).toBe(201);
     return await res.json() as { token: string; email: string; expires_at: number };
   };
-  const send = async (to: string, from = 'user@example.com') => {
-    const m = fakeMessage(to, 'Subject: hello\r\n\r\nhi', { from, headers: { 'authentication-results': AUTH, 'message-id': '<m1@example.com>' } });
+  const send = async (to: string, from = 'user@example.com', auth: string | null = AUTH) => {
+    const m = fakeMessage(to, 'Subject: hello\r\n\r\nhi', { from, headers: { ...(auth ? { 'authentication-results': auth } : {}), 'message-id': '<m1@example.com>' } });
     await handleHostedEmail(m, env);
     return m;
   };
@@ -105,18 +106,42 @@ describe('canary (Check Email) addressing', () => {
     expect(t.rows('SELECT * FROM check_results')).toEqual([]);
   });
 
-  it('rate-limits per sender domain, not per address', async () => {
+  it('rate-limits per authenticated sender domain, not per address', async () => {
     const t = setup();
     const accepted: boolean[] = [];
     for (let i = 0; i < CANARY_PER_DOMAIN_LIMIT + 2; i++) {
-      const s = await t.issue();
-      const m = await t.send(s.email, `person${i}@busy.example`);
+      const m = await t.send((await t.issue()).email, `person${i}@busy.example`, authFor('mail.busy.example'));
       accepted.push(m.reply.mock.calls.length === 1);
       if (!accepted[i]) expect(m.setReject.mock.calls[0][0]).toMatch(/Too many checks/);
     }
     expect(accepted).toEqual([...Array(CANARY_PER_DOMAIN_LIMIT).fill(true), false, false]);
-    // another sender domain is unaffected
-    const other = await t.send((await t.issue()).email, 'x@calm.example');
-    expect(other.reply).toHaveBeenCalledOnce();
+    // another domain is unaffected, and subdomains share their registrable domain's allowance
+    expect((await t.send((await t.issue()).email, 'x@calm.example', authFor('calm.example'))).reply).toHaveBeenCalledOnce();
+    expect((await t.send((await t.issue()).email, 'x@busy.example', authFor('other.busy.example'))).reply).not.toHaveBeenCalled();
+  });
+
+  it('a spoofed From cannot use up a real domain’s allowance', async () => {
+    const t = setup();
+    for (let i = 0; i < CANARY_UNAUTHENTICATED_LIMIT + 3; i++) {
+      await t.send((await t.issue()).email, 'ceo@victim.example', null); // claims victim.example, proves nothing
+    }
+    expect(t.rows("SELECT key FROM auth_rate_limits WHERE key LIKE 'canary:%victim%'")).toEqual([]);
+    const real = await t.send((await t.issue()).email, 'ceo@victim.example', authFor('victim.example'));
+    expect(real.reply).toHaveBeenCalledOnce();
+  });
+
+  it('unauthenticated senders share one small bucket', async () => {
+    const t = setup();
+    const outcomes: boolean[] = [];
+    for (let i = 0; i < CANARY_UNAUTHENTICATED_LIMIT + 2; i++) outcomes.push((await t.send((await t.issue()).email, 'a@x.example', null)).reply.mock.calls.length === 1);
+    expect(outcomes.filter(Boolean)).toHaveLength(CANARY_UNAUTHENTICATED_LIMIT);
+  });
+
+  it('a global hourly cap bounds the total', async () => {
+    const t = setup();
+    t.db.sqlite.prepare("INSERT INTO auth_rate_limits (id, key, count, last_request) VALUES ('g', 'canary:global', ?, ?)").run(CANARY_GLOBAL_LIMIT, Date.now());
+    const m = await t.send((await t.issue()).email);
+    expect(m.reply).not.toHaveBeenCalled();
+    expect(m.setReject.mock.calls[0][0]).toMatch(/busy/);
   });
 });

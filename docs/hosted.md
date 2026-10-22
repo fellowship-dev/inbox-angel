@@ -3,6 +3,8 @@
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
 
+> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default account. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and apply migration 0014. Mail addressed without a valid token is rejected, not filed anywhere.
+
 Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Customer setup](#customer-setup) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits-and-quotas)
 
 ## Overview
@@ -93,9 +95,10 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 1. **Zone reconcile**: lists the whole records zone, stores the record count (quota), warns at 3,200, and diffs it against the database:
    expected records that are missing and records under `*.h.` that no domain owns are **reported, never fixed or deleted**.
    Records outside `*.h.` are only counted and fingerprinted; a change since yesterday is logged (`records outside h.inboxangel.io changed`). The job issues only `GET`s.
-2. **SPF refresh**: re-flattens every hosted SPF from its stored source and updates the record if the providers' ranges moved. A source that cannot be fully resolved leaves the current record alone.
-3. **Pointer verification** for every hosted domain.
-4. Forgets expired canary addresses.
+2. **MTA-STS MX refresh** for hosted domains (never publishes a policy with no MX hosts).
+3. **SPF refresh**: re-flattens every hosted SPF from its stored source and updates the record if the providers' ranges moved. A source that cannot be fully resolved leaves the current record alone.
+4. **Pointer verification** for every hosted domain.
+5. Forgets expired canary addresses.
 
 ### Adding a second records zone later
 
@@ -131,8 +134,8 @@ Notes for the customer:
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
 
 1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to account + domain. The `TenantContext` is built for that account. **There is no default-account fallback in `saas`**: `resolveInboundAccount` throws.
-2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed (the cap applies while inflating, so a small gzip bomb is stopped).
-3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must belong to **that account**, resolved through the account-scoped query. Otherwise the whole report is rejected and nothing is stored.
+2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed. Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read.
+3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain. Any other domain is rejected for good and nothing is stored, **including another domain of the same account**. Subdomains need no registration of their own.
 4. `check+` at `CANARY_DOMAIN`: see below.
 
 | Outcome | Behaviour |
@@ -144,7 +147,7 @@ Notes for the customer:
 
 **Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no account, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
-Rate limit: 5 checks per sender domain per hour (shared `auth_rate_limits` counters). Note the From domain is what the sender claims; the limit is a cost guard, not an identity check.
+Rate limits (shared `auth_rate_limits` counters, 1-hour windows): 5 per **authenticated** sender domain (a passing DMARC/DKIM/SPF result in the `Authentication-Results` header Cloudflare adds, reduced to its registrable domain), 20 for senders that authenticate as nothing (one shared bucket), and 500 overall. The `From` header is never used as a key, so a spoofed From cannot use up a real domain's allowance; the cost of that is that unauthenticated senders compete for one small bucket.
 
 **MTA-STS host** (`src/hosted/policy-host.ts`): `mta-sts.<id>.h.<zone>` → the tenant whose hosted id is `<id>`; `mta-sts.<customer domain>` → the tenant hosting that domain; anything else 404. Never the implicit account in `saas`.
 
@@ -175,6 +178,8 @@ All under `/api/domains/:id/hosted`, authenticated like every other route and sc
 }
 ```
 
+MTA-STS on a hosted domain: `POST /api/domains/:id/mta-sts` answers `409` (use `mta_sts: true` above); `PATCH` (mode, `refresh_mx`) and `DELETE` act on the hosted records through the hosted writer (`DELETE` removes only the MTA-STS records); the legacy daily MX job skips hosted domains and the hosted daily job refreshes them. `DELETE /api/domains/:id` removes the hosted records and quota first; if that DNS cleanup fails the domain is **not** deleted (`502`).
+
 Errors: `409` already enabled · `422` SPF cannot be resolved, no MX for MTA-STS, several SPF records · `502` Cloudflare/DNS failure · `507` records zone full.
 Enabling is all-or-nothing: if Cloudflare fails part-way, the records already written are removed.
 
@@ -188,4 +193,4 @@ Enabling is all-or-nothing: if Cloudflare fails part-way, the records already wr
 | Zone limit | 3,500 on Pro (counts **every** record in the zone); warning logged from 3,200; enabling is refused (`507`) if the records would not fit |
 | Report size | 25 MiB raw and 25 MiB decompressed |
 | Token rotation grace | 72 h |
-| Canary | 1 hour, one email; 5 per sender domain per hour |
+| Canary | 1 hour, one email; 5 per authenticated sender domain, 20 unauthenticated, 500 overall, per hour |
