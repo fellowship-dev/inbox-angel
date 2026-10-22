@@ -3,6 +3,7 @@ import { IMPLICIT_ACCOUNT_ID } from '../schema';
 import { apiKeyQueries } from './api-keys';
 import { analyticsQueries } from './analytics';
 import { auditQueries } from './audit';
+import { connectionQueries } from './connections';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
 import { heartbeatStats } from './heartbeat';
@@ -18,6 +19,7 @@ export { FIRST_SEEN_HORIZON_DAYS } from './analytics';
 export * from './audit';
 export * from './team';
 export * from './api-keys';
+export type { CfConnectionInfo, CfConnectionZone } from './connections';
 export { authLookups } from './auth';
 export { intakeLookups, TOKEN_ROTATION_GRACE_SECONDS, type IntakeTarget, type HostedDomainRow, type PointerStatus } from './intake';
 export * from './heartbeat';
@@ -45,6 +47,7 @@ export function forAccount(db: DbLike, accountId: string) {
 		audit: auditQueries(d, accountId),
 		team: teamQueries(d, accountId),
 		apiKeys: apiKeyQueries(d, accountId),
+		connections: connectionQueries(d, accountId),
 		intake: intakeQueries(d, accountId),
 		hosted: hostedQueries(d, accountId),
 		heartbeat: () => heartbeatStats(d, accountId),

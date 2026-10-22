@@ -118,6 +118,38 @@ CREATE TABLE `check_results` (
 --> statement-breakpoint
 CREATE INDEX `idx_check_results_domain` ON `check_results` (`from_domain`);--> statement-breakpoint
 CREATE INDEX `idx_check_results_token` ON `check_results` (`session_token`);--> statement-breakpoint
+CREATE TABLE `cloudflare_connection_zones` (
+	`connection_id` text NOT NULL,
+	`account_id` text NOT NULL,
+	`zone_id` text NOT NULL,
+	`zone_name` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	PRIMARY KEY(`connection_id`, `zone_id`),
+	FOREIGN KEY (`connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_cf_connection_zones_account` ON `cloudflare_connection_zones` (`account_id`);--> statement-breakpoint
+CREATE TABLE `cloudflare_connections` (
+	`id` text PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`label` text NOT NULL,
+	`cf_account_id` text,
+	`cf_account_name` text,
+	`auth_type` text NOT NULL,
+	`token_envelope` text NOT NULL,
+	`scopes` text,
+	`status` text DEFAULT 'active' NOT NULL,
+	`status_detail` text,
+	`created_by` text,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`last_used_at` integer,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "cf_connections_auth_type_check" CHECK("cloudflare_connections"."auth_type" IN ('oauth', 'token')),
+	CONSTRAINT "cf_connections_status_check" CHECK("cloudflare_connections"."status" IN ('active', 'broken', 'revoked'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_cf_connections_account` ON `cloudflare_connections` (`account_id`);--> statement-breakpoint
 CREATE TABLE `domains` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`domain` text NOT NULL,
@@ -136,11 +168,14 @@ CREATE TABLE `domains` (
 	`alerts_enabled` integer DEFAULT 1 NOT NULL,
 	`spf_lookup_count` integer,
 	`account_id` text DEFAULT 'acct_default' NOT NULL,
-	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null
+	`cf_connection_id` text,
+	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`cf_connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `domains_domain_unique` ON `domains` (`domain`);--> statement-breakpoint
 CREATE INDEX `idx_domains_domain` ON `domains` (`domain`);--> statement-breakpoint
+CREATE INDEX `idx_domains_cf_connection` ON `domains` (`cf_connection_id`);--> statement-breakpoint
 CREATE INDEX `idx_domains_parent` ON `domains` (`parent_id`);--> statement-breakpoint
 CREATE INDEX `idx_domains_account` ON `domains` (`account_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`account_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint

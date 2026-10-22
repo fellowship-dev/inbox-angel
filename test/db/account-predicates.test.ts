@@ -28,7 +28,7 @@ const TABLE_VARS: Record<string, string> = {
 	domains: 'domains', aggregateReports: 'aggregate_reports', reportRecords: 'report_records', tlsReports: 'tls_reports',
 	spfFlattenConfig: 'spf_flatten_config', mtaStsConfig: 'mta_sts_config', monitorSubscriptions: 'monitor_subscriptions',
 	settings: 'settings', invites: 'invites', auditLog: 'audit_log', memberships: 'memberships', apiKeys: 'api_keys',
-	intakeTokens: 'intake_tokens', hostedDomains: 'hosted_domains',
+	intakeTokens: 'intake_tokens', hostedDomains: 'hosted_domains', cloudflareConnections: 'cloudflare_connections', cloudflareConnectionZones: 'cloudflare_connection_zones',
 };
 
 interface Hit { table: string; problem: string }

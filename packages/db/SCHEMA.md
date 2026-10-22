@@ -83,6 +83,8 @@ Self-hosted installs have one account, `acct_default`. `domains.domain` stays **
 | `sessions`, `auth_accounts`, `verifications`, `auth_rate_limits` | global | Better Auth (0013). `auth_accounts` = login methods per user — not the tenant `accounts` table. Camel-case properties in `schema.ts`; `users` has a second view in `auth-schema.ts` |
 | `intake_tokens` | ✔ | 0014: per-domain report token (SHA-256 only, rotatable, previous hash valid 72 h); looked up by hash before the account is known (`queries/intake.ts`) |
 | `hosted_domains` | ✔ | 0014: a domain's opaque `hosted_id`, its records in the hosted zone, and the last pointer verification |
+| `cloudflare_connections` | ✔ | 0015: a connected Cloudflare account (OAuth or pasted token); the token only as an AES-GCM envelope |
+| `cloudflare_connection_zones` | ✔ | 0015: the zones Inbox Angel may manage through a connection (owner-picked allow-list) |
 | `hosted_zones`, `canary_tokens` | global | 0014: record counts of the operator's hosted-records zone; expiring single-use free-check addresses |
 | `api_keys` | ✔ | per-user keys, SHA-256 at rest; looked up by hash before the account is known (`queries/auth.ts`) |
 
