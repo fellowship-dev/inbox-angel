@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { forAccount, globalQueries, IMPLICIT_ACCOUNT_ID } from '../src';
+import { forAccount, authLookups, globalQueries, IMPLICIT_ACCOUNT_ID } from '../src';
 import { createMigratedD1, type TestD1 } from '../src/testing';
 
 const A = IMPLICIT_ACCOUNT_ID;
@@ -255,18 +255,12 @@ describe('behaviour carried over from the old queries.ts', () => {
 });
 
 describe('global queries', () => {
-	it('users, reset tokens, free-check results, ip cache', async () => {
+	it('users, memberships, free-check results, ip cache', async () => {
 		const g = globalQueries(d1);
 		await a.team.addUser({ id: 'u1', email: 'one@x.test', name: 'One', password_hash: 'h', role: 'admin' });
 		expect(await g.users.byEmail('one@x.test')).toMatchObject({ id: 'u1' });
-		await g.users.setSession('u1', 'sess');
-		expect(await g.users.bySession('sess')).toMatchObject({ id: 'u1' });
-		await g.users.setPasswordHash('u1', 'h2');
-		expect((await g.users.byEmail('one@x.test'))!.password_hash).toBe('h2');
-
-		await g.passwordResets.insert('t', 'u1', 123);
-		await g.passwordResets.markUsed('t');
-		expect((await g.passwordResets.get('t'))!.used_at).not.toBeNull();
+		expect(await g.users.byId('u1')).toMatchObject({ email: 'one@x.test' });
+		expect(await authLookups(d1).membershipsOf('u1')).toEqual([{ account_id: 'acct_default', role: 'owner' }]);
 
 		await g.checkResults.insert({ from_email: 'a@b.c', from_domain: 'b.c', overall_status: 'exposed', report_sent: 0, session_token: 'tk' });
 		expect(await g.checkResults.byToken('tk')).toMatchObject({ from_domain: 'b.c', spf_lookup_count: null });

@@ -6,7 +6,12 @@ interface AuthStatus {
   telemetry_default: boolean;
   turnstile_site_key: string | null;
   has_domain: boolean;
+  mode?: 'self-host' | 'saas';
+  signup_open?: boolean;
+  oauth_providers?: string[];
 }
+
+const PROVIDER_LABELS: Record<string, string> = { github: 'GitHub', google: 'Google' };
 
 interface Props {
   onSave: (token: string) => void;
@@ -68,6 +73,7 @@ export function AuthGate({ onSave }: Props) {
   const [telemetry, setTelemetry] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false); // saas: "create an account" instead of "sign in"
   const turnstileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -87,21 +93,22 @@ export function AuthGate({ onSave }: Props) {
     e.preventDefault();
     setError('');
 
-    if (!status?.configured) {
+    if (!status?.configured || creating) {
       if (password !== confirm) { setError('Passwords do not match'); return; }
       if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
     }
 
     setLoading(true);
     try {
-      const endpoint = status?.configured ? '/api/auth/login' : '/api/auth/setup';
+      const isSetup = !status?.configured || creating;
+      const endpoint = !isSetup ? '/api/auth/login' : status?.configured ? '/api/auth/signup' : '/api/auth/setup';
 
       // Collect Turnstile token if widget is present
       const cf_turnstile_token = status?.turnstile_site_key
         ? (document.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement | null)?.value ?? undefined
         : undefined;
 
-      const body = status?.configured
+      const body = !isSetup
         ? { email, password, ...(cf_turnstile_token ? { cf_turnstile_token } : {}) }
         : { name, email, password, telemetry, ...(cf_turnstile_token ? { cf_turnstile_token } : {}) };
 
@@ -201,7 +208,25 @@ export function AuthGate({ onSave }: Props) {
     );
   }
 
-  const isSetup = !status.configured;
+  const isSetup = !status.configured || creating;
+  const providers = status.oauth_providers ?? [];
+
+  // OAuth: Better Auth returns the provider URL; the session comes back as a cookie.
+  const oauth = async (provider: string) => {
+    setError('');
+    try {
+      const res = await fetch('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, callbackURL: '/' }),
+      });
+      const data = await res.json() as { url?: string; error?: string; message?: string };
+      if (!res.ok || !data.url) { setError(data.error ?? data.message ?? 'Could not start sign-in'); return; }
+      window.location.href = data.url;
+    } catch {
+      setError('Network error — please try again');
+    }
+  };
 
   return (
     <div style={s.wrap}>
@@ -302,9 +327,21 @@ export function AuthGate({ onSave }: Props) {
           {loading ? '…' : isSetup ? 'Create account →' : 'Sign in →'}
         </button>
 
+        {providers.map(p => (
+          <button key={p} type="button" onClick={() => oauth(p)} style={s.link}>
+            Continue with {PROVIDER_LABELS[p] ?? p}
+          </button>
+        ))}
+
         {!isSetup && (
           <button type="button" onClick={() => { setView('forgot'); setError(''); }} style={s.link}>
             Forgot your password?
+          </button>
+        )}
+
+        {status.configured && status.signup_open && (
+          <button type="button" onClick={() => { setCreating(c => !c); setError(''); }} style={s.link}>
+            {creating ? '← Back to sign in' : 'New here? Create an account'}
           </button>
         )}
       </form>

@@ -152,7 +152,7 @@ export interface TeamMember {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'member';
+  role: 'owner' | 'admin' | 'member';
   last_login_at: number | null;
   created_at: number;
 }

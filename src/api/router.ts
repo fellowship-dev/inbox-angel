@@ -1,6 +1,7 @@
 // REST API router for InboxAngel Worker.
-// All /api/* routes require authentication via requireAuth().
-// Auth provider is pluggable — see src/api/auth.ts.
+// All /api/* routes require authentication: the AccountResolver (default: sessionAccountResolver,
+// src/auth/resolver.ts) turns the deprecated API_KEY, a per-user API key or a Better Auth session
+// into {account, user, role}, and the request acts on that account only. Members are read-only.
 //
 // Unauthenticated:
 //   GET  /health                              — liveness probe
@@ -8,14 +9,16 @@
 //   POST /api/check-sessions                  — create a free-check session
 //   GET  /api/check-sessions/:token           — poll for free-check result
 //   POST /api/monitor                         — subscribe to change alerts (unauthenticated)
-//   GET  /api/auth/status                     — any admin configured? + env prefill
-//   POST /api/auth/setup                      — first-time admin creation
+//   GET  /api/auth/status                     — owner configured? OAuth providers, mode
+//   POST /api/auth/setup                      — first-run owner (self-host, closed once an owner exists)
+//   POST /api/auth/signup                     — new account (MODE=saas)
 //   POST /api/auth/login                      — password login → session token
-//   POST /api/auth/logout                     — clear session token
+//   POST /api/auth/logout                     — end the session
 //   POST /api/auth/forgot                     — send password reset email
 //   POST /api/auth/reset                      — set new password via reset token
+//   *    /api/auth/{sign-in/social,callback/*,get-session,…} — Better Auth (OAuth, sessions); see src/auth/routes.ts
 //   GET  /api/invites/:token                  — invite info
-//   POST /api/invites/:token/accept           — accept invite + create user
+//   POST /api/invites/:token                  — accept invite + create user
 //
 // Authenticated:
 //   GET    /api/domains                       — list domains
@@ -42,6 +45,7 @@
 //   GET    /api/reports                       — list recent aggregate reports
 //   GET    /api/reports/:id                   — single report with per-IP records
 //   GET    /api/check-results                 — recent free check results (last 20)
+//   GET/POST /api/keys, POST /api/keys/revoke-all, DELETE /api/keys/:id — per-user API keys
 //   GET    /api/team                          — list users (admin only)
 //   POST   /api/team/invite                   — send invite link (admin only)
 //   DELETE /api/team/:id                      — remove team member (admin only)
@@ -50,10 +54,14 @@
 // the first authenticated request auto-provisions the domain (no bootstrap call needed).
 
 import type { BoundEnv as Env } from '../index';
-import { requireAuth, AuthError } from './auth';
+import { AuthError } from './auth';
 import { version } from '../../package.json';
 import { globals } from '../db/scope';
-import { hashPassword, verifyPassword } from './password';
+import { handleAuthRoute } from '../auth/routes';
+import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
+import type { AuthedAccount } from '../auth/resolver';
+import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
 import { fetchSubdomains } from '../domains/ct';
@@ -278,20 +286,6 @@ async function getReport(tenant: TenantContext, reportId: string): Promise<Respo
   return json({ report, records });
 }
 
-async function verifyTurnstile(token: string, secret: string, ip: string): Promise<boolean> {
-  try {
-    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ secret, response: token, remoteip: ip }),
-    });
-    const data = await res.json() as { success: boolean };
-    return data.success;
-  } catch {
-    return false;
-  }
-}
-
 async function getCheckResults(tenant: TenantContext): Promise<Response> {
   // Return the last 20 results for monitored domains
   const domains = await tenant.scope.domains.list();
@@ -415,6 +409,11 @@ async function _handleApi(
   const method = request.method.toUpperCase();
   const path = url.pathname;
 
+  // MODE=saas (hosted) is an explicit opt-in until it launches.
+  if (getMode(env) === 'saas' && env.SAAS_ENABLED !== '1' && path !== '/health') {
+    return err('MODE=saas is not enabled: set SAAS_ENABLED=1 to opt in (hosted mode is not launched yet)', 503);
+  }
+
   // Global rate limit — 200 req/min per IP (covers all routes including unauthenticated)
   if (env.API_LIMITER) {
     const ip = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for') ?? 'unknown';
@@ -457,14 +456,22 @@ async function _handleApi(
     });
   }
 
-  // Everything below acts on one tenant. The resolver is the seam to authentication: self-host
-  // always answers with the implicit account; a session-based resolver plugs in later.
-  const account = await resolver(request, env);
-  if (!account) return err('no account for this request', 401);
-  const tenant = await loadTenant(env, account);
+  // ── Public routes ───────────────────────────────────────────
+  // No credentials, no user data. They act through an explicit anonymous context: the platform's
+  // implicit account (where inbound check mail lands), with no user and no role.
+  // A signed-in caller's own tenant if there is one, else that anonymous context.
+  const tenantFor = async () => {
+    let who: Awaited<ReturnType<AccountResolver>> = null;
+    const hasCredential = request.headers.has('x-api-key') || request.headers.has('authorization') || request.headers.has('cookie');
+    if (hasCredential) {
+      try { who = await resolver(request, env); } catch { /* unusable credential: treated as anonymous here */ }
+    }
+    return loadTenant(env, who ?? { accountId: IMPLICIT_ACCOUNT_ID });
+  };
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
+    const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -484,6 +491,7 @@ async function _handleApi(
 
   // POST /api/monitor — subscribe to change alerts for a domain (unauthenticated)
   if (path === '/api/monitor' && method === 'POST') {
+    const tenant = await tenantFor();
     const body = await parseBody<{ email?: string; session_token?: string }>(request);
     if (!body.email || !body.session_token) return err('email and session_token are required', 400);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
@@ -504,259 +512,33 @@ async function _handleApi(
     return json({ domain: checkResult.from_domain, email: body.email }, 201);
   }
 
-  // GET /api/auth/status — any admin configured? + env prefill
-  if (path === '/api/auth/status' && method === 'GET') {
-    const admin = await tenant.scope.team.firstAdmin();
-    const [tsKeyRow, customDomainRow, telemetryRow] = await Promise.all([
-      tenant.scope.settings.get('turnstile_site_key'),
-      tenant.scope.settings.get('custom_domain'),
-      tenant.scope.settings.get('telemetry_opted_in'),
-    ]);
-    const existingDomains = await tenant.scope.domains.list();
-    const baseDomain = tenant.settings.baseDomain;
-    return json({
-      configured: !!admin,
-      prefill: { name: '', email: '' },
-      telemetry_default: telemetryRow?.value === 'true',
-      turnstile_site_key: tsKeyRow?.value ?? null,
-      custom_domain: customDomainRow?.value ?? null,
-      base_domain: baseDomain ?? null,
-      has_domain: existingDomains.length > 0 || !!baseDomain,
-    });
-  }
-
-  // POST /api/auth/setup — first-time admin creation (only if no users exist)
-  if (path === '/api/auth/setup' && method === 'POST') {
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-    if (env.AUTH_LIMITER) {
-      const { success } = await env.AUTH_LIMITER.limit({ key: ip });
-      if (!success) return err('Too many requests — try again later', 429);
-    }
-    const admin = await tenant.scope.team.firstAdmin();
-    if (admin) return err('already configured — use /api/auth/login', 409);
-
-    const body = await parseBody<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
-    if (!body.email || !body.password) return err('email and password are required', 400);
-    if (body.password.length < 8) return err('password must be at least 8 characters', 400);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
-
-    const tsSecretRow = await tenant.scope.settings.get('turnstile_secret_key');
-    if (tsSecretRow?.value) {
-      const tsToken = body.cf_turnstile_token;
-      if (!tsToken) return err('Bot check failed', 403);
-      const ip = request.headers.get('CF-Connecting-IP') ?? '';
-      const valid = await verifyTurnstile(tsToken, tsSecretRow.value, ip);
-      if (!valid) return err('Bot check failed', 403);
-    }
-
-    const hash = await hashPassword(body.password);
-    const token = crypto.randomUUID();
-    const id = crypto.randomUUID();
-    const email = body.email.toLowerCase().trim();
-
-    await tenant.scope.team.addUser({ id, email, name: body.name?.trim() || email, password_hash: hash, role: 'admin' });
-    await globals(env.DB!).users.setSession(id, token);
-    if (body.telemetry !== undefined) await tenant.scope.settings.set('telemetry_opted_in', body.telemetry ? 'true' : 'false');
-
-    logAudit(tenant, {
-      actor_id: id, actor_email: email, actor_type: 'user',
-      action: 'auth.setup',
-      resource_type: 'user', resource_id: id, resource_name: email,
-      after_value: { email, role: 'admin' },
-      meta: { ip },
-    }, ctx);
-    track(tenant, { event: 'instance.born' }); // fire-and-forget
-
-    // Check if a domain is already configured (from env var or D1)
-    const baseDomain = tenant.settings.baseDomain;
-    const existingDomains = await tenant.scope.domains.list();
-    const has_domain = existingDomains.length > 0 || !!baseDomain;
-
-    return json({ token, has_domain }, 201);
-  }
-
-  // POST /api/auth/login — verify password → new session token
-  if (path === '/api/auth/login' && method === 'POST') {
-    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
-    if (env.AUTH_LIMITER) {
-      const { success } = await env.AUTH_LIMITER.limit({ key: ip });
-      if (!success) return err('Too many requests — try again later', 429);
-    }
-    const body = await parseBody<{ email?: string; password?: string; cf_turnstile_token?: string }>(request);
-    if (!body.email || !body.password) return err('email and password are required', 400);
-
-    const tsSecretRow = await tenant.scope.settings.get('turnstile_secret_key');
-    if (tsSecretRow?.value) {
-      const tsToken = body.cf_turnstile_token;
-      if (!tsToken) return err('Bot check failed', 403);
-      const ip = request.headers.get('CF-Connecting-IP') ?? '';
-      const valid = await verifyTurnstile(tsToken, tsSecretRow.value, ip);
-      if (!valid) return err('Bot check failed', 403);
-    }
-
-    const user = await globals(env.DB!).users.byEmail(body.email.toLowerCase().trim());
-    if (!user || !user.password_hash) return err('invalid credentials', 401);
-
-    const valid = await verifyPassword(body.password, user.password_hash);
-    if (!valid) return err('invalid credentials', 401);
-
-    const token = crypto.randomUUID();
-    await globals(env.DB!).users.setSession(user.id, token);
-    logAudit(tenant, {
-      actor_id: user.id, actor_email: user.email, actor_type: 'user',
-      action: 'auth.login',
-      resource_type: 'user', resource_id: user.id, resource_name: user.email,
-      meta: { ip: request.headers.get('CF-Connecting-IP') ?? 'unknown' },
-    }, ctx);
-    return json({ token });
-  }
-
-  // POST /api/auth/logout — clear session token
-  if (path === '/api/auth/logout' && method === 'POST') {
-    const key = request.headers.get('x-api-key') ?? '';
-    const user = await globals(env.DB!).users.bySession(key);
-    if (user) {
-      await globals(env.DB!).users.setSession(user.id, null);
-      logAudit(tenant, {
-          actor_id: user.id, actor_email: user.email, actor_type: 'user',
-        action: 'auth.logout',
-        resource_type: 'user', resource_id: user.id, resource_name: user.email,
-      }, ctx);
-    }
-    return json({ ok: true });
-  }
-
-  // POST /api/auth/forgot — generate reset token + send email
-  if (path === '/api/auth/forgot' && method === 'POST') {
-    const body = await parseBody<{ email?: string }>(request);
-    if (!body.email) return err('email is required', 400);
-
-    const user = await globals(env.DB!).users.byEmail(body.email.toLowerCase().trim());
-    // Always return 200 — don't reveal whether email exists
-    if (user) {
-      const token = crypto.randomUUID();
-      const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour
-      await globals(env.DB!).passwordResets.insert(token, user.id, expiresAt);
-      logAudit(tenant, {
-          actor_id: user.id, actor_email: user.email, actor_type: 'user',
-        action: 'auth.password_reset',
-        resource_type: 'user', resource_id: user.id, resource_name: user.email,
-        meta: { phase: 'requested' },
-      }, ctx);
-
-      const origin = new URL(request.url).origin;
-      const resetUrl = `${origin}/#/reset/${token}`;
-      const emailBody = `Hi ${user.name},\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
-
-      const fe = tenant.settings.fromEmail;
-      if (env.SEND_EMAIL && fe) {
-        try {
-          await env.SEND_EMAIL.send({
-            from: { name: 'InboxAngel', email: fe },
-            to: [user.email],
-            subject: 'Reset your InboxAngel password',
-            text: emailBody,
-          });
-        } catch (e) {
-          console.error('[auth] reset email send failed:', e);
-        }
-      } else {
-        console.log(`[auth] reset link for ${user.email}: ${resetUrl}`);
-      }
-    }
-    return json({ ok: true });
-  }
-
-  // POST /api/auth/reset — set new password using reset token
-  if (path === '/api/auth/reset' && method === 'POST') {
-    const body = await parseBody<{ token?: string; password?: string }>(request);
-    if (!body.token || !body.password) return err('token and password are required', 400);
-    if (body.password.length < 8) return err('password must be at least 8 characters', 400);
-
-    const resetToken = await globals(env.DB!).passwordResets.get(body.token);
-    if (!resetToken || resetToken.used_at || resetToken.expires_at < Math.floor(Date.now() / 1000)) {
-      return err('reset link is invalid or has expired', 400);
-    }
-
-    const hash = await hashPassword(body.password);
-    const sessionToken = crypto.randomUUID();
-    await globals(env.DB!).users.setPasswordHash(resetToken.user_id, hash);
-    await globals(env.DB!).users.setSession(resetToken.user_id, sessionToken);
-    await globals(env.DB!).passwordResets.markUsed(body.token);
-    logAudit(tenant, {
-      actor_id: resetToken.user_id, actor_type: 'user',
-      action: 'auth.password_reset',
-      resource_type: 'user', resource_id: resetToken.user_id,
-      meta: { phase: 'completed' },
-    }, ctx);
-    return json({ token: sessionToken });
-  }
-
-  // GET /api/invites/:token — get invite info (unauthenticated, for the accept page)
-  const inviteTokenMatch = path.match(/^\/api\/invites\/([^/]+)$/);
-  if (inviteTokenMatch && method === 'GET') {
-    const invite = await tenant.scope.team.getInvite(inviteTokenMatch[1]);
-    if (!invite || invite.used_at || invite.expires_at < Math.floor(Date.now() / 1000)) {
-      return err('invite not found or expired', 404);
-    }
-    return json({ email: invite.email, invited_by: invite.invited_by, role: invite.role });
-  }
-
-  // POST /api/invites/:token/accept — set name+password, create user, return session
-  if (inviteTokenMatch && method === 'POST') {
-    const invite = await tenant.scope.team.getInvite(inviteTokenMatch[1]);
-    if (!invite || invite.used_at || invite.expires_at < Math.floor(Date.now() / 1000)) {
-      return err('invite not found or expired', 404);
-    }
-    const body = await parseBody<{ name?: string; password?: string }>(request);
-    if (!body.name || !body.password) return err('name and password are required', 400);
-    if (body.password.length < 8) return err('password must be at least 8 characters', 400);
-
-    const existing = await globals(env.DB!).users.byEmail(invite.email);
-    if (existing) return err('an account with this email already exists', 409);
-
-    const hash = await hashPassword(body.password);
-    const token = crypto.randomUUID();
-    const id = crypto.randomUUID();
-
-    await tenant.scope.team.addUser({ id, email: invite.email, name: body.name.trim(), password_hash: hash, role: invite.role as 'admin' | 'member' });
-    await globals(env.DB!).users.setSession(id, token);
-    await tenant.scope.team.markInviteUsed(invite.token);
-    logAudit(tenant, {
-      actor_id: id, actor_email: invite.email, actor_type: 'user',
-      action: 'auth.invite_accepted',
-      resource_type: 'user', resource_id: id, resource_name: invite.email,
-      after_value: { email: invite.email, role: invite.role, invited_by: invite.invited_by },
-    }, ctx);
-    return json({ token }, 201);
-  }
+  // /api/auth/* and /api/invites/*: status, setup, signup, login, logout, forgot, reset, OAuth, invites
+  const authResponse = await handleAuthRoute(request, env, ctx, tenantFor);
+  if (authResponse) return authResponse;
 
   // All /api/* routes require auth
   if (!path.startsWith('/api/')) {
     return err('not found', 404);
   }
 
-  // Resolve session: env API_KEY match → users table session.
-  // First-run setup is POST /api/auth/setup (only while no admin exists); there is
-  // no auto-generated credential.
-  const requestKey = request.headers.get('x-api-key') ?? '';
-  let effectiveApiKey: string | undefined;
-  let userBySession: Awaited<ReturnType<ReturnType<typeof globals>['users']['bySession']>> = null;
-  if (env.API_KEY && requestKey === env.API_KEY) {
-    // Direct API_KEY match (curl/automation)
-    effectiveApiKey = env.API_KEY;
-  } else if (requestKey) {
-    // Try session-based auth (dashboard login) — only when a key is actually provided
-    userBySession = await globals(env.DB!).users.bySession(requestKey);
-    if (userBySession) {
-      effectiveApiKey = requestKey;
-    }
-  }
+  // Who is calling, and for which account. The resolver is the seam between authentication and
+  // tenancy: every data access, audit entry, invite and Cloudflare call below uses tenant.accountId.
+  let account: Awaited<ReturnType<AccountResolver>>;
   try {
-    await requireAuth(request, { ...env, API_KEY: effectiveApiKey });
+    account = await resolver(request, env);
   } catch (e) {
     if (e instanceof AuthError) return err(e.message, e.status);
     return err('authentication error', 401);
+  }
+  if (!account) return err('Unauthorized — sign in, or provide an X-Api-Key header', 401);
+  const tenant = await loadTenant(env, account);
+
+  const actorRow = account.userId ? await globals(env.DB).users.byId(account.userId) : null;
+  const userBySession = actorRow ? { id: actorRow.id, email: actorRow.email, name: actorRow.name } : null;
+  const isAdmin = account.role === 'owner' || account.role === 'admin';
+  // Members are read-only. POST /api/spf-lookup-count only computes; managing your own API keys is self-service.
+  if (!(method === 'GET' || method === 'HEAD') && !isAdmin && !isKeyRoute(path) && path !== '/api/spf-lookup-count') {
+    return err('admin required', 403);
   }
 
   try {
@@ -1516,7 +1298,8 @@ async function _handleApi(
     if (monitorSubPatchMatch && method === 'PATCH') {
       const body = await parseBody<{ active?: boolean }>(request);
       if (typeof body.active !== 'boolean') return err('active (boolean) is required', 400);
-      await tenant.scope.monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
+      const upd = await tenant.scope.monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
+      if (!upd.meta.changes) return err('subscription not found', 404);
       return json({ ok: true });
     }
 
@@ -1525,22 +1308,23 @@ async function _handleApi(
     if (domainAlertsMatch && method === 'PATCH') {
       const body = await parseBody<{ alerts_enabled?: boolean }>(request);
       if (typeof body.alerts_enabled !== 'boolean') return err('alerts_enabled (boolean) is required', 400);
-      await tenant.scope.domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
+      const upd = await tenant.scope.domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
+      if (!upd.meta.changes) return err('domain not found', 404);
       return json({ ok: true });
     }
 
     // GET /api/team — list all users (admin only)
     if (path === '/api/team' && method === 'GET') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
       const results = await tenant.scope.team.list();
-      return json({ users: results, current_user_id: actor.id });
+      return json({ users: results, current_user_id: userBySession?.id ?? null });
     }
 
     // POST /api/team/invite — generate one-time invite link (admin only)
     if (path === '/api/team/invite' && method === 'POST') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
+      const actor = userBySession;
+      if (!actor) return err('sign in as a user to invite teammates', 403);
       const body = await parseBody<{ email?: string; role?: string }>(request);
       if (!body.email) return err('email is required', 400);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
@@ -1570,10 +1354,14 @@ async function _handleApi(
     // DELETE /api/team/:id — remove a team member (admin only, can't remove self)
     const teamMemberMatch = path.match(/^\/api\/team\/([^/]+)$/);
     if (teamMemberMatch && method === 'DELETE') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
+      const actor = userBySession;
+      if (!actor) return err('sign in as a user to remove teammates', 403);
       if (actor.id === teamMemberMatch[1]) return err('cannot remove yourself', 400);
       const removed = await tenant.scope.team.getMember(teamMemberMatch[1]).catch(() => null);
+      if (!removed) return err('team member not found', 404);
+      if (removed?.role === 'owner') return err('the owner cannot be removed', 403);
+      if (removed?.role === 'admin' && account.role !== 'owner') return err('only the owner can remove an admin', 403);
       await tenant.scope.team.removeUser(teamMemberMatch[1]);
       logAudit(tenant, {
           actor_id: actor.id, actor_email: actor.email, actor_type: 'user',
@@ -1858,8 +1646,7 @@ async function _handleApi(
 
     // GET /api/audit-log — admin only
     if (path === '/api/audit-log' && method === 'GET') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
       const page  = parseInt(url.searchParams.get('page')  ?? '1',  10);
       const limit = parseInt(url.searchParams.get('limit') ?? '50', 10);
       const results = await tenant.scope.audit.list({
@@ -1876,8 +1663,7 @@ async function _handleApi(
 
     // POST /api/domains/bulk-import — admin-only fast path: insert + provision N domains at once
     if (path === '/api/domains/bulk-import' && method === 'POST') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
       const body = await parseBody<{ domains?: string }>(request);
       if (!body.domains || typeof body.domains !== 'string') return err('domains (string) is required', 400);
       const list = parseDomainList(body.domains);
@@ -1886,7 +1672,7 @@ async function _handleApi(
       const results = await bulkInsertDomains(
         tenant,
         list,
-        { actorId: actor.id, actorEmail: actor.email, ctx },
+        { actorId: userBySession?.id, actorEmail: userBySession?.email, ctx },
       );
       const imported = results.filter(r => r.status === 'imported').length;
       return json({ imported, total: results.length, results }, imported > 0 ? 201 : 200);
@@ -1894,8 +1680,7 @@ async function _handleApi(
 
     // GET /api/domains/ct-discover?domain= — admin-only: enumerate subdomains via crt.sh
     if (path === '/api/domains/ct-discover' && method === 'GET') {
-      const actor = await globals(env.DB).users.bySession(requestKey);
-      if (!actor || actor.role !== 'admin') return err('admin required', 403);
+      if (!isAdmin) return err('admin required', 403);
       const rootDomain = url.searchParams.get('domain')?.toLowerCase().trim();
       if (!rootDomain) return err('domain query param is required', 400);
       if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(rootDomain)) return err('invalid domain format', 400);
@@ -1906,6 +1691,10 @@ async function _handleApi(
         return err(e.message ?? 'CT log lookup failed', 502);
       }
     }
+
+    // /api/keys — per-user API keys
+    const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: account.role, kind: (account as AuthedAccount).kind, user: userBySession });
+    if (keyResponse) return keyResponse;
 
     return err('not found', 404);
   } catch (e: any) {

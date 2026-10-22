@@ -9,10 +9,10 @@ function makeRequest(headers: Record<string, string> = {}): Request {
 }
 
 describe('requireAuth', () => {
-  it('returns userId = api key value when key matches', async () => {
+  it('treats a matching API_KEY as the instance admin (no user, never echoes the key)', async () => {
     const req = makeRequest({ 'x-api-key': 'test-key-org_abc123' });
     const ctx = await requireAuth(req, ENV);
-    expect(ctx.userId).toBe('test-key-org_abc123');
+    expect(ctx).toMatchObject({ userId: 'instance', kind: 'instance', role: 'owner', accountId: 'acct_default', user: null });
   });
 
   it('throws AuthError when x-api-key is missing', async () => {

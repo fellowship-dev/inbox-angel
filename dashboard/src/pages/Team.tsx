@@ -97,7 +97,7 @@ export function Team({ onUnauthorized }: Props) {
                     <div style={s.memberName}>{m.name}</div>
                     <div style={s.memberEmail}>{m.email}</div>
                   </div>
-                  <span style={{ ...s.badge, background: m.role === 'admin' ? '#ede9fe' : '#f3f4f6', color: m.role === 'admin' ? '#6d28d9' : '#374151' }}>
+                  <span style={{ ...s.badge, background: m.role !== 'member' ? '#ede9fe' : '#f3f4f6', color: m.role !== 'member' ? '#6d28d9' : '#374151' }}>
                     {m.role}
                   </span>
                   <span style={s.muted}>{m.last_login_at ? formatDate(m.last_login_at) : 'Never logged in'}</span>

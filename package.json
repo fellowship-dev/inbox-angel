@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@inbox-angel/dns-checks": "*",
+    "better-auth": "^1.7.12",
     "fast-xml-parser": "^5.5.11",
     "fflate": "^0.8.2",
     "mimetext": "^3.0.28",

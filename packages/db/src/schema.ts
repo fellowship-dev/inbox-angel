@@ -71,9 +71,14 @@ export const users = sqliteTable(
 		name: text('name').notNull(),
 		password_hash: text('password_hash'),
 		role: text('role', { enum: ['admin', 'member'] }).notNull().default('member'),
+		/** Legacy single-session token. Unused since 0013 (sessions live in `sessions`). */
 		session_token: text('session_token'),
 		last_login_at: integer('last_login_at'),
 		created_at: integer('created_at').notNull().default(now),
+		// Better Auth columns (0013).
+		email_verified: integer('email_verified').notNull().default(0),
+		image: text('image'),
+		updated_at: integer('updated_at').notNull().default(sql`0`),
 	},
 	(t) => [index('idx_users_email').on(t.email), index('idx_users_session').on(t.session_token)],
 );
@@ -356,6 +361,93 @@ export const passwordResetTokens = sqliteTable(
 	(t) => [index('idx_prt_user').on(t.user_id)],
 );
 
+// ── Authentication (Better Auth) ────────────────────────────
+//
+// These tables are read and written by Better Auth's Drizzle adapter, which looks
+// columns up by *its* field names (createdAt, userId, …), so unlike the rest of this
+// file their properties are camelCase and their dates are `timestamp` columns (unix
+// seconds in SQL, Date in JS). The SQL column names follow the usual snake_case.
+// `users` is adapted separately in auth-schema.ts for the same reason.
+
+const authTimestamps = () => ({
+	createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
+	updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
+});
+
+export const sessions = sqliteTable(
+	'sessions',
+	{
+		id: text('id').primaryKey(),
+		userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+		token: text('token').notNull().unique(),
+		expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+		ipAddress: text('ip_address'),
+		userAgent: text('user_agent'),
+		...authTimestamps(),
+	},
+	(t) => [index('idx_sessions_user').on(t.userId)],
+);
+
+/** One row per login method: the `credential` password, or an OAuth provider link. (Not the tenant `accounts` table.) */
+export const authAccounts = sqliteTable(
+	'auth_accounts',
+	{
+		id: text('id').primaryKey(),
+		userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+		accountId: text('provider_account_id').notNull(),
+		providerId: text('provider_id').notNull(),
+		accessToken: text('access_token'),
+		refreshToken: text('refresh_token'),
+		idToken: text('id_token'),
+		accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+		refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
+		scope: text('scope'),
+		password: text('password'),
+		...authTimestamps(),
+	},
+	(t) => [index('idx_auth_accounts_user').on(t.userId), uniqueIndex('idx_auth_accounts_provider').on(t.providerId, t.accountId)],
+);
+
+export const verifications = sqliteTable(
+	'verifications',
+	{
+		id: text('id').primaryKey(),
+		identifier: text('identifier').notNull(),
+		value: text('value').notNull(),
+		expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+		...authTimestamps(),
+	},
+	(t) => [index('idx_verifications_identifier').on(t.identifier)],
+);
+
+export const authRateLimits = sqliteTable('auth_rate_limits', {
+	id: text('id').primaryKey(),
+	key: text('key').notNull().unique(),
+	count: integer('count').notNull(),
+	lastRequest: integer('last_request').notNull(),
+});
+
+/**
+ * Per-user API keys, scoped to one account. Only a SHA-256 of the key is stored;
+ * `prefix` (the first characters of the key) is what the UI shows.
+ */
+export const apiKeys = sqliteTable(
+	'api_keys',
+	{
+		id: text('id').primaryKey(),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		prefix: text('prefix').notNull(),
+		key_hash: text('key_hash').notNull().unique(),
+		created_at: integer('created_at').notNull().default(now),
+		last_used_at: integer('last_used_at'),
+		expires_at: integer('expires_at'),
+		revoked_at: integer('revoked_at'),
+	},
+	(t) => [index('idx_api_keys_account').on(t.account_id), index('idx_api_keys_user').on(t.user_id)],
+);
+
 /**
  * Tables with no account_id, and why. `test/account-predicates.test.ts` uses
  * this list: anything else that is tenant data must be scoped.
@@ -365,7 +457,11 @@ export const GLOBAL_TABLES = {
 	users: 'a user can belong to several accounts; membership carries the role',
 	check_results: 'anonymous public free-check results, not tenant data',
 	ip_info: 'shared public IP-metadata cache',
-	password_reset_tokens: 'keyed by user_id, which is global',
+	password_reset_tokens: 'keyed by user_id, which is global (superseded by verifications)',
+	sessions: 'keyed by user; a session is resolved to an account through memberships',
+	auth_accounts: 'login methods of a user (password / OAuth link), keyed by user',
+	verifications: 'one-time auth tokens (password reset), keyed by identifier',
+	auth_rate_limits: 'auth endpoint rate-limit counters, keyed by IP and path',
 } as const;
 
 /** Tables that must carry an `account_id` column. */
@@ -381,4 +477,5 @@ export const ACCOUNT_OWNED_TABLES = [
 	'settings',
 	'invites',
 	'audit_log',
+	'api_keys',
 ] as const;

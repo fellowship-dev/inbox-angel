@@ -10,6 +10,7 @@
 import type { Env } from '../index';
 import { IMPLICIT_ACCOUNT_ID, globalQueries } from '@inbox-angel/db';
 import { getMode } from './mode';
+import { sessionAccountResolver } from '../auth/resolver';
 
 export interface ResolvedAccount {
   accountId: string;
@@ -22,9 +23,12 @@ export type AccountResolver = (request: Request, env: Env) => Promise<ResolvedAc
 /** Self-host: every request acts on the single implicit account. */
 export const selfHostResolver: AccountResolver = async () => ({ accountId: IMPLICIT_ACCOUNT_ID });
 
-/** The resolver used when none is injected. */
+/**
+ * The resolver used when none is injected: session / API key → user → membership → account
+ * (src/auth/resolver.ts). Self-host callers resolve to acct_default; saas callers to their own account.
+ */
 export function defaultResolver(_env: Env): AccountResolver {
-  return selfHostResolver;
+  return sessionAccountResolver;
 }
 
 /**

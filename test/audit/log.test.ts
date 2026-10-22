@@ -5,7 +5,7 @@ import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -23,6 +23,7 @@ vi.mock('../../src/dns/provision', () => ({
 import { logAudit, AuditEntry } from '../../src/audit/log';
 import { scope } from '../../src/db/scope';
 import { handleApi } from '../../src/api/router';
+import * as authMod from '../../src/api/auth';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -219,13 +220,15 @@ describe('GET /api/audit-log', () => {
     vi.clearAllMocks();
   });
 
-  it('returns 401 for non-admin user', async () => {
+  it('returns 403 for a member', async () => {
     const db = createMigratedD1();
     seedUser(db, 'user-1', 'member');
+    vi.mocked(authMod.requireAuth).mockResolvedValueOnce({
+      userId: 'user-1', accountId: IMPLICIT_ACCOUNT_ID, role: 'member', kind: 'session',
+      user: { id: 'user-1', email: 'user-1@test.com', name: 'user-1' },
+    });
 
     const env = makeEnv(db);
-    // Remove API_KEY so it falls through to session-based auth
-    delete (env as any).API_KEY;
     const res = await handleApi(
       req('GET', '/api/audit-log', undefined, { 'x-api-key': 'test-key' }),
       env,

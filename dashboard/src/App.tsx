@@ -84,6 +84,8 @@ function CustomDomainBanner({ hostname }: { hostname: string }) {
 export function App() {
   const [route, setRoute] = useState(getRoute);
   const [hasKey, setHasKey] = useState(() => !!localStorage.getItem('ia_api_key'));
+  // No stored token: an OAuth sign-in leaves a session cookie instead. Probe once.
+  const [probing, setProbing] = useState(() => !localStorage.getItem('ia_api_key'));
   const [update, setUpdate] = useState<VersionInfo | null>(null);
   const [customDomain, setCustomDomain] = useState<string | null>(null);
   const handleUnauth = () => { localStorage.removeItem('ia_api_key'); setHasKey(false); };
@@ -102,6 +104,15 @@ export function App() {
     const onHash = () => setRoute(getRoute());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    if (!probing) return;
+    fetch('/api/auth/get-session')
+      .then(r => r.ok ? r.json() : null)
+      .then(sess => { if (sess) setHasKey(true); })
+      .catch(() => {})
+      .finally(() => setProbing(false));
   }, []);
 
   useEffect(() => {
@@ -127,6 +138,7 @@ export function App() {
 
   const mobile = useIsMobile();
 
+  if (!hasKey && probing) return null;
   if (!hasKey) return <AuthGate onSave={() => setHasKey(true)} />;
 
   // SPF Flatten wizard — full-screen, outside nav shell

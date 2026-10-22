@@ -1,5 +1,6 @@
 import { getDb, type DbLike } from '../client';
 import { IMPLICIT_ACCOUNT_ID } from '../schema';
+import { apiKeyQueries } from './api-keys';
 import { auditQueries } from './audit';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
@@ -12,6 +13,8 @@ import { teamQueries } from './team';
 export * from './reports';
 export * from './audit';
 export * from './team';
+export * from './api-keys';
+export { authLookups } from './auth';
 export * from './heartbeat';
 export type { MtaStsMode } from './domain-config';
 export { globalQueries } from './global';
@@ -35,6 +38,7 @@ export function forAccount(db: DbLike, accountId: string) {
 		mtaSts: mtaStsQueries(d, accountId),
 		audit: auditQueries(d, accountId),
 		team: teamQueries(d, accountId),
+		apiKeys: apiKeyQueries(d, accountId),
 		heartbeat: () => heartbeatStats(d, accountId),
 	};
 }

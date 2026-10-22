@@ -5,7 +5,7 @@ import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -131,9 +131,10 @@ describe('POST /api/check-sessions', () => {
     expect((a as any).token).not.toBe((b as any).token);
   });
 
-  it('does not call requireAuth', async () => {
-    await handleApi(req('POST', '/api/check-sessions'), makeEnv(), ctx);
-    expect(authMod.requireAuth).not.toHaveBeenCalled();
+  it('does not require auth (works with an unusable credential, as an anonymous context)', async () => {
+    vi.mocked(authMod.requireAuth).mockRejectedValueOnce(new authMod.AuthError('Unauthorized'));
+    const res = await handleApi(req('POST', '/api/check-sessions'), makeEnv(), ctx);
+    expect(res.status).toBe(201);
   });
 });
 
@@ -452,8 +453,9 @@ describe('POST /api/monitor', () => {
   it('does not require auth', async () => {
     const env = makeEnv();
     seedCheckResult(env, 'tok123');
-    await handleApi(req('POST', '/api/monitor', { email: 'u@x.com', session_token: 'tok123' }), env, ctx);
-    expect(authMod.requireAuth).not.toHaveBeenCalled();
+    vi.mocked(authMod.requireAuth).mockRejectedValueOnce(new authMod.AuthError('Unauthorized'));
+    const res = await handleApi(req('POST', '/api/monitor', { email: 'u@x.com', session_token: 'tok123' }), env, ctx);
+    expect(res.status).toBe(201);
   });
 });
 

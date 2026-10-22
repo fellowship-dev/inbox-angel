@@ -62,3 +62,15 @@ so roll back by restoring the backup together with the previous Worker version.
 
 * **Databases created before March 2026 (the multi-tenant prototype) are not supported and are already broken on main.** Their `customer_id` columns are `NOT NULL` with no default, so inserts from the current app fail. Manual path: `wrangler d1 export` a backup, then recreate the database with `npm run migrate` on an empty one and re-import your rows into the current columns (`domains`, `aggregate_reports`, `report_records`), dropping `customer_id`/`customers`/`dkim_configured`.
 * A database with a half-applied `0011` (only some of the four columns) is repaired by the adoption step.
+
+## 0013: Better Auth
+
+Migration `0013_better_auth.sql` adds `sessions`, `auth_accounts`, `verifications`, `auth_rate_limits` and `api_keys`,
+and `email_verified`/`image`/`updated_at` on `users`.
+
+* Every user with a `password_hash` gets a `credential` row in `auth_accounts` with the **same hash string**. The Worker keeps the
+  existing PBKDF2 hasher (`saltHex:hashHex`), so passwords verify unchanged; no rehash step.
+* **Sessions are not carried over.** `users.session_token` is no longer read (the column stays); everyone signs in once more.
+* `password_reset_tokens` stays but is unused; outstanding reset links stop working. Reset tokens now live in `verifications`.
+* Roles come from `memberships` (0012). Members are read-only in the API.
+* Roll back by restoring the backup with the previous Worker, as for 0012.

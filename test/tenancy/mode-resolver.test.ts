@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'u' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'u', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -11,6 +11,7 @@ import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { getMode } from '../../src/tenancy/mode';
 import { defaultResolver, resolveDomainOwner, resolveInboundAccount, selfHostResolver, type AccountResolver } from '../../src/tenancy/resolver';
 import { DEFAULT_WORKER_NAME, workerName } from '../../src/tenancy/context';
+import { sessionAccountResolver } from '../../src/auth/resolver';
 import { handleApi } from '../../src/api/router';
 import { makeTenant } from '../helpers/tenant';
 
@@ -38,9 +39,14 @@ describe('self-host account resolution', () => {
   it('every request, inbound email and hostname belongs to the one implicit account', async () => {
     const req = new Request('https://x.test/api/domains');
     expect(await selfHostResolver(req, {} as any)).toEqual({ accountId: 'acct_default' });
-    expect(await defaultResolver({} as any)(req, {} as any)).toEqual({ accountId: 'acct_default' });
     expect(await resolveInboundAccount({} as any, 'rua@reports.acme.com')).toBe('acct_default');
     expect(await resolveDomainOwner({} as any, 'acme.com')).toBe('acct_default');
+  });
+});
+
+describe('the default resolver is session-based', () => {
+  it('defaultResolver is the session / API-key resolver, not an implicit account', () => {
+    expect(defaultResolver({} as any)).toBe(sessionAccountResolver);
   });
 });
 

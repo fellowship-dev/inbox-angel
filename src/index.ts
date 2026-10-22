@@ -10,7 +10,17 @@ import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
 export interface Env {
   DB: D1Database | undefined;
   ASSETS: Fetcher;
-  API_KEY?: string;              // static API key (optional — dashboard uses session auth)
+  API_KEY?: string;              // DEPRECATED self-host "instance admin" key. Prefer per-user keys (Settings → API keys).
+  // Auth (all optional)
+  SAAS_ENABLED?: string;         // "1" to allow MODE=saas (hosted mode is not launched yet; explicit opt-in)
+  OWNER_EMAIL?: string;          // self-host: only this email may claim first ownership (password or OAuth)
+  BETTER_AUTH_SECRET?: string;   // session signing secret; generated and kept in D1 if unset
+  BETTER_AUTH_URL?: string;      // public origin when it differs from the request's (custom domain behind a proxy)
+  TRUSTED_ORIGINS?: string;      // extra origins allowed to make cookie-authenticated writes (comma-separated)
+  GITHUB_CLIENT_ID?: string;     // GitHub / Google sign-in appears only when both id and secret are set
+  GITHUB_CLIENT_SECRET?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   // Cloudflare (secrets — set via wrangler secret put)
   CLOUDFLARE_API_TOKEN?: string; // EMAIL token: email routing + DNS writes
   // Worker config (vars in wrangler.jsonc)

@@ -4,7 +4,7 @@ import type { Env } from '../../src/index';
 // POST /api/domains/:id/apply-dmarc: the record is written to the zone of *that* domain.
 
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'u', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
