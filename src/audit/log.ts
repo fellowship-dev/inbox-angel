@@ -10,6 +10,9 @@
 
 import { scope } from '../db/scope';
 
+/** What an audit entry is written for: a TenantContext satisfies this. */
+export interface AuditTarget { db: D1Database; accountId: string }
+
 export interface AuditEntry {
   actor_id?: string | null;
   actor_email?: string | null;
@@ -24,13 +27,13 @@ export interface AuditEntry {
 }
 
 export function logAudit(
-  db: D1Database,
+  target: AuditTarget,
   entry: AuditEntry,
   ctx?: ExecutionContext,
 ): void {
   const run = Promise.resolve()
     .then(() =>
-      scope(db).audit.insert({
+      scope(target.db, target.accountId).audit.insert({
         actor_id: entry.actor_id,
         actor_email: entry.actor_email,
         actor_type: entry.actor_type,

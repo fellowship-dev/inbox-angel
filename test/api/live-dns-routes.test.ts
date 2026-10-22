@@ -14,19 +14,9 @@ vi.mock('../../src/dns/provision', () => ({
   deprovisionDomain: vi.fn(),
   DnsProvisionError: class DnsProvisionError extends Error {},
 }));
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    getZoneId: vi.fn().mockReturnValue(null),
-    getAccountId: vi.fn().mockReturnValue(null),
-    reportsDomain: vi.fn().mockReturnValue('reports.test.com'),
-    fromEmail: vi.fn().mockReturnValue('noreply@reports.test.com'),
-  };
-});
-
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
+import { seedSettings } from '../helpers/tenant';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const DOMAIN: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.test.com', dns_record_id: null };
@@ -34,6 +24,7 @@ const DOMAIN: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@r
 function makeEnv(): Env {
   const db = createMigratedD1();
   db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, dns_record_id) VALUES (?, ?, ?, ?)').run(DOMAIN.id!, DOMAIN.domain!, DOMAIN.rua_address!, null);
+  seedSettings(db, { reports_domain: 'reports.test.com', from_email: 'noreply@reports.test.com' });
   return { DB: db as unknown as D1Database, API_KEY: 'k' } as unknown as Env;
 }
 

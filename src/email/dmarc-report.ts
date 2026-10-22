@@ -5,7 +5,7 @@
 // Routing is by report content (policy_published.domain), not by the recipient address.
 // This lets self-hosters use a fixed rua=mailto:rua@reports.yourdomain.com for all domains.
 
-import type { BoundEnv as Env } from '../index';
+import type { TenantContext } from '../tenancy/context';
 import { extractAttachmentBytes, MimeExtractError } from './mime-extract';
 import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
@@ -13,7 +13,7 @@ import { storeReport } from '../dmarc/store-report';
 
 export async function handleDmarcReport(
   message: ForwardableEmailMessage,
-  env: Env,
+  tenant: TenantContext,
 ): Promise<{ failure_count: number }> {
   // 1. Extract attachment bytes from raw MIME stream
   let bytes: Uint8Array;
@@ -32,7 +32,7 @@ export async function handleDmarcReport(
   let report;
   let rawXml: string | null = null;
   try {
-    report = await parseDmarcEmail(bytes, false, env.DB);
+    report = await parseDmarcEmail(bytes, false, tenant.db);
 
     // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
     try {
@@ -54,7 +54,7 @@ export async function handleDmarcReport(
 
   // 3. Resolve domain from the policy_domain in the report
   const policyDomain = report.policy_published.domain;
-  const domain = await resolveDomain(env.DB, policyDomain);
+  const domain = await resolveDomain(tenant, policyDomain);
   if (!domain) {
     console.warn('dmarc-report: no domain found for policy_domain', policyDomain);
     message.setReject(`Unknown domain ${policyDomain} — not a registered InboxAngel inbox`);
@@ -65,7 +65,7 @@ export async function handleDmarcReport(
 
   // 4. Store in D1 (dedup handled by INSERT OR IGNORE inside storeReport)
   try {
-    const result = await storeReport(env.DB, domain.id, report, rawXml, { DB: env.DB, SEND_EMAIL: env.SEND_EMAIL, WORKER_NAME: env.WORKER_NAME });
+    const result = await storeReport(tenant, domain.id, report, rawXml, true);
     if (result.stored) {
       console.log(
         `dmarc-report: stored report ${report.report_metadata.report_id} ` +

@@ -2,10 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-vi.mock('../../src/env-utils', () => ({
-  getZoneId: () => 'zone',
-  reportsDomain: () => 'reports.test.com',
-}));
 vi.mock('../../src/audit/log', () => ({ logAudit: vi.fn() }));
 
 import { discoverMxHosts, detectExistingMtaStsMode, buildPolicyFile, generatePolicyId } from '../../src/email/mta-sts';

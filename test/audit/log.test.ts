@@ -80,7 +80,7 @@ describe('logAudit()', () => {
   /** Run logAudit with a ctx and await the promise handed to waitUntil. */
   async function logAndFlush(db: TestDb, entry: AuditEntry) {
     const waitUntil = vi.fn();
-    logAudit(db, entry, { waitUntil } as unknown as ExecutionContext);
+    logAudit({ db: db as unknown as D1Database, accountId: IMPLICIT_ACCOUNT_ID }, entry, { waitUntil } as unknown as ExecutionContext);
     await waitUntil.mock.calls[0][0];
   }
 
@@ -135,7 +135,7 @@ describe('logAudit()', () => {
 
     // Should not throw
     expect(() => {
-      logAudit(db, { action: 'test.action' });
+      logAudit({ db: db as unknown as D1Database, accountId: IMPLICIT_ACCOUNT_ID }, { action: 'test.action' });
     }).not.toThrow();
 
     // Wait for rejection to be caught
@@ -162,7 +162,7 @@ describe('logAudit()', () => {
     const db = createMigratedD1();
     const mockCtx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
-    logAudit(db, {
+    logAudit({ db: db as unknown as D1Database, accountId: IMPLICIT_ACCOUNT_ID }, {
       action: 'test.action',
     }, mockCtx);
 
@@ -178,14 +178,14 @@ describe('getAuditLog()', () => {
     seedAudit(db, 1, 'domain.add', 1000);
     seedAudit(db, 2, 'domain.remove', 2000);
 
-    const result = await scope(db).audit.list({ page: 1, limit: 50 });
+    const result = await scope(db as unknown as D1Database, IMPLICIT_ACCOUNT_ID).audit.list({ page: 1, limit: 50 });
 
     // newest first
     expect(result.map(r => r.id)).toEqual([2, 1]);
     expect(result.map(r => r.action)).toEqual(['domain.remove', 'domain.add']);
 
     // limit/offset applied
-    const page2 = await scope(db).audit.list({ page: 2, limit: 1 });
+    const page2 = await scope(db as unknown as D1Database, IMPLICIT_ACCOUNT_ID).audit.list({ page: 2, limit: 1 });
     expect(page2.map(r => r.id)).toEqual([1]);
   });
 
@@ -195,7 +195,7 @@ describe('getAuditLog()', () => {
     seedAudit(db, 2, 'dns.remove', 2000);
     seedAudit(db, 3, 'domain.add', 3000);
 
-    const result = await scope(db).audit.list({ action: 'dns' });
+    const result = await scope(db as unknown as D1Database, IMPLICIT_ACCOUNT_ID).audit.list({ action: 'dns' });
     expect(result.map(r => r.action).sort()).toEqual(['dns.provision', 'dns.remove']);
   });
 
@@ -207,7 +207,7 @@ describe('getAuditLog()', () => {
     seedAudit(db, 4, 'd', 2000);
     seedAudit(db, 5, 'e', 2500);
 
-    const result = await scope(db).audit.list({ since: 1000, until: 2000 });
+    const result = await scope(db as unknown as D1Database, IMPLICIT_ACCOUNT_ID).audit.list({ since: 1000, until: 2000 });
     expect(result.map(r => r.id).sort()).toEqual([2, 3, 4]);
   });
 });

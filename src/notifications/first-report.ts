@@ -3,14 +3,7 @@
 // Delivery: Cloudflare Email Workers (SEND_EMAIL binding).
 // Falls back to console.log if binding is absent.
 
-import { fromEmail, getWorkersSubdomain } from '../env-utils';
-import { scope } from '../db/scope';
-
-export interface FirstReportEnv {
-  DB: D1Database;
-  SEND_EMAIL?: SendEmail;
-  WORKER_NAME?: string;
-}
+import type { TenantContext } from '../tenancy/context';
 
 export interface ReportStats {
   totalMessages: number;
@@ -56,25 +49,25 @@ export function buildFirstReportBody(
 // ── Delivery ──────────────────────────────────────────────────
 
 export async function sendFirstReportNotification(
-  env: FirstReportEnv,
+  tenant: TenantContext,
   domain: string,
   reportStats: ReportStats,
 ): Promise<void> {
   // Resolve dashboard URL: custom domain > {worker}.{subdomain}.workers.dev
-  const customDomain = await scope(env.DB).settings.get('custom_domain');
+  const customDomain = await tenant.scope.settings.get('custom_domain');
   let dashboardUrl: string;
   if (customDomain?.value) {
     dashboardUrl = `https://${customDomain.value}`;
   } else {
-    const workerName = env.WORKER_NAME ?? 'inbox-angel-worker';
-    const subdomain = getWorkersSubdomain();
+    const workerName = tenant.workerName;
+    const subdomain = await tenant.workersSubdomain();
     dashboardUrl = subdomain
       ? `https://${workerName}.${subdomain}.workers.dev`
       : `https://${workerName}.workers.dev`;
   }
 
   // Get admin user email
-  const admin = await scope(env.DB).team.firstAdmin();
+  const admin = await tenant.scope.team.firstAdmin();
   if (!admin) {
     console.log('[first-report] no admin user found — skipping notification');
     return;
@@ -83,14 +76,14 @@ export async function sendFirstReportNotification(
   const subject = `\u{1F389} First DMARC report received for ${domain}`;
   const body = buildFirstReportBody(admin.name ?? 'there', domain, reportStats, dashboardUrl);
 
-  if (!env.SEND_EMAIL) {
+  if (!tenant.env.SEND_EMAIL) {
     console.log(`[first-report] SEND_EMAIL binding not configured — would send to ${admin.email}: ${subject}\n${body}`);
     return;
   }
 
   try {
-    await env.SEND_EMAIL.send({
-      from: { name: 'InboxAngel', email: fromEmail()! },
+    await tenant.env.SEND_EMAIL.send({
+      from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
       to: [admin.email],
       subject,
       text: body,

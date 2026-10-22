@@ -3,9 +3,9 @@
 // report_id are silently skipped (returns { stored: false }).
 
 import { AggregateReport, ReportRecord as ParserRecord } from './types';
-import { scope } from '../db/scope';
+import type { TenantContext } from '../tenancy/context';
 import { ReportRecord as DbRecord } from '../db/types';
-import { sendFirstReportNotification, FirstReportEnv } from '../notifications/first-report';
+import { sendFirstReportNotification } from '../notifications/first-report';
 
 export interface StoreReportResult {
   stored: boolean;       // false = duplicate, records not re-inserted
@@ -66,23 +66,23 @@ function mapRecord(
 /**
  * Inserts an aggregate report + its records into D1.
  *
- * @param db          D1Database binding
+ * @param tenant      the account the report is stored for
  * @param domainId    D1 domains.id for the monitored domain
  * @param report      Parsed AggregateReport from parseDmarcEmail()
  * @param rawXml      Original XML string to store for reprocessing (nullable)
- * @param env         Full env (optional) — enables first-report notification email
+ * @param notifyFirstReport  send the first-report notification email when this is the domain's first report
  */
 export async function storeReport(
-  db: D1Database,
+  tenant: TenantContext,
   domainId: number,
   report: AggregateReport,
   rawXml: string | null = null,
-  env?: FirstReportEnv,
+  notifyFirstReport = false,
 ): Promise<StoreReportResult> {
   const { total, pass, fail } = computeCounts(report.records);
   const meta = report.report_metadata;
 
-  const q = scope(db);
+  const q = tenant.scope;
   const insertResult = await q.reports.insertAggregate({
     domain_id:   domainId,
     org_name:    meta.org_name,
@@ -107,7 +107,7 @@ export async function storeReport(
   }
 
   // Fire first-report notification if this is the very first report for this domain
-  if (env) {
+  if (notifyFirstReport) {
     const reportCount = await q.reports.countForDomain(domainId);
 
     if (reportCount === 1) {
@@ -115,7 +115,7 @@ export async function storeReport(
 
       if (domainRow) {
         const uniqueSources = new Set(report.records.map(r => r.source.ip));
-        void sendFirstReportNotification(env, domainRow.domain, {
+        void sendFirstReportNotification(tenant, domainRow.domain, {
           totalMessages: total,
           passMessages: pass,
           failMessages: fail,

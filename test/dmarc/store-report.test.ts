@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { storeReport } from '../../src/dmarc/store-report';
+import { makeTenant } from '../helpers/tenant';
 import type { AggregateReport, ReportRecord } from '../../src/dmarc/types';
 
 // ── Fixtures ──────────────────────────────────────────────────
@@ -101,7 +102,7 @@ function makeDb() {
 describe('storeReport', () => {
   it('returns stored=true and reportId on first insert', async () => {
     const { db, reports } = makeDb();
-    const result = await storeReport(db, 1, makeReport());
+    const result = await storeReport(makeTenant({ db }), 1, makeReport());
 
     expect(result.stored).toBe(true);
     expect(result.reportId).toBe(reports()[0].id);
@@ -110,8 +111,8 @@ describe('storeReport', () => {
 
   it('returns stored=false when INSERT OR IGNORE skips (duplicate report_id)', async () => {
     const { db, reports } = makeDb();
-    await storeReport(db, 1, makeReport());
-    const result = await storeReport(db, 1, makeReport());
+    await storeReport(makeTenant({ db }), 1, makeReport());
+    const result = await storeReport(makeTenant({ db }), 1, makeReport());
 
     expect(result.stored).toBe(false);
     expect(result.reportId).toBeUndefined();
@@ -120,9 +121,9 @@ describe('storeReport', () => {
 
   it('does not insert records when report was a duplicate', async () => {
     const { db, records } = makeDb();
-    await storeReport(db, 1, makeReport());
+    await storeReport(makeTenant({ db }), 1, makeReport());
     expect(records()).toHaveLength(1);
-    await storeReport(db, 1, makeReport());
+    await storeReport(makeTenant({ db }), 1, makeReport());
 
     expect(records()).toHaveLength(1);
   });
@@ -133,7 +134,7 @@ describe('storeReport', () => {
     });
     const { db, records } = makeDb();
 
-    const result = await storeReport(db, 1, report);
+    const result = await storeReport(makeTenant({ db }), 1, report);
     // one row per record, all linked to the new report
     expect(records()).toHaveLength(2);
     expect(records().map(r => r.source_ip)).toEqual(['10.0.0.1', '10.0.0.2']);
@@ -144,7 +145,7 @@ describe('storeReport', () => {
     const { db, reports, records } = makeDb();
 
     const report = makeReport({ records: [] });
-    const result = await storeReport(db, 1, report);
+    const result = await storeReport(makeTenant({ db }), 1, report);
 
     expect(result.stored).toBe(true);
     expect(reports()).toHaveLength(1);
@@ -162,7 +163,7 @@ describe('storeReport', () => {
         makeRecord({ count: 3 }),
       ],
     });
-    await storeReport(db, 1, report);
+    await storeReport(makeTenant({ db }), 1, report);
 
     expect(reports()[0].total_count).toBe(18); // 10+5+3
   });
@@ -176,7 +177,7 @@ describe('storeReport', () => {
         makeRecord({ count: 3,  dkimResult: 'fail', spfResult: 'pass' }), // passes (via SPF)
       ],
     });
-    await storeReport(db, 1, report);
+    await storeReport(makeTenant({ db }), 1, report);
 
     const row = reports()[0];
     expect(row.total_count).toBe(18);
@@ -190,7 +191,7 @@ describe('storeReport', () => {
       beginDate: '2024-06-13T00:00:00Z',
       endDate:   '2024-06-13T23:59:59Z',
     });
-    await storeReport(db, 1, report);
+    await storeReport(makeTenant({ db }), 1, report);
 
     expect(reports()[0].date_begin).toBe(1718236800); // 2024-06-13 00:00:00 UTC
     expect(reports()[0].date_end).toBe(1718323199);   // 2024-06-13 23:59:59 UTC
@@ -198,20 +199,20 @@ describe('storeReport', () => {
 
   it('passes rawXml to the insert', async () => {
     const { db, reports } = makeDb();
-    await storeReport(db, 1, makeReport(), '<xml>raw</xml>');
+    await storeReport(makeTenant({ db }), 1, makeReport(), '<xml>raw</xml>');
     expect(reports()[0].raw_xml).toBe('<xml>raw</xml>');
   });
 
   it('passes null rawXml when not provided', async () => {
     const { db, reports } = makeDb();
-    await storeReport(db, 1, makeReport());
+    await storeReport(makeTenant({ db }), 1, makeReport());
     expect(reports()[0].raw_xml).toBeNull();
   });
 
   it('maps record source_ip from source.ip', async () => {
     const { db, records } = makeDb();
     const report = makeReport({ records: [makeRecord({ ip: '192.168.1.100' })] });
-    await storeReport(db, 1, report);
+    await storeReport(makeTenant({ db }), 1, report);
 
     expect(records()[0].source_ip).toBe('192.168.1.100');
   });
@@ -223,7 +224,7 @@ describe('storeReport', () => {
       auth_results: { dkim: [], spf: [] }, // empty auth results
     };
     const report = makeReport({ records: [rec] });
-    await storeReport(db, 1, report);
+    await storeReport(makeTenant({ db }), 1, report);
 
     // dkim_result and spf_result should be null (not crash)
     expect(records()[0].dkim_result).toBeNull();

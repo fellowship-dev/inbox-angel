@@ -52,14 +52,17 @@
 import type { BoundEnv as Env } from '../index';
 import { requireAuth, AuthError } from './auth';
 import { version } from '../../package.json';
-import { scope, globals } from '../db/scope';
+import { globals } from '../db/scope';
 import { hashPassword, verifyPassword } from './password';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
 import { track } from '../telemetry';
-import { reportsDomain, fromEmail, enrichEnv, getZoneId, getAccountId, getBaseDomain, resetEnvCache } from '../env-utils';
+import { loadTenant, refreshTenant } from '../tenancy/load';
+import type { TenantContext } from '../tenancy/context';
+import { defaultResolver, type AccountResolver } from '../tenancy/resolver';
+import { CfApiError, CfAuthError, CfNotConfiguredError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
@@ -103,6 +106,12 @@ function err(message: string, status: number): Response {
   return json({ error: message }, status);
 }
 
+/** HTTP status for a Cloudflare failure: config problems are the caller's, the rest is reported as given. */
+function cfFailure(e: unknown, fallbackStatus = 500): Response {
+  if (e instanceof CfNotConfiguredError || e instanceof CfZoneNotFoundError) return err(e.message, 400);
+  return err(cfErrorText(e), fallbackStatus);
+}
+
 async function parseBody<T>(request: Request): Promise<T> {
   try {
     return await request.json() as T;
@@ -113,12 +122,12 @@ async function parseBody<T>(request: Request): Promise<T> {
 
 // ── Route handlers ────────────────────────────────────────────
 
-async function getDomainsHandler(env: Env): Promise<Response> {
-  const results = await scope(env.DB).domains.list();
+async function getDomainsHandler(tenant: TenantContext): Promise<Response> {
+  const results = await tenant.scope.domains.list();
   return json({ domains: results });
 }
 
-async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: ExecutionContext, actorId?: string): Promise<Response> {
+async function addDomain(request: Request, tenant: TenantContext, userEmail?: string, ctx?: ExecutionContext, actorId?: string): Promise<Response> {
   const body = await parseBody<{ domain?: string }>(request);
   if (!body.domain || typeof body.domain !== 'string') {
     return err('domain is required', 400);
@@ -129,7 +138,7 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
     return err('invalid domain format', 400);
   }
 
-  const rdomain = reportsDomain();
+  const rdomain = tenant.settings.reportsDomain;
   if (!rdomain) return err('Reports domain not configured — complete the setup wizard first', 500);
 
   // Fixed rua address — routing is by XML policy_domain, not by address encoding
@@ -141,16 +150,16 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
   // Insert domain row — no DNS writes here; all DNS changes require explicit user action
   let domainId: number;
   try {
-    const result = await scope(env.DB).domains.insert({ domain, rua_address: ruaAddress });
+    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress });
     domainId = result.meta.last_row_id as number;
   } catch (e: any) {
     if (e?.message?.includes('UNIQUE')) return err('domain already registered', 409);
     throw e;
   }
 
-  track(env, { event: 'domain.add' }); // fire-and-forget, non-blocking
+  track(tenant, { event: 'domain.add' }); // fire-and-forget, non-blocking
 
-  logAudit(env.DB!, {
+  logAudit(tenant, {
     actor_id: actorId ?? null, actor_email: userEmail ?? null, actor_type: 'user',
     action: 'domain.add',
     resource_type: 'domain', resource_id: String(domainId), resource_name: domain,
@@ -160,7 +169,7 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
   // Auto-subscribe the adding user to monitoring alerts
   const email = userEmail;
   if (email) {
-    await scope(env.DB).monitor.insert({
+    await tenant.scope.monitor.insert({
       email: email.toLowerCase().trim(),
       domain,
       session_token: null,
@@ -177,7 +186,7 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
       lookupSpf(domain)
         .then(spf => {
           if (spf?.lookup_count !== undefined) {
-            return scope(env.DB!).domains.updateSpfLookupCount(domainId, spf.lookup_count);
+            return tenant.scope.domains.updateSpfLookupCount(domainId, spf.lookup_count);
           }
         })
         .catch(e => console.warn('[domain.add] background SPF walk failed (non-fatal):', e))
@@ -185,12 +194,12 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
   }
 
   // Return the full domain row so the frontend has the ID
-  const domainRow = await scope(env.DB).domains.getById(domainId);
+  const domainRow = await tenant.scope.domains.getById(domainId);
 
   // If subdomain, fetch parent context for the inheritance-aware wizard
   let parent_context: { domain: string; dmarc_policy: string | null; dmarc_sp: string | null; has_dmarc: boolean } | null = null;
   if (domainRow?.parent_id) {
-    const parentRow = await scope(env.DB).domains.getById(domainRow.parent_id);
+    const parentRow = await tenant.scope.domains.getById(domainRow.parent_id);
     if (parentRow) {
       // A failed lookup leaves parent_context unset: "unknown" must not be reported as "parent has no DMARC".
       const parentDmarc = await lookupDmarc(parentRow.domain).then(r => ({ ok: true as const, r }), () => ({ ok: false as const, r: null }));
@@ -216,16 +225,16 @@ async function addDomain(request: Request, env: Env, userEmail?: string, ctx?: E
   }, 201);
 }
 
-async function deleteDomain(env: Env, domainId: string, actor?: { id?: string; email?: string }, ctx?: ExecutionContext): Promise<Response> {
+async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { id?: string; email?: string }, ctx?: ExecutionContext): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
-  await scope(env.DB).domains.delete(id);
+  await tenant.scope.domains.delete(id);
 
-  logAudit(env.DB!, {
+  logAudit(tenant, {
     actor_id: actor?.id ?? null, actor_email: actor?.email ?? null, actor_type: 'user',
     action: 'domain.remove',
     resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
@@ -234,15 +243,15 @@ async function deleteDomain(env: Env, domainId: string, actor?: { id?: string; e
 
   // Best-effort cleanup of the CF DNS record (non-fatal if it fails)
   if (domain.dns_record_id) {
-    const rdomain = reportsDomain();
+    const rdomain = tenant.settings.reportsDomain;
     const recordName = rdomain ? `${domain.domain}._report._dmarc.${rdomain}` : domain.dns_record_id;
-    logAudit(env.DB!, {
+    logAudit(tenant, {
       actor_id: actor?.id ?? null, actor_email: actor?.email ?? null, actor_type: 'user',
       action: 'dns.delete',
       resource_type: 'dns_record', resource_id: domain.dns_record_id, resource_name: recordName,
       before_value: { type: 'TXT', name: recordName, content: 'v=DMARC1;', ttl: 3600 },
     }, ctx);
-    await deprovisionDomain({ CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN ?? '' }, domain.dns_record_id).catch(e =>
+    await deprovisionDomain(tenant, domain.dns_record_id).catch(e =>
       console.warn(`deprovisionDomain failed for domain ${id}:`, e)
     );
   }
@@ -250,21 +259,21 @@ async function deleteDomain(env: Env, domainId: string, actor?: { id?: string; e
   return new Response(null, { status: 204 });
 }
 
-async function getReports(env: Env, url: URL): Promise<Response> {
+async function getReports(tenant: TenantContext, url: URL): Promise<Response> {
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '30', 10), 100);
-  const results = await scope(env.DB).reports.recent(limit);
+  const results = await tenant.scope.reports.recent(limit);
   return json({ reports: results });
 }
 
-async function getReport(env: Env, reportId: string): Promise<Response> {
+async function getReport(tenant: TenantContext, reportId: string): Promise<Response> {
   const id = parseInt(reportId, 10);
   if (isNaN(id)) return err('invalid report id', 400);
 
-  const report = await scope(env.DB).reports.getWithDomain(id);
+  const report = await tenant.scope.reports.getWithDomain(id);
 
   if (!report) return err('report not found', 404);
 
-  const records = await scope(env.DB).reports.records(id);
+  const records = await tenant.scope.reports.records(id);
 
   return json({ report, records });
 }
@@ -283,41 +292,41 @@ async function verifyTurnstile(token: string, secret: string, ip: string): Promi
   }
 }
 
-async function getCheckResults(env: Env): Promise<Response> {
+async function getCheckResults(tenant: TenantContext): Promise<Response> {
   // Return the last 20 results for monitored domains
-  const domains = await scope(env.DB).domains.list();
+  const domains = await tenant.scope.domains.list();
   const domainNames = domains.map(d => d.domain);
 
   if (domainNames.length === 0) return json({ results: [] });
 
-  const results = await globals(env.DB).checkResults.latestForDomains(domainNames, 20);
+  const results = await globals(tenant.db).checkResults.latestForDomains(domainNames, 20);
 
   return json({ results });
 }
 
-async function getDomainStatsSummary(env: Env, domainId: string, url: URL): Promise<Response> {
+async function getDomainStatsSummary(tenant: TenantContext, domainId: string, url: URL): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
   const rawDays = parseInt(url.searchParams.get('days') ?? '30', 10);
   const days = Math.min(isNaN(rawDays) ? 30 : rawDays, 90);
   const since = Math.floor(Date.now() / 1000) - days * 86400;
 
-  const results = await scope(env.DB).reports.dailyStats(id, since);
+  const results = await tenant.scope.reports.dailyStats(id, since);
   return json({ domain: domain.domain, days, stats: results });
 }
 
-async function exportDomainData(env: Env, domainId: string): Promise<Response> {
+async function exportDomainData(tenant: TenantContext, domainId: string): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
-  const results = await scope(env.DB).reports.exportData(id);
+  const results = await tenant.scope.reports.exportData(id);
 
   const header = 'date,org_name,total_count,pass_count,fail_count,source_ip,header_from,spf_result,spf_domain,dkim_result,dkim_domain,record_count,disposition\n';
   const rows = results.map(r =>
@@ -336,50 +345,50 @@ async function exportDomainData(env: Env, domainId: string): Promise<Response> {
   });
 }
 
-async function getDomainCheckSummary(env: Env, domainId: string): Promise<Response> {
+async function getDomainCheckSummary(tenant: TenantContext, domainId: string): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
   const since = Math.floor(Date.now() / 1000) - 30 * 86400;
-  const summary = await scope(env.DB).reports.checkSummary(id, since);
+  const summary = await tenant.scope.reports.checkSummary(id, since);
   if (!summary) return err('check summary not found', 404);
 
   return json(summary);
 }
 
-async function getDomainReportByDate(env: Env, domainId: string, url: URL): Promise<Response> {
+async function getDomainReportByDate(tenant: TenantContext, domainId: string, url: URL): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
   const date = url.searchParams.get('date');
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return err('date param required (YYYY-MM-DD)', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
   const [summary, sources] = await Promise.all([
-    scope(env.DB).reports.daySummary(id, date),
-    scope(env.DB).reports.sourcesByDate(id, date),
+    tenant.scope.reports.daySummary(id, date),
+    tenant.scope.reports.sourcesByDate(id, date),
   ]);
 
   return json({ date, domain: domain.domain, summary: summary ?? { total: 0, passed: 0, failed: 0 }, sources });
 }
 
-async function getDomainSources(env: Env, domainId: string, url: URL): Promise<Response> {
+async function getDomainSources(tenant: TenantContext, domainId: string, url: URL): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
-  const domain = await scope(env.DB).domains.getById(id);
+  const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
 
   const rawDays = parseInt(url.searchParams.get('days') ?? '7', 10);
   const days = Math.min(isNaN(rawDays) ? 7 : rawDays, 90);
   const since = Math.floor(Date.now() / 1000) - days * 86400;
 
-  const results = await scope(env.DB).reports.topFailingSources(id, since);
+  const results = await tenant.scope.reports.topFailingSources(id, since);
   return json({ sources: results });
 }
 
@@ -389,8 +398,9 @@ export async function handleApi(
   request: Request,
   envRaw: Env,
   ctx: ExecutionContext,
+  resolver: AccountResolver = defaultResolver(envRaw),
 ): Promise<Response> {
-  const res = await _handleApi(request, envRaw, ctx);
+  const res = await _handleApi(request, envRaw, ctx, resolver);
   return withSecurityHeaders(res);
 }
 
@@ -398,8 +408,8 @@ async function _handleApi(
   request: Request,
   envRaw: Env,
   ctx: ExecutionContext,
+  resolver: AccountResolver,
 ): Promise<Response> {
-  await enrichEnv(envRaw, envRaw.DB);
   const env = envRaw;
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
@@ -447,14 +457,20 @@ async function _handleApi(
     });
   }
 
+  // Everything below acts on one tenant. The resolver is the seam to authentication: self-host
+  // always answers with the implicit account; a session-based resolver plugs in later.
+  const account = await resolver(request, env);
+  if (!account) return err('no account for this request', 401);
+  const tenant = await loadTenant(env, account);
+
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
-    const rd = reportsDomain();
+    const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     const token = Array.from(crypto.getRandomValues(new Uint8Array(8)))
       .map(b => chars[b % chars.length]).join('');
-    track(env, { event: 'check.created' }); // fire-and-forget
+    track(tenant, { event: 'check.created' }); // fire-and-forget
     return json({ token, email: `${token}@${rd}` }, 201);
   }
 
@@ -475,7 +491,7 @@ async function _handleApi(
     const checkResult = await globals(env.DB).checkResults.byToken(body.session_token);
     if (!checkResult) return err('check result not found — send the test email first', 404);
 
-    await scope(env.DB).monitor.insert({
+    await tenant.scope.monitor.insert({
       email: body.email.toLowerCase().trim(),
       domain: checkResult.from_domain,
       session_token: body.session_token,
@@ -490,14 +506,14 @@ async function _handleApi(
 
   // GET /api/auth/status — any admin configured? + env prefill
   if (path === '/api/auth/status' && method === 'GET') {
-    const admin = await scope(env.DB!).team.firstAdmin();
+    const admin = await tenant.scope.team.firstAdmin();
     const [tsKeyRow, customDomainRow, telemetryRow] = await Promise.all([
-      scope(env.DB!).settings.get('turnstile_site_key'),
-      scope(env.DB!).settings.get('custom_domain'),
-      scope(env.DB!).settings.get('telemetry_opted_in'),
+      tenant.scope.settings.get('turnstile_site_key'),
+      tenant.scope.settings.get('custom_domain'),
+      tenant.scope.settings.get('telemetry_opted_in'),
     ]);
-    const existingDomains = await scope(env.DB!).domains.list();
-    const baseDomain = getBaseDomain();
+    const existingDomains = await tenant.scope.domains.list();
+    const baseDomain = tenant.settings.baseDomain;
     return json({
       configured: !!admin,
       prefill: { name: '', email: '' },
@@ -516,7 +532,7 @@ async function _handleApi(
       const { success } = await env.AUTH_LIMITER.limit({ key: ip });
       if (!success) return err('Too many requests — try again later', 429);
     }
-    const admin = await scope(env.DB!).team.firstAdmin();
+    const admin = await tenant.scope.team.firstAdmin();
     if (admin) return err('already configured — use /api/auth/login', 409);
 
     const body = await parseBody<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
@@ -524,7 +540,7 @@ async function _handleApi(
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
 
-    const tsSecretRow = await scope(env.DB!).settings.get('turnstile_secret_key');
+    const tsSecretRow = await tenant.scope.settings.get('turnstile_secret_key');
     if (tsSecretRow?.value) {
       const tsToken = body.cf_turnstile_token;
       if (!tsToken) return err('Bot check failed', 403);
@@ -538,22 +554,22 @@ async function _handleApi(
     const id = crypto.randomUUID();
     const email = body.email.toLowerCase().trim();
 
-    await scope(env.DB!).team.addUser({ id, email, name: body.name?.trim() || email, password_hash: hash, role: 'admin' });
+    await tenant.scope.team.addUser({ id, email, name: body.name?.trim() || email, password_hash: hash, role: 'admin' });
     await globals(env.DB!).users.setSession(id, token);
-    if (body.telemetry !== undefined) await scope(env.DB!).settings.set('telemetry_opted_in', body.telemetry ? 'true' : 'false');
+    if (body.telemetry !== undefined) await tenant.scope.settings.set('telemetry_opted_in', body.telemetry ? 'true' : 'false');
 
-    logAudit(env.DB!, {
+    logAudit(tenant, {
       actor_id: id, actor_email: email, actor_type: 'user',
       action: 'auth.setup',
       resource_type: 'user', resource_id: id, resource_name: email,
       after_value: { email, role: 'admin' },
       meta: { ip },
     }, ctx);
-    track(env, { event: 'instance.born' }); // fire-and-forget
+    track(tenant, { event: 'instance.born' }); // fire-and-forget
 
     // Check if a domain is already configured (from env var or D1)
-    const baseDomain = getBaseDomain();
-    const existingDomains = await scope(env.DB!).domains.list();
+    const baseDomain = tenant.settings.baseDomain;
+    const existingDomains = await tenant.scope.domains.list();
     const has_domain = existingDomains.length > 0 || !!baseDomain;
 
     return json({ token, has_domain }, 201);
@@ -569,7 +585,7 @@ async function _handleApi(
     const body = await parseBody<{ email?: string; password?: string; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);
 
-    const tsSecretRow = await scope(env.DB!).settings.get('turnstile_secret_key');
+    const tsSecretRow = await tenant.scope.settings.get('turnstile_secret_key');
     if (tsSecretRow?.value) {
       const tsToken = body.cf_turnstile_token;
       if (!tsToken) return err('Bot check failed', 403);
@@ -586,7 +602,7 @@ async function _handleApi(
 
     const token = crypto.randomUUID();
     await globals(env.DB!).users.setSession(user.id, token);
-    logAudit(env.DB!, {
+    logAudit(tenant, {
       actor_id: user.id, actor_email: user.email, actor_type: 'user',
       action: 'auth.login',
       resource_type: 'user', resource_id: user.id, resource_name: user.email,
@@ -601,7 +617,7 @@ async function _handleApi(
     const user = await globals(env.DB!).users.bySession(key);
     if (user) {
       await globals(env.DB!).users.setSession(user.id, null);
-      logAudit(env.DB!, {
+      logAudit(tenant, {
           actor_id: user.id, actor_email: user.email, actor_type: 'user',
         action: 'auth.logout',
         resource_type: 'user', resource_id: user.id, resource_name: user.email,
@@ -621,7 +637,7 @@ async function _handleApi(
       const token = crypto.randomUUID();
       const expiresAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour
       await globals(env.DB!).passwordResets.insert(token, user.id, expiresAt);
-      logAudit(env.DB!, {
+      logAudit(tenant, {
           actor_id: user.id, actor_email: user.email, actor_type: 'user',
         action: 'auth.password_reset',
         resource_type: 'user', resource_id: user.id, resource_name: user.email,
@@ -632,7 +648,7 @@ async function _handleApi(
       const resetUrl = `${origin}/#/reset/${token}`;
       const emailBody = `Hi ${user.name},\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
 
-      const fe = fromEmail();
+      const fe = tenant.settings.fromEmail;
       if (env.SEND_EMAIL && fe) {
         try {
           await env.SEND_EMAIL.send({
@@ -667,7 +683,7 @@ async function _handleApi(
     await globals(env.DB!).users.setPasswordHash(resetToken.user_id, hash);
     await globals(env.DB!).users.setSession(resetToken.user_id, sessionToken);
     await globals(env.DB!).passwordResets.markUsed(body.token);
-    logAudit(env.DB!, {
+    logAudit(tenant, {
       actor_id: resetToken.user_id, actor_type: 'user',
       action: 'auth.password_reset',
       resource_type: 'user', resource_id: resetToken.user_id,
@@ -679,7 +695,7 @@ async function _handleApi(
   // GET /api/invites/:token — get invite info (unauthenticated, for the accept page)
   const inviteTokenMatch = path.match(/^\/api\/invites\/([^/]+)$/);
   if (inviteTokenMatch && method === 'GET') {
-    const invite = await scope(env.DB!).team.getInvite(inviteTokenMatch[1]);
+    const invite = await tenant.scope.team.getInvite(inviteTokenMatch[1]);
     if (!invite || invite.used_at || invite.expires_at < Math.floor(Date.now() / 1000)) {
       return err('invite not found or expired', 404);
     }
@@ -688,7 +704,7 @@ async function _handleApi(
 
   // POST /api/invites/:token/accept — set name+password, create user, return session
   if (inviteTokenMatch && method === 'POST') {
-    const invite = await scope(env.DB!).team.getInvite(inviteTokenMatch[1]);
+    const invite = await tenant.scope.team.getInvite(inviteTokenMatch[1]);
     if (!invite || invite.used_at || invite.expires_at < Math.floor(Date.now() / 1000)) {
       return err('invite not found or expired', 404);
     }
@@ -703,10 +719,10 @@ async function _handleApi(
     const token = crypto.randomUUID();
     const id = crypto.randomUUID();
 
-    await scope(env.DB!).team.addUser({ id, email: invite.email, name: body.name.trim(), password_hash: hash, role: invite.role as 'admin' | 'member' });
+    await tenant.scope.team.addUser({ id, email: invite.email, name: body.name.trim(), password_hash: hash, role: invite.role as 'admin' | 'member' });
     await globals(env.DB!).users.setSession(id, token);
-    await scope(env.DB!).team.markInviteUsed(invite.token);
-    logAudit(env.DB!, {
+    await tenant.scope.team.markInviteUsed(invite.token);
+    logAudit(tenant, {
       actor_id: id, actor_email: invite.email, actor_type: 'user',
       action: 'auth.invite_accepted',
       resource_type: 'user', resource_id: id, resource_name: invite.email,
@@ -756,33 +772,30 @@ async function _handleApi(
       const rd = `reports.${domain}`;
       const fe = `noreply@${rd}`;
       const ruaAddress = `rua@${rd}`;
-      await scope(env.DB!).settings.setMany({
+      await tenant.scope.settings.setMany({
         base_domain: domain,
         reports_domain: rd,
         from_email: fe,
       });
 
-      // Reset caches so enrichEnv picks up new values
-      resetEnvCache();
-      await enrichEnv(env, env.DB);
-
-      // Resolve zone_id + account_id from the new domain
-      const zoneId = getZoneId();
-      const accountId = getAccountId();
-      if (zoneId && accountId) {
-        await scope(env.DB!).settings.setMany({ zone_id: zoneId, account_id: accountId });
+      // A different base domain may live in a different zone: forget the stored one so it is re-resolved.
+      if (tenant.settings.baseDomain !== domain) {
+        await tenant.scope.settings.setMany({ zone_id: '', zone_name: '', account_id: '' });
       }
+      await refreshTenant(tenant);
+      const zoneId = tenant.settings.zoneId;
+      const accountId = tenant.settings.cfAccountId;
 
       // Create the domain row if it doesn't exist yet, then mark it as default.
       // This is the first domain configured — it becomes the infrastructure hub.
-      const existing = await scope(env.DB!).domains.list();
+      const existing = await tenant.scope.domains.list();
       const alreadyHas = existing.some(d => d.domain === domain);
       let domainId: number | undefined;
       if (!alreadyHas) {
-        const result = await scope(env.DB!).domains.insert({ domain, rua_address: ruaAddress });
+        const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress });
         domainId = result.meta.last_row_id as number;
-        track(env, { event: 'domain.add' });
-        logAudit(env.DB!, {
+        track(tenant, { event: 'domain.add' });
+        logAudit(tenant, {
           actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
           action: 'domain.add',
           resource_type: 'domain', resource_id: String(domainId), resource_name: domain,
@@ -794,7 +807,7 @@ async function _handleApi(
 
       // Atomically designate this domain as the default (clears any existing default first)
       if (domainId) {
-        await scope(env.DB!).domains.setDefault(domainId);
+        await tenant.scope.domains.setDefault(domainId);
       }
 
       return json({
@@ -809,62 +822,52 @@ async function _handleApi(
 
     // GET /api/zones — list CF account zones for zone picker (requires CLOUDFLARE_API_TOKEN)
     if (path === '/api/zones' && method === 'GET') {
-      if (!env.CLOUDFLARE_API_TOKEN) return err('Cloudflare API token not configured', 400);
+      const cf = tenant.cf();
+      if (!cf) return err('Cloudflare API token not configured', 400);
       try {
-        const res = await fetch('https://api.cloudflare.com/client/v4/zones?per_page=200&status=active', {
-          headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` },
-        });
-        const data = await res.json() as {
-          success: boolean;
-          result?: { id: string; name: string; status: string }[];
-          errors?: { message: string }[];
-        };
-        if (!data.success) {
-          const msg = data.errors?.map(e => e.message).join(', ') ?? 'CF API error';
-          return err(msg, 502);
-        }
-        const zones = (data.result ?? []).map(z => ({ id: z.id, name: z.name, status: z.status }));
+        const zones = (await cf.listZones()).map(z => ({ id: z.id, name: z.name, status: z.status }));
         return json({ zones });
-      } catch {
+      } catch (e) {
+        if (e instanceof CfApiError || e instanceof CfAuthError) return err(cfErrorText(e), 502);
         return err('Failed to fetch zones from Cloudflare', 502);
       }
     }
 
     // GET /api/domains
     if (path === '/api/domains' && method === 'GET') {
-      return await getDomainsHandler(env);
+      return await getDomainsHandler(tenant);
     }
     // POST /api/domains
     if (path === '/api/domains' && method === 'POST') {
       const userEmail = userBySession?.email;
-      return await addDomain(request, env, userEmail, ctx, userBySession?.id);
+      return await addDomain(request, tenant, userEmail, ctx, userBySession?.id);
     }
     // GET /api/domains/:id/stats
     const domainStatsMatch = path.match(/^\/api\/domains\/([^/]+)\/stats$/);
     if (domainStatsMatch && method === 'GET') {
-      return await getDomainStatsSummary(env, domainStatsMatch[1], url);
+      return await getDomainStatsSummary(tenant, domainStatsMatch[1], url);
     }
     // GET /api/domains/:id/reports?date=YYYY-MM-DD
     const domainReportsMatch = path.match(/^\/api\/domains\/([^/]+)\/reports$/);
     if (domainReportsMatch && method === 'GET') {
-      return await getDomainReportByDate(env, domainReportsMatch[1], url);
+      return await getDomainReportByDate(tenant, domainReportsMatch[1], url);
     }
     // GET /api/domains/:id/sources
     const domainSourcesMatch = path.match(/^\/api\/domains\/([^/]+)\/sources$/);
     if (domainSourcesMatch && method === 'GET') {
-      return await getDomainSources(env, domainSourcesMatch[1], url);
+      return await getDomainSources(tenant, domainSourcesMatch[1], url);
     }
     // GET /api/domains/:id/explore?days=30
     const exploreMatch = path.match(/^\/api\/domains\/([^/]+)\/explore$/);
     if (exploreMatch && method === 'GET') {
       const id = parseInt(exploreMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       const rawDays = parseInt(url.searchParams.get('days') ?? '30', 10);
       const days = Math.min(isNaN(rawDays) ? 30 : rawDays, 90);
       const since = Math.floor(Date.now() / 1000) - days * 86400;
-      const results = await scope(env.DB).reports.allSources(id, since);
+      const results = await tenant.scope.reports.allSources(id, since);
       return json({ days, domain: domain.domain, sources: results });
     }
     // GET /api/domains/:id/anomalies?days=30
@@ -872,30 +875,30 @@ async function _handleApi(
     if (anomaliesMatch && method === 'GET') {
       const id = parseInt(anomaliesMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       const rawDays = parseInt(url.searchParams.get('days') ?? '30', 10);
       const days = Math.min(isNaN(rawDays) ? 30 : rawDays, 90);
       const since = Math.floor(Date.now() / 1000) - days * 86400;
-      const results = await scope(env.DB).reports.anomalySources(id, since);
+      const results = await tenant.scope.reports.anomalySources(id, since);
       return json({ days, domain: domain.domain, anomalies: results });
     }
     // GET /api/domains/:id/export — CSV download (requires normal session/API key auth)
     const exportMatch = path.match(/^\/api\/domains\/([^/]+)\/export$/);
     if (exportMatch && method === 'GET') {
-      return await exportDomainData(env, exportMatch[1]);
+      return await exportDomainData(tenant, exportMatch[1]);
     }
     // GET /api/domains/:id/check-summary — DMARC/SPF/DKIM/MTA-STS summary for PDF report
     const checkSummaryMatch = path.match(/^\/api\/domains\/([^/]+)\/check-summary$/);
     if (checkSummaryMatch && method === 'GET') {
-      return await getDomainCheckSummary(env, checkSummaryMatch[1]);
+      return await getDomainCheckSummary(tenant, checkSummaryMatch[1]);
     }
     // GET /api/domains/:id/dns-check — check if user has added the _dmarc TXT record
     const dnsCheckMatch = path.match(/^\/api\/domains\/([^/]+)\/dns-check$/);
     if (dnsCheckMatch && method === 'GET') {
       const id = parseInt(dnsCheckMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
       try {
@@ -909,7 +912,7 @@ async function _handleApi(
         const has_rua = records.some(r => r.includes(domain.rua_address));
         const current_record = records[0] ?? null;
         const cf_managed = !!domain.dns_record_id;
-        if (found) track(env, { event: 'domain.dns_verified' }); // fire-and-forget
+        if (found) track(tenant, { event: 'domain.dns_verified' }); // fire-and-forget
         return json({ found, has_rua, current_record, cf_managed });
       } catch {
         return json({ found: false, has_rua: false, current_record: null, cf_managed: false, error: 'dns lookup failed' });
@@ -920,10 +923,10 @@ async function _handleApi(
     if (dmarcPatchMatch && method === 'PATCH') {
       const id = parseInt(dmarcPatchMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       if (!domain.dns_record_id) return err('domain is not CF-managed — update DNS manually', 400);
-      if (!env.CLOUDFLARE_API_TOKEN) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
 
       const body = await parseBody<{ policy?: string }>(request);
       const policy = body.policy;
@@ -932,27 +935,28 @@ async function _handleApi(
       }
 
       // Build updated TXT record, preserving rua= and any pct= from existing record
-      const rd = reportsDomain();
+      const rd = tenant.settings.reportsDomain;
       const ruaPart = rd ? `; rua=mailto:${domain.rua_address}` : '';
       const newRecord = `v=DMARC1; p=${policy}${ruaPart}`;
 
       try {
-        await patchCfDnsRecord({ CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN }, domain.dns_record_id, newRecord);
+        // The record lives in the zone of the domain being updated.
+        await patchCfDnsRecord(tenant, domain.domain, domain.dns_record_id, newRecord);
       } catch (e: any) {
         return err(e.message ?? 'CF DNS patch failed', 500);
       }
 
       const prevPolicy = domain.dmarc_policy ?? 'none';
-      await scope(env.DB).domains.updateDmarcPolicy(id, policy);
+      await tenant.scope.domains.updateDmarcPolicy(id, policy);
 
-      logAudit(env.DB, {
+      logAudit(tenant, {
           actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
         action: 'domain.dmarc_mode_change',
         resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
         before_value: { policy: prevPolicy },
         after_value: { policy, record: newRecord },
       }, ctx);
-      track(env, { event: 'domain.dmarc_mode_change', from: prevPolicy, to: policy });
+      track(tenant, { event: 'domain.dmarc_mode_change', from: prevPolicy, to: policy });
 
       return json({ ok: true, policy, record: newRecord });
     }
@@ -962,10 +966,10 @@ async function _handleApi(
     if (onboardingMatch && method === 'GET') {
       const id = parseInt(onboardingMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
-      const rd = reportsDomain();
+      const rd = tenant.settings.reportsDomain;
       const DKIM_SELECTORS = getAllDkimSelectors();
 
       // Live DNS goes through the shared resolver: a DNS *error* is reported as such
@@ -1001,10 +1005,11 @@ async function _handleApi(
           // Check if the admin's email is verified as a CF Email Routing destination
           let destination_verified = false;
           let destination_debug: string | undefined;
-          const admin = await scope(env.DB!).team.firstAdmin();
+          const admin = await tenant.scope.team.firstAdmin();
           const admin_email = admin?.email ?? null;
-          const accountId = getAccountId();
-          if (!env.CLOUDFLARE_API_TOKEN) {
+          const accountId = tenant.settings.cfAccountId;
+          const cf = tenant.cf();
+          if (!cf) {
             destination_debug = 'no CF token';
           } else if (!accountId) {
             destination_debug = 'account ID not resolved';
@@ -1012,15 +1017,9 @@ async function _handleApi(
             destination_debug = 'no admin email found';
           } else {
             try {
-              const destRes = await fetch(
-                `https://api.cloudflare.com/client/v4/accounts/${accountId}/email/routing/addresses`,
-                { headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` } }
-              );
-              const destData = await destRes.json() as { success?: boolean; result?: { email: string; verified?: string | null }[]; errors?: { message: string }[] };
-              if (!destData.success) {
-                destination_debug = `CF API error: ${destData.errors?.map(e => e.message).join(', ') ?? 'unknown'}`;
-              } else {
-                const match = destData.result?.find(d => d.email === admin.email);
+              const destinations = await cf.request<{ email: string; verified?: string | null }[]>('GET', `/accounts/${accountId}/email/routing/addresses`);
+              {
+                const match = destinations?.find(d => d.email === admin.email);
                 if (!match) {
                   destination_debug = `email ${admin.email} not found in routing destinations`;
                 } else if (!match.verified) {
@@ -1030,7 +1029,9 @@ async function _handleApi(
                 }
               }
             } catch (e) {
-              destination_debug = `fetch error: ${e instanceof Error ? e.message : String(e)}`;
+              destination_debug = e instanceof CfApiError || e instanceof CfAuthError
+                ? `CF API error: ${cfErrorText(e)}`
+                : `fetch error: ${e instanceof Error ? e.message : String(e)}`;
             }
           }
 
@@ -1040,22 +1041,18 @@ async function _handleApi(
         // DKIM: CF API if available (full zone scan), else DoH for common selectors
         // Scans both TXT and CNAME records — providers like Proton Mail use CNAMEs for DKIM
         (async () => {
-          if (env.CLOUDFLARE_API_TOKEN && getZoneId()) {
+          const cf = tenant.cf();
+          if (cf) {
             try {
-              const zoneId = getZoneId();
-              const headers = { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}` };
-              const [txtRes, cnameRes] = await Promise.all([
-                fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=TXT&per_page=100`, { headers }),
-                fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=CNAME&per_page=100`, { headers }),
+              // DKIM records live in this domain's own zone.
+              const zone = await tenant.zoneFor(domain.domain);
+              const [txtRecords, cnameRecords] = await Promise.all([
+                cf.listDnsRecords(zone.id, { type: 'TXT', per_page: 100 }),
+                cf.listDnsRecords(zone.id, { type: 'CNAME', per_page: 100 }),
               ]);
-              const txtData = await txtRes.json() as { result?: { name: string; content: string }[] };
-              const cnameData = await cnameRes.json() as { result?: { name: string; content: string }[] };
-              const allRecords = [...(txtData.result ?? []), ...(cnameData.result ?? [])];
-              const found = allRecords.filter(r => r.name.includes('_domainkey'));
-              if (found.length > 0 || txtData.result !== undefined) {
-                return { selectors: found.map(r => ({ name: r.name, record: r.content })), source: 'cf' as const };
-              }
-            } catch {}
+              const found = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
+              return { selectors: found.map(r => ({ name: r.name, record: r.content })), source: 'cf' as const };
+            } catch { /* no usable zone or API access: fall back to DNS */ }
           }
           // DoH fallback
           const hits = await Promise.all(DKIM_SELECTORS.map(async sel => {
@@ -1096,12 +1093,12 @@ async function _handleApi(
         })(),
       ]);
 
-      const spfFlatConfig = await scope(env.DB).spf.get(domain.id);
+      const spfFlatConfig = await tenant.scope.spf.get(domain.id);
       return json({
         domain_id: domain.id,
         domain: domain.domain,
         rua_address: domain.rua_address,
-        cf_available: !!(env.CLOUDFLARE_API_TOKEN && getZoneId()),
+        cf_available: !!tenant.cf(),
         dmarc: { ...dmarcData, auth_record: authRecordData },
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },
         dkim: dkimData,
@@ -1113,18 +1110,18 @@ async function _handleApi(
 
     // POST /api/setup/email-routing — set up MX records + catch-all rule for reports domain
     if (path === '/api/setup/email-routing' && method === 'POST') {
-      if (!env.CLOUDFLARE_API_TOKEN || !getZoneId()) return err('Cloudflare credentials not configured', 400);
-      const rd = reportsDomain();
+      if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
+      const rd = tenant.settings.reportsDomain;
       if (!rd) return err('Reports domain not configured — complete the setup wizard first', 400);
 
       let result;
       try {
-        result = await ensureEmailRouting(env);
+        result = await ensureEmailRouting(tenant);
       } catch (e: any) {
         return err(e.message ?? 'Email routing setup failed', 500);
       }
       if (result.status !== 'skipped') {
-        logAudit(env.DB!, {
+        logAudit(tenant, {
               actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
           action: 'setup.email_routing',
           resource_type: 'email_routing', resource_id: rd, resource_name: rd,
@@ -1137,11 +1134,10 @@ async function _handleApi(
 
     // POST /api/settings/register-destination — register admin email as CF Email Routing destination
     if (path === '/api/settings/register-destination' && method === 'POST') {
-      const accountId = getAccountId();
-      if (!env.CLOUDFLARE_API_TOKEN || !accountId) return err('Cloudflare credentials not configured', 400);
-      const admin = await scope(env.DB!).team.firstAdmin();
+      if (!tenant.cf() || !tenant.settings.cfAccountId) return err('Cloudflare credentials not configured', 400);
+      const admin = await tenant.scope.team.firstAdmin();
       if (!admin?.email) return err('no admin email found', 400);
-      const sent = await registerEmailRoutingDestination(env.CLOUDFLARE_API_TOKEN, accountId, admin.email);
+      const sent = await registerEmailRoutingDestination(tenant, admin.email);
       return json({ ok: true, email: admin.email, verification_sent: sent });
     }
 
@@ -1150,57 +1146,47 @@ async function _handleApi(
     if (applyDmarcMatch && method === 'POST') {
       const id = parseInt(applyDmarcMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      if (!env.CLOUDFLARE_API_TOKEN || !getZoneId()) return err('Cloudflare credentials not configured', 400);
+      const cf = tenant.cf();
+      if (!cf) return err('Cloudflare credentials not configured', 400);
 
       const body = await parseBody<{ record?: string }>(request);
       if (!body.record) return err('record content is required', 400);
 
-      const zoneId = getZoneId()!;
-      const token = env.CLOUDFLARE_API_TOKEN;
       const recordName = `_dmarc.${domain.domain}`;
 
-      // Find existing record
-      const searchData = await fetch(
-        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=TXT&name=${encodeURIComponent(recordName)}&per_page=5`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      ).then(r => r.json() as Promise<{ result?: { id: string }[] }>);
-      const existingId = searchData.result?.[0]?.id;
+      // The write goes to the zone this domain lives in, not to a default zone.
+      let written;
+      let existingId: string | undefined;
+      try {
+        const zone = await tenant.zoneFor(domain.domain);
+        existingId = (await cf.listDnsRecords(zone.id, { type: 'TXT', name: recordName, per_page: 5 }))[0]?.id;
+        written = existingId
+          ? await cf.patchDnsRecord(zone.id, existingId, { content: body.record })
+          : await cf.createDnsRecord(zone.id, { type: 'TXT', name: recordName, content: body.record, ttl: 3600 });
+      } catch (e) {
+        return cfFailure(e);
+      }
 
-      const cfRes = existingId
-        ? await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${existingId}`, {
-            method: 'PATCH',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: body.record }),
-          })
-        : await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'TXT', name: recordName, content: body.record, ttl: 3600 }),
-          });
-
-      const cfData = await cfRes.json() as { success: boolean; result?: { id: string }; errors?: { message: string }[] };
-      if (!cfData.success) return err(cfData.errors?.map(e => e.message).join(', ') ?? 'CF DNS update failed', 500);
-
-      logAudit(env.DB!, {
+      logAudit(tenant, {
           actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
         action: existingId ? 'dns.update' : 'dns.create',
-        resource_type: 'dns_record', resource_id: cfData.result?.id ?? '', resource_name: recordName,
+        resource_type: 'dns_record', resource_id: written?.id ?? '', resource_name: recordName,
         after_value: { type: 'TXT', name: recordName, content: body.record },
       }, ctx);
 
       // Provision the cross-domain DMARC authorization record if not already present
       let authProvisioned = false;
-      const rd = reportsDomain();
+      const rd = tenant.settings.reportsDomain;
       if (rd && !domain.dns_record_id) {
         try {
-          const authResult = await provisionDomain({ CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN ?? '' }, domain.domain, {
-            db: env.DB!, actor_id: userBySession?.id ?? null,
+          const authResult = await provisionDomain(tenant, domain.domain, {
+            actor_id: userBySession?.id ?? null,
             actor_email: userBySession?.email ?? null, actor_type: 'user', ctx,
           });
           if (authResult.recordId) {
-            await scope(env.DB!).domains.setDnsRecord(id, authResult.recordId, { provisioned: true });
+            await tenant.scope.domains.setDnsRecord(id, authResult.recordId, { provisioned: true });
             authProvisioned = true;
           }
         } catch (e) {
@@ -1230,12 +1216,13 @@ async function _handleApi(
     if (applySpfMatch && method === 'POST') {
       const id = parseInt(applySpfMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      if (!env.CLOUDFLARE_API_TOKEN || !getZoneId()) return err('Cloudflare credentials not configured', 400);
+      const cf = tenant.cf();
+      if (!cf) return err('Cloudflare credentials not configured', 400);
 
       // Block if SPF flattening is active — wizard edits would be overwritten by next cron run
-      const flatConfig = await scope(env.DB).spf.get(id);
+      const flatConfig = await tenant.scope.spf.get(id);
       if (flatConfig?.enabled) return err('SPF flattening is active for this domain. Disable it before editing the SPF record manually.', 409);
 
       const body = await parseBody<{ record?: string; confirm_overwrite?: boolean }>(request);
@@ -1243,16 +1230,18 @@ async function _handleApi(
       if (!body.record.startsWith('v=spf1')) return err('SPF record must start with v=spf1', 400);
       if (!body.record.includes('all')) return err('SPF record must end with an all mechanism', 400);
 
-      const zoneId = getZoneId()!;
-      const token = env.CLOUDFLARE_API_TOKEN;
       const recordName = domain.domain;
 
-      // Find existing SPF TXT record
-      const searchData = await fetch(
-        `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=TXT&name=${encodeURIComponent(recordName)}&per_page=100`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      ).then(r => r.json() as Promise<{ result?: { id: string; content: string }[] }>);
-      const existingSpf = searchData.result?.find(r => r.content.replace(/^"|"$/g, '').startsWith('v=spf1'));
+      // Find the existing SPF TXT record in this domain's own zone
+      let zoneId: string;
+      let existingSpf;
+      try {
+        zoneId = (await tenant.zoneFor(domain.domain)).id;
+        existingSpf = (await cf.listDnsRecords(zoneId, { type: 'TXT', name: recordName, per_page: 100 }))
+          .find(r => r.content.replace(/^"|"$/g, '').startsWith('v=spf1'));
+      } catch (e) {
+        return cfFailure(e);
+      }
       const existingId = existingSpf?.id;
 
       // Safety: require explicit confirmation when overwriting an existing record
@@ -1260,25 +1249,19 @@ async function _handleApi(
         return json({ ok: false, needs_confirmation: true, existing_record: existingSpf.content.replace(/^"|"$/g, ''), proposed_record: body.record }, 200);
       }
 
-      const cfRes = existingId
-        ? await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${existingId}`, {
-            method: 'PATCH',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: body.record }),
-          })
-        : await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'TXT', name: recordName, content: body.record, ttl: 3600 }),
-          });
+      let written;
+      try {
+        written = existingId
+          ? await cf.patchDnsRecord(zoneId, existingId, { content: body.record })
+          : await cf.createDnsRecord(zoneId, { type: 'TXT', name: recordName, content: body.record, ttl: 3600 });
+      } catch (e) {
+        return cfFailure(e);
+      }
 
-      const cfData = await cfRes.json() as { success: boolean; result?: { id: string }; errors?: { message: string }[] };
-      if (!cfData.success) return err(cfData.errors?.map(e => e.message).join(', ') ?? 'CF DNS update failed', 500);
-
-      logAudit(env.DB!, {
+      logAudit(tenant, {
           actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
         action: existingId ? 'dns.update' : 'dns.create',
-        resource_type: 'dns_record', resource_id: cfData.result?.id ?? '', resource_name: recordName,
+        resource_type: 'dns_record', resource_id: written?.id ?? '', resource_name: recordName,
         before_value: existingSpf ? { type: 'TXT', name: recordName, content: existingSpf.content } : null,
         after_value: { type: 'TXT', name: recordName, content: body.record },
       }, ctx);
@@ -1288,28 +1271,34 @@ async function _handleApi(
 
     // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
-      if (!env.CLOUDFLARE_API_TOKEN || !getZoneId()) return err('Cloudflare credentials not configured', 400);
-      const accountId = getAccountId();
-      if (!accountId) return err('Account ID not available', 400);
-      const bd = getBaseDomain();
+      const cf = tenant.cf();
+      if (!cf) return err('Cloudflare credentials not configured', 400);
+      const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
-      const workerName = env.WORKER_NAME ?? 'inbox-angel-worker';
+      const workerName = tenant.workerName;
       const hostname = `inbox-angel.${bd}`;
 
-      const domainRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ environment: 'production', hostname, service: workerName, zone_id: getZoneId() }),
-      });
-      const domainData = await domainRes.json() as { success: boolean; errors?: { message: string }[] };
-      if (!domainData.success) {
-        const msg = domainData.errors?.map(e => e.message).join(', ') ?? 'Failed to register custom domain';
-        return err(msg, 502);
+      // The hostname is on the base domain's zone.
+      let zone;
+      try {
+        zone = await tenant.zoneFor(bd);
+      } catch (e) {
+        return cfFailure(e, 502);
+      }
+      const accountId = zone.accountId ?? tenant.settings.cfAccountId;
+      if (!accountId) return err('Account ID not available', 400);
+
+      try {
+        await cf.request('PUT', `/accounts/${accountId}/workers/domains`, {
+          body: { environment: 'production', hostname, service: workerName, zone_id: zone.id },
+        });
+      } catch (e) {
+        return err(cfErrorText(e) || 'Failed to register custom domain', 502);
       }
 
-      await scope(env.DB!).settings.set('custom_domain', hostname);
-      logAudit(env.DB!, {
+      await tenant.scope.settings.set('custom_domain', hostname);
+      logAudit(tenant, {
           actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
         action: 'setup.custom_domain',
         resource_type: 'custom_domain', resource_id: hostname, resource_name: hostname,
@@ -1323,10 +1312,10 @@ async function _handleApi(
     if (wizardGetMatch && method === 'GET') {
       const id = parseInt(wizardGetMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
-      const raw = await scope(env.DB).settings.get(`wizard_state_${id}`);
+      const raw = await tenant.scope.settings.get(`wizard_state_${id}`);
       const defaults = { domain: 'not_started', spf: 'not_started', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' };
       const state = raw ? { ...defaults, ...JSON.parse(raw.value) } : defaults;
       return json(state);
@@ -1337,7 +1326,7 @@ async function _handleApi(
     if (wizardPutMatch && method === 'PUT') {
       const id = parseInt(wizardPutMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
       const body = await parseBody<Record<string, string>>(request);
@@ -1345,7 +1334,7 @@ async function _handleApi(
       const validStates = ['not_started', 'complete', 'skipped'];
 
       // Merge with existing state
-      const raw = await scope(env.DB).settings.get(`wizard_state_${id}`);
+      const raw = await tenant.scope.settings.get(`wizard_state_${id}`);
       const defaults = { domain: 'not_started', spf: 'not_started', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' };
       const current = raw ? { ...defaults, ...JSON.parse(raw.value) } : defaults;
 
@@ -1355,7 +1344,7 @@ async function _handleApi(
         }
       }
 
-      await scope(env.DB).settings.set(`wizard_state_${id}`, JSON.stringify(current));
+      await tenant.scope.settings.set(`wizard_state_${id}`, JSON.stringify(current));
       return json(current);
     }
 
@@ -1367,15 +1356,12 @@ async function _handleApi(
     if (setDefaultMatch && method === 'PUT') {
       const id = parseInt(setDefaultMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
-      await scope(env.DB!).domains.setDefault(id);
+      await tenant.scope.domains.setDefault(id);
 
-      // Reset caches so next request re-derives REPORTS_DOMAIN and FROM_EMAIL from new default
-      resetEnvCache();
-
-      logAudit(env.DB!, {
+      logAudit(tenant, {
         actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
         action: 'domain.set_default',
         resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
@@ -1394,7 +1380,7 @@ async function _handleApi(
     if (rolloutNextMatch && method === 'GET') {
       const id = parseInt(rolloutNextMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
       // Fetch live DMARC record to get current p= / t= (and legacy pct=)
@@ -1418,7 +1404,7 @@ async function _handleApi(
 
       // Pass rate from last 30 days
       const since30d = Math.floor(Date.now() / 1000) - 30 * 86400;
-      const statsResult = await scope(env.DB).reports.dailyStats(id, since30d);
+      const statsResult = await tenant.scope.reports.dailyStats(id, since30d);
       const rows = statsResult ?? [];
       const totalMsgs = rows.reduce((n, r) => n + (r.total ?? 0), 0);
       const passedMsgs = rows.reduce((n, r) => n + (r.passed ?? 0), 0);
@@ -1426,7 +1412,7 @@ async function _handleApi(
 
       // Unknown senders check: sources with no aligned domain in last 7 days
       const since7d = Math.floor(Date.now() / 1000) - 7 * 86400;
-      const sourcesResult = await scope(env.DB).reports.topFailingSources(id, since7d);
+      const sourcesResult = await tenant.scope.reports.topFailingSources(id, since7d);
       const unknownSenders = (sourcesResult ?? []).filter(
         (s: any) => !s.spf_domain && !s.dkim_domain
       ).length;
@@ -1477,7 +1463,7 @@ async function _handleApi(
     if (rolloutAdvanceMatch && method === 'POST') {
       const id = parseInt(rolloutAdvanceMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
       // New clients send { policy, testing }. Legacy clients send { policy, pct }: pct is
@@ -1495,35 +1481,35 @@ async function _handleApi(
       }
 
       const stored = toStored(ROLLOUT_SEQUENCE[stepIndexFor(policy, pct ?? null, testing === true)]);
-      await scope(env.DB).domains.updateRollout(id, stored.policy, stored.pct);
+      await tenant.scope.domains.updateRollout(id, stored.policy, stored.pct);
       return json({ ok: true, rollout_rec_policy: stored.policy, rollout_rec_pct: stored.pct, rollout_rec_testing: stored.pct === 0 });
     }
 
     // DELETE /api/domains/:id
     const domainDeleteMatch = path.match(/^\/api\/domains\/([^/]+)$/);
     if (domainDeleteMatch && method === 'DELETE') {
-      return await deleteDomain(env, domainDeleteMatch[1], { id: userBySession?.id, email: userBySession?.email }, ctx);
+      return await deleteDomain(tenant, domainDeleteMatch[1], { id: userBySession?.id, email: userBySession?.email }, ctx);
     }
     // GET /api/reports
     if (path === '/api/reports' && method === 'GET') {
-      return await getReports(env, url);
+      return await getReports(tenant, url);
     }
     // GET /api/reports/:id
     const reportMatch = path.match(/^\/api\/reports\/([^/]+)$/);
     if (reportMatch && method === 'GET') {
-      return await getReport(env, reportMatch[1]);
+      return await getReport(tenant, reportMatch[1]);
     }
     // GET /api/check-results
     if (path === '/api/check-results' && method === 'GET') {
-      return await getCheckResults(env);
+      return await getCheckResults(tenant);
     }
 
     // GET /api/domains/:id/monitor-subs — list monitoring subscriptions for a domain
     const monitorSubsMatch = path.match(/^\/api\/domains\/(\d+)\/monitor-subs$/);
     if (monitorSubsMatch && method === 'GET') {
-      const domain = await scope(env.DB).domains.getById(parseInt(monitorSubsMatch[1], 10));
+      const domain = await tenant.scope.domains.getById(parseInt(monitorSubsMatch[1], 10));
       if (!domain) return err('domain not found', 404);
-      const results = await scope(env.DB).monitor.byDomain(domain.domain);
+      const results = await tenant.scope.monitor.byDomain(domain.domain);
       return json({ subs: results });
     }
 
@@ -1532,7 +1518,7 @@ async function _handleApi(
     if (monitorSubPatchMatch && method === 'PATCH') {
       const body = await parseBody<{ active?: boolean }>(request);
       if (typeof body.active !== 'boolean') return err('active (boolean) is required', 400);
-      await scope(env.DB).monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
+      await tenant.scope.monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
       return json({ ok: true });
     }
 
@@ -1541,7 +1527,7 @@ async function _handleApi(
     if (domainAlertsMatch && method === 'PATCH') {
       const body = await parseBody<{ alerts_enabled?: boolean }>(request);
       if (typeof body.alerts_enabled !== 'boolean') return err('alerts_enabled (boolean) is required', 400);
-      await scope(env.DB).domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
+      await tenant.scope.domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
       return json({ ok: true });
     }
 
@@ -1549,7 +1535,7 @@ async function _handleApi(
     if (path === '/api/team' && method === 'GET') {
       const actor = await globals(env.DB).users.bySession(requestKey);
       if (!actor || actor.role !== 'admin') return err('admin required', 403);
-      const results = await scope(env.DB).team.list();
+      const results = await tenant.scope.team.list();
       return json({ users: results, current_user_id: actor.id });
     }
 
@@ -1567,14 +1553,14 @@ async function _handleApi(
       const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 3600; // 7 days
       const inviteEmail = body.email.toLowerCase().trim();
       const inviteRole = body.role === 'admin' ? 'admin' : 'member';
-      await scope(env.DB).team.insertInvite({
+      await tenant.scope.team.insertInvite({
         token,
         email: inviteEmail,
         role: inviteRole,
         invited_by: actor.email,
         expires_at: expiresAt,
       });
-      logAudit(env.DB, {
+      logAudit(tenant, {
           actor_id: actor.id, actor_email: actor.email, actor_type: 'user',
         action: 'auth.invite_sent',
         resource_type: 'user', resource_name: inviteEmail,
@@ -1589,9 +1575,9 @@ async function _handleApi(
       const actor = await globals(env.DB).users.bySession(requestKey);
       if (!actor || actor.role !== 'admin') return err('admin required', 403);
       if (actor.id === teamMemberMatch[1]) return err('cannot remove yourself', 400);
-      const removed = await scope(env.DB).team.getMember(teamMemberMatch[1]).catch(() => null);
-      await scope(env.DB).team.removeUser(teamMemberMatch[1]);
-      logAudit(env.DB, {
+      const removed = await tenant.scope.team.getMember(teamMemberMatch[1]).catch(() => null);
+      await tenant.scope.team.removeUser(teamMemberMatch[1]);
+      logAudit(tenant, {
           actor_id: actor.id, actor_email: actor.email, actor_type: 'user',
         action: 'team.member_removed',
         resource_type: 'user', resource_id: teamMemberMatch[1], resource_name: removed?.email ?? teamMemberMatch[1],
@@ -1605,7 +1591,7 @@ async function _handleApi(
     if (spfPreviewMatch && method === 'GET') {
       const id = parseInt(spfPreviewMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       try {
         const { ips, extra, allQualifier } = await collectIps(domain.domain);
@@ -1621,24 +1607,20 @@ async function _handleApi(
     if (spfFlattenMatch) {
       const id = parseInt(spfFlattenMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
-      const available = !!(env.CLOUDFLARE_API_TOKEN && getZoneId());
+      const available = !!tenant.cf();
 
       // GET — return current config + availability
       if (method === 'GET') {
-        const config = await scope(env.DB).spf.get(id);
+        const config = await tenant.scope.spf.get(id);
         return json({ available, config: config ?? null, lookup_count: domain.spf_lookup_count ?? null });
       }
 
       // POST — enable + trigger initial flatten
       if (method === 'POST') {
         if (!available) return err('Cloudflare credentials not configured — complete the setup wizard first', 422);
-
-        const flatEnv = {
-          CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN!,
-        };
 
         // Walk lookup count first (for display)
         let spfRecord;
@@ -1652,29 +1634,29 @@ async function _handleApi(
         // Do initial flatten
         let result;
         try {
-          result = await flattenSpf(domain.domain, flatEnv);
+          result = await flattenSpf(tenant, domain.domain);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           // Save config with error so user can see it
-          await scope(env.DB).spf.upsert({
+          await tenant.scope.spf.upsert({
             domain_id: id,
             canonical_record: spfRecord?.raw ?? '',
             lookup_count,
             cf_record_id: null,
           });
-          await scope(env.DB).spf.updateError(id, msg);
+          await tenant.scope.spf.updateError(id, msg);
           return err(msg, 422);
         }
 
-        await scope(env.DB).spf.upsert({
+        await tenant.scope.spf.upsert({
           domain_id: id,
           canonical_record: result.canonical_record,
           lookup_count,
           cf_record_id: result.cf_record_id,
         });
-        await scope(env.DB).spf.updateResult(id, result.flattened_record, result.ip_count, result.cf_record_id);
+        await tenant.scope.spf.updateResult(id, result.flattened_record, result.ip_count, result.cf_record_id);
 
-        logAudit(env.DB, {
+        logAudit(tenant, {
               actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
           action: 'spf_flatten.enable',
           resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
@@ -1682,7 +1664,7 @@ async function _handleApi(
           after_value: { spf_record: result.flattened_record, ip_count: result.ip_count },
         }, ctx);
         if (result.cf_record_id) {
-          logAudit(env.DB, {
+          logAudit(tenant, {
                   actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
             action: 'dns.update',
             resource_type: 'dns_record', resource_id: result.cf_record_id, resource_name: `TXT _spf.${domain.domain}`,
@@ -1691,36 +1673,34 @@ async function _handleApi(
           }, ctx);
         }
 
-        track(env, { event: 'spf_flatten.enable' }); // fire-and-forget
-        const config = await scope(env.DB).spf.get(id);
+        track(tenant, { event: 'spf_flatten.enable' }); // fire-and-forget
+        const config = await tenant.scope.spf.get(id);
         return json({ ok: true, config }, 201);
       }
 
       // DELETE — disable + restore canonical record
       if (method === 'DELETE') {
-        const config = await scope(env.DB).spf.get(id);
+        const config = await tenant.scope.spf.get(id);
         if (!config) return err('SPF flattening not configured for this domain', 404);
 
         if (available && config.cf_record_id && config.canonical_record) {
           try {
-            await restoreSpf(domain.domain, config.cf_record_id, config.canonical_record, {
-              CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN!,
-            });
+            await restoreSpf(tenant, domain.domain, config.cf_record_id, config.canonical_record);
           } catch (e) {
             console.warn(`[spf-flatten] restore failed for ${domain.domain}:`, e);
             // Non-fatal — delete config anyway so user can retry
           }
         }
 
-        logAudit(env.DB, {
+        logAudit(tenant, {
               actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
           action: 'spf_flatten.disable',
           resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
           before_value: { spf_record: config.flattened_record ?? config.canonical_record },
           after_value: { spf_record: config.canonical_record },
         }, ctx);
-        track(env, { event: 'spf_flatten.disable' }); // fire-and-forget
-        await scope(env.DB).spf.delete(id);
+        track(tenant, { event: 'spf_flatten.disable' }); // fire-and-forget
+        await tenant.scope.spf.delete(id);
         return new Response(null, { status: 204 });
       }
     }
@@ -1730,30 +1710,27 @@ async function _handleApi(
     if (mtaStsMatch) {
       const id = parseInt(mtaStsMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const domain = await scope(env.DB).domains.getById(id);
+      const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
       if (method === 'GET') {
-        const config = await scope(env.DB).mtaSts.get(id);
+        const config = await tenant.scope.mtaSts.get(id);
         const tlsSince = Math.floor(Date.now() / 1000) - 30 * 86400; // last 30 days
-        const summary = config ? await scope(env.DB).reports.tlsSummary(id, tlsSince) : null;
-        return json({ available: !!(env.CLOUDFLARE_API_TOKEN && getZoneId()), config, summary });
+        const summary = config ? await tenant.scope.reports.tlsSummary(id, tlsSince) : null;
+        return json({ available: !!tenant.cf(), config, summary });
       }
 
       if (method === 'POST') {
         // Enable MTA-STS
-        if (!env.CLOUDFLARE_API_TOKEN || !getZoneId() || !reportsDomain()) {
+        if (!tenant.cf() || !tenant.settings.reportsDomain) {
           return err('Cloudflare credentials not configured', 400);
         }
-        const existing = await scope(env.DB).mtaSts.get(id);
+        const existing = await tenant.scope.mtaSts.get(id);
         if (existing?.enabled) return err('MTA-STS already enabled for this domain', 409);
 
         try {
-          const result = await provisionMtaSts(domain.domain, {
-            CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
-            WORKER_NAME: env.WORKER_NAME ?? 'inbox-angel-worker',
-          });
-          await scope(env.DB).mtaSts.insert({
+          const result = await provisionMtaSts(tenant, domain.domain);
+          await tenant.scope.mtaSts.insert({
             domain_id: id,
             mode: result.mode,
             mx_hosts: result.mx_hosts.join(','),
@@ -1762,18 +1739,18 @@ async function _handleApi(
             tls_rpt_record_id: result.tls_rpt_record_id,
             cname_record_id: result.cname_record_id,
           });
-          const rd = reportsDomain()!;
-          logAudit(env.DB, {
+          const rd = tenant.settings.reportsDomain!;
+          logAudit(tenant, {
                   actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
             action: 'mta_sts.enable',
             resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
             after_value: { mode: result.mode, mx_hosts: result.mx_hosts, policy_id: result.policy_id },
           }, ctx);
           // Log each DNS record created
-          logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, after_value: { type: 'TXT', name: `_mta-sts.${domain.domain}`, content: `v=STSv1; id=${result.policy_id}` } }, ctx);
-          logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.tls_rpt_record_id, resource_name: `_smtp._tls.${domain.domain}`, after_value: { type: 'TXT', name: `_smtp._tls.${domain.domain}`, content: `v=TLSRPTv1; rua=mailto:tls-rpt@${rd}` } }, ctx);
-          logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.cname_record_id, resource_name: `mta-sts.${domain.domain}`, after_value: { type: 'CNAME', name: `mta-sts.${domain.domain}`, proxied: true } }, ctx);
-          track(env, { event: 'mta_sts.enable' }); // fire-and-forget
+          logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, after_value: { type: 'TXT', name: `_mta-sts.${domain.domain}`, content: `v=STSv1; id=${result.policy_id}` } }, ctx);
+          logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.tls_rpt_record_id, resource_name: `_smtp._tls.${domain.domain}`, after_value: { type: 'TXT', name: `_smtp._tls.${domain.domain}`, content: `v=TLSRPTv1; rua=mailto:tls-rpt@${rd}` } }, ctx);
+          logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.create', resource_type: 'dns_record', resource_id: result.cname_record_id, resource_name: `mta-sts.${domain.domain}`, after_value: { type: 'CNAME', name: `mta-sts.${domain.domain}`, proxied: true } }, ctx);
+          track(tenant, { event: 'mta_sts.enable' }); // fire-and-forget
           return json({ ok: true, mode: result.mode, mx_hosts: result.mx_hosts });
         } catch (e: any) {
           return err(e.message ?? 'provisioning failed', 500);
@@ -1782,18 +1759,17 @@ async function _handleApi(
 
       if (method === 'PATCH') {
         // Update mode (testing → enforce) or refresh MX hosts
-        const config = await scope(env.DB).mtaSts.get(id);
+        const config = await tenant.scope.mtaSts.get(id);
         if (!config?.enabled) return err('MTA-STS not enabled for this domain', 404);
-        if (!env.CLOUDFLARE_API_TOKEN || !getZoneId()) return err('Cloudflare credentials not configured', 400);
+        if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
 
         const body = await parseBody<{ mode?: string; refresh_mx?: boolean }>(request);
-        const patchEnv = { CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN };
 
         if (body.mode && (body.mode === 'testing' || body.mode === 'enforce')) {
           const newPolicyId = generatePolicyId();
-          await updateMtaStsTxtRecord(config.mta_sts_record_id!, newPolicyId, patchEnv);
-          await scope(env.DB).mtaSts.updateMode(id, body.mode, newPolicyId);
-          logAudit(env.DB, {
+          await updateMtaStsTxtRecord(tenant, domain.domain, config.mta_sts_record_id!, newPolicyId);
+          await tenant.scope.mtaSts.updateMode(id, body.mode, newPolicyId);
+          logAudit(tenant, {
                   actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
             action: 'mta_sts.mode_change',
             resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
@@ -1801,9 +1777,9 @@ async function _handleApi(
             after_value: { mode: body.mode, policy_id: newPolicyId },
           }, ctx);
           if (config.mta_sts_record_id) {
-            logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.update', resource_type: 'dns_record', resource_id: config.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, before_value: { content: `v=STSv1; id=${config.policy_id}` }, after_value: { content: `v=STSv1; id=${newPolicyId}` } }, ctx);
+            logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.update', resource_type: 'dns_record', resource_id: config.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, before_value: { content: `v=STSv1; id=${config.policy_id}` }, after_value: { content: `v=STSv1; id=${newPolicyId}` } }, ctx);
           }
-          track(env, { event: 'mta_sts.mode_change', from: config.mode, to: body.mode }); // fire-and-forget
+          track(tenant, { event: 'mta_sts.mode_change', from: config.mode, to: body.mode }); // fire-and-forget
           return json({ ok: true, mode: body.mode, policy_id: newPolicyId });
         }
 
@@ -1817,9 +1793,9 @@ async function _handleApi(
           }
           if (mxHosts.length === 0) return err('No MX records found', 400);
           const newPolicyId = generatePolicyId();
-          await updateMtaStsTxtRecord(config.mta_sts_record_id!, newPolicyId, patchEnv);
-          await scope(env.DB).mtaSts.updateMxHosts(id, mxHosts.join(','), newPolicyId);
-          logAudit(env.DB, {
+          await updateMtaStsTxtRecord(tenant, domain.domain, config.mta_sts_record_id!, newPolicyId);
+          await tenant.scope.mtaSts.updateMxHosts(id, mxHosts.join(','), newPolicyId);
+          logAudit(tenant, {
                   actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
             action: 'mta_sts.mx_refresh',
             resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
@@ -1834,13 +1810,14 @@ async function _handleApi(
 
       if (method === 'DELETE') {
         // Disable + remove DNS records
-        const config = await scope(env.DB).mtaSts.get(id);
+        const config = await tenant.scope.mtaSts.get(id);
         if (!config) return new Response(null, { status: 204 });
 
-        if (env.CLOUDFLARE_API_TOKEN && getZoneId()) {
+        if (tenant.cf()) {
           try {
             await deprovisionMtaSts(
-              { CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN },
+              tenant,
+              domain.domain,
               {
                 mta_sts_record_id: config.mta_sts_record_id ?? null,
                 tls_rpt_record_id: config.tls_rpt_record_id ?? null,
@@ -1852,19 +1829,19 @@ async function _handleApi(
           }
         }
 
-        logAudit(env.DB, {
+        logAudit(tenant, {
               actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user',
           action: 'mta_sts.disable',
           resource_type: 'domain', resource_id: String(id), resource_name: domain.domain,
           before_value: { mode: config.mode, mx_hosts: config.mx_hosts?.split(',').filter(Boolean) ?? [], policy_id: config.policy_id },
         }, ctx);
         // Log each DNS record deleted
-        const rd = reportsDomain();
-        if (config.mta_sts_record_id) logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, before_value: { type: 'TXT', name: `_mta-sts.${domain.domain}`, content: `v=STSv1; id=${config.policy_id}` } }, ctx);
-        if (config.tls_rpt_record_id && rd) logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.tls_rpt_record_id, resource_name: `_smtp._tls.${domain.domain}`, before_value: { type: 'TXT', name: `_smtp._tls.${domain.domain}`, content: `v=TLSRPTv1; rua=mailto:tls-rpt@${rd}` } }, ctx);
-        if (config.cname_record_id) logAudit(env.DB, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.cname_record_id, resource_name: `mta-sts.${domain.domain}`, before_value: { type: 'CNAME', name: `mta-sts.${domain.domain}` } }, ctx);
-        track(env, { event: 'mta_sts.disable' }); // fire-and-forget
-        await scope(env.DB).mtaSts.delete(id);
+        const rd = tenant.settings.reportsDomain;
+        if (config.mta_sts_record_id) logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.mta_sts_record_id, resource_name: `_mta-sts.${domain.domain}`, before_value: { type: 'TXT', name: `_mta-sts.${domain.domain}`, content: `v=STSv1; id=${config.policy_id}` } }, ctx);
+        if (config.tls_rpt_record_id && rd) logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.tls_rpt_record_id, resource_name: `_smtp._tls.${domain.domain}`, before_value: { type: 'TXT', name: `_smtp._tls.${domain.domain}`, content: `v=TLSRPTv1; rua=mailto:tls-rpt@${rd}` } }, ctx);
+        if (config.cname_record_id) logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'dns.delete', resource_type: 'dns_record', resource_id: config.cname_record_id, resource_name: `mta-sts.${domain.domain}`, before_value: { type: 'CNAME', name: `mta-sts.${domain.domain}` } }, ctx);
+        track(tenant, { event: 'mta_sts.disable' }); // fire-and-forget
+        await tenant.scope.mtaSts.delete(id);
         return new Response(null, { status: 204 });
       }
     }
@@ -1874,7 +1851,7 @@ async function _handleApi(
     if (mtaStsPolicyMatch && method === 'GET') {
       const id = parseInt(mtaStsPolicyMatch[1], 10);
       if (isNaN(id)) return err('invalid domain id', 400);
-      const config = await scope(env.DB).mtaSts.get(id);
+      const config = await tenant.scope.mtaSts.get(id);
       if (!config?.enabled) return err('MTA-STS not enabled', 404);
       const mxHosts = config.mx_hosts ? config.mx_hosts.split(',').filter(Boolean) : [];
       const policy = buildPolicyFile(config.mode, mxHosts, 86400);
@@ -1887,7 +1864,7 @@ async function _handleApi(
       if (!actor || actor.role !== 'admin') return err('admin required', 403);
       const page  = parseInt(url.searchParams.get('page')  ?? '1',  10);
       const limit = parseInt(url.searchParams.get('limit') ?? '50', 10);
-      const results = await scope(env.DB).audit.list({
+      const results = await tenant.scope.audit.list({
         page:      isNaN(page)  ? 1  : page,
         limit:     isNaN(limit) ? 50 : limit,
         action:    url.searchParams.get('action')    ?? undefined,
@@ -1909,7 +1886,7 @@ async function _handleApi(
       if (list.length === 0) return err('no valid domains provided', 400);
       if (list.length > 50) return err('too many domains: limit is 50 per request', 400);
       const results = await bulkInsertDomains(
-        { DB: env.DB, CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN },
+        tenant,
         list,
         { actorId: actor.id, actorEmail: actor.email, ctx },
       );

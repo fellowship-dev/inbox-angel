@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ensureNullSenderRecords } from '../../src/setup/email-routing';
+import { makeTenant } from '../helpers/tenant';
 
 const TOKEN = 'test-token';
 const ZONE = 'zone-123';
@@ -7,11 +8,8 @@ const REPORTS = 'reports.example.com';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
-// Mock env-utils (imported by email-routing.ts)
-vi.mock('../../src/env-utils', () => ({
-  getZoneId: vi.fn().mockReturnValue('zone-123'),
-  reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
-}));
+// The reports domain's zone is already known to the tenant, so no zone lookup hits the mock.
+const tenant = () => makeTenant({ cfToken: TOKEN, settings: { zoneId: ZONE, zoneName: 'example.com' } });
 
 beforeEach(() => {
   fetchMock = vi.fn();
@@ -38,7 +36,7 @@ describe('ensureNullSenderRecords', () => {
       // Create DMARC record
       .mockResolvedValueOnce(cfOk({ id: 'rec-dmarc' }));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions).toHaveLength(2);
     expect(actions[0]).toContain('created');
@@ -64,7 +62,7 @@ describe('ensureNullSenderRecords', () => {
       // Search DMARC — exact match found
       .mockResolvedValueOnce(cfOk([{ id: 'existing-dmarc', content: 'v=DMARC1; p=reject;' }]));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions).toHaveLength(2);
     expect(actions[0]).toContain('exists');
@@ -84,7 +82,7 @@ describe('ensureNullSenderRecords', () => {
       // Create DMARC
       .mockResolvedValueOnce(cfOk({ id: 'rec-dmarc' }));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions[0]).toContain('conflict');
     expect(actions[1]).toContain('created');
@@ -105,7 +103,7 @@ describe('ensureNullSenderRecords', () => {
       // Search DMARC — different policy
       .mockResolvedValueOnce(cfOk([{ id: 'existing-dmarc', content: 'v=DMARC1; p=none;' }]));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions[0]).toContain('exists');
     expect(actions[1]).toContain('conflict');
@@ -119,7 +117,7 @@ describe('ensureNullSenderRecords', () => {
       .mockResolvedValueOnce(cfOk([{ id: 'spf-1', content: '"v=spf1 -all"' }]))
       .mockResolvedValueOnce(cfOk([{ id: 'dmarc-1', content: '"v=DMARC1; p=reject;"' }]));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions[0]).toContain('exists');
     expect(actions[1]).toContain('exists');
@@ -136,7 +134,7 @@ describe('ensureNullSenderRecords', () => {
       // Create DMARC
       .mockResolvedValueOnce(cfOk({ id: 'new-dmarc' }));
 
-    const actions = await ensureNullSenderRecords(TOKEN, ZONE, REPORTS);
+    const actions = await ensureNullSenderRecords(tenant(), REPORTS);
 
     expect(actions[0]).toContain('created');
     expect(actions[1]).toContain('created');

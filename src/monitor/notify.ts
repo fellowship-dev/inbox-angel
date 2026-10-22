@@ -3,12 +3,8 @@
 // Falls back to console.log if binding is absent (wrangler dev has no local send_email support).
 
 import { DomainChange } from './check';
-import { reportsDomain, fromEmail } from '../env-utils';
+import type { TenantContext } from '../tenancy/context';
 import { buildDnsAlertHtml } from '../email/html-templates';
-
-export interface NotifyEnv {
-  SEND_EMAIL?: SendEmail;
-}
 
 const SEVERITY_EMOJI: Record<DomainChange['severity'], string> = {
   improved: '✅',
@@ -49,25 +45,25 @@ export async function sendChangeNotification(
   email: string,
   domain: string,
   changes: DomainChange[],
-  env: NotifyEnv,
+  tenant: TenantContext,
 ): Promise<void> {
   const hasDegraded = changes.some(c => c.severity === 'degraded');
   const subject = hasDegraded
     ? `⚠️ ${domain} email security degraded`
     : `${domain} email security updated`;
 
-  const rd = reportsDomain()!;
+  const rd = tenant.settings.reportsDomain!;
   const body = buildEmailBody(domain, changes, rd);
-  const html = buildDnsAlertHtml({ domain, changes, reportsDomain: rd });
+  const html = buildDnsAlertHtml({ domain, changes, reportsDomain: rd, brand: tenant.brand });
 
-  if (!env.SEND_EMAIL) {
+  if (!tenant.env.SEND_EMAIL) {
     console.log(`[notify] SEND_EMAIL binding not configured — would send to ${email}: ${subject}\n${body}`);
     return;
   }
 
   try {
-    await env.SEND_EMAIL.send({
-      from: { name: 'InboxAngel', email: fromEmail()! },
+    await tenant.env.SEND_EMAIL.send({
+      from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
       to: [email],
       subject,
       text: body,

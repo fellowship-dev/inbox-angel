@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { resolveDomain } from '../../src/email/resolve-domain';
+import { makeTenant } from '../helpers/tenant';
 import type { Domain } from '../../src/db/types';
 
 // ── Fixtures ──────────────────────────────────────────────────
@@ -41,7 +42,7 @@ function makeDb(domain: Domain | null): D1Database {
 describe('resolveDomain', () => {
   it('returns domain for a known policy domain', async () => {
     const db = makeDb(DOMAIN);
-    const result = await resolveDomain(db, 'acme.com');
+    const result = await resolveDomain(makeTenant({ db }), 'acme.com');
 
     expect(result).not.toBeNull();
     expect(result!.id).toBe(1);
@@ -50,13 +51,13 @@ describe('resolveDomain', () => {
 
   it('returns null when domain is not in domains table', async () => {
     const db = makeDb(null);
-    const result = await resolveDomain(db, 'unknown.com');
+    const result = await resolveDomain(makeTenant({ db }), 'unknown.com');
     expect(result).toBeNull();
   });
 
   it('normalises the policy domain to lowercase before lookup', async () => {
     const db = makeDb(DOMAIN); // stored lowercase
-    const result = await resolveDomain(db, 'ACME.COM');
+    const result = await resolveDomain(makeTenant({ db }), 'ACME.COM');
 
     expect(result).not.toBeNull();
     expect(result!.domain).toBe('acme.com');
@@ -64,7 +65,7 @@ describe('resolveDomain', () => {
 
   it('preserves all domain fields in the result', async () => {
     const db = makeDb(DOMAIN);
-    const result = await resolveDomain(db, 'acme.com');
+    const result = await resolveDomain(makeTenant({ db }), 'acme.com');
     // The real row carries additional columns (rollout, parent, etc.); every fixture field must match.
     expect(result).toMatchObject(DOMAIN);
   });
@@ -72,7 +73,7 @@ describe('resolveDomain', () => {
   it('returns different domains for different lookups', async () => {
     const domain2: Domain = { ...DOMAIN, id: 2, domain: 'acme.io', rua_address: 'rua@reports.inboxangel.io' };
     const db = makeDb(domain2);
-    const result = await resolveDomain(db, 'acme.io');
+    const result = await resolveDomain(makeTenant({ db }), 'acme.io');
 
     expect(result!.domain).toBe('acme.io');
     expect(result!.id).toBe(2);

@@ -10,9 +10,8 @@
 //                  summary: { total-successful-session-count, total-failure-session-count },
 //                  failure-details: [{ result-type, ... }] }] }
 
-import { Env } from '../index';
+import type { TenantContext } from '../tenancy/context';
 import { extractTextBody } from './mime-extract';
-import { scope } from '../db/scope';
 
 // RFC 8460 § 4.3 — subset of fields we care about
 interface TlsRptFailureDetail {
@@ -54,9 +53,8 @@ function parseIsoDate(s: string): number {
 
 export async function handleTlsRptReport(
   message: ForwardableEmailMessage,
-  env: Env,
+  tenant: TenantContext,
 ): Promise<{ failure_count: number }> {
-  if (!env.DB) return { failure_count: 0 };
 
   // Extract JSON from email body (TLS-RPT reports are plain JSON, not attachments)
   let raw: string;
@@ -92,7 +90,7 @@ export async function handleTlsRptReport(
     const policyDomain = policy.policy?.['policy-domain'];
     if (!policyDomain) continue;
 
-    const domain = await scope(env.DB).domains.getByName(policyDomain);
+    const domain = await tenant.scope.domains.getByName(policyDomain);
     if (!domain) {
       console.warn(`[tls-rpt] unknown domain ${policyDomain} — skipping policy`);
       continue;
@@ -106,7 +104,7 @@ export async function handleTlsRptReport(
       : null;
 
     try {
-      await scope(env.DB).reports.insertTls({
+      await tenant.scope.reports.insertTls({
         domain_id: domain.id,
         org_name: orgName,
         date_begin: dateBegin,

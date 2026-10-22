@@ -11,22 +11,6 @@ vi.mock('../../src/api/auth', () => ({
   },
 }));
 
-// Mock env-utils — enrichEnv is no-op, reportsDomain returns test value
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    enrichEnv: vi.fn().mockResolvedValue(undefined),
-    getZoneId: vi.fn().mockReturnValue(undefined),
-    getAccountId: vi.fn().mockReturnValue(undefined),
-    reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
-    fromEmail: vi.fn().mockReturnValue('noreply@reports.example.com'),
-    getBaseDomain: vi.fn().mockReturnValue('example.com'),
-    getWorkersSubdomain: vi.fn().mockReturnValue(undefined),
-    resetEnvCache: vi.fn(),
-  };
-});
-
 vi.mock('../../src/dns/provision', () => ({
   provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', manual: false }),
   deprovisionDomain: vi.fn().mockResolvedValue(undefined),
@@ -37,6 +21,8 @@ vi.mock('../../src/dns/provision', () => ({
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
+import { seedSettings } from '../helpers/tenant';
+import { loadTenant } from '../../src/tenancy/load';
 
 const BASE = 'https://api.inboxangel.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -52,8 +38,10 @@ function req(method: string, path: string, body?: unknown): Request {
 }
 
 function makeEnv(): Env {
+  const DB = createMigratedD1();
+  seedSettings(DB, { reports_domain: 'reports.example.com', from_email: 'noreply@reports.example.com' });
   return {
-    DB: createMigratedD1() as unknown as D1Database,
+    DB: DB as unknown as D1Database,
     API_KEY: 'test-key',
     CLOUDFLARE_API_TOKEN: 'tok-test',
   };
@@ -66,9 +54,7 @@ describe('GET /api/zones', () => {
     const env = makeEnv();
     const mockZones = [{ id: 'z1', name: 'example.com', status: 'active' }];
 
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ success: true, result: mockZones }),
-    } as unknown as Response);
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, result: mockZones }), { status: 200 }));
 
     const res = await handleApi(req('GET', '/api/zones'), env, ctx);
     expect(res.status).toBe(200);
@@ -85,9 +71,7 @@ describe('GET /api/zones', () => {
 
   it('returns 502 when CF API reports failure', async () => {
     const env = makeEnv();
-    global.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ success: false, errors: [{ message: 'Unauthorized' }] }),
-    } as unknown as Response);
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: false, errors: [{ message: 'Unauthorized' }] }), { status: 200 }));
 
     const res = await handleApi(req('GET', '/api/zones'), env, ctx);
     expect(res.status).toBe(502);
@@ -150,25 +134,18 @@ describe('migration 0005 backfill', () => {
   });
 });
 
-// ── enrichEnv() default domain fallback (unit) ─────────────────
+// ── loadTenant() default domain fallback (unit) ────────────────
 
-describe('enrichEnv() fallback to is_default=1', () => {
-  it('queries domains table when base_domain not in settings', async () => {
-    // Import actual (unmocked) enrichEnv by bypassing the vi.mock
-    const { enrichEnv, resetEnvCache } = await vi.importActual<typeof import('../../src/env-utils')>('../../src/env-utils');
-
-    // Reset caches so enrichEnv reads fresh
-    resetEnvCache();
-
+describe('loadTenant() fallback to is_default=1', () => {
+  it('derives the base domain from the default domain when base_domain is not in settings', async () => {
     const db = createMigratedD1();
     // no base_domain in settings, but a default domain exists
     db.sqlite.exec("INSERT INTO domains (id, domain, rua_address, is_default) VALUES (1, 'fallback.com', 'r@x.com', 1)");
 
-    const fakeEnv = { DB: db, CLOUDFLARE_API_TOKEN: undefined } as any;
-    await enrichEnv(fakeEnv, db as unknown as D1Database);
+    const tenant = await loadTenant({ DB: db } as any, { accountId: 'acct_default' });
 
-    // The base domain is derived from the is_default=1 domain
-    const { getBaseDomain } = await vi.importActual<typeof import('../../src/env-utils')>('../../src/env-utils');
-    expect(getBaseDomain()).toBe('fallback.com');
+    expect(tenant.settings.baseDomain).toBe('fallback.com');
+    expect(tenant.settings.reportsDomain).toBe('reports.fallback.com');
+    expect(tenant.settings.fromEmail).toBe('noreply@reports.fallback.com');
   });
 });

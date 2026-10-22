@@ -9,20 +9,16 @@
 //
 // Requires: CLOUDFLARE_API_TOKEN (DNS:Edit + Email Routing Rules:Edit)
 
-import type { Env } from '../index';
-import { getZoneId, reportsDomain } from '../env-utils';
+import type { TenantContext } from '../tenancy/context';
+import { CfError, CfNetworkError, CfZoneNotFoundError, type CfClient } from '../tenancy/cf-client';
 
-type CfResult<T> = { success: boolean; result: T; errors: { message: string }[] };
-
-async function cfFetch<T>(token: string, zoneId: string, method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}${path}`, {
-    method,
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
+/** Zone-scoped call; resolves to the `result` and throws a typed CfError on failure. */
+function zoneCall<T>(cf: CfClient, zoneId: string, method: string, path: string, body?: unknown): Promise<T> {
+  return cf.request<T>(method, `/zones/${zoneId}${path}`, { body }).catch(e => {
+    // Keep the bare Cloudflare message the callers (and the dashboard) have always shown.
+    if (e instanceof CfError && e.details.length) throw new Error(e.details.map(d => d.message).join(', '));
+    throw e;
   });
-  const data = await res.json() as CfResult<T>;
-  if (!data.success) throw new Error(data.errors.map(e => e.message).join(', '));
-  return data.result;
 }
 
 interface EmailRule {
@@ -45,30 +41,21 @@ interface DnsRecord {
  * Returns true if the API call succeeded, false if skipped or failed (non-fatal).
  */
 export async function registerEmailRoutingDestination(
-  token: string,
-  accountId: string,
+  tenant: TenantContext,
   email: string,
 ): Promise<boolean> {
+  const cf = tenant.cf();
+  const accountId = tenant.settings.cfAccountId;
+  if (!cf || !accountId) return false;
   try {
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/email/routing/addresses`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      }
-    );
-    const data = await res.json() as { success: boolean; errors?: { message: string }[] };
-    if (!data.success) {
-      // "already exists" is fine — address just needs the user to verify if they haven't
-      const alreadyExists = data.errors?.some(e => e.message.toLowerCase().includes('already'));
-      if (!alreadyExists) console.warn('[setup] registerEmailRoutingDestination failed:', data.errors);
-    }
-    return true;
+    await cf.request('POST', `/accounts/${accountId}/email/routing/addresses`, { body: { email } });
   } catch (e) {
-    console.warn('[setup] registerEmailRoutingDestination error:', e);
-    return false;
+    // "already exists" is fine — address just needs the user to verify if they haven't
+    const alreadyExists = e instanceof CfError && e.details.some(d => d.message.toLowerCase().includes('already'));
+    if (!alreadyExists) console.warn('[setup] registerEmailRoutingDestination failed:', e instanceof Error ? e.message : e);
+    if (!(e instanceof CfError) || e instanceof CfNetworkError) return false;
   }
+  return true;
 }
 
 export interface EmailRoutingResult {
@@ -76,13 +63,22 @@ export interface EmailRoutingResult {
   detail: string;
 }
 
-export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> {
-  const token = env.CLOUDFLARE_API_TOKEN;
-  const zoneId = getZoneId();
-  const domain = reportsDomain();
-  const workerName = env.WORKER_NAME ?? 'inbox-angel-worker';
+export async function ensureEmailRouting(tenant: TenantContext): Promise<EmailRoutingResult> {
+  const cf = tenant.cf();
+  const domain = tenant.settings.reportsDomain;
+  const workerName = tenant.workerName;
 
-  if (!token || !zoneId || !domain) {
+  // Email Routing for the reports domain lives in the reports domain's zone.
+  let zoneId: string | undefined;
+  if (cf && domain) {
+    try {
+      zoneId = (await tenant.zoneFor(domain)).id;
+    } catch (e) {
+      if (!(e instanceof CfZoneNotFoundError)) throw e;
+    }
+  }
+
+  if (!cf || !zoneId || !domain) {
     console.log('[setup] missing CF credentials — skipping email routing setup');
     return { status: 'skipped', detail: 'Cloudflare credentials or reports domain not configured' };
   }
@@ -90,7 +86,7 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
   // Step 1: Check if catch-all rule already points to a worker
   let catchAllActive = false;
   try {
-    const catchAll = await cfFetch<EmailRule>(token, zoneId, 'GET', '/email/routing/rules/catch_all');
+    const catchAll = await zoneCall<EmailRule>(cf, zoneId, 'GET', '/email/routing/rules/catch_all');
     catchAllActive = !!(catchAll?.enabled && catchAll.actions.some(a => a.type === 'worker'));
   } catch {
     // catch_all rule doesn't exist yet — will create below
@@ -100,7 +96,7 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
   // and the /enable endpoint requires a broader permission than Email Routing Rules)
   if (!catchAllActive) {
     try {
-      await cfFetch(token, zoneId, 'PUT', '/email/routing/enable');
+      await zoneCall(cf, zoneId, 'PUT', '/email/routing/enable');
       console.log('[setup] email routing enabled');
     } catch (e) {
       console.log(`[setup] email routing enable skipped (likely already active): ${e instanceof Error ? e.message : e}`);
@@ -116,7 +112,7 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
   ];
 
   let mxCreated = false;
-  const existingMx = await cfFetch<DnsRecord[]>(token, zoneId, 'GET', `/dns_records?type=MX&name=${domain}`);
+  const existingMx = await zoneCall<DnsRecord[]>(cf, zoneId, 'GET', `/dns_records?type=MX&name=${domain}`);
   const hasCfMx = existingMx.some(r => r.content.endsWith('.mx.cloudflare.net'));
 
   if (!hasCfMx) {
@@ -124,14 +120,14 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
     for (const old of existingMx) {
       if (!old.content.endsWith('.mx.cloudflare.net')) {
         try {
-          await cfFetch(token, zoneId, 'DELETE', `/dns_records/${old.id}`);
+          await zoneCall(cf, zoneId, 'DELETE', `/dns_records/${old.id}`);
         } catch {}
       }
     }
 
     const subdomain = domain.split('.')[0];
     for (const mx of CF_EMAIL_ROUTING_MX) {
-      await cfFetch(token, zoneId, 'POST', '/dns_records', {
+      await zoneCall(cf, zoneId, 'POST', '/dns_records', {
         type: 'MX', name: subdomain, content: mx.content, priority: mx.priority, ttl: 1,
       });
     }
@@ -146,7 +142,7 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
 
   // Step 4: Set catch-all rule → this Worker (skip if already active)
   if (!catchAllActive) {
-    await cfFetch(token, zoneId, 'PUT', '/email/routing/rules/catch_all', {
+    await zoneCall(cf, zoneId, 'PUT', '/email/routing/rules/catch_all', {
       actions: [{ type: 'worker', value: [workerName] }],
       enabled: true,
       matchers: [{ type: 'all' }],
@@ -167,20 +163,16 @@ export async function ensureEmailRouting(env: Env): Promise<EmailRoutingResult> 
  * Returns an array of 2 action strings describing what happened for each record.
  */
 export async function ensureNullSenderRecords(
-  token: string,
-  zoneId: string,
+  tenant: TenantContext,
   rdomain: string,
 ): Promise<string[]> {
-  const CF_API = `https://api.cloudflare.com/client/v4/zones/${zoneId}`;
-  const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-
+  const cf = tenant.requireCf();
+  const zoneId = (await tenant.zoneFor(rdomain)).id;
   const actions: string[] = [];
 
   // --- SPF on reports subdomain ---
   const spfExpected = 'v=spf1 -all';
-  const spfRes = await fetch(`${CF_API}/dns_records?type=TXT&name=${encodeURIComponent(rdomain)}&per_page=50`, { headers });
-  const spfData = await spfRes.json() as CfResult<{ id: string; content: string }[]>;
-  const spfRecords = spfData.result ?? [];
+  const spfRecords = await cf.listDnsRecords(zoneId, { type: 'TXT', name: rdomain, per_page: 50 });
   const spfMatch = spfRecords.find(r => {
     const clean = r.content.replace(/^"|"$/g, '');
     return clean.startsWith('v=spf1');
@@ -195,19 +187,14 @@ export async function ensureNullSenderRecords(
       actions.push(`SPF ${rdomain}: conflict (found "${clean}")`);
     }
   } else {
-    await fetch(`${CF_API}/dns_records`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ type: 'TXT', name: rdomain, content: `"${spfExpected}"`, ttl: 3600 }),
-    });
+    await cf.createDnsRecord(zoneId, { type: 'TXT', name: rdomain, content: `"${spfExpected}"`, ttl: 3600 });
     actions.push(`SPF ${rdomain}: created`);
   }
 
   // --- DMARC on reports subdomain ---
   const dmarcExpected = 'v=DMARC1; p=reject;';
   const dmarcName = `_dmarc.${rdomain}`;
-  const dmarcRes = await fetch(`${CF_API}/dns_records?type=TXT&name=${encodeURIComponent(dmarcName)}&per_page=50`, { headers });
-  const dmarcData = await dmarcRes.json() as CfResult<{ id: string; content: string }[]>;
-  const dmarcRecords = dmarcData.result ?? [];
+  const dmarcRecords = await cf.listDnsRecords(zoneId, { type: 'TXT', name: dmarcName, per_page: 50 });
   const dmarcMatch = dmarcRecords.find(r => {
     const clean = r.content.replace(/^"|"$/g, '');
     return clean.startsWith('v=DMARC1');
@@ -222,10 +209,7 @@ export async function ensureNullSenderRecords(
       actions.push(`DMARC ${dmarcName}: conflict (found "${clean}")`);
     }
   } else {
-    await fetch(`${CF_API}/dns_records`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ type: 'TXT', name: dmarcName, content: `"${dmarcExpected}"`, ttl: 3600 }),
-    });
+    await cf.createDnsRecord(zoneId, { type: 'TXT', name: dmarcName, content: `"${dmarcExpected}"`, ttl: 3600 });
     actions.push(`DMARC ${dmarcName}: created`);
   }
 

@@ -5,13 +5,12 @@
 
 import { EmailMessage } from 'cloudflare:email';
 import { createMimeMessage } from 'mimetext/browser';
-import type { BoundEnv as Env } from '../index';
+import type { TenantContext } from '../tenancy/context';
 import { extractAuthResults } from './parse-headers';
 import { checkDomain } from './dns-check';
 import { buildSummary, formatCheckReport } from './report-formatter';
 import { buildFreeCheckHtml } from './html-templates';
 import { globals } from '../db/scope';
-import { fromEmail as derivedFromEmail } from '../env-utils';
 
 function extractDomain(email: string): string {
   const at = email.lastIndexOf('@');
@@ -42,7 +41,7 @@ export function buildReplyRaw(
 
 export async function handleFreeCheck(
   message: ForwardableEmailMessage,
-  env: Env,
+  tenant: TenantContext,
   sessionToken: string,
 ): Promise<{ result: string }> {
   const fromEmail = message.from;
@@ -60,10 +59,10 @@ export async function handleFreeCheck(
   // 4. Build structured summary and format plain-English report
   const summary = buildSummary(domain, auth, dns);
   const reportText = formatCheckReport(fromEmail, summary, auth, dns);
-  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns });
+  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand });
 
   // 5. Send reply
-  const resolvedFrom = derivedFromEmail();
+  const resolvedFrom = tenant.settings.fromEmail;
   if (!resolvedFrom) throw new Error('FROM_EMAIL not configured — complete the setup wizard first');
   const subject = `Email security check — ${domain}`;
   const raw = buildReplyRaw({ name: 'InboxAngel', addr: resolvedFrom }, fromEmail, subject, reportText, reportHtml, message.headers.get('message-id'));
@@ -71,7 +70,7 @@ export async function handleFreeCheck(
 
   // 6. Store result in D1 (best-effort — don't let DB failure break the email flow)
   try {
-    await globals(env.DB).checkResults.insert({
+    await globals(tenant.db).checkResults.insert({
       from_email: fromEmail,
       from_domain: domain,
       spf_result: (auth?.spf?.result ?? null) as any,

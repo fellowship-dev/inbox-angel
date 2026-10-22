@@ -1,23 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock env-utils — reads from module-level caches that tests never populate
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    getZoneId: vi.fn().mockReturnValue('zone-abc'),
-    reportsDomain: vi.fn().mockReturnValue('reports.inboxangel.io'),
-  };
-});
-
 import { provisionDomain, deprovisionDomain, DnsProvisionError } from '../../src/dns/provision';
-import { getZoneId, reportsDomain } from '../../src/env-utils';
+import { makeTenant } from '../helpers/tenant';
 
-const ENV = {
-  CLOUDFLARE_API_TOKEN: 'test-token',
-  CLOUDFLARE_ZONE_ID: 'zone-abc',
-  REPORTS_DOMAIN: 'reports.inboxangel.io',
-};
+/** A tenant whose reports domain (reports.inboxangel.io) sits in the already-known zone-abc. */
+const ENV = makeTenant({
+  cfToken: 'test-token',
+  settings: { reportsDomain: 'reports.inboxangel.io', zoneId: 'zone-abc', zoneName: 'inboxangel.io' },
+});
 
 function mockFetch(status: number, body: unknown): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
@@ -27,7 +17,6 @@ function mockFetch(status: number, body: unknown): void {
 
 beforeEach(() => {
   vi.unstubAllGlobals();
-  vi.mocked(getZoneId).mockReturnValue('zone-abc');
 });
 
 // ── provisionDomain ───────────────────────────────────────────
@@ -95,14 +84,30 @@ describe('provisionDomain', () => {
   });
 
   it('returns manual result when CF credentials are not configured', async () => {
-    vi.mocked(getZoneId).mockReturnValue(undefined);
-    vi.mocked(reportsDomain).mockReturnValue('r.io');
-    const bare = { CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_ZONE_ID: '', REPORTS_DOMAIN: 'r.io' };
+    const bare = makeTenant({ settings: { reportsDomain: 'r.io' } });
     const result = await provisionDomain(bare, 'acme.com');
     expect(result.manual).toBe(true);
     expect(result.recordId).toBeNull();
     expect(result.recordName).toBe('acme.com._report._dmarc.r.io');
-    vi.mocked(reportsDomain).mockReturnValue('reports.inboxangel.io');
+  });
+
+  it('writes into the reports domain\'s zone, looked up by name when not already known', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, result: [{ id: 'zone-lookup', name: 'other.io' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, result: { id: 'rec-9' } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const tenant = makeTenant({ cfToken: 'tok', settings: { reportsDomain: 'reports.other.io' } });
+    const result = await provisionDomain(tenant, 'acme.com');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.cloudflare.com/client/v4/zones?name=other.io');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.cloudflare.com/client/v4/zones/zone-lookup/dns_records');
+    expect(result.recordId).toBe('rec-9');
+  });
+
+  it('falls back to manual mode when the token has no zone for the reports domain', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, result: [] }), { status: 200 })));
+    const tenant = makeTenant({ cfToken: 'tok', settings: { reportsDomain: 'reports.nozone.io' } });
+    const result = await provisionDomain(tenant, 'acme.com');
+    expect(result).toMatchObject({ manual: true, recordId: null });
   });
 });
 
@@ -129,11 +134,9 @@ describe('deprovisionDomain', () => {
   });
 
   it('resolves without calling fetch when credentials are not configured', async () => {
-    vi.mocked(getZoneId).mockReturnValue(undefined);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const bare = { CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_ZONE_ID: '' };
-    await deprovisionDomain(bare, 'some-id');
+    await deprovisionDomain(makeTenant(), 'some-id');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

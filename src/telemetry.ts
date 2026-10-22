@@ -10,10 +10,8 @@
 //
 // What is NOT collected: domain names, email addresses, IP addresses, report contents.
 
-import type { Env } from './index';
+import type { TenantContext } from './tenancy/context';
 import { version } from '../package.json';
-import { getAccountId } from './env-utils';
-import { scope } from './db/scope';
 
 const TELEMETRY_URL = 'https://telemetry.inboxangel.io/v1/events';
 
@@ -45,20 +43,11 @@ export type TelemetryProps =
   | { event: 'report.received'; failure_count: number }
   | { event: 'tls-rpt.received'; failure_count: number };
 
-// Module-level cache so we don't query D1 on every event
-let _telemetryEnabled: boolean | undefined;
-
-async function isTelemetryEnabled(env: Env): Promise<boolean> {
-  if (_telemetryEnabled !== undefined) return _telemetryEnabled;
-  if (!env.DB) { _telemetryEnabled = false; return false; }
-  const row = await scope(env.DB).settings.get('telemetry_opted_in');
-  _telemetryEnabled = row?.value === 'true';
-  return _telemetryEnabled;
-}
-
-async function anonymousId(env: Env): Promise<string> {
-  const accountId = getAccountId() ?? '';
-  const raw = `${accountId}:${env.WORKER_NAME ?? 'inbox-angel-worker'}`;
+async function anonymousId(tenant: TenantContext): Promise<string> {
+  const cfAccountId = tenant.settings.cfAccountId ?? '';
+  const base = `${cfAccountId}:${tenant.workerName}`;
+  // Self-host keeps its original id; in saas each tenant is its own "instance".
+  const raw = tenant.mode === 'saas' ? `${base}:${tenant.accountId}` : base;
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2, '0'))
@@ -66,12 +55,12 @@ async function anonymousId(env: Env): Promise<string> {
     .slice(0, 16);
 }
 
-export async function track(env: Env, props: TelemetryProps): Promise<void> {
-  const enabled = await isTelemetryEnabled(env);
+export async function track(tenant: TenantContext, props: TelemetryProps): Promise<void> {
+  const enabled = await tenant.telemetryEnabled().catch(() => false);
   if (!enabled) return;
 
   try {
-    const id = await anonymousId(env);
+    const id = await anonymousId(tenant);
     const { event, ...rest } = props;
     await fetch(TELEMETRY_URL, {
       method: 'POST',

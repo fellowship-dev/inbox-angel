@@ -6,7 +6,7 @@
 //
 // Returns null if the domain is unknown (not provisioned in D1).
 
-import { scope } from '../db/scope';
+import type { TenantContext } from '../tenancy/context';
 import { Domain } from '../db/types';
 
 /**
@@ -14,8 +14,8 @@ import { Domain } from '../db/types';
  * Returns null if the domain is not registered.
  */
 export async function resolveDomain(
-  db: D1Database,
+  tenant: TenantContext,
   policyDomain: string,
 ): Promise<Domain | null> {
-  return (await scope(db).domains.getByName(policyDomain.toLowerCase())) as Domain | null;
+  return (await tenant.scope.domains.getByName(policyDomain.toLowerCase())) as Domain | null;
 }

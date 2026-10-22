@@ -6,9 +6,8 @@
 // Recipients must be verified destination addresses in CF Email Routing.
 // Falls back to console.log if binding is absent (wrangler dev has no local send_email support).
 
-import { scope } from '../db/scope';
+import type { TenantContext } from '../tenancy/context';
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
-import { reportsDomain, fromEmail } from '../env-utils';
 import { buildWeeklyDigestHtml } from '../email/html-templates';
 import { version } from '../../package.json';
 
@@ -24,11 +23,6 @@ async function fetchLatestVersion(): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-export interface DigestEnv {
-  DB: D1Database;
-  SEND_EMAIL?: SendEmail;
 }
 
 // ── Formatting ────────────────────────────────────────────────
@@ -124,16 +118,16 @@ async function sendDigest(
   subject: string,
   body: string,
   html: string,
-  env: DigestEnv,
+  tenant: TenantContext,
 ): Promise<void> {
-  if (!env.SEND_EMAIL) {
+  if (!tenant.env.SEND_EMAIL) {
     console.log(`[digest] SEND_EMAIL binding not configured — would send to ${email}: ${subject}\n${body}`);
     return;
   }
 
   try {
-    await env.SEND_EMAIL.send({
-      from: { name: 'InboxAngel', email: fromEmail()! },
+    await tenant.env.SEND_EMAIL.send({
+      from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
       to: [email],
       subject,
       text: body,
@@ -146,12 +140,16 @@ async function sendDigest(
 
 // ── Main ──────────────────────────────────────────────────────
 
-export async function sendWeeklyDigests(env: DigestEnv, now = Date.now()): Promise<void> {
+export async function sendWeeklyDigests(tenant: TenantContext, now = Date.now()): Promise<void> {
   const since = Math.floor(now / 1000) - 7 * 24 * 60 * 60; // 7 days ago in Unix seconds
   const weekLabel = new Date(since * 1000).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   });
-  const rd = reportsDomain()!;
+  const rd = tenant.settings.reportsDomain;
+  if (!rd) {
+    console.log('[digest] reports domain not configured — skipping weekly digest');
+    return;
+  }
   const ruaAddress = `rua@${rd}`;
 
   const latestVersion = await fetchLatestVersion();
@@ -160,7 +158,7 @@ export async function sendWeeklyDigests(env: DigestEnv, now = Date.now()): Promi
   }
 
   // Single-tenant: get admin user email for digest delivery
-  const q = scope(env.DB);
+  const q = tenant.scope;
   const admin = await q.team.firstAdmin();
   if (!admin) {
     console.log('[digest] no admin user found — skipping weekly digest');
@@ -193,13 +191,14 @@ export async function sendWeeklyDigests(env: DigestEnv, now = Date.now()): Promi
       reportsDomain: rd,
       latestVersion,
       currentVersion: version,
+      brand: tenant.brand,
     });
     const hasIssues = stats.some(s => s.fail_messages > 0 || !s.dmarc_policy || s.dmarc_policy === 'none');
     const subject = hasIssues
       ? `⚠️ DMARC Weekly Digest — action needed`
       : `✅ DMARC Weekly Digest — all clear`;
 
-    await sendDigest(admin.email, subject, body, html, env);
+    await sendDigest(admin.email, subject, body, html, tenant);
     console.log(`[digest] sent to ${admin.email} (${stats.length} domain(s))`);
   } catch (e) {
     console.error('[digest] error:', e);

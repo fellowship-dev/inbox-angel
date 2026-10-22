@@ -11,20 +11,6 @@ vi.mock('../../src/api/auth', () => ({
   },
 }));
 
-// Mock env-utils so enrichEnv is a no-op (avoids extra DB calls that break mock ordering)
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    enrichEnv: vi.fn().mockResolvedValue(undefined),
-    getZoneId: vi.fn().mockReturnValue(undefined),
-    getAccountId: vi.fn().mockReturnValue(undefined),
-    reportsDomain: vi.fn().mockReturnValue('reports.inboxangel.io'),
-    fromEmail: vi.fn().mockReturnValue('check@reports.inboxangel.io'),
-    getWorkersSubdomain: vi.fn().mockReturnValue(undefined),
-  };
-});
-
 // Mock DNS provisioning so router tests don't hit Cloudflare
 vi.mock('../../src/dns/provision', () => ({
   provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', recordName: 'acme.com._report._dmarc.reports.inboxangel.io', manual: false }),
@@ -35,6 +21,7 @@ vi.mock('../../src/dns/provision', () => ({
 }));
 
 import { handleApi } from '../../src/api/router';
+import { seedSettings } from '../helpers/tenant';
 import * as authMod from '../../src/api/auth';
 import * as dnsMod from '../../src/dns/provision';
 
@@ -45,8 +32,10 @@ const BASE = 'https://api.inboxangel.com';
 type TestEnv = Env & { DB: TestD1 };
 
 function makeEnv(): TestEnv {
+  const DB = createMigratedD1();
+  seedSettings(DB, { reports_domain: 'reports.inboxangel.io', from_email: 'check@reports.inboxangel.io' });
   return {
-    DB: createMigratedD1(),
+    DB,
     API_KEY: 'test-key',
     CLOUDFLARE_ACCOUNT_ID: '',
     CLOUDFLARE_ZONE_ID: '',

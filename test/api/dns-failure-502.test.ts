@@ -7,13 +7,10 @@ vi.mock('../../src/api/auth', () => ({
   AuthError: class AuthError extends Error { constructor(m: string, public status = 401) { super(m); } },
 }));
 vi.mock('../../src/dns/provision', () => ({ provisionDomain: vi.fn(), deprovisionDomain: vi.fn(), DnsProvisionError: class extends Error {} }));
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return { ...actual, getZoneId: vi.fn().mockReturnValue('zone-1'), getAccountId: vi.fn().mockReturnValue('acct'), reportsDomain: vi.fn().mockReturnValue('reports.test.com') };
-});
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
+import { seedSettings } from '../helpers/tenant';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const DOMAIN = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.test.com' };
@@ -21,6 +18,7 @@ const DOMAIN = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.test.com' 
 function makeEnv(): Env {
   const db = createMigratedD1();
   db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (?, ?, ?)').run(DOMAIN.id, DOMAIN.domain, DOMAIN.rua_address);
+  seedSettings(db, { reports_domain: 'reports.test.com', from_email: 'noreply@reports.test.com' });
   db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, enabled, mode, mx_hosts, policy_id, mta_sts_record_id) VALUES (?, 1, 'testing', ?, '1', 'rec')").run(DOMAIN.id, JSON.stringify(['a.acme.com']));
   return { DB: db as unknown as D1Database, API_KEY: 'k', CLOUDFLARE_API_TOKEN: 'tok' } as unknown as Env;
 }

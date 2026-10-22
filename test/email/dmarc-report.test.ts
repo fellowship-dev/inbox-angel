@@ -2,6 +2,7 @@
 // Mocks all I/O: message.raw stream, D1, and the module collaborators.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../../src/index';
+import { makeTenant } from '../helpers/tenant';
 import type { Domain } from '../../src/db/types';
 import type { AggregateReport } from '../../src/dmarc/types';
 
@@ -91,12 +92,8 @@ function makeMessage(overrides: Partial<{
   } as unknown as ForwardableEmailMessage;
 }
 
-function makeEnv(): Env {
-  return {
-    DB: {} as D1Database,
-    FROM_EMAIL: 'check@reports.inboxangel.io',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-  };
+function makeEnv() {
+  return makeTenant({ db: {} });
 }
 
 // ── Test setup ────────────────────────────────────────────────
@@ -122,11 +119,11 @@ describe('handleDmarcReport — happy path', () => {
     expect(mimeExtract.extractAttachmentBytes).toHaveBeenCalledWith(raw);
   });
 
-  it('calls resolveDomain with env.DB and the policy_domain from the report', async () => {
+  it('calls resolveDomain with the tenant and the policy_domain from the report', async () => {
     const env = makeEnv();
     await handleDmarcReport(makeMessage(), env);
 
-    expect(resolveDomainMod.resolveDomain).toHaveBeenCalledWith(env.DB, 'acme.com');
+    expect(resolveDomainMod.resolveDomain).toHaveBeenCalledWith(env, 'acme.com');
   });
 
   it('calls parseDmarcEmail with the extracted bytes', async () => {
@@ -143,9 +140,9 @@ describe('handleDmarcReport — happy path', () => {
     const env = makeEnv();
     await handleDmarcReport(makeMessage(), env);
 
-    const [calledDb, calledDomainId, calledReport] =
+    const [calledTenant, calledDomainId, calledReport] =
       vi.mocked(storeReportMod.storeReport).mock.calls[0];
-    expect(calledDb).toBe(env.DB);
+    expect(calledTenant).toBe(env);
     expect(calledDomainId).toBe(1);
     expect(calledReport).toBe(REPORT);
   });

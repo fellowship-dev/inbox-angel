@@ -9,19 +9,6 @@ vi.mock('../../src/api/auth', () => ({
   },
 }));
 
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    enrichEnv: vi.fn().mockResolvedValue(undefined),
-    getZoneId: vi.fn().mockReturnValue(undefined),
-    getAccountId: vi.fn().mockReturnValue(undefined),
-    reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
-    fromEmail: vi.fn().mockReturnValue('check@reports.example.com'),
-    getWorkersSubdomain: vi.fn().mockReturnValue(undefined),
-  };
-});
-
 vi.mock('../../src/dns/provision', () => ({
   provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-1', recordName: 'acme.com._report._dmarc.reports.example.com', manual: false }),
   deprovisionDomain: vi.fn().mockResolvedValue(undefined),
@@ -32,6 +19,7 @@ vi.mock('../../src/dns/provision', () => ({
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
+import { seedSettings } from '../helpers/tenant';
 
 const BASE = 'https://api.example.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -52,6 +40,7 @@ function makeEnv(domainRow: Partial<Domain> | null = domain): Env {
     db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, dmarc_policy, dmarc_pct) VALUES (?, ?, ?, ?, ?)')
       .run(domainRow.id!, domainRow.domain!, domainRow.rua_address!, domainRow.dmarc_policy ?? null, domainRow.dmarc_pct ?? null);
   }
+  seedSettings(db, { reports_domain: 'reports.example.com', from_email: 'check@reports.example.com' });
   return { DB: db as unknown as D1Database, API_KEY: 'test-key' } as Env;
 }
 
