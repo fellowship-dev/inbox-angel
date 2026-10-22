@@ -16,7 +16,6 @@
 //   POST /api/auth/reset                      — set new password via reset token
 //   GET  /api/invites/:token                  — invite info
 //   POST /api/invites/:token/accept           — accept invite + create user
-//   GET  /api/init-key                        — auto-generated API key (no API_KEY set)
 //
 // Authenticated:
 //   GET    /api/domains                       — list domains
@@ -771,21 +770,14 @@ async function _handleApi(
     return json({ token }, 201);
   }
 
-  // GET /api/init-key — returns the auto-generated API key (only when API_KEY env is not set)
-  // Used by the dashboard on first load to pre-fill the API key gate.
-  if (path === '/api/init-key' && method === 'GET') {
-    if (env.API_KEY) return err('not found', 404); // manual key configured — no auto-key needed
-    const row = await getSetting(env.DB!, 'auto_api_key');
-    if (!row) return err('not found', 404);
-    return json({ key: row.value });
-  }
-
   // All /api/* routes require auth
   if (!path.startsWith('/api/')) {
     return err('not found', 404);
   }
 
-  // Resolve session: env API_KEY match → users table session → legacy auto-key
+  // Resolve session: env API_KEY match → users table session.
+  // First-run setup is POST /api/auth/setup (only while no admin exists); there is
+  // no auto-generated credential.
   const requestKey = request.headers.get('x-api-key') ?? '';
   let effectiveApiKey: string | undefined;
   let userBySession: Awaited<ReturnType<typeof getUserBySession>> = null;
@@ -799,11 +791,6 @@ async function _handleApi(
       effectiveApiKey = requestKey;
     }
   }
-  // Fall back to auto-generated key when no API_KEY env and no session matched
-  if (!effectiveApiKey && !env.API_KEY) {
-    effectiveApiKey = (await getSetting(env.DB!, 'auto_api_key'))?.value;
-  }
-
   try {
     await requireAuth(request, { ...env, API_KEY: effectiveApiKey });
   } catch (e) {
