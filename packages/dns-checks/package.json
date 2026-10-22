@@ -16,9 +16,14 @@
     "./mta-sts": "./src/mta-sts.ts",
     "./bimi": "./src/bimi.ts",
     "./providers": "./src/providers.ts",
-    "./org-domain": "./src/org-domain.ts"
+    "./org-domain": "./src/org-domain.ts",
+    "./email-service-providers": "./src/email-service-providers.ts",
+    "./spf-record": "./src/spf-record.ts"
   },
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "typecheck": "tsc -p ."
   },

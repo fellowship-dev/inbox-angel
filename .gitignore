@@ -165,8 +165,6 @@ dist
 .env*
 !.env.example
 .wrangler/
-dashboard/dist
-dashboard/node_modules
 
 # AI coding agents & assistants
 # https://github.com/Fellowship-dev/agents-gitignore
@@ -233,3 +231,4 @@ specs/
 # Domain audit fleet: seed lists + results contain third-party domains. NEVER commit.
 tools/audit-fleet/out/
 test-results/
+web/dist

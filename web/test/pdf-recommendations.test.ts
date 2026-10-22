@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getRecommendations, getAllRecommendations } from '../../dashboard/src/utils/pdfRecommendations';
-import type { DomainCheckSummary } from '../../dashboard/src/types';
+import { getRecommendations, getAllRecommendations } from '../src/lib/pdf/recommendations';
+import type { DomainCheckSummary } from '../src/lib/types';
 
 function makeSummary(overrides: Partial<DomainCheckSummary> = {}): DomainCheckSummary {
   return {

@@ -1,7 +1,7 @@
 import { Button, FieldError, Input, cn } from '@inbox-angel/ui';
 import { useId, useState, type KeyboardEvent } from 'react';
-import { SPF_PROVIDERS } from '../../../lib/email-service-providers';
-import { normalizeCustomInclude } from '../../../lib/spf';
+import { SPF_PROVIDERS } from '@inbox-angel/dns-checks/email-service-providers';
+import { normalizeCustomInclude } from '@inbox-angel/dns-checks/spf-record';
 
 /** Providers matching the query (name or include domain), minus those already selected. */
 export function filterProviders(query: string, selected: readonly string[]) {

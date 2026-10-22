@@ -6,7 +6,7 @@
 // When packages/dns-checks lands, replace the single `checker` construction in run.ts with its
 // `checkDomain` (mapped to DomainReport) — nothing else in the fleet depends on how checks run.
 import { parseSpfRecord, parseDmarcRecord } from '../../../src/email/dns-check.ts';
-import { detectProviders, getAllDkimSelectors, matchDkimProvider } from '../../../dashboard/src/email-service-providers.ts';
+import { detectProviders, getAllDkimSelectors, matchDkimProvider } from '@inbox-angel/dns-checks/email-service-providers';
 import type { DohClient } from './doh.ts';
 
 export interface DomainReport {

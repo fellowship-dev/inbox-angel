@@ -81,7 +81,7 @@ import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/sp
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
 import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
-import { getAllDkimSelectors } from '../../dashboard/src/email-service-providers';
+import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import {
   provisionMtaSts,
   updateMtaStsTxtRecord,

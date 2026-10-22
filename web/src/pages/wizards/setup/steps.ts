@@ -1,5 +1,5 @@
 import type { Severity } from '../../../components/wizard/SeverityBadge';
-import { findUnsignedSpfProviders } from '../../../lib/email-service-providers';
+import { findUnsignedSpfProviders } from '@inbox-angel/dns-checks/email-service-providers';
 import type { OnboardingStatus, WizardState } from '../../../lib/types';
 
 export const STEP_KEYS = ['domain', 'spf', 'dkim', 'dmarc', 'routing'] as const satisfies readonly (keyof WizardState)[];

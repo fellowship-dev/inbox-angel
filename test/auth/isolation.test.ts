@@ -135,6 +135,7 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/team/invite', body: { email: 'new-for-a@example.com' }, kind: 'scoped' },
   { method: 'DELETE', path: '/api/team/u-b-member', kind: 'denied' },
   { method: 'GET', path: '/api/audit-log', kind: 'scoped' },
+  { method: 'GET', path: '/api/me', kind: 'scoped' },
   { method: 'GET', path: '/api/keys', kind: 'scoped' },
   { method: 'DELETE', path: '/api/keys/__B_KEY__', kind: 'denied' },
   { method: 'POST', path: '/api/keys/revoke-all', body: {}, kind: 'scoped' },

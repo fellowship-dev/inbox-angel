@@ -11,6 +11,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@inbox-angel/dns-checks": "*",
 		"@inbox-angel/ui": "*",
 		"@tanstack/react-query": "^5.104.5",
 		"jspdf": "^2.5.2",

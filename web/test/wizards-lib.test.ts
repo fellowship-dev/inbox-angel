@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildRecommendedRecord, parseDmarcPolicy } from '../src/lib/dmarc-record';
-import { SPF_PROVIDERS, detectProviders, findUnsignedSpfProviders, getAllDkimSelectors, matchDkimProvider } from '../src/lib/email-service-providers';
-import { buildSpfRecord, existingQualifier, extractIncludes, extractOtherMechanisms, lookupLevel, normalizeCustomInclude } from '../src/lib/spf';
+import { SPF_PROVIDERS, detectProviders, findUnsignedSpfProviders, getAllDkimSelectors, matchDkimProvider } from '@inbox-angel/dns-checks/email-service-providers';
+import { buildSpfRecord, existingQualifier, extractIncludes, extractOtherMechanisms, lookupLevel, normalizeCustomInclude } from '@inbox-angel/dns-checks/spf-record';
 import { DEFAULT_WIZARD, dnsErrorsFor, resolveStep, routingSeverity, spfSeverity, dkimSeverity } from '../src/pages/wizards/setup/steps';
 
 describe('spf.ts', () => {
