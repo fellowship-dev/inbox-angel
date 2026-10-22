@@ -1,18 +1,17 @@
 // Playwright smoke test — Bulk Domain Import
 //
-// Requires a live dashboard (see CLAUDE.md for URL) with an admin session
+// Requires a running dashboard (default http://127.0.0.1:8787) with an admin session
 // injected into localStorage as 'ia_api_key'.
 //
-// Run via /test-prod or connect to Chromium CDP on port 9222.
+// Run: npm run dev (wrangler dev), then npm run test:e2e  (override target with E2E_BASE_URL).
 // Pre-condition: dashboard URL reachable, admin API key available.
 
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.DASHBOARD_URL ?? 'https://inbox-angel-worker.fellowshipdev.workers.dev';
 
 test.describe('Bulk domain import', () => {
   test('navigates to /bulk-import and shows the form', async ({ page }) => {
-    await page.goto(`${BASE}/#/bulk-import`);
+    await page.goto(`/#/bulk-import`);
     await expect(page.getByRole('heading', { name: 'Bulk domain import' })).toBeVisible();
     await expect(page.locator('textarea')).toBeVisible();
     await expect(page.getByRole('button', { name: /Import domains/ })).toBeVisible();
@@ -26,7 +25,7 @@ test.describe('Bulk domain import', () => {
       'bulk-e2e-test-3.invalid',
     ].join('\n');
 
-    await page.goto(`${BASE}/#/bulk-import`);
+    await page.goto(`/#/bulk-import`);
     await page.locator('textarea').fill(testDomains);
     await page.getByRole('button', { name: /Import domains/ }).click();
 
@@ -43,7 +42,7 @@ test.describe('Bulk domain import', () => {
   });
 
   test('reports duplicates without failing the whole batch', async ({ page }) => {
-    await page.goto(`${BASE}/#/bulk-import`);
+    await page.goto(`/#/bulk-import`);
     // Submit a list where at least one is likely already registered
     await page.locator('textarea').fill('fellowship.dev\nbulk-e2e-unique-xyz.invalid');
     await page.getByRole('button', { name: /Import domains/ }).click();
@@ -56,7 +55,7 @@ test.describe('Bulk domain import', () => {
   });
 
   test('shows invalid status for a malformed entry', async ({ page }) => {
-    await page.goto(`${BASE}/#/bulk-import`);
+    await page.goto(`/#/bulk-import`);
     await page.locator('textarea').fill('not a domain at all');
     await page.getByRole('button', { name: /Import domains/ }).click();
 

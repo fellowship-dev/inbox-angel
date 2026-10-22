@@ -140,8 +140,11 @@ npm install             # installs the root app, all workspaces and dashboard/
 npm run dev:dashboard   # Vite dev server on :5173
 npm run dev             # Worker on :8787 (wrangler dev)
 npm test                # unit tests: test/ and packages/*/test
-npm run typecheck       # tsc -p packages/dns-checks
+npm run typecheck       # tsc --noEmit (app) + tsc -p packages/dns-checks
+npm run test:e2e        # Playwright against http://127.0.0.1:8787 (start `npm run dev` first)
 ```
+
+`test:e2e` targets local `wrangler dev` by default; set `E2E_BASE_URL` to point elsewhere. It is not part of CI. There is no Workers-runtime (`@cloudflare/vitest-pool-workers`) suite yet — the old `test:workers` script just re-ran the node tests, so it was removed. Add a pool-workers config alongside the first real Worker integration test.
 
 ---
 

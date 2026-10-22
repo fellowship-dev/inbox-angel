@@ -1,28 +1,27 @@
 // Playwright smoke test — CT Log Subdomain Discovery
 //
-// Requires a live dashboard (see CLAUDE.md for URL) with an admin session
+// Requires a running dashboard (default http://127.0.0.1:8787) with an admin session
 // injected into localStorage as 'ia_api_key'.
 //
-// Run via /test-prod or connect to Chromium CDP on port 9222.
+// Run: npm run dev (wrangler dev), then npm run test:e2e  (override target with E2E_BASE_URL).
 // Pre-condition: dashboard URL reachable, admin API key available.
 
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.DASHBOARD_URL ?? 'https://inbox-angel-worker.fellowshipdev.workers.dev';
 
 // A known domain with public CT entries; any widely-used domain works.
 const KNOWN_DOMAIN = 'cloudflare.com';
 
 test.describe('CT log subdomain discovery', () => {
   test('navigates to /ct-discover and shows the form', async ({ page }) => {
-    await page.goto(`${BASE}/#/ct-discover`);
+    await page.goto(`/#/ct-discover`);
     await expect(page.getByRole('heading', { name: 'Discover subdomains' })).toBeVisible();
     await expect(page.locator('input[id="ct-domain-input"]')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Discover' })).toBeVisible();
   });
 
   test('returns subdomains for a known root domain within 10 seconds', async ({ page }) => {
-    await page.goto(`${BASE}/#/ct-discover`);
+    await page.goto(`/#/ct-discover`);
     await page.locator('input[id="ct-domain-input"]').fill(KNOWN_DOMAIN);
     await page.getByRole('button', { name: 'Discover' }).click();
 
@@ -34,7 +33,7 @@ test.describe('CT log subdomain discovery', () => {
   });
 
   test('select-all selects every subdomain', async ({ page }) => {
-    await page.goto(`${BASE}/#/ct-discover`);
+    await page.goto(`/#/ct-discover`);
     await page.locator('input[id="ct-domain-input"]').fill(KNOWN_DOMAIN);
     await page.getByRole('button', { name: 'Discover' }).click();
     await expect(page.locator('text=/subdomain.*found/')).toBeVisible({ timeout: 12_000 });
@@ -52,7 +51,7 @@ test.describe('CT log subdomain discovery', () => {
   });
 
   test('returns empty list message for a domain with no CT history', async ({ page }) => {
-    await page.goto(`${BASE}/#/ct-discover`);
+    await page.goto(`/#/ct-discover`);
     await page.locator('input[id="ct-domain-input"]').fill('no-ct-history-xyz-12345.invalid');
     await page.getByRole('button', { name: 'Discover' }).click();
 
