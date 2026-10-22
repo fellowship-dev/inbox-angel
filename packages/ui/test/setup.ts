@@ -1,7 +1,8 @@
-import "@testing-library/jest-dom/vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 
+expect.extend(matchers);
 afterEach(cleanup);
 
 // Radix primitives expect these browser APIs; jsdom lacks them.
