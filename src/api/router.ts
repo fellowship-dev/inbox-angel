@@ -32,6 +32,7 @@
 //   GET    /api/domains/:id/export            — CSV export
 //   GET    /api/domains/:id/dns-check         — check _dmarc TXT record in DNS
 //   GET/POST/DELETE /api/domains/:id/hosted, POST …/hosted/rotate-token, …/hosted/verify — hosted records (MODE=saas; src/hosted/routes.ts)
+//   GET /api/analytics, GET /api/domains/:id/analytics — sender inventory, pass-rate trend, what to fix next, enforcement readiness (src/analytics/routes.ts)
 //   GET    /api/domains/:id/rollout-next      — current rollout step, next step, DNS preview, safety
 //   POST   /api/domains/:id/rollout-advance   — persist recommended rollout step
 //   PUT    /api/domains/:id/set-default       — designate domain as default (infrastructure hub)
@@ -61,6 +62,7 @@ import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
+import { handleAnalyticsRoutes } from '../analytics/routes';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
@@ -1758,6 +1760,10 @@ async function _handleApi(
     // /api/domains/:id/hosted — hosted records (MODE=saas only)
     const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
     if (hostedResponse) return hostedResponse;
+
+    // /api/analytics, /api/domains/:id/analytics — read-only sender inventory, trend, fixes, readiness
+    const analyticsResponse = await handleAnalyticsRoutes(request, tenant);
+    if (analyticsResponse) return analyticsResponse;
 
     // /api/keys — per-user API keys
     const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: account.role, kind: (account as AuthedAccount).kind, user: userBySession });
