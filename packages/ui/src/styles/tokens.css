@@ -1,0 +1,152 @@
+/* ─────────────────────────────────────────────────────────
+   Inbox Angel design tokens. Values are taken verbatim from the website's
+   globals.css (docs/design/site-globals.css); test/tokens.test.ts keeps them in sync.
+
+   --brand is a FILL (white on #60a5fa fails AA): text on it uses --brand-fg,
+   brand-coloured text on surfaces uses --brand-ink.
+
+   Theme selection:
+   - default: light; follows prefers-color-scheme: dark
+   - <html data-theme="light|dark"> forces a theme
+   ───────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface-0: #f8fafc;
+  --surface-1: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+
+  /* Text */
+  --ink-1: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #64748b;
+
+  /* Brand — sky blue from the logo */
+  --brand: #60a5fa;
+  --brand-hover: #3b8ff0;
+  --brand-ink: #1d5bb5;
+  --brand-subtle: #eff6ff;
+  --brand-fg: #0b1f3a;
+
+  /* Accent — halo gold and blush from the logo */
+  --accent: #fad172;
+  --accent-hover: #f5c04a;
+  --accent-fg: #3b2a00;
+  --accent-subtle: #fef7e3;
+  --blush: #fca0a4;
+
+  /* Semantic */
+  --success: #15803d;
+  --success-subtle: #ecfdf3;
+  --warning: #b45309;
+  --warning-subtle: #fff7e6;
+  --danger: #b91c1c;
+  --danger-subtle: #fef2f2;
+
+  /* Borders */
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(15 23 42 / 0.07), 0 2px 4px -2px rgb(15 23 42 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(15 23 42 / 0.07), 0 4px 6px -4px rgb(15 23 42 / 0.05);
+  --shadow-xl: 0 20px 25px -5px rgb(15 23 42 / 0.08), 0 8px 10px -6px rgb(15 23 42 / 0.04);
+
+  /* Radius */
+  --r-sm: 0.375rem;
+  --r-md: 0.625rem;
+  --r-lg: 0.875rem;
+  --r-xl: 1.25rem;
+  --r-2xl: 1.5rem;
+  --r-full: 9999px;
+
+  /* Additions to the website set (not in site-globals.css).
+     --line-strong is ~1.5:1 on white, below the 3:1 WCAG 1.4.11 needs for
+     form-control edges, so controls use --control-border (= --ink-3). */
+  --control-border: #64748b;
+
+  /* Fonts (bundled via @fontsource-variable, no CDN) */
+  --font-geist-sans: "Geist Variable";
+  --font-geist-mono: "Geist Mono Variable";
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-0: #0a1220;
+    --surface-1: #101a2d;
+    --surface-2: #17233a;
+    --surface-3: #22314d;
+
+    --ink-1: #f1f5f9;
+    --ink-2: #a8b5c8;
+    --ink-3: #8191a8;
+
+    --brand: #60a5fa;
+    --brand-hover: #7bb6fb;
+    --brand-ink: #93c5fd;
+    --brand-subtle: #10233f;
+    --brand-fg: #0b1f3a;
+
+    --accent-subtle: #2a2210;
+
+    --success: #4ade80;
+    --success-subtle: #0f2a1a;
+    --warning: #fbbf24;
+    --warning-subtle: #2a2110;
+    --danger: #f87171;
+    --danger-subtle: #2c1416;
+
+    --line: #22314d;
+    --line-strong: #33466a;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+
+    --control-border: #8191a8;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-0: #0a1220;
+  --surface-1: #101a2d;
+  --surface-2: #17233a;
+  --surface-3: #22314d;
+
+  --ink-1: #f1f5f9;
+  --ink-2: #a8b5c8;
+  --ink-3: #8191a8;
+
+  --brand: #60a5fa;
+  --brand-hover: #7bb6fb;
+  --brand-ink: #93c5fd;
+  --brand-subtle: #10233f;
+  --brand-fg: #0b1f3a;
+
+  --accent-subtle: #2a2210;
+
+  --success: #4ade80;
+  --success-subtle: #0f2a1a;
+  --warning: #fbbf24;
+  --warning-subtle: #2a2110;
+  --danger: #f87171;
+  --danger-subtle: #2c1416;
+
+  --line: #22314d;
+  --line-strong: #33466a;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+
+  --control-border: #8191a8;
+}
