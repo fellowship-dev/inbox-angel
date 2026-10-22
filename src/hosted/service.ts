@@ -5,7 +5,7 @@
 // only its hash is stored. (It is also published in the hosted DMARC / TLS-RPT records, which is why rotation
 // edits those records rather than asking the customer to change anything.)
 
-import { collectIps as collectIpsPure, buildFlatRecord, createResolver, normalizeName, type Resolver } from '@inbox-angel/dns-checks';
+import { createResolver, type Resolver } from '@inbox-angel/dns-checks';
 import { globalQueries, type PointerStatus } from '@inbox-angel/db';
 import type { TenantContext } from '../tenancy/context';
 import { CfError, CfNotConfiguredError, cfErrorText } from '../tenancy/cf-client';
@@ -17,6 +17,7 @@ import {
   buildHostedDmarc, buildHostedTlsRpt, hostedNames, openHostedZone, retargetRua, HostedNameError, type HostedRecordWriter,
 } from './records';
 import { chooseZone, HostedQuotaError, zoneSlot } from './zones';
+import { flattenSource } from './spf';
 import { customerPointers, levelInputs, mergePointerReport, verifyPointers } from './pointers';
 
 export class HostedError extends Error {
@@ -37,15 +38,6 @@ export interface HostedDeps {
 type DomainRow = NonNullable<Awaited<ReturnType<TenantContext['scope']['domains']['getById']>>>;
 
 const POLICIES: readonly string[] = ['none', 'quarantine', 'reject'];
-
-/** The resolver, but TXT at `domain` answers with `record`: flatten the SPF the customer *had*, not the one they publish after cutover. */
-function withSpfSource(resolver: Resolver, domain: string, record: string): Resolver {
-  const d = normalizeName(domain);
-  return {
-    ...resolver,
-    txt: async name => (normalizeName(name) === d ? { status: 'ok' as const, records: [record] } : resolver.txt(name)),
-  };
-}
 
 function requireHosted(tenant: TenantContext) {
   const env = tenant.env;
@@ -131,9 +123,9 @@ export async function enableHosted(
     source = spf[0]?.trim() ?? 'v=spf1 ~all';
   }
   if (!/^v=spf1(\s|$)/i.test(source)) throw new HostedError('spf_record must start with v=spf1', 400);
-  const flat = await collectIpsPure(domain.domain, withSpfSource(resolver, domain.domain, source));
-  if (flat.errors.length > 0) throw new HostedError(`Could not fully resolve the SPF record: ${flat.errors.map(e => e.message).join('; ')}`, 422);
-  const spfContent = buildFlatRecord(flat.ips, flat.extra, flat.allQualifier);
+  const flat = await flattenSource(domain.domain, source, resolver);
+  if (!flat.ok) throw new HostedError(`Could not fully resolve the SPF record: ${flat.errors.map(e => e.message).join('; ')}`, 422);
+  const spfContent = flat.content;
 
   let mxHosts: string[] = [];
   if (opts.mtaSts) {

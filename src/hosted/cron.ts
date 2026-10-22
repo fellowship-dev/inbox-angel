@@ -2,8 +2,9 @@
 //   1. reconcile the hosted zone: count every record (quota), warn at 3,200, and diff what is there against
 //      what the database says we wrote. Records outside `*.h.<zone>` are only counted and fingerprinted, never
 //      touched: the job reports a change in them, it can't make one.
-//   2. verify every hosted domain's pointers in the customer's DNS.
-//   3. forget expired canary addresses.
+//   2. re-flatten every hosted SPF from its stored source (provider IP ranges change).
+//   3. verify every hosted domain's pointers in the customer's DNS.
+//   4. forget expired canary addresses.
 //
 // It piggybacks on the existing 11:00 UTC schedule, so no new trigger is needed in wrangler.jsonc.
 
@@ -14,7 +15,8 @@ import { hostedApex, hostedConfig, hostedEnabled } from './config';
 import { hostedNames, openHostedZone } from './records';
 import { assessQuota, configuredZones, type ZoneQuota } from './zones';
 import { mergePointerReport, verifyPointers } from './pointers';
-import type { Resolver } from '@inbox-angel/dns-checks';
+import { createResolver, type Resolver } from '@inbox-angel/dns-checks';
+import { flattenSource } from './spf';
 
 export const HOSTED_CRON = '0 11 * * *';
 
@@ -98,10 +100,45 @@ export async function verifyAllPointers(env: BoundEnv, opts: { resolver?: Resolv
   return checked;
 }
 
+/**
+ * Re-flatten every hosted SPF from its stored source and update the record when the result changed.
+ * A source that can't be fully resolved today leaves yesterday's record in place (a partial one would drop senders).
+ */
+export async function refreshHostedSpf(env: BoundEnv, opts: { fetch?: typeof fetch; resolver?: Resolver } = {}): Promise<{ updated: number; failed: number }> {
+  const apex = hostedApex(hostedConfig(env));
+  const out = { updated: 0, failed: 0 };
+  if (!apex) return out;
+  const resolver = opts.resolver ?? createResolver();
+  const rows = (await intakeLookups(env.DB).allHosted()).filter(h => h.spf_record_id && h.spf_source);
+  const writers = new Map<string, Awaited<ReturnType<typeof openHostedZone>>>();
+  for (const h of rows) {
+    try {
+      const slot = configuredZones(env).find(z => z.key === h.zone_key);
+      if (!slot) throw new Error(`unknown zone ${h.zone_key}`);
+      let writer = writers.get(slot.key);
+      if (!writer) writers.set(slot.key, writer = await openHostedZone(env, slot.name, { fetch: opts.fetch }));
+      const domain = await forAccount(env.DB, h.account_id).domains.getById(h.domain_id);
+      if (!domain) continue;
+      const flat = await flattenSource(domain.domain, h.spf_source!, resolver);
+      if (!flat.ok) throw new Error(flat.errors.map(e => e.message).join('; '));
+      const name = hostedNames(h.hosted_id, apex).spf;
+      const current = await writer.read(h.spf_record_id!, name);
+      if (current.content === flat.content) continue;
+      await writer.setContent(h.spf_record_id!, name, flat.content);
+      out.updated++;
+    } catch (e) {
+      out.failed++;
+      console.error(`[hosted] SPF refresh failed for domain ${h.domain_id} (record kept as is):`, e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
+}
+
 export async function runHostedCron(event: ScheduledController, env: BoundEnv, _ctx: ExecutionContext): Promise<void> {
   if (!hostedEnabled(env) || event.cron !== HOSTED_CRON) return;
   for (const [name, job] of [
     ['zone reconcile', () => reconcileZones(env)],
+    ['SPF refresh', () => refreshHostedSpf(env)],
     ['pointer verification', () => verifyAllPointers(env)],
     ['canary purge', () => globalQueries(env.DB).canary.purgeExpired(Math.floor(Date.now() / 1000))],
   ] as const) {

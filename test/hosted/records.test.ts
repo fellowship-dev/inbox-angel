@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { globalQueries, intakeLookups } from '@inbox-angel/db';
 import { assertHostedName, HostedNameError, hostedNames, openHostedZone, retargetRua } from '../../src/hosted/records';
 import { assessQuota, chooseZone, HostedQuotaError, PRO_RECORD_LIMIT, QUOTA_WARN_AT } from '../../src/hosted/zones';
-import { reconcileZones } from '../../src/hosted/cron';
+import { reconcileZones, refreshHostedSpf } from '../../src/hosted/cron';
 import { disableHosted, enableHosted, HostedError, hostedStatus, rotateHostedToken } from '../../src/hosted/service';
 import { hashToken } from '../../src/hosted/tokens';
 import { makeTenant } from '../helpers/tenant';
@@ -246,6 +246,25 @@ describe('hosted records for a domain', () => {
     expect(w.rows('SELECT record_count FROM hosted_zones')).toEqual([{ record_count: 0 }]);
     expect(await hostedStatus(tenant(), await domain())).toBeNull();
     await expect(disableHosted(tenant(), await domain())).rejects.toBeInstanceOf(HostedError);
+  });
+
+  it('the daily SPF refresh follows the provider’s ranges; an unresolvable source keeps yesterday’s record', async () => {
+    const { w, cf, tenant, domain } = await setup();
+    const { hosted } = await enableHosted(tenant(), await domain(), { spfRecord: SOURCE }, { resolver });
+    const spfName = hostedNames(hosted.hosted_id, 'h.inboxangel.io').spf;
+    const content = () => zoneRecords(cf).find(r => r.name === spfName)!.content;
+    expect(content()).toBe('v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.7 ip4:203.0.113.5 ~all');
+
+    expect(await refreshHostedSpf(w.env, { resolver })).toEqual({ updated: 0, failed: 0 }); // unchanged: no write
+    expect(cf.calls.filter(c => c.method === 'PATCH')).toEqual([]);
+
+    const moved = dnsFrom({ '_spf.example.net': { TXT: ['v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.200 -all'] } });
+    expect(await refreshHostedSpf(w.env, { resolver: moved })).toEqual({ updated: 1, failed: 0 });
+    expect(content()).toBe('v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.200 ip4:203.0.113.5 ~all');
+
+    const broken = dnsFrom({ '_spf.example.net': { error: true } });
+    expect(await refreshHostedSpf(w.env, { resolver: broken })).toEqual({ updated: 0, failed: 1 });
+    expect(content()).toBe('v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.200 ip4:203.0.113.5 ~all');
   });
 
   it('daily reconcile counts the whole zone, reports drift, flags changes outside the label, and writes nothing', async () => {

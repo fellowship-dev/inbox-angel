@@ -93,8 +93,9 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 1. **Zone reconcile**: lists the whole records zone, stores the record count (quota), warns at 3,200, and diffs it against the database:
    expected records that are missing and records under `*.h.` that no domain owns are **reported, never fixed or deleted**.
    Records outside `*.h.` are only counted and fingerprinted; a change since yesterday is logged (`records outside h.inboxangel.io changed`). The job issues only `GET`s.
-2. **Pointer verification** for every hosted domain.
-3. Forgets expired canary addresses.
+2. **SPF refresh**: re-flattens every hosted SPF from its stored source and updates the record if the providers' ranges moved. A source that cannot be fully resolved leaves the current record alone.
+3. **Pointer verification** for every hosted domain.
+4. Forgets expired canary addresses.
 
 ### Adding a second records zone later
 
