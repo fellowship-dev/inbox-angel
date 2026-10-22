@@ -99,6 +99,23 @@ describe('/api/domains/:id/hosted', () => {
   });
 });
 
+describe('GET /api/hosted/config', () => {
+  it('says the hosted UI applies in hosted mode, to a signed-in caller only', async () => {
+    const t = await setup();
+    const r = await call(t.env, 'GET', '/api/hosted/config', { key: t.A.token });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ enabled: true });
+    expect((await call(t.env, 'GET', '/api/hosted/config')).status).toBe(401);
+  });
+
+  it('says no in self-host, without erroring', async () => {
+    const env = makeEnv(createMigratedD1(), { API_KEY: 'k' }) as any;
+    const r = await call(env, 'GET', '/api/hosted/config', { key: 'k' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ enabled: false });
+  });
+});
+
 describe('MTA-STS policy host', () => {
   const policyReq = (host: string) => new Request(`https://${host}/.well-known/mta-sts.txt`);
 

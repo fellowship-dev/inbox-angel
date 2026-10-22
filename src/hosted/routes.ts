@@ -1,6 +1,7 @@
 // /api/domains/:id/hosted — the domain's hosted records (MODE=saas, SAAS_ENABLED=1). Tenant-scoped like every
 // other route: the domain is looked up through the caller's account, so another account's id is a 404.
 //
+//   GET    /api/hosted/config                    { enabled } — whether the hosted UI applies (MODE=saas and SAAS_ENABLED=1)
 //   GET    /api/domains/:id/hosted               status: record names, the pointers to add, their verification, Level inputs
 //   POST   /api/domains/:id/hosted               enable { spf_record?, mta_sts? } → status + intake addresses (shown once)
 //   DELETE /api/domains/:id/hosted               remove the hosted records
@@ -26,6 +27,10 @@ export async function handleHostedRoutes(
   deps: HostedDeps = {},
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  // GET /api/hosted/config — lets the dashboard decide whether to show the hosted UI. Never an error, never a secret.
+  if (path === '/api/hosted/config' && request.method.toUpperCase() === 'GET') {
+    return json({ enabled: hostedEnabled(tenant.env) });
+  }
   const m = path.match(ROUTE);
   if (!m) return null;
   if (!hostedEnabled(tenant.env)) return err('not found', 404);
