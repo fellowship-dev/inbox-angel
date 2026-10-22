@@ -1,6 +1,7 @@
 import { getDb, type DbLike } from '../client';
 import { IMPLICIT_ACCOUNT_ID } from '../schema';
 import { apiKeyQueries } from './api-keys';
+import { analyticsQueries } from './analytics';
 import { auditQueries } from './audit';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
@@ -12,6 +13,8 @@ import { settingsQueries } from './settings';
 import { teamQueries } from './team';
 
 export * from './reports';
+export type { SenderRow, TrendRow } from './analytics';
+export { FIRST_SEEN_HORIZON_DAYS } from './analytics';
 export * from './audit';
 export * from './team';
 export * from './api-keys';
@@ -34,6 +37,7 @@ export function forAccount(db: DbLike, accountId: string) {
 		accountId,
 		domains: domainQueries(d, accountId),
 		reports: reportQueries(d, accountId),
+		analytics: analyticsQueries(d, accountId),
 		monitor: monitorQueries(d, accountId),
 		settings: settingsQueries(d, accountId),
 		spf: spfFlattenQueries(d, accountId),
