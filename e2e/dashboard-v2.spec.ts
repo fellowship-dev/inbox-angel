@@ -35,13 +35,15 @@ test('first-run setup, add the first domain, see its records', async ({ page }) 
 	await signInOrSetUp(page);
 
 	// A brand-new instance has no domain: straight into the setup wizard.
-	const hasDomain = await page.getByRole('heading', { name: 'Domains', level: 1 }).isVisible().catch(() => false);
-	if (!hasDomain) {
-		await expect(page.getByRole('heading', { name: "What's your main domain?" })).toBeVisible();
+	const domains = page.getByRole('heading', { name: 'Domains', level: 1 });
+	const wizard = page.getByRole('heading', { name: "What's your main domain?" });
+	await expect(domains.or(wizard)).toBeVisible();
+	if (await wizard.isVisible()) {
 		await page.getByPlaceholder('yourdomain.com').fill(DOMAIN);
 		await page.getByRole('button', { name: /Continue/ }).click();
-		await expect(page.getByText(/of 5 steps complete/)).toBeVisible();
-		await page.getByRole('link', { name: /Skip setup|Exit/ }).first().click();
+		await expect(page).toHaveURL(/#\/domains\/\d+\/setup\/2$/);
+		await page.getByRole('link', { name: 'Skip setup' }).click();
+		await expect(page).toHaveURL(/#\/domains\/\d+$/);
 	}
 
 	// The domain is listed as a level card, then opens to its records.
@@ -62,6 +64,7 @@ test('first-run setup, add the first domain, see its records', async ({ page }) 
 
 test('create an API key (secret shown once) and revoke it', async ({ page }) => {
 	await signInOrSetUp(page);
+	await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
 	await page.goto('/#/keys');
 	await expect(page.getByRole('heading', { name: 'API keys', level: 1 })).toBeVisible();
 
