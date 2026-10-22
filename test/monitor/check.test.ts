@@ -19,18 +19,19 @@ function makeSub(overrides: Partial<MonitorSubscription> = {}): MonitorSubscript
   };
 }
 
-function mockDns(spfRaw: string | null, dmarcRaw: string | null) {
+type Dns = string | null | 'SERVFAIL';
+
+function mockDns(spfRaw: Dns, dmarcRaw: Dns) {
   vi.mocked(fetch).mockImplementation(async (url) => {
-    const u = url.toString();
-    if (u.includes('_dmarc.')) {
-      return new Response(JSON.stringify({
-        Answer: dmarcRaw ? [{ type: 16, data: `"${dmarcRaw}"` }] : [],
-      }), { status: 200 });
-    }
-    // SPF
-    return new Response(JSON.stringify({
-      Answer: spfRaw ? [{ type: 16, data: `"${spfRaw}"` }] : [],
-    }), { status: 200 });
+    const name = new URL(url.toString()).searchParams.get('name')!;
+    const body = (raw: Dns) =>
+      raw === 'SERVFAIL'
+        ? { Status: 2 }
+        : { Status: 0, ...(raw ? { Answer: [{ type: 16, data: `"${raw}"` }] } : {}) };
+    if (name.startsWith('_dmarc.')) return new Response(JSON.stringify(body(dmarcRaw)), { status: 200 });
+    if (name === 'acme.com') return new Response(JSON.stringify(body(spfRaw)), { status: 200 });
+    // include targets
+    return new Response(JSON.stringify(body('v=spf1 ip4:192.0.2.1 -all')), { status: 200 });
   });
 }
 
@@ -109,5 +110,45 @@ describe('checkSubscription', () => {
     // SPF appeared = improved
     const spfChange = result.changes.find(c => c.field === 'SPF record');
     expect(spfChange!.severity).toBe('improved');
+  });
+
+  describe('DNS failures are not "record removed"', () => {
+    it('SPF SERVFAIL: no change reported, baseline preserved, error surfaced', async () => {
+      mockDns('SERVFAIL', 'v=DMARC1; p=none; pct=100');
+      const sub = makeSub();
+      const result = await checkSubscription(sub);
+      expect(result.changes).toHaveLength(0);
+      expect(result.newBaseline.spf_record).toBe(sub.spf_record);
+      expect(result.errors.spf).toMatch(/SERVFAIL/);
+      expect(result.errors.dmarc).toBeUndefined();
+    });
+
+    it('DMARC SERVFAIL: policy downgrade NOT reported, baseline preserved', async () => {
+      mockDns('v=spf1 include:_spf.google.com -all', 'SERVFAIL');
+      const sub = makeSub({ dmarc_policy: 'reject', dmarc_pct: 100, dmarc_record: 'v=DMARC1; p=reject' });
+      const result = await checkSubscription(sub);
+      expect(result.changes.find(c => c.field.startsWith('DMARC'))).toBeUndefined();
+      expect(result.newBaseline).toMatchObject({ dmarc_policy: 'reject', dmarc_pct: 100, dmarc_record: 'v=DMARC1; p=reject' });
+      expect(result.errors.dmarc).toBeDefined();
+    });
+
+    it('a network failure on one check still lets the other be diffed', async () => {
+      vi.mocked(fetch).mockImplementation(async (url) => {
+        const name = new URL(url.toString()).searchParams.get('name')!;
+        if (name === 'acme.com') throw new Error('timeout');
+        return new Response(JSON.stringify({ Status: 0, Answer: [{ type: 16, data: '"v=DMARC1; p=reject; pct=100"' }] }), { status: 200 });
+      });
+      const result = await checkSubscription(makeSub({ dmarc_policy: 'none' }));
+      expect(result.errors.spf).toMatch(/timeout/);
+      expect(result.changes.map(c => c.field)).toEqual(['DMARC policy']);
+    });
+
+    it('genuinely removed records (NXDOMAIN) are still reported', async () => {
+      vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ Status: 3 }), { status: 200 }));
+      const result = await checkSubscription(makeSub());
+      expect(result.errors).toEqual({});
+      expect(result.changes.find(c => c.field === 'SPF record')?.severity).toBe('degraded');
+      expect(result.changes.find(c => c.field === 'DMARC policy')?.severity).toBe('degraded');
+    });
   });
 });
