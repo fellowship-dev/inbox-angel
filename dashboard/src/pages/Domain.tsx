@@ -408,7 +408,7 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Rollout progress</span>
               <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-                {rollout.current_policy === 'quarantine' ? 'Quarantine' : 'Reject'}: {rollout.current_pct ?? 100}% of traffic
+                {rollout.current_policy === 'quarantine' ? 'Quarantine' : 'Reject'}{rollout.current_testing ? ' (testing, t=y)' : ''}
               </span>
               {rollout.behind_schedule && (
                 <span style={{ padding: '1px 6px', borderRadius: '9999px', fontSize: '0.68rem', fontWeight: 700, color: '#92400e', background: '#fef3c7' }}>
@@ -423,7 +423,7 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
                 disabled={rollout.blocked}
                 title={rollout.block_reason ?? undefined}
               >
-                Increase coverage →
+                Advance policy →
               </button>
             )}
             {!rollout.next_step && (
@@ -438,7 +438,7 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#9ca3af', marginTop: '0.2rem' }}>
             <span>Step {rollout.current_step_index + 1} of {rollout.total_steps}</span>
-            <span>{rollout.current_step_index + 1 < rollout.total_steps ? `Next: ${rollout.next_step?.policy} ${rollout.next_step?.pct}%` : 'Complete'}</span>
+            <span>{rollout.current_step_index + 1 < rollout.total_steps ? `Next: ${rollout.next_step?.policy}${rollout.next_step?.testing ? ' (testing, t=y)' : ''}` : 'Complete'}</span>
           </div>
           {rollout.blocked && rollout.block_reason && (
             <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: '#b45309', background: '#fef3c7', borderRadius: '4px', padding: '0.3rem 0.5rem' }}>
@@ -460,8 +460,13 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
           onClick={(e) => { if (e.target === e.currentTarget) setShowRolloutModal(false); }}>
           <div style={{ background: '#fff', borderRadius: '10px', padding: '1.25rem', maxWidth: '520px', width: '100%', boxShadow: '0 10px 40px rgba(0,0,0,0.15)' }}>
             <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
-              Advance to {rollout.next_step.policy} {rollout.next_step.pct}%
+              Advance to {rollout.next_step.policy}{rollout.next_step.testing ? ' (testing, t=y)' : ''}
             </h3>
+            {rollout.next_step_note && (
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.78rem', color: '#92400e', background: '#fef3c7', borderRadius: '4px', padding: '0.3rem 0.5rem' }}>
+                ⚠ {rollout.next_step_note}
+              </p>
+            )}
             <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#6b7280' }}>
               Update your <code>_dmarc.{domain.domain}</code> TXT record to:
             </p>
@@ -479,7 +484,7 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
                 onClick={async () => {
                   setRolloutBusy(true); setRolloutError(null);
                   try {
-                    await advanceRollout(id, rollout!.next_step!.policy, rollout!.next_step!.pct);
+                    await advanceRollout(id, rollout!.next_step!.policy, rollout!.next_step!.testing);
                     const updated = await getRolloutNext(id);
                     setRollout(updated);
                     setShowRolloutModal(false);

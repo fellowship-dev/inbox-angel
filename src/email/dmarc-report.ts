@@ -5,7 +5,7 @@
 // Routing is by report content (policy_published.domain), not by the recipient address.
 // This lets self-hosters use a fixed rua=mailto:rua@reports.yourdomain.com for all domains.
 
-import { Env } from '../index';
+import type { BoundEnv as Env } from '../index';
 import { extractAttachmentBytes, MimeExtractError } from './mime-extract';
 import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
@@ -36,7 +36,7 @@ export async function handleDmarcReport(
 
     // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
     try {
-      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
       if (decoded.trimStart().startsWith('<?xml') || decoded.trimStart().startsWith('<feed')) {
         rawXml = decoded;
       }

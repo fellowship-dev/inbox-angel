@@ -1,5 +1,5 @@
 /**
- * Playwright smoke test: staged pct= rollout UI on domain detail page.
+ * Playwright smoke test: staged rollout (RFC 9989 p=/t=) UI on domain detail page.
  *
  * Run via /test-prod or manually:
  *   node e2e/domain-rollout.spec.mjs
@@ -13,7 +13,7 @@
 
 import { chromium } from '/root/.local/share/fry-bot/node_modules/playwright-core/index.js';
 
-const BASE = process.env.IA_BASE_URL ?? 'https://inbox-angel-worker.fellowshipdev.workers.dev';
+const BASE = process.env.IA_BASE_URL ?? 'http://127.0.0.1:8787';
 const API_KEY = process.env.IA_API_KEY;
 const DOMAIN_ID = process.env.DOMAIN_ID ?? '2';
 
@@ -46,8 +46,8 @@ try {
     await progressBar.waitFor({ state: 'visible', timeout: 5000 });
     console.log('✓ Progress bar rendered');
 
-    // "Increase coverage" button should be present if not at last step
-    const advanceBtn = page.locator('text=Increase coverage');
+    // "Advance policy" button should be present if not at last step
+    const advanceBtn = page.locator('text=Advance policy');
     const btnCount = await advanceBtn.count();
     if (btnCount > 0) {
       // If button is enabled, verify modal opens on click

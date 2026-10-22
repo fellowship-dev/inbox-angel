@@ -23,5 +23,5 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm test -- --run
-      - run: npx tsc -p packages/dns-checks
+      - run: npm run typecheck
       - run: npm run test:ui

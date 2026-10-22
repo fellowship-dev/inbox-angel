@@ -1,4 +1,4 @@
-import { Env } from '../index';
+import type { BoundEnv as Env } from '../index';
 import { handleFreeCheck } from './free-check';
 import { handleDmarcReport } from './dmarc-report';
 import { handleTlsRptReport } from './tls-rpt';

@@ -12,7 +12,14 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
   };
 });
 
-import { handleFreeCheck } from '../../src/email/free-check';
+// cloudflare:email only exists in workerd — stand-in that records the constructor args.
+vi.mock('cloudflare:email', () => ({
+  EmailMessage: class {
+    constructor(public from: string, public to: string, public raw: string) {}
+  },
+}));
+
+import { handleFreeCheck, buildReplyRaw } from '../../src/email/free-check';
 import type { Env } from '../../src/index';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -49,7 +56,7 @@ function makeMessage(overrides: Partial<{
     ' dmarc=pass (p=reject dis=none) header.from=example.com',
   ].join('');
 
-  const headers = new Headers({ 'authentication-results': authHeader });
+  const headers = new Headers({ 'authentication-results': authHeader, 'message-id': '<orig-123@mail.example.com>' });
 
   return {
     from: overrides.from ?? 'user@example.com',
@@ -97,46 +104,59 @@ describe('handleFreeCheck', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
 
-  it('calls message.reply with a MIME stream', async () => {
+  // mimetext RFC 2047-encodes From name / Subject; decode so assertions read naturally.
+  const decodeWords = (raw: string) => raw.replace(/=\?utf-8\?B\?([^?]+)\?=/gi, (_, b) => Buffer.from(b, 'base64').toString('utf8'));
+
+  function sentReply(message: ForwardableEmailMessage) {
+    return (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as { from: string; to: string; raw: string };
+  }
+
+  it('replies with an EmailMessage (envelope from/to + raw MIME), not a stream', async () => {
     mockDohAll();
     const message = makeMessage();
-    const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, makeEnv(), 'test-token');
 
     expect(message.reply).toHaveBeenCalledOnce();
-    const arg = (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(arg).toBeInstanceOf(ReadableStream);
+    const reply = sentReply(message);
+    expect(reply).not.toBeInstanceOf(ReadableStream);
+    expect(reply.from).toBe('check@reports.inboxangel.io');
+    expect(reply.to).toBe('user@example.com');
+    expect(typeof reply.raw).toBe('string');
+  });
+
+  it('threads the reply with In-Reply-To / References from the original Message-ID', async () => {
+    mockDohAll();
+    const message = makeMessage();
+
+    await handleFreeCheck(message, makeEnv(), 'test-token');
+
+    const { raw } = sentReply(message);
+    expect(raw).toMatch(/In-Reply-To: <orig-123@mail\.example\.com>/i);
+    expect(raw).toMatch(/References: <orig-123@mail\.example\.com>/i);
   });
 
   it('MIME reply contains domain name', async () => {
     mockDohAll();
     const message = makeMessage({ from: 'founder@startupxyz.com' });
-    const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, makeEnv(), 'test-token');
 
-    const stream = (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as ReadableStream;
-    const reader = stream.getReader();
-    const { value } = await reader.read();
-    const text = new TextDecoder().decode(value);
-    expect(text).toContain('startupxyz.com');
+    expect(sentReply(message).raw).toContain('startupxyz.com');
   });
 
-  it('MIME reply contains From and Subject headers', async () => {
+  it('MIME reply has From, To, Subject and both text and html parts', async () => {
     mockDohAll();
     const message = makeMessage();
-    const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, makeEnv(), 'test-token');
 
-    const stream = (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as ReadableStream;
-    const reader = stream.getReader();
-    const { value } = await reader.read();
-    const text = new TextDecoder().decode(value);
-    expect(text).toContain('From:');
-    expect(text).toContain('Subject:');
-    expect(text).toContain('check@reports.inboxangel.io');
+    const raw = decodeWords(sentReply(message).raw);
+    expect(raw).toMatch(/From: "?InboxAngel"? <check@reports\.inboxangel\.io>/);
+    expect(raw).toMatch(/To: <?user@example\.com>?/);
+    expect(raw).toMatch(/Subject: Email security check — example\.com/);
+    expect(raw).toContain('text/plain');
+    expect(raw).toContain('text/html');
   });
 
   it('stores result in D1', async () => {
@@ -156,11 +176,7 @@ describe('handleFreeCheck', () => {
 
     await handleFreeCheck(message, env, 'test-token');
 
-    const stream = (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as ReadableStream;
-    const reader = stream.getReader();
-    const { value } = await reader.read();
-    const text = new TextDecoder().decode(value);
-    expect(text).toContain('my-company.io');
+    expect(sentReply(message).raw).toContain('my-company.io');
   });
 
   it('still sends reply even when all DNS lookups return nothing', async () => {
@@ -182,11 +198,7 @@ describe('handleFreeCheck', () => {
 
     await handleFreeCheck(message, env, 'test-token');
 
-    const stream = (message.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as ReadableStream;
-    const reader = stream.getReader();
-    const { value } = await reader.read();
-    const text = new TextDecoder().decode(value);
-    expect(text).toContain('🚨'); // exposed status line
+    expect(sentReply(message).raw).toContain('🚨'); // exposed status line
   });
 
   it('handles missing Authentication-Results header gracefully', async () => {
@@ -222,5 +234,12 @@ describe('handleFreeCheck', () => {
     const result = await handleFreeCheck(message, env, 'test-token');
     expect(result).toHaveProperty('result');
     expect(message.reply).toHaveBeenCalledOnce();
+  });
+});
+
+describe('buildReplyRaw', () => {
+  it('omits In-Reply-To when the original had no Message-ID', () => {
+    const raw = buildReplyRaw({ name: 'InboxAngel', addr: 'check@reports.inboxangel.io' }, 'a@b.co', 'Hi', 'text', '<p>html</p>', null);
+    expect(raw).not.toMatch(/In-Reply-To/i);
   });
 });

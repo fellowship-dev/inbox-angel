@@ -5,7 +5,7 @@ import { extractReport, ParserError } from './extract-report';
 import { parseAggregateReportXml } from './parse-aggregate';
 import { AggregateReport, InvalidAggregateReport } from './types';
 
-export { AggregateReport };
+export type { AggregateReport };
 
 export class ParseEmailError extends Error {
   constructor(

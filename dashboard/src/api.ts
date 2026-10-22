@@ -348,11 +348,13 @@ export async function fetchZones(): Promise<{ zones: CfZone[] }> {
 
 export interface RolloutNext {
   current_policy: string | null;
-  current_pct: number | null;
+  current_pct: number | null; // legacy pct= on the live record (RFC 9989 removed it)
+  current_testing: boolean;   // live record has t=y
   current_record: string | null;
   current_step_index: number;
   total_steps: number;
-  next_step: { policy: string; pct: number } | null;
+  next_step: { policy: string; testing: boolean } | null;
+  next_step_note: string | null; // caveat, e.g. dropping a partial pct= applies the policy to 100%
   dns_preview: string | null;
   pass_rate: number | null;
   blocked: boolean;
@@ -369,10 +371,10 @@ export async function getRolloutNext(domainId: number): Promise<RolloutNext> {
   return res.json();
 }
 
-export async function advanceRollout(domainId: number, policy: string, pct: number): Promise<{ ok: boolean }> {
+export async function advanceRollout(domainId: number, policy: string, testing: boolean): Promise<{ ok: boolean }> {
   const res = await apiFetch(`/api/domains/${domainId}/rollout-advance`, {
     method: 'POST',
-    body: JSON.stringify({ policy, pct }),
+    body: JSON.stringify({ policy, testing }),
   });
   if (!res.ok) await throwApiError(res);
   return res.json();

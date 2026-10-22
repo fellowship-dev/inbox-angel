@@ -12,17 +12,18 @@
     "start": "wrangler dev",
     "test": "vitest --config vitest.node.config.mts",
     "test:ui": "npm test --workspace @inbox-angel/ui",
-    "test:workers": "vitest --config vitest.config.mts",
+    "test:e2e": "playwright test",
     "cf-typegen": "wrangler types",
     "seed:local": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --local  --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
     "seed:remote": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --remote --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
     "unseed:local": "wrangler d1 execute inbox-angel --local  --file=scripts/unseed-demo.sql",
     "unseed:remote": "wrangler d1 execute inbox-angel --remote --file=scripts/unseed-demo.sql",
-    "typecheck": "tsc -p packages/dns-checks"
+    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.15.0",
     "@cloudflare/workers-types": "^4.20260410.1",
+    "@playwright/test": "^1.64.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5",
     "wrangler": "^4.85.0"
@@ -31,6 +32,7 @@
     "@inbox-angel/dns-checks": "*",
     "fast-xml-parser": "^5.5.11",
     "fflate": "^0.8.2",
+    "mimetext": "^3.0.28",
     "tldts": "^7.4.19"
   },
   "cloudflare": {
