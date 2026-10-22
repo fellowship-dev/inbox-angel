@@ -387,6 +387,21 @@ Library: `jspdf`, client-side only, A4 mm, filename `email-auth-report.pdf` (`do
 - [x] Domain overview as Level cards (Delivering → Authenticated → Protected) with findings (`web/src/lib/levels.ts`).
 - [x] Domain detail DNS records as RecordBlocks with copy, "Lookup failed" vs "Not found" per record, role-gated apply buttons and the RFC 9989 rollout step and note.
 
+## Follow-ups from #111 (hosted intake and records): not built here
+
+The dashboard does not yet surface these hosted routes (`docs/hosted.md`, API section):
+
+- [ ] Enable hosted records on a domain: `POST /api/domains/:id/hosted` (`spf_record?`, `mta_sts?`); show the intake addresses (`rua`, `tls_rpt`) once, with copy, and the pointer records to publish (`pointers[]` as RecordBlocks).
+- [ ] Hosted status on domain detail: `GET /api/domains/:id/hosted` (`pointer_status`: ok / missing / wrong / error per purpose, `checked_at`); `error` must read as "Lookup failed", never as missing.
+- [ ] Verify pointers now: `POST …/hosted/verify`.
+- [ ] Rotate token (addresses shown once; previous token valid 72 h): `POST …/hosted/rotate-token`.
+- [ ] Disable hosted records: `DELETE …/hosted`.
+- [ ] Level cards for hosted domains should read `level_inputs` (`dmarc_published`, `spf_published`, `mta_sts_published`) from the hosted status instead of the stored summary.
+- [ ] MTA-STS wizard on a hosted domain: `POST /api/domains/:id/mta-sts` answers `409` (use `mta_sts: true` on enable); the wizard currently shows that as a generic error.
+- [ ] Domain delete may answer `502` when hosted DNS cleanup fails (the domain is kept): show that message and a retry.
+- [ ] Email check in `saas`: `POST /api/check-sessions` now returns `expires_at` (1 hour, one email); the page works with `email`/`token` but does not show the expiry.
+- [ ] Hosted writes need owner/admin like the rest; reuse `WriteButton`.
+
 ## Gaps
 
 No functional gaps: every item above is implemented in `web/`. The Preact `dashboard/` folder was deleted in the final commit.

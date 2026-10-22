@@ -29,6 +29,11 @@ describe('SPF_PROVIDERS', () => {
 });
 
 describe('detectProviders', () => {
+  it('does not match an include that merely starts with a known provider domain', () => {
+    expect(detectProviders('v=spf1 include:_spf.google.com.evil.net ~all')).toEqual([]);
+    expect(detectProviders('v=spf1 include:evil-sendgrid.net ~all')).toEqual([]);
+  });
+
   it('detects Google Workspace from SPF record', () => {
     const record = 'v=spf1 include:_spf.google.com ~all';
     const detected = detectProviders(record);

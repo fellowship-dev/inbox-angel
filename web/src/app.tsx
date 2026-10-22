@@ -1,34 +1,15 @@
 import { Button, EmptyState, Toaster } from '@inbox-angel/ui';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
-import type { ComponentType, ReactNode } from 'react';
+import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { HashRouter, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router';
 import { FocusLayout } from './components/FocusLayout';
 import { Shell } from './components/Shell';
 import { PageSkeleton } from './components/states';
 import { SessionProvider, useSession } from './lib/session';
-import { AnomaliesPage } from './pages/reports/AnomaliesPage';
-import { AuditLogPage } from './pages/audit/AuditLogPage';
 import { AuthPage } from './pages/auth/AuthPage';
 import { ForgotPage } from './pages/auth/ForgotPage';
 import { InvitePage } from './pages/auth/InvitePage';
 import { ResetPage } from './pages/auth/ResetPage';
-import { ApiKeysPage } from './pages/keys/ApiKeysPage';
-import { EmailCheckPage } from './pages/check/EmailCheckPage';
-import { AddDomainPage } from './pages/domains/AddDomainPage';
-import { BulkImportPage } from './pages/domains/BulkImportPage';
-import { CtDiscoverPage } from './pages/domains/CtDiscoverPage';
-import { DomainDetailPage } from './pages/domains/DomainDetailPage';
-import { DomainSettingsPage } from './pages/domains/DomainSettingsPage';
-import { OverviewPage } from './pages/domains/OverviewPage';
-import { ExplorePage } from './pages/reports/ExplorePage';
-import { ReportBrowserPage } from './pages/reports/ReportBrowserPage';
-import { ReportDetailPage } from './pages/reports/ReportDetailPage';
-import { SettingsPage } from './pages/settings/SettingsPage';
-import { TeamPage } from './pages/team/TeamPage';
-import { DmarcWizardPage } from './pages/wizards/DmarcWizardPage';
-import { MtaStsPage } from './pages/wizards/MtaStsPage';
-import { SetupWizardPage } from './pages/wizards/SetupWizardPage';
-import { SpfFlattenPage } from './pages/wizards/SpfFlattenPage';
 
 /** Waits for the session, then shows the app, the sign-in screen (deep link preserved) or a "server unreachable" state. */
 function Gate({ children }: { children: ReactNode }) {
@@ -84,9 +65,31 @@ function WizardFor({ render }: { render: (domainId: number) => ReactNode }) {
 	return <Wizard exitTo={`/domains/${id}`}>{render(id)}</Wizard>;
 }
 
+// Every page is its own chunk: the sign-in screen and shell load first, pages load on navigation.
+const AnomaliesPage = lazy(() => import('./pages/reports/AnomaliesPage').then((m) => ({ default: m.AnomaliesPage })));
+const AuditLogPage = lazy(() => import('./pages/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })));
+const ApiKeysPage = lazy(() => import('./pages/keys/ApiKeysPage').then((m) => ({ default: m.ApiKeysPage })));
+const EmailCheckPage = lazy(() => import('./pages/check/EmailCheckPage').then((m) => ({ default: m.EmailCheckPage })));
+const AddDomainPage = lazy(() => import('./pages/domains/AddDomainPage').then((m) => ({ default: m.AddDomainPage })));
+const BulkImportPage = lazy(() => import('./pages/domains/BulkImportPage').then((m) => ({ default: m.BulkImportPage })));
+const CtDiscoverPage = lazy(() => import('./pages/domains/CtDiscoverPage').then((m) => ({ default: m.CtDiscoverPage })));
+const DomainDetailPage = lazy(() => import('./pages/domains/DomainDetailPage').then((m) => ({ default: m.DomainDetailPage })));
+const DomainSettingsPage = lazy(() => import('./pages/domains/DomainSettingsPage').then((m) => ({ default: m.DomainSettingsPage })));
+const OverviewPage = lazy(() => import('./pages/domains/OverviewPage').then((m) => ({ default: m.OverviewPage })));
+const ExplorePage = lazy(() => import('./pages/reports/ExplorePage').then((m) => ({ default: m.ExplorePage })));
+const ReportBrowserPage = lazy(() => import('./pages/reports/ReportBrowserPage').then((m) => ({ default: m.ReportBrowserPage })));
+const ReportDetailPage = lazy(() => import('./pages/reports/ReportDetailPage').then((m) => ({ default: m.ReportDetailPage })));
+const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const TeamPage = lazy(() => import('./pages/team/TeamPage').then((m) => ({ default: m.TeamPage })));
+const DmarcWizardPage = lazy(() => import('./pages/wizards/DmarcWizardPage').then((m) => ({ default: m.DmarcWizardPage })));
+const MtaStsPage = lazy(() => import('./pages/wizards/MtaStsPage').then((m) => ({ default: m.MtaStsPage })));
+const SetupWizardPage = lazy(() => import('./pages/wizards/SetupWizardPage').then((m) => ({ default: m.SetupWizardPage })));
+const SpfFlattenPage = lazy(() => import('./pages/wizards/SpfFlattenPage').then((m) => ({ default: m.SpfFlattenPage })));
+
 // Hash routes on purpose: reset and invite emails, and bookmarks, already use `#/…`.
 function AppRoutes() {
 	return (
+		<Suspense fallback={<div className="mx-auto max-w-3xl p-8"><PageSkeleton /></div>}>
 		<Routes>
 			<Route path="/invite/:token" element={<InvitePage />} />
 			<Route path="/reset/:token" element={<ResetPage />} />
@@ -129,6 +132,7 @@ function AppRoutes() {
 				<Route path="domains/:id/dmarc-wizard" element={<WizardFor render={() => <DmarcWizardPage />} />} />
 			</Route>
 		</Routes>
+		</Suspense>
 	);
 }
 

@@ -42,6 +42,25 @@ const page = (opts: Parameters<typeof renderApp>[1]) =>
 		{ route: '/domains/1', ...opts },
 	);
 
+describe('DomainDetailPage policy badge', () => {
+	it('never contradicts the DMARC record card: no live record means "last known", not p=quarantine', async () => {
+		page({ routes: routes({ 'GET /api/domains/1/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false } }) });
+		expect(await screen.findByText('No DMARC record found (last known policy: p=quarantine)')).toBeInTheDocument();
+		expect(screen.queryByText('p=quarantine')).not.toBeInTheDocument();
+	});
+
+	it('shows the live policy when DNS has the record, even if the stored one differs', async () => {
+		page({ routes: routes({ 'GET /api/domains/1/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=reject; rua=mailto:r@reports.test', cf_managed: true } }) });
+		expect(await screen.findByText('p=reject')).toBeInTheDocument();
+		expect(screen.queryByText('p=quarantine')).not.toBeInTheDocument();
+	});
+
+	it('says the lookup failed rather than guessing a policy', async () => {
+		page({ routes: routes({ 'GET /api/domains/1/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false, error: 'dns lookup failed' } }) });
+		expect(await screen.findByText(/DMARC lookup failed/)).toBeInTheDocument();
+	});
+});
+
 describe('DomainDetailPage', () => {
 	it('is read-only for members: data visible, apply and advance disabled, with the explanation', async () => {
 		page({ role: 'member', routes: routes() });

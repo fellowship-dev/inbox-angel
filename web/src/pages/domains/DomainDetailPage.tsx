@@ -26,6 +26,20 @@ function PolicyBadge({ policy }: { policy: Domain['dmarc_policy'] }) {
 	return <Badge variant={variant}>p={policyLabel(policy)}</Badge>;
 }
 
+/**
+ * The policy as the DNS shows it now, from the same read as the DMARC record card (one query, so the two can
+ * never disagree). When DNS has no record the stored policy is only a "last known" value, and says so.
+ */
+function LivePolicyBadge({ domain }: { domain: Domain }) {
+	const dns = useDnsCheck(domain.id);
+	if (dns.isPending) return <Badge variant="outline">Checking DMARC policy…</Badge>;
+	const lastKnown = domain.dmarc_policy && domain.dmarc_policy !== 'none' ? ` (last known policy: p=${domain.dmarc_policy})` : '';
+	if (dns.isError || dns.data.error) return <Badge variant="outline">DMARC lookup failed{lastKnown}</Badge>;
+	if (!dns.data.found || !dns.data.current_record) return <Badge variant="outline">No DMARC record found{lastKnown}</Badge>;
+	const live = dns.data.current_record.match(/(^|;\s*)p=([a-z]+)/i)?.[2]?.toLowerCase();
+	return live ? <PolicyBadge policy={live as Domain['dmarc_policy']} /> : <Badge variant="outline">DMARC record has no p= tag</Badge>;
+}
+
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
@@ -124,7 +138,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					</Link>
 				}
 				title={domain.domain}
-				description={<PolicyBadge policy={domain.dmarc_policy} />}
+				description={<LivePolicyBadge domain={domain} />}
 				actions={
 					<Button asChild variant="secondary">
 						<Link to={`/domains/${domain.id}/settings`}>

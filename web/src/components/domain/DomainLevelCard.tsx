@@ -73,8 +73,9 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 				</p>
 				{a.next ? <p className="text-ink-1">Next: {a.next}</p> : null}
 				<div className="flex flex-wrap items-center gap-2">
-					<Badge variant="outline">p={domain.dmarc_policy ?? 'none'}</Badge>
-					{progress && progress.done < progress.total ? (
+					{summary.data.dmarc_policy ? <Badge variant="outline">p={summary.data.dmarc_policy}</Badge> : null}
+					{/* Protected domains are done: nudging them to finish a wizard would contradict the level above. */}
+					{progress && progress.done < progress.total && a.level < 2 ? (
 						<Link to={`/domains/${domain.id}/setup/${progress.nextStep}`} className="text-brand-ink underline underline-offset-4">
 							Continue setup ({progress.done}/{progress.total})
 						</Link>

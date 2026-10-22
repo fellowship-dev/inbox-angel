@@ -110,3 +110,15 @@ export function groupColumns(rows) {
 	for (const { tbl, col } of rows) (out[tbl] ??= []).push(col);
 	return out;
 }
+
+/**
+ * The JSON array in `wrangler d1 execute --json` output. Wrangler prints progress lines and config
+ * warnings (which contain "[WARNING]") first; the JSON starts on a line of its own. Throws, with the head
+ * of the output, when there is none, rather than failing later in JSON.parse with no context.
+ * @param {string} stdout
+ */
+export function parseWranglerJson(stdout) {
+	const start = stdout.search(/^\[\s*$/m);
+	if (start < 0) throw new Error(`wrangler printed no JSON result. Output began:\n${stdout.slice(0, 500)}`);
+	return JSON.parse(stdout.slice(start));
+}

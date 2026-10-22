@@ -34,7 +34,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	const [confirmOpen, setConfirmOpen] = useState(false);
 
 	const current = dns.data?.current_record ?? null;
-	const policy = current?.match(/\bp=([a-z]+)/)?.[1] ?? domain.dmarc_policy ?? 'none';
+	const policy = current?.match(/\bp=([a-z]+)/)?.[1] ?? 'none';
 	const recommended = buildRecommendedRecord(current, policy, domain.rua_address);
 	const dmarcName = `_dmarc.${domain.domain}`;
 	const cfAvailable = !!(dns.data?.cf_managed || onboarding.data?.cf_available);

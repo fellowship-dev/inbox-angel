@@ -28,8 +28,10 @@ describe('OverviewPage', () => {
 		expect(levels.map((l) => /Level (\d)/.exec(l.textContent ?? '')?.[1])).toEqual(['2', '1', '0']);
 		expect(screen.getAllByText(/97% pass rate over 7 days/)).toHaveLength(2);
 		expect(screen.getAllByText('No reports in the last 7 days.').length).toBe(1);
+		// Level 2 (Protected) is done: no nudge to finish setup. The others still get one.
 		const continueLinks = screen.getAllByRole('link', { name: /Continue setup \(2\/5\)/ });
-		expect(continueLinks[0]).toHaveAttribute('href', '/domains/1/setup/3');
+		expect(continueLinks).toHaveLength(1);
+		expect(continueLinks[0]).toHaveAttribute('href', '/domains/2/setup/3');
 	});
 
 	it('shows an error instead of a level when a summary fails, and does not downgrade the domain', async () => {

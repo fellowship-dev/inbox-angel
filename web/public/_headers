@@ -1,0 +1,10 @@
+# Workers Static Assets reads this file from the assets directory (web/dist).
+# Hashed build output never changes under the same name; the HTML shell must always be revalidated.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/index.html
+  Cache-Control: no-cache
+
+/
+  Cache-Control: no-cache

@@ -160,6 +160,26 @@ describe('DNS lookup failures are not missing records', () => {
 		expect(screen.getByText('v=DMARC1; p=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
 	});
 
+	it('DMARC: an existing p=reject stays p=reject when only our rua is added', async () => {
+		const current = 'v=DMARC1; p=reject; sp=none; rua=mailto:other@x.com';
+		const { calls } = renderApp(<Wizard />, {
+			route: '/domains/7/setup/4',
+			routes: routes({
+				status: status({ dmarc: { found: true, has_our_rua: false, current_record: current, rua_address: 'r@reports.example.com' } }),
+				extra: { 'POST /api/domains/7/apply-dmarc': { ok: true, record: 'x', created: false } },
+			}),
+		});
+		await heading('DMARC policy');
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole('button', { name: /Apply via Cloudflare/ }));
+		await waitFor(() => expect(calls.some((c) => c.path === '/api/domains/7/apply-dmarc')).toBe(true));
+		const record = calls.find((c) => c.path === '/api/domains/7/apply-dmarc')?.body.record as string;
+		expect(record).toContain('p=reject');
+		expect(record).toContain('sp=none');
+		expect(record).not.toMatch(/(^|;\s*)p=none/);
+		expect(record).toContain('mailto:other@x.com,mailto:r@reports.example.com');
+	});
+
 	it('Routing: failed MX lookup is an error row without the "set up" nudge', async () => {
 		renderApp(<Wizard />, {
 			route: '/domains/7/setup/5',
