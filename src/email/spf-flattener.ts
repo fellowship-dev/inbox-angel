@@ -7,12 +7,23 @@
 //
 // Supported: include:, redirect=, ip4:, ip6: (covers 99% of cloud mail provider SPF records)
 // Out of scope (MVP): a:, mx:, ptr:, exists: — preserved verbatim if present (rare)
+//
+// The pure resolution logic (collectIps / buildFlatRecord) lives in packages/dns-checks;
+// this module only adds the Cloudflare zone API writes on top.
 
 import { getZoneId } from '../env-utils';
 import { logAudit } from '../audit/log';
+import {
+  collectIps as collectIpsPure,
+  createResolver,
+  buildFlatRecord,
+  type CollectResult,
+} from '../../packages/dns-checks/src';
+
+export { buildFlatRecord };
+export type { CollectResult };
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
-const DOH_URL = 'https://cloudflare-dns.com/dns-query';
 
 /** Optional audit context for self-logging DNS mutations. */
 export interface SpfAuditOpts {
@@ -35,88 +46,19 @@ export interface FlattenEnv {
   CLOUDFLARE_API_TOKEN: string;
 }
 
-// ── DNS helpers ───────────────────────────────────────────────
-
-async function queryTxt(name: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${DOH_URL}?name=${encodeURIComponent(name)}&type=TXT`, {
-      headers: { Accept: 'application/dns-json' },
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { Answer?: { type: number; data: string }[] };
-    return (data.Answer ?? [])
-      .filter(r => r.type === 16)
-      .map(r => r.data.replace(/^"|"$/g, '').replace(/"\s*"/g, ''));
-  } catch {
-    return [];
-  }
-}
-
 // ── IP collector ──────────────────────────────────────────────
 
-interface CollectResult {
-  ips: string[];         // all resolved ip4:/ip6: entries
-  extra: string[];       // mechanisms we can't flatten: a:, mx:, ptr:, exists:
-  allQualifier: string;  // terminal ~all / -all / +all / ?all from root record
-}
-
-export async function collectIps(
-  domain: string,
-  visited = new Set<string>(),
-  root = true,
-): Promise<CollectResult> {
-  const result: CollectResult = { ips: [], extra: [], allQualifier: '~all' };
-
-  if (visited.has(domain)) return result;
-  visited.add(domain);
-
-  const records = await queryTxt(domain);
-  const spfRaw = records.find(r => r.startsWith('v=spf1'));
-  if (!spfRaw) return result;
-
-  for (const token of spfRaw.split(/\s+/)) {
-    const t = token.toLowerCase();
-    if (t === 'v=spf1') continue;
-
-    if (t.startsWith('ip4:') || t.startsWith('ip6:')) {
-      result.ips.push(t);
-    } else if (t.startsWith('include:')) {
-      const sub = await collectIps(t.slice(8), visited, false);
-      result.ips.push(...sub.ips);
-      result.extra.push(...sub.extra);
-    } else if (t.startsWith('redirect=')) {
-      const sub = await collectIps(t.slice(9), visited, false);
-      result.ips.push(...sub.ips);
-      result.extra.push(...sub.extra);
-      if (sub.allQualifier) result.allQualifier = sub.allQualifier;
-    } else if (t.endsWith('all') && root) {
-      result.allQualifier = t;  // -all / ~all / +all / ?all
-    } else if (
-      t === 'a' || t.startsWith('a:') || t.startsWith('a/') ||
-      t === 'mx' || t.startsWith('mx:') || t.startsWith('mx/') ||
-      t === 'ptr' || t.startsWith('ptr:') ||
-      t.startsWith('exists:')
-    ) {
-      // These trigger DNS lookups we can't flatten without resolving A/MX records.
-      // Preserve them verbatim — rare in practice for cloud mail providers.
-      result.extra.push(t);
-    }
-    // exp= and other unknown tags are silently dropped (safe)
+/**
+ * Resolve the include:/redirect= chain of `domain` into ip4:/ip6: entries via live DNS.
+ * Throws if the chain could not be fully resolved (DNS error, loop, multiple SPF records):
+ * publishing a partial flattened record would silently drop senders.
+ */
+export async function collectIps(domain: string): Promise<CollectResult> {
+  const result = await collectIpsPure(domain, createResolver());
+  if (result.errors.length > 0) {
+    throw new Error(`Could not fully resolve SPF for ${domain}: ${result.errors.map(e => e.message).join('; ')}`);
   }
-
   return result;
-}
-
-export function buildFlatRecord(ips: string[], extra: string[], allQualifier: string): string {
-  // Deduplicate IPs
-  const seen = new Set<string>();
-  const deduped = ips.filter(ip => {
-    if (seen.has(ip)) return false;
-    seen.add(ip);
-    return true;
-  });
-  const parts = ['v=spf1', ...deduped, ...extra, allQualifier];
-  return parts.join(' ');
 }
 
 // ── Cloudflare DNS API ────────────────────────────────────────

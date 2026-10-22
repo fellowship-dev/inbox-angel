@@ -1,208 +1,129 @@
-// Live DNS lookups for SPF, DKIM, DMARC records via Cloudflare DoH (DNS over HTTPS).
-// Workers-native: uses fetch(), no Node.js dns module.
+// Worker-side adapter over @inbox-angel/dns-checks (packages/dns-checks), which holds all
+// DNS logic. This file only binds the package to the global fetch and keeps the
+// `T | null` call shape the worker uses.
+//
+// Contract: `null` means the DNS authoritatively has no such record. A DNS failure
+// (SERVFAIL, timeout, DoH HTTP error, malformed answer) THROWS DnsLookupError and is never
+// folded into `null`, so callers can't mistake "couldn't check" for "doesn't exist".
+
+import {
+  parseDmarcRecord,
+  parseSpfRecord,
+  analyzeSpf,
+  analyzeSpfRecord,
+  createResolver,
+  lookupDkim as pkgLookupDkim,
+  lookupDmarc as pkgLookupDmarc,
+  type DkimRecord,
+  type DmarcRecord as PkgDmarcRecord,
+  type SpfAnalysis,
+  type SpfRecord as PkgSpfRecord,
+} from '../../packages/dns-checks/src';
+
+export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '../../packages/dns-checks/src';
+export type { DkimRecord };
+
+/** Returned lookups may carry `permerror`: the record(s) exist but receivers will treat them as an error. */
+export type SpfRecord = PkgSpfRecord & { permerror?: string };
+export type DmarcRecord = PkgDmarcRecord & { permerror?: string };
 
 export interface DnsRecord {
   type: string;
   value: string;
 }
 
-export interface SpfRecord {
-  raw: string;
-  mechanisms: string[];  // e.g. ["ip4:1.2.3.4", "include:sendgrid.net", "~all"]
-  verdict: 'strict' | 'soft' | 'open' | 'missing';
-  lookup_count?: number;  // total DNS lookups required to evaluate this record (set by lookupSpf, not parseSpfRecord)
+export class DnsLookupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DnsLookupError';
+  }
 }
 
-export interface DkimRecord {
-  raw: string;
-  version: string;   // v=DKIM1
-  keyType: string;   // k=rsa
-  present: boolean;
-}
-
-export interface DmarcRecord {
-  raw: string;
-  policy: 'none' | 'quarantine' | 'reject';
-  subdomainPolicy: 'none' | 'quarantine' | 'reject';
-  pct: number;
-  rua: string[];     // aggregate report addresses
-  ruf: string[];     // forensic report addresses
-}
+/** Typed RFC permerrors: the records exist but are unusable. Not a DNS outage. */
+export type RecordProblem = string;
 
 export interface DnsCheckResult {
   domain: string;
   spf: SpfRecord | null;
   dkim: DkimRecord | null;   // null if no selector available
   dmarc: DmarcRecord | null;
+  /** Set per check when the lookup FAILED (as opposed to finding no record). */
+  errors?: { spf?: string; dkim?: string; dmarc?: string };
+  /** Set per check when records were found but are broken (multiple records, SPF permerror…). */
+  problems?: { spf?: string; dmarc?: string };
 }
 
-const DOH_URL = 'https://cloudflare-dns.com/dns-query';
-
-async function queryTxt(name: string): Promise<string[]> {
-  try {
-    const url = `${DOH_URL}?name=${encodeURIComponent(name)}&type=TXT`;
-    const res = await fetch(url, {
-      headers: { Accept: 'application/dns-json' },
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { Answer?: { type: number; data: string }[] };
-    return (data.Answer ?? [])
-      .filter(r => r.type === 16) // TXT = 16
-      .map(r => r.data.replace(/^"|"$/g, '').replace(/"\s*"/g, '')); // strip quotes + join split strings
-  } catch {
-    return [];
-  }
+function spfDnsError(a: SpfAnalysis): string | null {
+  return a.status === 'temperror' ? (a.issues.find(i => i.code === 'dns-error')?.message ?? 'DNS error') : null;
 }
 
-// ── SPF ──────────────────────────────────────────────────────
-
-export function parseSpfRecord(raw: string): SpfRecord {
-  const mechanisms = raw
-    .split(/\s+/)
-    .filter(p => !p.startsWith('v='))
-    .map(p => p.toLowerCase());
-
-  const allMechanism = mechanisms.find(m => m.endsWith('all'));
-  let verdict: SpfRecord['verdict'] = 'missing';
-  if (allMechanism) {
-    if (allMechanism === '-all') verdict = 'strict';
-    else if (allMechanism === '~all') verdict = 'soft';
-    else verdict = 'open'; // +all or ?all
-  }
-
-  return { raw, mechanisms, verdict };
-}
-
-// Walk the SPF include chain and count DNS lookups.
-// Mechanisms that count toward the 10-lookup limit: include, a, mx, ptr, exists, redirect.
-// ip4, ip6, all, exp do NOT count.
-const MAX_WALK = 50; // safety cap to prevent runaway recursion
-
-function countMechanismLookups(
-  spfRaw: string,
-  visited: Set<string>,
-  count: { n: number },
-  recurse: (domain: string) => Promise<void>,
-) {
-  const promises: Promise<void>[] = [];
-  for (const token of spfRaw.split(/\s+/)) {
-    const t = token.toLowerCase();
-    if (t.startsWith('include:')) {
-      count.n++;
-      promises.push(recurse(t.slice(8)));
-    } else if (t.startsWith('redirect=')) {
-      count.n++;
-      promises.push(recurse(t.slice(9)));
-    } else if (t === 'a' || t.startsWith('a:') || t.startsWith('a/') ||
-               t === 'mx' || t.startsWith('mx:') || t.startsWith('mx/') ||
-               t === 'ptr' || t.startsWith('ptr:') ||
-               t.startsWith('exists:')) {
-      count.n++;
-    }
-    if (count.n > MAX_WALK) break;
-  }
-  return promises;
-}
-
-async function walkSpfLookups(domain: string, visited = new Set<string>(), count = { n: 0 }): Promise<number> {
-  if (visited.has(domain) || count.n > MAX_WALK) return count.n;
-  visited.add(domain);
-
-  const records = await queryTxt(domain);
-  const spfRaw = records.find(r => r.startsWith('v=spf1'));
-  if (!spfRaw) return count.n;
-
-  const recurse = async (d: string) => { await walkSpfLookups(d, visited, count); };
-  const promises = countMechanismLookups(spfRaw, visited, count, recurse);
-  await Promise.all(promises);
-  return count.n;
-}
-
-// Count DNS lookups for an arbitrary SPF record string (not yet published in DNS).
-// Parses the provided record for the root level, then recurses into includes via live DNS.
-export async function countSpfLookupsFromRecord(record: string): Promise<number> {
-  const visited = new Set<string>();
-  const count = { n: 0 };
-
-  const recurse = async (d: string) => { await walkSpfLookups(d, visited, count); };
-  const promises = countMechanismLookups(record, visited, count, recurse);
-  await Promise.all(promises);
-  return count.n;
-}
-
+/**
+ * `null` = no SPF record (authoritative). Throws DnsLookupError ONLY on a real DNS failure.
+ * A permerror (multiple records, too many lookups, loop…) returns the record with `permerror` set.
+ */
 export async function lookupSpf(domain: string): Promise<SpfRecord | null> {
-  const records = await queryTxt(domain);
-  const spfRaw = records.find(r => r.startsWith('v=spf1'));
-  if (!spfRaw) return null;
-  const parsed = parseSpfRecord(spfRaw);
-  const lookup_count = await walkSpfLookups(domain);
-  return { ...parsed, lookup_count };
+  const a = await analyzeSpf(domain, createResolver());
+  const dnsErr = spfDnsError(a);
+  if (dnsErr) throw new DnsLookupError(`SPF lookup for ${domain} failed: ${dnsErr}`);
+  if (a.status === 'none') return null;
+  if (a.rawRecords) {
+    // multiple v=spf1 records: expose all of them so the change is visible, flagged as permerror
+    return { ...parseSpfRecord(a.rawRecords[0]), raw: a.rawRecords.join('  |  '), verdict: 'missing', permerror: a.issues[0]?.message ?? 'multiple SPF records' };
+  }
+  if (a.status === 'permerror') return { ...a.record!, permerror: a.issues.find(i => i.code !== 'dns-error')?.message ?? 'SPF permerror' };
+  return a.record;
 }
 
-// ── DKIM ─────────────────────────────────────────────────────
-
-export function parseDkimRecord(raw: string): DkimRecord {
-  const tags = Object.fromEntries(
-    raw.split(/\s*;\s*/).map(t => {
-      const [k, ...v] = t.split('=');
-      return [k?.trim().toLowerCase(), v.join('=').trim()];
-    })
-  );
-  return {
-    raw,
-    version: tags['v'] ?? 'DKIM1',
-    keyType: tags['k'] ?? 'rsa',
-    present: true,
-  };
+/** Count RFC 7208 lookups for an unpublished SPF record. Throws DnsLookupError if DNS failed mid-walk. */
+export async function countSpfLookupsFromRecord(record: string): Promise<number> {
+  const a = await analyzeSpfRecord(record, createResolver());
+  if (a.status === 'temperror') throw new DnsLookupError(`SPF lookup count failed: ${spfDnsError(a)}`);
+  return a.lookupCount;
 }
 
 export async function lookupDkim(domain: string, selector: string): Promise<DkimRecord | null> {
-  const name = `${selector}._domainkey.${domain}`;
-  const records = await queryTxt(name);
-  const dkimRaw = records.find(r => r.includes('v=DKIM1') || r.includes('k='));
-  return dkimRaw ? parseDkimRecord(dkimRaw) : null;
-}
-
-// ── DMARC ────────────────────────────────────────────────────
-
-export function parseDmarcRecord(raw: string): DmarcRecord {
-  const tags = Object.fromEntries(
-    raw.split(/\s*;\s*/).map(t => {
-      const [k, ...v] = t.split('=');
-      return [k?.trim().toLowerCase(), v.join('=').trim()];
-    })
-  );
-
-  const policy = (tags['p'] ?? 'none') as DmarcRecord['policy'];
-  const sp = (tags['sp'] ?? policy) as DmarcRecord['subdomainPolicy'];
-  const pct = parseInt(tags['pct'] ?? '100', 10);
-  const rua = (tags['rua'] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-  const ruf = (tags['ruf'] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-
-  return { raw, policy, subdomainPolicy: sp, pct, rua, ruf };
+  const r = await pkgLookupDkim(createResolver(), domain, selector);
+  if (r.status === 'error') throw new DnsLookupError(`DKIM lookup for ${r.name} failed: ${r.error}`);
+  return r.record;
 }
 
 export async function lookupDmarc(domain: string): Promise<DmarcRecord | null> {
-  // Try _dmarc.domain first, then _dmarc on the org domain
-  const names = [`_dmarc.${domain}`];
-  const parts = domain.split('.');
-  if (parts.length > 2) names.push(`_dmarc.${parts.slice(-2).join('.')}`);
-
-  for (const name of names) {
-    const records = await queryTxt(name);
-    const dmarcRaw = records.find(r => r.startsWith('v=DMARC1'));
-    if (dmarcRaw) return parseDmarcRecord(dmarcRaw);
+  const r = await pkgLookupDmarc(createResolver(), domain);
+  if (r.status === 'error') throw new DnsLookupError(`DMARC lookup for ${domain} failed: ${r.error}`);
+  if (r.status === 'multiple') {
+    // RFC 7489 §6.6.3: with several records DMARC does not apply, i.e. effectively no policy.
+    const msg = `${r.foundAt} has ${r.rawRecords!.length} DMARC records; receivers ignore DMARC`;
+    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join('  |  '), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg };
   }
-  return null;
+  return r.record;
 }
 
-// ── Combined lookup ───────────────────────────────────────────
-
 export async function checkDomain(domain: string, dkimSelector?: string | null): Promise<DnsCheckResult> {
+  const settle = async <T>(p: Promise<T>): Promise<{ v: T | null; err?: string }> => {
+    try {
+      return { v: await p };
+    } catch (e) {
+      return { v: null, err: e instanceof Error ? e.message : String(e) };
+    }
+  };
   const [spf, dmarc, dkim] = await Promise.all([
-    lookupSpf(domain),
-    lookupDmarc(domain),
-    dkimSelector ? lookupDkim(domain, dkimSelector) : Promise.resolve(null),
+    settle(lookupSpf(domain)),
+    settle(lookupDmarc(domain)),
+    dkimSelector ? settle(lookupDkim(domain, dkimSelector)) : Promise.resolve<{ v: DkimRecord | null; err?: string }>({ v: null }),
   ]);
-  return { domain, spf, dkim, dmarc };
+  const errors: NonNullable<DnsCheckResult['errors']> = {};
+  if (spf.err) errors.spf = spf.err;
+  if (dmarc.err) errors.dmarc = dmarc.err;
+  if (dkim.err) errors.dkim = dkim.err;
+  const problems: NonNullable<DnsCheckResult['problems']> = {};
+  if (spf.v?.permerror) problems.spf = spf.v.permerror;
+  if (dmarc.v?.permerror) problems.dmarc = dmarc.v.permerror;
+  return {
+    domain,
+    spf: spf.v,
+    dkim: dkim.v,
+    dmarc: dmarc.v,
+    ...(Object.keys(errors).length ? { errors } : {}),
+    ...(Object.keys(problems).length ? { problems } : {}),
+  };
 }

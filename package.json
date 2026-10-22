@@ -27,15 +27,16 @@
   },
   "dependencies": {
     "fast-xml-parser": "^5.5.11",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "tldts": "^7.4.19"
   },
   "cloudflare": {
     "bindings": {
       "CLOUDFLARE_API_TOKEN": {
-        "description": "Runtime API token for Email Routing + DNS writes. Not the deploy token \u2014 create a separate one. See the README (Before you start) for step-by-step instructions and required permissions."
+        "description": "Runtime API token for Email Routing + DNS writes. Not the deploy token — create a separate one. See the README (Before you start) for step-by-step instructions and required permissions."
       },
       "CLOUDFLARE_ZONE_ID": {
-        "description": "Your Cloudflare Zone ID. Find it at dash.cloudflare.com \u2192 click your domain \u2192 right sidebar \u2192 Zone ID."
+        "description": "Your Cloudflare Zone ID. Find it at dash.cloudflare.com → click your domain → right sidebar → Zone ID."
       }
     }
   }

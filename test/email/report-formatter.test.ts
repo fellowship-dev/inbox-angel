@@ -233,3 +233,46 @@ describe('formatCheckReport', () => {
     expect(report).toContain('exists but this email was not signed');
   });
 });
+
+describe('DNS lookup failures are not reported as missing records', () => {
+  const failed = (errors: NonNullable<DnsCheckResult['errors']>): DnsCheckResult => ({
+    domain: 'example.com', spf: null, dkim: null, dmarc: null, errors,
+  });
+
+  it('DMARC lookup failure says "could not look up", not "No policy set"', () => {
+    const dns = failed({ dmarc: 'DNS SERVFAIL' });
+    const summary = buildSummary('example.com', null, dns);
+    const text = formatCheckReport('a@example.com', summary, null, dns);
+    expect(summary.dmarcLookupFailed).toBe(true);
+    expect(text).toContain('could not look up your DMARC record');
+    expect(text).toContain('DMARC record: (could not be checked');
+    expect(text).not.toContain('No policy set');
+    expect(text).not.toContain('Add a DMARC record');
+  });
+
+  it('SPF lookup failure is distinguished from "(none found)"', () => {
+    const dns = failed({ spf: 'timeout' });
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
+    expect(text).toContain('SPF record:   (could not be checked');
+    expect(text).not.toContain('SPF record:   (none found)');
+    expect(text).not.toContain('Add an SPF record');
+  });
+
+  it('a genuinely missing record is still reported as missing', () => {
+    const dns: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
+    expect(text).toContain('SPF record:   (none found)');
+    expect(text).toContain('DMARC record: (none found)');
+    expect(text).toContain('No policy set');
+  });
+});
+
+describe('broken (permerror) records are not described as lookup failures', () => {
+  it('multiple SPF records → "broken", not "could not look up"', () => {
+    const dns: DnsCheckResult = { domain: 'example.com', spf: { raw: 'v=spf1 -all  |  v=spf1 +all', mechanisms: [], terms: [], verdict: 'missing', permerror: 'x publishes 2 SPF records' } as any, dkim: null, dmarc: null, problems: { spf: 'x publishes 2 SPF records' } };
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
+    expect(text).toContain('Your SPF record is broken: x publishes 2 SPF records');
+    expect(text).toContain('Fix your SPF record: publish exactly one');
+    expect(text).not.toContain('could not look up your SPF');
+  });
+});

@@ -208,6 +208,9 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
   if (dns.dmarc) {
     body += `<tr><td style="padding-right:12px;color:#6b7280;">DMARC</td><td>${esc(dns.dmarc.raw)}</td></tr>`;
   }
+  for (const [label, msg] of [['SPF', dns.errors?.spf], ['DMARC', dns.errors?.dmarc], ['DKIM', dns.errors?.dkim]] as const) {
+    if (msg) body += `<tr><td style="padding-right:12px;color:#6b7280;">${label}</td><td>could not be checked (DNS lookup failed)</td></tr>`;
+  }
   if (dns.dkim) {
     body += `<tr><td style="padding-right:12px;color:#6b7280;">DKIM</td><td>selector: ${esc(auth?.dkim?.selector ?? 'found')}</td></tr>`;
   }

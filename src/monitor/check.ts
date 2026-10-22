@@ -17,6 +17,9 @@ export interface CheckMonitorResult {
   changes: DomainChange[];
   // Updated baseline — use this to overwrite stored values
   newBaseline: Pick<MonitorSubscription, 'spf_record' | 'dmarc_policy' | 'dmarc_pct' | 'dmarc_record'>;
+  // Checks whose DNS lookup FAILED. Their baseline is carried over unchanged and no change is
+  // reported: an outage must never look like "SPF/DMARC record removed".
+  errors: { spf?: string; dmarc?: string };
 }
 
 // DMARC policy strength order: reject > quarantine > none > (missing)
@@ -30,7 +33,8 @@ function dmarcSeverity(was: string, now: string): DomainChange['severity'] {
   return 'changed';
 }
 
-function spfSeverity(was: string, now: string): DomainChange['severity'] {
+function spfSeverity(was: string, now: string, permerror?: string): DomainChange['severity'] {
+  if (permerror) return 'degraded'; // record exists but receivers will fail it
   // Softfail→fail = improved, fail→softfail = degraded, any removal = degraded
   if (!now && was) return 'degraded';
   if (now && !was) return 'improved';
@@ -55,16 +59,23 @@ export function detectRollbackRisk(
 }
 
 export async function checkSubscription(sub: MonitorSubscription): Promise<CheckMonitorResult> {
-  const [spf, dmarc] = await Promise.all([
+  const [spfRes, dmarcRes] = await Promise.allSettled([
     lookupSpf(sub.domain),
     lookupDmarc(sub.domain),
   ]);
+  const errors: CheckMonitorResult['errors'] = {};
+  const reason = (r: PromiseRejectedResult) => (r.reason instanceof Error ? r.reason.message : String(r.reason));
+  if (spfRes.status === 'rejected') errors.spf = reason(spfRes);
+  if (dmarcRes.status === 'rejected') errors.dmarc = reason(dmarcRes);
+  const spf = spfRes.status === 'fulfilled' ? spfRes.value : null;
+  const dmarc = dmarcRes.status === 'fulfilled' ? dmarcRes.value : null;
 
+  // On a failed lookup keep the stored baseline for that field instead of overwriting it with "missing".
   const newBaseline = {
-    spf_record: spf?.raw ?? null,
-    dmarc_policy: dmarc?.policy ?? null,
-    dmarc_pct: dmarc?.pct ?? null,
-    dmarc_record: dmarc?.raw ?? null,
+    spf_record: errors.spf ? sub.spf_record : (spf?.raw ?? null),
+    dmarc_policy: errors.dmarc ? sub.dmarc_policy : (dmarc?.policy ?? null),
+    dmarc_pct: errors.dmarc ? sub.dmarc_pct : (dmarc?.pct ?? null),
+    dmarc_record: errors.dmarc ? sub.dmarc_record : (dmarc?.raw ?? null),
   };
 
   const changes: DomainChange[] = [];
@@ -77,7 +88,7 @@ export async function checkSubscription(sub: MonitorSubscription): Promise<Check
       field: 'SPF record',
       was: wasSpf,
       now: nowSpf,
-      severity: spfSeverity(wasSpf, nowSpf),
+      severity: spfSeverity(wasSpf, nowSpf, spf?.permerror),
     });
   }
 
@@ -106,5 +117,5 @@ export async function checkSubscription(sub: MonitorSubscription): Promise<Check
     });
   }
 
-  return { subscription: sub, changes, newBaseline };
+  return { subscription: sub, changes, newBaseline, errors };
 }
