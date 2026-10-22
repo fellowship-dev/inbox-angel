@@ -32,6 +32,7 @@
     "@inbox-angel/dns-checks": "*",
     "fast-xml-parser": "^5.5.11",
     "fflate": "^0.8.2",
+    "mimetext": "^3.0.28",
     "tldts": "^7.4.19"
   },
   "cloudflare": {

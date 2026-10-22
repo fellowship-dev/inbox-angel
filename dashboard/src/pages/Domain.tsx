@@ -462,6 +462,11 @@ export function DomainDetail({ id, onUnauthorized }: Props) {
             <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: 700 }}>
               Advance to {rollout.next_step.policy}{rollout.next_step.testing ? ' (testing, t=y)' : ''}
             </h3>
+            {rollout.next_step_note && (
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.78rem', color: '#92400e', background: '#fef3c7', borderRadius: '4px', padding: '0.3rem 0.5rem' }}>
+                ⚠ {rollout.next_step_note}
+              </p>
+            )}
             <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#6b7280' }}>
               Update your <code>_dmarc.{domain.domain}</code> TXT record to:
             </p>

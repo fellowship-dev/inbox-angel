@@ -354,6 +354,7 @@ export interface RolloutNext {
   current_step_index: number;
   total_steps: number;
   next_step: { policy: string; testing: boolean } | null;
+  next_step_note: string | null; // caveat, e.g. dropping a partial pct= applies the policy to 100%
   dns_preview: string | null;
   pass_rate: number | null;
   blocked: boolean;

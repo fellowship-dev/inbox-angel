@@ -9,6 +9,8 @@ import {
   stepIndexFromStored,
   toStored,
   parseDmarcTags,
+  testingWouldWeaken,
+  planNextStep,
 } from '../../src/dmarc/rollout';
 import { detectRollbackRisk, ROLLBACK_THRESHOLD_PP } from '../../src/monitor/check';
 
@@ -130,14 +132,15 @@ describe('buildStepRecord', () => {
   });
 
   it('never weakens an existing stricter sp=/np=', () => {
-    const rec = buildStepRecord('v=DMARC1; p=none; sp=reject; np=quarantine', Q_T);
+    const rec = buildStepRecord('v=DMARC1; p=none; sp=reject; np=quarantine', Q);
     const tags = parseDmarcTags(rec);
     expect(tags.get('sp')).toBe('reject');
     expect(tags.get('np')).toBe('quarantine');
   });
 
-  it('builds a record from the p=none step', () => {
-    expect(buildStepRecord('v=DMARC1; p=quarantine', NONE)).toBe('v=DMARC1; p=none; sp=none; np=none');
+  it('builds a record from the p=none step (existing effective sp/np are never weakened)', () => {
+    expect(buildStepRecord('v=DMARC1; p=none', NONE)).toBe('v=DMARC1; p=none; sp=none; np=none');
+    expect(buildStepRecord('v=DMARC1; p=quarantine', NONE)).toBe('v=DMARC1; p=none; sp=quarantine; np=quarantine');
   });
 });
 
@@ -156,5 +159,112 @@ describe('detectRollbackRisk', () => {
     expect(detectRollbackRisk(null, 90)).toBe(false);
     expect(detectRollbackRisk(80, null)).toBe(false);
     expect(detectRollbackRisk(null, null)).toBe(false);
+  });
+});
+
+describe('pct=0 (RFC 9989 Appendix A.6: equivalent to t=y)', () => {
+  it('maps to the testing step of the same policy', () => {
+    expect(stepIndexFor('quarantine', 0)).toBe(1);
+    expect(stepIndexFor('reject', 0)).toBe(3);
+    expect(stepIndexFor('none', 0)).toBe(0);
+    expect(stepIndexForRecord('v=DMARC1; p=quarantine; pct=0')).toBe(1);
+    expect(stepIndexForRecord('v=DMARC1; p=reject; pct=0; rua=mailto:a@b.c')).toBe(3);
+  });
+
+  it('1-99 still maps to enforced, 100 to enforced', () => {
+    expect(stepIndexFor('quarantine', 1)).toBe(2);
+    expect(stepIndexFor('reject', 99)).toBe(4);
+  });
+});
+
+describe('sp=/np= inheritance and t=y (RFC 9989: t applies to p, sp and np)', () => {
+  it('an absent np inherits sp: p=none; sp=reject keeps np=reject', () => {
+    const tags = parseDmarcTags(buildStepRecord('v=DMARC1; p=none; sp=reject', Q));
+    expect(tags.get('sp')).toBe('reject');
+    expect(tags.get('np')).toBe('reject');
+  });
+
+  it('an absent sp inherits p: p=quarantine, no sp/np, step reject keeps sp=np=reject', () => {
+    const tags = parseDmarcTags(buildStepRecord('v=DMARC1; p=quarantine', R));
+    expect([tags.get('sp'), tags.get('np')]).toEqual(['reject', 'reject']);
+  });
+
+  it('explicit np wins over inherited sp', () => {
+    const tags = parseDmarcTags(buildStepRecord('v=DMARC1; p=none; sp=reject; np=none', Q));
+    expect(tags.get('sp')).toBe('reject');
+    expect(tags.get('np')).toBe('quarantine');
+  });
+
+  it('testingWouldWeaken: stricter sp or inherited np under t=y', () => {
+    expect(testingWouldWeaken('v=DMARC1; p=none; sp=reject', Q_T)).toBe(true);
+    expect(testingWouldWeaken('v=DMARC1; p=none; sp=quarantine', Q_T)).toBe(true);
+    expect(testingWouldWeaken('v=DMARC1; p=none; np=reject', Q_T)).toBe(true);
+    expect(testingWouldWeaken('v=DMARC1; p=quarantine; sp=reject', R_T)).toBe(true);
+  });
+
+  it('testingWouldWeaken: plain forward steps and enforced steps are fine', () => {
+    expect(testingWouldWeaken('v=DMARC1; p=none', Q_T)).toBe(false);
+    expect(testingWouldWeaken('v=DMARC1; p=quarantine', R_T)).toBe(false);
+    expect(testingWouldWeaken('v=DMARC1; p=none; sp=reject', Q)).toBe(false);
+  });
+
+  it('buildStepRecord refuses a t=y step that would weaken sp=', () => {
+    expect(() => buildStepRecord('v=DMARC1; p=none; sp=reject', Q_T)).toThrow(/weaken/);
+    expect(() => buildStepRecord('v=DMARC1; p=quarantine; sp=reject', R_T)).toThrow(/weaken/);
+  });
+});
+
+describe('planNextStep', () => {
+  it('plain advance from p=none goes to quarantine t=y', () => {
+    const plan = planNextStep('v=DMARC1; p=none')!;
+    expect(plan.step).toEqual(Q_T);
+    expect(plan.note).toBeNull();
+    expect(plan.skippedTesting).toBe(false);
+  });
+
+  it('follows the sequence for new-style records', () => {
+    expect(planNextStep('v=DMARC1; p=quarantine; t=y')!.step).toEqual(Q);
+    expect(planNextStep('v=DMARC1; p=quarantine')!.step).toEqual(R_T);
+    expect(planNextStep('v=DMARC1; p=reject; t=y')!.step).toEqual(R);
+    expect(planNextStep('v=DMARC1; p=reject')).toBeNull();
+    expect(planNextStep('v=DMARC1; p=bogus')).toBeNull();
+  });
+
+  it('skips t=y straight to enforced when it would weaken sp= (p=none; sp=reject)', () => {
+    const plan = planNextStep('v=DMARC1; p=none; sp=reject')!;
+    expect(plan.step).toEqual(Q);
+    expect(plan.skippedTesting).toBe(true);
+    expect(plan.note).toMatch(/weaken/);
+    // and the resulting record is actually safe to build
+    const tags = parseDmarcTags(buildStepRecord('v=DMARC1; p=none; sp=reject', plan.step));
+    expect([tags.get('p'), tags.get('sp'), tags.get('np'), tags.has('t')]).toEqual(['quarantine', 'reject', 'reject', false]);
+  });
+
+  it('skips t=y one step later (p=quarantine; sp=reject → reject enforced)', () => {
+    const plan = planNextStep('v=DMARC1; p=quarantine; sp=reject')!;
+    expect(plan.step).toEqual(R);
+    expect(plan.skippedTesting).toBe(true);
+  });
+
+  it('partial-pct quarantine: next step is quarantine (full), labelled honestly', () => {
+    for (const pct of [10, 50]) {
+      const plan = planNextStep(`v=DMARC1; p=quarantine; pct=${pct}`)!;
+      expect(plan.step).toEqual(Q);
+      expect(plan.dropsPartialPct).toBe(true);
+      expect(plan.note).toContain(`pct=${pct}`);
+      expect(plan.note).toContain('100%');
+      expect(buildStepRecord(`v=DMARC1; p=quarantine; pct=${pct}`, plan.step)).not.toMatch(/pct=/);
+    }
+  });
+
+  it('partial-pct reject offers reject (full) instead of "fully graduated"', () => {
+    const plan = planNextStep('v=DMARC1; p=reject; pct=50')!;
+    expect(plan.step).toEqual(R);
+    expect(plan.dropsPartialPct).toBe(true);
+  });
+
+  it('pct=100 / pct=0 are not partial', () => {
+    expect(planNextStep('v=DMARC1; p=quarantine; pct=100')!.dropsPartialPct).toBe(false);
+    expect(planNextStep('v=DMARC1; p=quarantine; pct=0')!.step).toEqual(Q);
   });
 });

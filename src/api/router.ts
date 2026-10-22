@@ -110,7 +110,7 @@ import { track } from '../telemetry';
 import { reportsDomain, fromEmail, enrichEnv, getZoneId, getAccountId, getBaseDomain, resetEnvCache } from '../env-utils';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
-import { getNextStep, buildStepRecord, parseDmarcTags, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
+import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
 import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
 import { getAllDkimSelectors } from '../../dashboard/src/email-service-providers';
@@ -1499,9 +1499,8 @@ async function _handleApi(
       ).length;
 
       const currentStepIndex = currentRecord ? stepIndexForRecord(currentRecord) : 0;
-      const nextStep = currentStepIndex === -1 || currentStepIndex === ROLLOUT_SEQUENCE.length - 1
-        ? null
-        : ROLLOUT_SEQUENCE[currentStepIndex + 1];
+      const plan = currentStepIndex === -1 ? null : planNextStep(currentRecord);
+      const nextStep = plan?.step ?? null;
 
       // Safety: block if pass rate is below threshold
       const blocked = passRate !== null && passRate < PASS_RATE_THRESHOLD;
@@ -1528,6 +1527,7 @@ async function _handleApi(
         current_step_index: currentStepIndex,
         total_steps: ROLLOUT_SEQUENCE.length,
         next_step: nextStep,
+        next_step_note: plan?.note ?? null,
         dns_preview: dnsPreview,
         pass_rate: passRate,
         blocked,

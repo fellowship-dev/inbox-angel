@@ -19,7 +19,7 @@ export interface Domain {
   spf_lookup_count: number | null; // cached SPF lookup depth (updated on add + daily cron)
   parent_id: number | null;      // non-null for subdomains; references domains.id
   rollout_rec_policy: string | null; // recommended rollout policy: quarantine | reject
-  rollout_rec_pct: number | null;    // recommended rollout pct: 10 | 50 | 100
+  rollout_rec_pct: number | null;    // 0 = testing step (t=y), 100 = enforced; legacy rows hold 10|50|100 (pct is gone in RFC 9989, read via stepIndexFromStored)
   created_at: number;
   updated_at: number;
 }
