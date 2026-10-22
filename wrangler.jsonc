@@ -15,10 +15,10 @@
 	"name": "inbox-angel-worker",
 	"main": "src/index.ts",
 	"build": {
-		"command": "npm install --prefix dashboard && npm run build:dashboard"
+		"command": "npm run build:dashboard"
 	},
 	"assets": {
-		"directory": "./dashboard/dist",
+		"directory": "./web/dist",
 		"not_found_handling": "single-page-application"
 	},
 	"compatibility_date": "2025-03-01",
