@@ -27,7 +27,7 @@ const KEYWORDS = new Set(['where', 'on', 'set', 'values', 'select', 'group', 'or
 const TABLE_VARS: Record<string, string> = {
 	domains: 'domains', aggregateReports: 'aggregate_reports', reportRecords: 'report_records', tlsReports: 'tls_reports',
 	spfFlattenConfig: 'spf_flatten_config', mtaStsConfig: 'mta_sts_config', monitorSubscriptions: 'monitor_subscriptions',
-	settings: 'settings', invites: 'invites', auditLog: 'audit_log', memberships: 'memberships',
+	settings: 'settings', invites: 'invites', auditLog: 'audit_log', memberships: 'memberships', apiKeys: 'api_keys',
 };
 
 interface Hit { table: string; problem: string }
@@ -147,12 +147,12 @@ describe('every query on tenant data carries an account predicate (per statement
 		expect(scan(walk(join(ROOT, 'src'))).found).toEqual([]);
 	});
 
-	it('the query layer (except global.ts) is scoped, with exactly one documented exemption', () => {
+	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, five in auth.ts: resolving a credential to its account)', () => {
 		const files = walk(join(ROOT, 'packages/db/src/queries')).filter((f) => !f.endsWith('global.ts'));
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(1);
+		expect(exemptions).toBe(6);
 	});
 
 	it('global.ts only touches allow-listed global tables', () => {
@@ -165,7 +165,7 @@ describe('every query on tenant data carries an account predicate (per statement
 
 	it('the allow-list matches the schema', () => {
 		for (const t of GLOBAL) expect(OWNED.has(t)).toBe(false);
-		expect([...GLOBAL].sort()).toEqual(['accounts', 'check_results', 'ip_info', 'password_reset_tokens', 'users']);
+		expect([...GLOBAL].sort()).toEqual(['accounts', 'auth_accounts', 'auth_rate_limits', 'check_results', 'ip_info', 'password_reset_tokens', 'sessions', 'users', 'verifications']);
 	});
 });
 

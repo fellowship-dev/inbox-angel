@@ -5,7 +5,7 @@ import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },

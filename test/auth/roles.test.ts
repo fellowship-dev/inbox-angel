@@ -1,0 +1,105 @@
+import { describe, it, expect, vi } from 'vitest';
+import type { Env } from '../../src/index';
+
+vi.mock('../../src/env-utils', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    enrichEnv: vi.fn().mockResolvedValue(undefined),
+    getZoneId: vi.fn().mockReturnValue(undefined),
+    getAccountId: vi.fn().mockReturnValue(undefined),
+    getBaseDomain: vi.fn().mockReturnValue(undefined),
+    reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
+    fromEmail: vi.fn().mockReturnValue('noreply@reports.example.com'),
+  };
+});
+vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
+
+import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { call, makeEnv, setupOwner, inviteAndAccept } from './helpers';
+
+// Every route that writes DNS or changes domains/settings. Members are read-only.
+const WRITES: Array<[string, string, unknown?]> = [
+  ['POST', '/api/domains', { domain: 'new.example.com' }],
+  ['DELETE', '/api/domains/1'],
+  ['POST', '/api/domains/1/apply-dmarc', { record: 'v=DMARC1; p=none' }],
+  ['POST', '/api/domains/1/apply-spf', { record: 'v=spf1 -all' }],
+  ['PATCH', '/api/domains/1/dmarc', { policy: 'none' }],
+  ['POST', '/api/domains/1/rollout-advance', {}],
+  ['PUT', '/api/domains/1/set-default', {}],
+  ['PUT', '/api/domains/1/wizard-state', {}],
+  ['PATCH', '/api/domains/1/alerts', { enabled: false }],
+  ['POST', '/api/domains/1/spf-flatten', {}],
+  ['DELETE', '/api/domains/1/spf-flatten'],
+  ['POST', '/api/domains/1/mta-sts', { mode: 'testing' }],
+  ['DELETE', '/api/domains/1/mta-sts'],
+  ['POST', '/api/settings/base-domain', { domain: 'example.com' }],
+  ['POST', '/api/settings/register-destination', {}],
+  ['POST', '/api/setup/email-routing', {}],
+  ['POST', '/api/setup/custom-domain', {}],
+  ['POST', '/api/domains/bulk-import', { domains: 'a.example.com' }],
+  ['POST', '/api/team/invite', { email: 'x@example.com' }],
+];
+
+async function world() {
+  const db = createMigratedD1();
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id) VALUES (1, 'acme.com', 'rua@reports.example.com', 'acct_default')").run();
+  const env = makeEnv(db);
+  const owner = await setupOwner(env);
+  return { env, owner, admin: await inviteAndAccept(env, owner, 'admin@example.com', 'admin'), member: await inviteAndAccept(env, owner, 'member@example.com', 'member') };
+}
+
+describe('roles: owner / admin / member', () => {
+  it('a member gets 403 on every DNS-writing / settings-changing route', async () => {
+    const { env, member } = await world();
+    for (const [method, path, body] of WRITES) {
+      const res = await call(env, method, path, { key: member, body });
+      expect(res.status, `${method} ${path}`).toBe(403);
+    }
+  });
+
+  it('admins and owners are not stopped by the role check', async () => {
+    const { env, owner, admin } = await world();
+    for (const key of [owner, admin]) {
+      for (const [method, path, body] of WRITES) {
+        if (method === 'DELETE' && path === '/api/domains/1') continue; // would remove the fixture
+        const res = await call(env, method, path, { key, body });
+        expect(res.status, `${method} ${path}`).not.toBe(403);
+        expect(res.status, `${method} ${path}`).not.toBe(401);
+      }
+    }
+  });
+
+  it('members can read', async () => {
+    const { env, member } = await world();
+    for (const path of ['/api/domains', '/api/reports', '/api/domains/1/stats']) {
+      expect((await call(env, 'GET', path, { key: member })).status, path).toBe(200);
+    }
+  });
+
+  it('members cannot see the team, audit log or bulk-import; admins can', async () => {
+    const { env, member, admin } = await world();
+    expect((await call(env, 'GET', '/api/team', { key: member })).status).toBe(403);
+    expect((await call(env, 'GET', '/api/audit-log', { key: member })).status).toBe(403);
+    expect((await call(env, 'GET', '/api/team', { key: admin })).status).toBe(200);
+    expect((await call(env, 'GET', '/api/audit-log', { key: admin })).status).toBe(200);
+  });
+
+  it('the deprecated API_KEY acts as instance admin: writes allowed, no user identity', async () => {
+    const env = makeEnv(createMigratedD1(), { API_KEY: 'instance-secret-key' });
+    expect((await call(env, 'GET', '/api/domains', { key: 'instance-secret-key' })).status).toBe(200);
+    expect((await call(env, 'POST', '/api/settings/base-domain', { key: 'instance-secret-key', body: { domain: 'example.com' } })).status).toBeLessThan(300);
+    expect((await call(env, 'GET', '/api/audit-log', { key: 'instance-secret-key' })).status).toBe(200);
+    // identity-bound actions need a user
+    expect((await call(env, 'POST', '/api/team/invite', { key: 'instance-secret-key', body: { email: 'x@example.com' } })).status).toBe(403);
+    expect((await call(env, 'POST', '/api/keys', { key: 'instance-secret-key', body: { name: 'k' } })).status).toBe(403);
+    expect((await call(env, 'GET', '/api/domains', { key: 'wrong' })).status).toBe(401);
+  });
+
+  it('an API_KEY does not unlock a user session of the same value, and bad credentials get 401', async () => {
+    const env = makeEnv(createMigratedD1());
+    expect((await call(env, 'GET', '/api/domains')).status).toBe(401);
+    expect((await call(env, 'GET', '/api/domains', { key: 'garbage' })).status).toBe(401);
+    expect((await call(env, 'GET', '/api/domains', { headers: { authorization: 'Bearer garbage' } })).status).toBe(401);
+  });
+});

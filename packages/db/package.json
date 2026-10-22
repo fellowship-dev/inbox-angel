@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
+    "./auth-schema": "./src/auth-schema.ts",
     "./queries": "./src/queries/index.ts",
     "./testing": "./src/testing/index.ts"
   },

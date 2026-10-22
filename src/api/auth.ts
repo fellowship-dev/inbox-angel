@@ -1,33 +1,42 @@
-// Simple API key auth for Cloudflare Workers.
-// Session-based auth (dashboard login) resolves session tokens to API keys
-// in the router before calling requireAuth().
+// Request authentication for /api/*. The work is in src/auth/session.ts; this is the
+// seam the router (and its tests) call.
+import { authenticate, passesCsrfCheck, AuthError, type Principal } from '../auth/session';
+import type { AuthEnv } from '../auth/config';
 
-export class AuthError extends Error {
-  constructor(
-    message: string,
-    public readonly status: 401 | 403 = 401,
-  ) {
-    super(message);
-    this.name = 'AuthError';
-  }
-}
+export { AuthError };
+export type { AuthEnv };
 
+/** What a route handler needs to know about the caller. */
 export interface AuthContext {
+  /** The user's id; 'instance' for the deprecated API_KEY. */
   userId: string;
-}
-
-export interface AuthEnv {
-  API_KEY?: string;
+  accountId: string;
+  role: Principal['role'];
+  kind: Principal['kind'];
+  user: Principal['user'];
+  apiKeyId?: string;
 }
 
 /**
- * Verifies the caller's identity via X-Api-Key header.
- * Returns { userId } on success; throws AuthError on failure.
+ * Verifies the caller. Returns who they are and their role on success; throws AuthError
+ * (401 unauthenticated, 403 forbidden) otherwise.
  */
-export async function requireAuth(request: Request, env: AuthEnv): Promise<AuthContext> {
-  const apiKey = request.headers.get('x-api-key');
-  if (!apiKey || !env.API_KEY || apiKey !== env.API_KEY) {
-    throw new AuthError('Unauthorized — provide X-Api-Key header');
+export async function requireAuth(
+  request: Request,
+  env: AuthEnv,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<AuthContext> {
+  const principal = await authenticate(request, env, ctx);
+  if (!principal) throw new AuthError('Unauthorized — sign in, or provide an X-Api-Key header');
+  if (principal.viaCookie && !passesCsrfCheck(request, env)) {
+    throw new AuthError('cross-origin request rejected', 403);
   }
-  return { userId: apiKey };
+  return {
+    userId: principal.user?.id ?? 'instance',
+    accountId: principal.accountId,
+    role: principal.role,
+    kind: principal.kind,
+    user: principal.user,
+    apiKeyId: principal.apiKeyId,
+  };
 }

@@ -1,4 +1,4 @@
-import { and, eq, notExists, sql } from 'drizzle-orm';
+import { and, eq, inArray, notExists, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { invites, memberships, users, type MembershipRole } from '../schema';
 
@@ -6,7 +6,7 @@ export interface TeamMember {
 	id: string;
 	email: string;
 	name: string;
-	role: 'admin' | 'member';
+	role: MembershipRole;
 	last_login_at: number | null;
 	created_at: number;
 }
@@ -16,7 +16,7 @@ export function teamQueries(db: Db, accountId: string) {
 		/** Users who are members of this account (no credentials). */
 		list(): Promise<TeamMember[]> {
 			return db
-				.select({ id: users.id, email: users.email, name: users.name, role: users.role, last_login_at: users.last_login_at, created_at: users.created_at })
+				.select({ id: users.id, email: users.email, name: users.name, role: memberships.role, last_login_at: users.last_login_at, created_at: users.created_at })
 				.from(users)
 				.innerJoin(memberships, and(eq(memberships.user_id, users.id), eq(memberships.account_id, accountId)))
 				.orderBy(users.created_at)
@@ -26,7 +26,7 @@ export function teamQueries(db: Db, accountId: string) {
 		/** A member of this account by id (no credentials), or null. */
 		getMember(userId: string) {
 			return db
-				.select({ id: users.id, email: users.email, name: users.name, role: users.role })
+				.select({ id: users.id, email: users.email, name: users.name, role: memberships.role })
 				.from(users)
 				.innerJoin(memberships, and(eq(memberships.user_id, users.id), eq(memberships.account_id, accountId)))
 				.where(eq(users.id, userId))
@@ -34,16 +34,54 @@ export function teamQueries(db: Db, accountId: string) {
 				.then((r) => r ?? null);
 		},
 
-		/** First admin of the account — the person digests and notices are sent to. */
+		/** The account's owner (else its earliest admin) — the person digests and notices are sent to. */
 		firstAdmin() {
 			return db
 				.select({ id: users.id, email: users.email, name: users.name })
 				.from(users)
 				.innerJoin(memberships, and(eq(memberships.user_id, users.id), eq(memberships.account_id, accountId)))
-				.where(eq(users.role, 'admin'))
+				.where(inArray(memberships.role, ['owner', 'admin']))
+				.orderBy(sql`CASE ${memberships.role} WHEN 'owner' THEN 0 ELSE 1 END`, memberships.created_at, users.created_at)
 				.limit(1)
 				.get()
 				.then((r) => r ?? null);
+		},
+
+		/** Does this account have an owner yet? (False means first-run setup is open.) */
+		hasOwner(): Promise<boolean> {
+			return db
+				.select({ x: memberships.user_id })
+				.from(memberships)
+				.where(and(eq(memberships.account_id, accountId), eq(memberships.role, 'owner')))
+				.limit(1)
+				.get()
+				.then((r) => !!r);
+		},
+
+		/** The user's role in this account, or null if they are not a member. */
+		roleOf(userId: string): Promise<MembershipRole | null> {
+			return db
+				.select({ role: memberships.role })
+				.from(memberships)
+				.where(and(eq(memberships.account_id, accountId), eq(memberships.user_id, userId)))
+				.get()
+				.then((r) => r?.role ?? null);
+		},
+
+		/**
+		 * Make an existing user the account's owner iff it has none yet — one statement, so
+		 * two concurrent first sign-ups cannot both win. Returns whether this call did.
+		 */
+		async claimOwnership(userId: string): Promise<boolean> {
+			const res = await db.run(sql`INSERT INTO memberships (account_id, user_id, role)
+				SELECT ${accountId}, ${userId}, 'owner'
+				WHERE NOT EXISTS (SELECT 1 FROM memberships WHERE account_id = ${accountId} AND role = 'owner')`);
+			return ((res as any).meta?.changes ?? (res as any).changes ?? 0) > 0;
+		},
+
+		/** Add an existing user to this account (no-op if they already belong). */
+		addMember(userId: string, role: MembershipRole) {
+			return db.insert(memberships).values({ account_id: accountId, user_id: userId, role }).onConflictDoNothing().run();
 		},
 
 		/** Create a user and make them a member of this account, atomically. */

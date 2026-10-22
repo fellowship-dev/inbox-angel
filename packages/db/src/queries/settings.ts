@@ -23,6 +23,17 @@ export function settingsQueries(db: Db, accountId: string) {
 				.then((r) => r ?? null);
 		},
 
+		/** Store `value` only if the key is unset, then return whatever is stored (safe under concurrent first calls). */
+		async setIfAbsent(key: string, value: string): Promise<string> {
+			await db.insert(settings).values({ account_id: accountId, key, value }).onConflictDoNothing().run();
+			const row = await db
+				.select({ value: settings.value })
+				.from(settings)
+				.where(and(eq(settings.account_id, accountId), eq(settings.key, key)))
+				.get();
+			return row!.value;
+		},
+
 		set(key: string, value: string) {
 			return upsert(key, value).run();
 		},

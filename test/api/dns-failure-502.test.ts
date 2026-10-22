@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../../src/index';
 
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error { constructor(m: string, public status = 401) { super(m); } },
 }));
 vi.mock('../../src/dns/provision', () => ({ provisionDomain: vi.fn(), deprovisionDomain: vi.fn(), DnsProvisionError: class extends Error {} }));

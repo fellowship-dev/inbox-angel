@@ -89,7 +89,7 @@ No `BASE_DOMAIN`, no `REPORTS_DOMAIN`, no zone IDs — the setup wizard handles 
 
 ### Step 2 — Create your account
 
-Open your worker URL. On first visit you'll see a setup form — enter your email and a password.
+Open your worker URL. On first visit you'll see a setup form — enter your email and a password. You become the owner; sign-up then closes (see [Authentication](#authentication)).
 
 ---
 
@@ -106,6 +106,22 @@ After creating your account, the setup wizard walks you through five steps:
 Reports from receiving mail servers worldwide will start arriving within 24 hours. The dashboard shows your pass rate and tells you when it's safe to tighten policy toward `p=reject`.
 
 ---
+
+## Authentication
+
+Auth is [Better Auth](https://www.better-auth.com) on D1 (sessions, logins and reset tokens live in your database).
+
+* **Email + password** always works — nothing to configure. The first person to open the dashboard becomes the **owner**; after that sign-up is closed and people join by **invite** (Team → Invite).
+* **⚠ First-run takeover window.** Until the first owner exists, *anyone* who reaches the Worker URL can claim it — with a password, or with any GitHub/Google account if OAuth is configured. Create your account right after deploying, and/or set `OWNER_EMAIL=you@yourdomain.com`: then only that email can claim first ownership (password or OAuth).
+* **Roles** (per account): `owner` and `admin` can change anything (DNS, domains, settings, team); `member` is read-only. Only the owner can remove an admin; the owner cannot be removed.
+* **GitHub / Google sign-in** appears only when its credentials are set (`wrangler secret put GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). The callback URLs are `https://<your-worker>/api/auth/callback/github` and `…/google`. On a self-hosted instance an OAuth user can only join if they are the first user or hold an invite for the same email.
+* **API keys** are per user, scoped to one account, and carry their owner's role (a member's key is read-only). Create one while signed in — `POST /api/keys {"name":"ci","expires_in_days":90}` — and send it as `X-Api-Key: ia_…` (or `Authorization: Bearer ia_…`). The secret is shown once; only a SHA-256 is stored. `GET /api/keys` lists prefixes and last use, `DELETE /api/keys/:id` revokes, `POST /api/keys/revoke-all` revokes all of yours. **API keys survive a password change** (changing a password signs out every other *session*, not keys) — revoke them yourself if a key may be compromised.
+* **`API_KEY` (env) is deprecated.** It still works as a self-host "instance admin" key (full access to the default account, no user identity), but prefer per-user keys; it will be removed in a future major release.
+* **Password reset** emails go out through the same outbound path as alerts. On self-host, Cloudflare Email Routing only delivers to *verified destination addresses*, so a reset email reaches the owner (verified during setup) but not an arbitrary teammate — until their address is verified, ask the owner to invite them again or reset it from the Worker log (without a `SEND_EMAIL` binding the link is logged).
+* **Security:** auth POSTs (setup, login, logout, reset, invite…) must be `application/json` and, when sent by a browser, same-origin (login-CSRF protection); cookie-authenticated writes must come from the same origin (set `TRUSTED_ORIGINS` for extra ones); login, sign-up and reset are rate-limited per IP in D1; resetting a password signs out every session; password reset never reveals whether an address exists.
+* Optional settings: `OWNER_EMAIL`; `MODE=saas` + `SAAS_ENABLED=1` (**experimental — do not enable yet**: every sign-up gets its own account, but API data scoping per account is not wired until tenancy lands, so saas callers are answered 403 on the API and the Worker answers 503 in `MODE=saas` without `SAAS_ENABLED=1`), `BETTER_AUTH_SECRET` (session signing secret — generated and stored in D1 if unset), `BETTER_AUTH_URL` (public origin behind a proxy).
+
+> Upgrading from before Better Auth: existing users, roles and password hashes carry over unchanged (migration `0013`). **Everyone is signed out once** (old session tokens are not honored) and outstanding password-reset links stop working. Members who could previously change DNS are now read-only — promote them to admin if needed.
 
 ## Upgrading
 
@@ -126,7 +142,7 @@ Until migrated, the Worker answers 503 and inbound email is refused for retry. D
 | Outbound email | Cloudflare Email Workers | Sends digests and alerts |
 | Storage | Cloudflare D1 | SQLite at the edge |
 | DNS provisioning | Cloudflare DNS API | Per-domain auth records + SPF + MTA-STS |
-| Auth | Email + password | Admin account created on first visit |
+| Auth | Better Auth on D1 | Email + password; optional GitHub/Google; roles; per-user API keys |
 | Frontend | Embedded SPA | Built from `dashboard/`, served as static assets |
 
 ---

@@ -24,6 +24,24 @@ CREATE INDEX `idx_agg_reports_domain` ON `aggregate_reports` (`domain_id`);--> s
 CREATE INDEX `idx_agg_reports_date` ON `aggregate_reports` (`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_account` ON `aggregate_reports` (`account_id`,`date_begin`);--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
+CREATE TABLE `api_keys` (
+	`id` text PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`name` text NOT NULL,
+	`prefix` text NOT NULL,
+	`key_hash` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`last_used_at` integer,
+	`expires_at` integer,
+	`revoked_at` integer,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `api_keys_key_hash_unique` ON `api_keys` (`key_hash`);--> statement-breakpoint
+CREATE INDEX `idx_api_keys_account` ON `api_keys` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_api_keys_user` ON `api_keys` (`user_id`);--> statement-breakpoint
 CREATE TABLE `audit_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`actor_id` text,
@@ -44,6 +62,33 @@ CREATE INDEX `idx_audit_created` ON `audit_log` ("created_at" DESC);--> statemen
 CREATE INDEX `idx_audit_actor` ON `audit_log` (`actor_id`);--> statement-breakpoint
 CREATE INDEX `idx_audit_resource` ON `audit_log` (`resource_type`,`resource_id`);--> statement-breakpoint
 CREATE INDEX `idx_audit_account` ON `audit_log` (`account_id`,"created_at" DESC);--> statement-breakpoint
+CREATE TABLE `auth_accounts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`provider_account_id` text NOT NULL,
+	`provider_id` text NOT NULL,
+	`access_token` text,
+	`refresh_token` text,
+	`id_token` text,
+	`access_token_expires_at` integer,
+	`refresh_token_expires_at` integer,
+	`scope` text,
+	`password` text,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_auth_accounts_user` ON `auth_accounts` (`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_auth_accounts_provider` ON `auth_accounts` (`provider_id`,`provider_account_id`);--> statement-breakpoint
+CREATE TABLE `auth_rate_limits` (
+	`id` text PRIMARY KEY NOT NULL,
+	`key` text NOT NULL,
+	`count` integer NOT NULL,
+	`last_request` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `auth_rate_limits_key_unique` ON `auth_rate_limits` (`key`);--> statement-breakpoint
 CREATE TABLE `check_results` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`from_email` text NOT NULL,
@@ -193,6 +238,20 @@ CREATE TABLE `report_records` (
 CREATE INDEX `idx_records_report` ON `report_records` (`report_id`);--> statement-breakpoint
 CREATE INDEX `idx_records_ip` ON `report_records` (`source_ip`);--> statement-breakpoint
 CREATE INDEX `idx_records_account` ON `report_records` (`account_id`);--> statement-breakpoint
+CREATE TABLE `sessions` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`token` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`ip_address` text,
+	`user_agent` text,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `sessions_token_unique` ON `sessions` (`token`);--> statement-breakpoint
+CREATE INDEX `idx_sessions_user` ON `sessions` (`user_id`);--> statement-breakpoint
 CREATE TABLE `settings` (
 	`account_id` text DEFAULT 'acct_default' NOT NULL,
 	`key` text NOT NULL,
@@ -245,9 +304,22 @@ CREATE TABLE `users` (
 	`role` text DEFAULT 'member' NOT NULL,
 	`session_token` text,
 	`last_login_at` integer,
-	`created_at` integer DEFAULT (unixepoch()) NOT NULL
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`email_verified` integer DEFAULT 0 NOT NULL,
+	`image` text,
+	`updated_at` integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);--> statement-breakpoint
 CREATE INDEX `idx_users_email` ON `users` (`email`);--> statement-breakpoint
-CREATE INDEX `idx_users_session` ON `users` (`session_token`);
+CREATE INDEX `idx_users_session` ON `users` (`session_token`);--> statement-breakpoint
+CREATE TABLE `verifications` (
+	`id` text PRIMARY KEY NOT NULL,
+	`identifier` text NOT NULL,
+	`value` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch()) NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `idx_verifications_identifier` ON `verifications` (`identifier`);

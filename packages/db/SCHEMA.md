@@ -79,7 +79,9 @@ Self-hosted installs have one account, `acct_default`. `domains.domain` stays **
 | `invites`, `audit_log` | ✔ | |
 | `check_results` | global | anonymous free-check results |
 | `ip_info` | global | shared public IP-metadata cache |
-| `password_reset_tokens` | global | keyed by `user_id` |
+| `password_reset_tokens` | global | keyed by `user_id`; unused since 0013 (see `verifications`) |
+| `sessions`, `auth_accounts`, `verifications`, `auth_rate_limits` | global | Better Auth (0013). `auth_accounts` = login methods per user — not the tenant `accounts` table. Camel-case properties in `schema.ts`; `users` has a second view in `auth-schema.ts` |
+| `api_keys` | ✔ | per-user keys, SHA-256 at rest; looked up by hash before the account is known (`queries/auth.ts`) |
 
 `ACCOUNT_OWNED_TABLES` and `GLOBAL_TABLES` in `schema.ts` encode this split; `test/db/account-predicates.test.ts`
 fails if SQL in `src/` touches an owned table without an account predicate.
