@@ -71,10 +71,10 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   const tenant = await loadTenant(env, { accountId: target.account_id });
 
   if (kind === 'rua') {
-    const { failure_count } = await handleDmarcReport(guarded, tenant, { maxBytes: MAX_REPORT_BYTES });
+    const { failure_count } = await handleDmarcReport(guarded, tenant, { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } });
     track(tenant, { event: 'report.received', failure_count });
   } else {
-    const { failure_count } = await handleTlsRptReport(guarded, tenant, { hosted: { maxBytes: MAX_REPORT_BYTES } });
+    const { failure_count } = await handleTlsRptReport(guarded, tenant, { hosted: { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } } });
     track(tenant, { event: 'tls-rpt.received', failure_count });
   }
 }

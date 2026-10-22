@@ -12,6 +12,7 @@
 
 import type { TenantContext } from '../tenancy/context';
 import { extractAttachmentBytes, extractTextBody, readStream } from './mime-extract';
+import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { extractReport, ReportTooLargeError } from '../dmarc/extract-report';
 
 // RFC 8460 § 4.3 — subset of fields we care about
@@ -58,7 +59,7 @@ export interface TlsRptOptions {
    * `maxBytes` once decompressed, and every policy must be for a domain this account owns or the whole
    * report is rejected. Unset (self-host): plain JSON bodies, unknown domains skipped.
    */
-  hosted?: { maxBytes: number };
+  hosted?: { maxBytes: number; token: TokenDomain };
 }
 
 /** The report text: the JSON body, or (hosted) a gzip/zip/JSON attachment. */
@@ -72,6 +73,34 @@ async function readReport(message: ForwardableEmailMessage, opts: TlsRptOptions)
     // No usable attachment: the report is the message body.
     return new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(all);
   }
+}
+
+/** Hosted: every policy is for the token's domain or a subdomain, so they file as one row under the token's domain. */
+async function storeHostedTlsRpt(
+  report: TlsRptReport, raw: string, orgName: string, dateBegin: number, dateEnd: number, tenant: TenantContext, token: TokenDomain,
+): Promise<{ failure_count: number }> {
+  const domain = await tenant.scope.domains.getById(token.id);
+  if (!domain) return { failure_count: 0 };
+  let success = 0;
+  let failure = 0;
+  const details: unknown[] = [];
+  for (const policy of report.policies) {
+    success += policy.summary?.['total-successful-session-count'] ?? 0;
+    failure += policy.summary?.['total-failure-session-count'] ?? 0;
+    details.push(...(policy['failure-details'] ?? []));
+  }
+  try {
+    await tenant.scope.reports.insertTls({
+      domain_id: domain.id, org_name: orgName, date_begin: dateBegin, date_end: dateEnd,
+      total_success: success, total_failure: failure,
+      failure_details: details.length ? JSON.stringify(details) : null,
+      raw_json: raw.slice(0, 65536),
+    });
+  } catch (e) {
+    console.error(`[tls-rpt] insert failed for ${domain.domain}:`, e);
+  }
+  console.log(`[tls-rpt] stored report from ${orgName} for ${domain.domain}`);
+  return { failure_count: failure };
 }
 
 export async function handleTlsRptReport(
@@ -116,12 +145,13 @@ export async function handleTlsRptReport(
     }
     for (const policy of report.policies ?? []) {
       const policyDomain = policy.policy?.['policy-domain'];
-      if (policyDomain && !(await tenant.scope.domains.getByName(policyDomain.toLowerCase()))) {
-        console.warn(`[tls-rpt] policy-domain ${policyDomain} is not owned by this account`);
-        message.setReject(`Unknown domain ${policyDomain} — not a registered InboxAngel inbox`);
+      if (!policyDomain || !coversDomain(opts.hosted.token.domain, policyDomain)) {
+        console.warn(`[tls-rpt] policy-domain ${policyDomain ?? '(none)'} is outside the token's domain`);
+        message.setReject(`Unknown domain ${policyDomain ?? '(none)'} — not a registered InboxAngel inbox`);
         return { failure_count: 0 };
       }
     }
+    return storeHostedTlsRpt(report, raw, orgName, dateBegin, dateEnd, tenant, opts.hosted.token);
   }
 
   let stored = 0;

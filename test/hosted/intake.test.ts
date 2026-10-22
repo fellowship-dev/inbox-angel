@@ -4,6 +4,7 @@ import { intakeLookups, forAccount, resetSchemaReadyCache } from '@inbox-angel/d
 import { createTestD1 } from '@inbox-angel/db/testing';
 import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
+import { coversDomain } from '../../src/hosted/scope';
 import { generateToken, hashToken, intakeAddress, isTokenShaped, parseRecipient } from '../../src/hosted/tokens';
 import { resolveInboundAccount } from '../../src/tenancy/resolver';
 import { dmarcXml, fakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime, zipReportMime } from '../helpers/mail';
@@ -131,6 +132,48 @@ describe('DMARC aggregate reports', () => {
     await handleHostedEmail(m, w.env);
     expect(m.setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'big' }]);
+  });
+});
+
+describe('what a token may file', () => {
+  it('coversDomain: the domain and its subdomains only', () => {
+    expect(coversDomain('a-corp.com', 'a-corp.com')).toBe(true);
+    expect(coversDomain('a-corp.com', 'Mail.Eu.A-Corp.com.')).toBe(true);
+    for (const other of ['corp.com', 'xa-corp.com', 'a-corp.com.evil.io', 'a-corp.org', 'com']) expect(coversDomain('a-corp.com', other)).toBe(false);
+    expect(coversDomain('mail.a-corp.com', 'a-corp.com')).toBe(false); // a parent is wider than the token
+    expect(coversDomain('co.uk', 'evil.co.uk')).toBe(false); // a public suffix never covers anything
+  });
+
+  it('DMARC for a subdomain is accepted and filed under the token’s domain', async () => {
+    const w = await twoAccounts();
+    const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('mail.a-corp.com', 'sub-1')));
+    await handleHostedEmail(m, w.env);
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT account_id, domain_id, report_id FROM aggregate_reports')).toEqual([{ account_id: 'acct_a', domain_id: 1, report_id: 'sub-1' }]);
+  });
+
+  it('domain A’s token cannot file for domain B of the same account, nor for a parent', async () => {
+    const w = await twoAccounts();
+    w.db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (3, 'acct_a', 'a-other.com', 'x'), (4, 'acct_a', 'corp.com', 'x')").run();
+    for (const domain of ['a-other.com', 'corp.com']) {
+      const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml(domain, 'x-' + domain)));
+      await handleHostedEmail(m, w.env);
+      expect(m.setReject, domain).toHaveBeenCalledOnce();
+    }
+    const tls = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(tlsRptJson('a-other.com')));
+    await handleHostedEmail(tls, w.env);
+    expect(tls.setReject).toHaveBeenCalledOnce();
+    expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
+    expect(w.rows('SELECT * FROM tls_reports')).toEqual([]);
+  });
+
+  it('TLS-RPT for the domain and a subdomain files as one row under the token’s domain', async () => {
+    const w = await twoAccounts();
+    const pol = (d: string) => ({ policy: { 'policy-type': 'sts', 'policy-domain': d }, summary: { 'total-successful-session-count': 4, 'total-failure-session-count': 1 } });
+    const m = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(tlsRptJson('a-corp.com', { policies: [pol('a-corp.com'), pol('mail.a-corp.com')] })));
+    await handleHostedEmail(m, w.env);
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT domain_id, total_success, total_failure FROM tls_reports')).toEqual([{ domain_id: 1, total_success: 8, total_failure: 2 }]);
   });
 });
 
