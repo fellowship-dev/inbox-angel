@@ -1,3 +1,10 @@
 node_modules/
 dist/
 gallery/dist/
+
+# Screenshots are regenerated locally with `npm run screenshots`; only these are committed.
+gallery/screenshots/*
+!gallery/screenshots/overview-light-desktop.webp
+!gallery/screenshots/overview-dark-desktop.webp
+!gallery/screenshots/wizard-light-desktop.webp
+!gallery/screenshots/wizard-dark-desktop.webp
