@@ -148,9 +148,7 @@ export async function enrichEnv(env: Env, db?: D1Database): Promise<void> {
     // Fallback: derive base domain from domains.is_default=1 if not in settings.
     // This supports the multi-domain model where base_domain migrates out of settings.
     if (!_baseDomainCache) {
-      const defaultDomain = await effectiveDb
-        .prepare('SELECT domain FROM domains WHERE is_default = 1 LIMIT 1')
-        .first<{ domain: string }>();
+      const defaultDomain = await scope(effectiveDb).domains.getDefault();
       if (defaultDomain) _baseDomainCache = defaultDomain.domain;
     }
 

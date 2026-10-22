@@ -158,8 +158,8 @@ export default {
           scope(env.DB!).reports.dailyStats(d.id, now - 7 * 86400),
           scope(env.DB!).reports.dailyStats(d.id, now - 14 * 86400),
         ]);
-        const currRows = curr.results ?? [];
-        const prevRows = prev.results?.filter(r => r.day < new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)) ?? [];
+        const currRows = curr;
+        const prevRows = prev.filter(r => r.day < new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10));
         const rate = (rows: typeof currRows) => {
           const t = rows.reduce((n, r) => n + r.total, 0);
           const p = rows.reduce((n, r) => n + r.passed, 0);

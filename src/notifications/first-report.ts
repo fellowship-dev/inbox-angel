@@ -74,8 +74,7 @@ export async function sendFirstReportNotification(
   }
 
   // Get admin user email
-  const admin = await env.DB.prepare(`SELECT email, name FROM users WHERE role = 'admin' LIMIT 1`)
-    .first<{ email: string; name: string }>();
+  const admin = await scope(env.DB).team.firstAdmin();
   if (!admin) {
     console.log('[first-report] no admin user found — skipping notification');
     return;

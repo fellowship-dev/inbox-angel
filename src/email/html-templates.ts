@@ -2,7 +2,7 @@
 // All templates use inline CSS (no <style> blocks) for email-client compatibility.
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
-import { DomainWeeklyStat, FailingSource } from '../db/queries';
+import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
 import { CheckSummary, OverallStatus } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
