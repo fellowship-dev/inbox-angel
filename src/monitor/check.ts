@@ -23,7 +23,7 @@ export interface CheckMonitorResult {
 }
 
 // DMARC policy strength order: reject > quarantine > none > (missing)
-const POLICY_STRENGTH: Record<string, number> = { reject: 3, quarantine: 2, none: 1, '': 0 };
+const POLICY_STRENGTH: Readonly<Record<string, number>> = { reject: 3, quarantine: 2, none: 1, '': 0 };
 
 function dmarcSeverity(was: string, now: string): DomainChange['severity'] {
   const wasStrength = POLICY_STRENGTH[was] ?? 0;

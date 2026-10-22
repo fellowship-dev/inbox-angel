@@ -12,14 +12,12 @@
 // We manage this record via Cloudflare DNS API. The CF record ID is stored in
 // domains.dns_record_id so we can delete it when the domain is removed.
 
-import { getZoneId, reportsDomain } from '../env-utils';
+import type { TenantContext } from '../tenancy/context';
+import { CfNetworkError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
-
-const CF_API = 'https://api.cloudflare.com/client/v4';
 
 /** Optional audit context — pass to enable self-logging of DNS mutations. */
 export interface DnsAuditOpts {
-  db: D1Database;
   actor_id?: string | null;
   actor_email?: string | null;
   actor_type?: 'user' | 'system';
@@ -42,79 +40,64 @@ export interface DnsProvisionResult {
   manual: boolean;          // true = CF creds absent, user must add DNS record manually
 }
 
-interface ProvisionEnv {
-  CLOUDFLARE_API_TOKEN: string;
-}
-
-interface DeprovisionEnv {
-  CLOUDFLARE_API_TOKEN: string;
-}
-
-function cfHeaders(token: string): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
 /**
  * Creates the cross-domain DMARC authorization TXT record for a monitored domain.
- * Call this when a domain is added.
+ * Call this when a domain is added. The record lives under the *reports* domain, so it is
+ * written to the reports domain's zone, not the monitored domain's.
  */
 export async function provisionDomain(
-  env: ProvisionEnv,
+  tenant: TenantContext,
   policyDomain: string,
   audit?: DnsAuditOpts,
 ): Promise<DnsProvisionResult> {
+  const reportsDomain = tenant.settings.reportsDomain;
   // RFC 7489 §7.1 cross-domain authorization record name
-  const recordName = `${policyDomain}._report._dmarc.${reportsDomain()}`;
-  const zoneId = getZoneId();
+  const recordName = `${policyDomain}._report._dmarc.${reportsDomain}`;
+  const cf = tenant.cf();
 
-  if (!env.CLOUDFLARE_API_TOKEN || !zoneId) {
+  if (!cf || !reportsDomain) {
     // Manual mode — caller must add the DNS record themselves
     return { recordId: null, recordName, manual: true };
   }
 
-  const body = {
-    type: 'TXT',
-    name: recordName,
-    content: 'v=DMARC1;',
-    ttl: 3600,
-    comment: `InboxAngel DMARC auth for ${policyDomain}`,
-  };
-
-  let res: Response;
+  let zoneId: string;
   try {
-    res = await fetch(`${CF_API}/zones/${zoneId}/dns_records`, {
-      method: 'POST',
-      headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-      body: JSON.stringify(body),
+    zoneId = (await tenant.zoneFor(reportsDomain)).id;
+  } catch (e) {
+    // The token's account has no zone for the reports domain: the user adds the record by hand.
+    if (e instanceof CfZoneNotFoundError) return { recordId: null, recordName, manual: true };
+    throw new DnsProvisionError(`DNS provision failed: ${cfErrorText(e)}`, e);
+  }
+
+  let record;
+  try {
+    record = await cf.createDnsRecord(zoneId, {
+      type: 'TXT',
+      name: recordName,
+      content: 'v=DMARC1;',
+      ttl: 3600,
+      comment: `InboxAngel DMARC auth for ${policyDomain}`,
     });
   } catch (e) {
-    throw new DnsProvisionError(`DNS provision fetch failed: ${String(e)}`, e);
+    if (e instanceof CfNetworkError) throw new DnsProvisionError(`DNS provision fetch failed: ${e.message}`, e);
+    throw new DnsProvisionError(`Cloudflare rejected DNS record creation: ${cfErrorText(e)}`, e);
   }
-
-  const data = await res.json() as { success: boolean; result?: { id: string }; errors?: { message: string }[] };
-
-  if (!data.success || !data.result?.id) {
-    const msg = data.errors?.map(e => e.message).join(', ') ?? 'unknown error';
-    throw new DnsProvisionError(`Cloudflare rejected DNS record creation: ${msg}`);
-  }
+  if (!record?.id) throw new DnsProvisionError('Cloudflare rejected DNS record creation: unknown error');
 
   if (audit) {
-    logAudit(audit.db, {
+    logAudit(tenant, {
       actor_id: audit.actor_id,
       actor_email: audit.actor_email,
       actor_type: audit.actor_type ?? 'user',
       action: 'dns.create',
       resource_type: 'dns_record',
-      resource_id: data.result.id,
+      resource_id: record.id,
       resource_name: recordName,
       after_value: { type: 'TXT', name: recordName, content: 'v=DMARC1;', ttl: 3600 },
     }, audit.ctx);
   }
 
-  return { recordId: data.result.id, recordName, manual: false };
+  return { recordId: record.id, recordName, manual: false };
 }
 
 /**
@@ -122,36 +105,27 @@ export async function provisionDomain(
  * Call this when a domain is removed. Idempotent — 404 is silently ignored.
  */
 export async function deprovisionDomain(
-  env: DeprovisionEnv,
+  tenant: TenantContext,
   recordId: string,
   audit?: DnsAuditOpts,
 ): Promise<void> {
-  const zoneId = getZoneId();
+  const cf = tenant.cf();
+  const reportsDomain = tenant.settings.reportsDomain;
 
-  if (!env.CLOUDFLARE_API_TOKEN || !zoneId) {
-    // If CF creds aren't configured, there's nothing to clean up
-    return;
-  }
+  // If CF creds aren't configured, there's nothing to clean up
+  if (!cf || !reportsDomain) return;
 
-  let res: Response;
   try {
-    res = await fetch(`${CF_API}/zones/${zoneId}/dns_records/${recordId}`, {
-      method: 'DELETE',
-      headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-    });
+    const zone = await tenant.zoneFor(reportsDomain);
+    await cf.deleteDnsRecord(zone.id, recordId);
   } catch (e) {
-    // Network failure — log but don't throw; domain delete should still succeed
-    console.warn(`deprovisionDomain: fetch failed for record ${recordId}:`, e);
+    // Domain delete must still succeed: warn and move on.
+    console.warn(`deprovisionDomain: could not delete record ${recordId}: ${e instanceof Error ? e.message : String(e)}`);
     return;
   }
 
-  // 404 = already gone (idempotent)
-  if (!res.ok && res.status !== 404) {
-    console.warn(`deprovisionDomain: unexpected status ${res.status} for record ${recordId}`);
-  }
-
-  if (audit && (res.ok || res.status === 404)) {
-    logAudit(audit.db, {
+  if (audit) {
+    logAudit(tenant, {
       actor_id: audit.actor_id,
       actor_email: audit.actor_email,
       actor_type: audit.actor_type ?? 'user',

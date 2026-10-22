@@ -1,16 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock env-utils — module-level caches are empty in test
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    reportsDomain: vi.fn().mockReturnValue('reports.inboxangel.io'),
-    fromEmail: vi.fn().mockReturnValue('check@reports.inboxangel.io'),
-  };
-});
-
 import { sendChangeNotification } from '../../src/monitor/notify';
+import { makeTenant } from '../helpers/tenant';
 import type { DomainChange } from '../../src/monitor/check';
 
 const degraded: DomainChange = { field: 'DMARC policy', was: 'reject', now: 'none', severity: 'degraded' };
@@ -21,11 +12,10 @@ function makeSendEmail() {
 }
 
 function makeEnv(sendEmail?: { send: ReturnType<typeof vi.fn> }) {
-  return {
-    FROM_EMAIL: 'check@reports.inboxangel.io',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-    SEND_EMAIL: sendEmail,
-  };
+  return makeTenant({
+    env: { SEND_EMAIL: sendEmail as any },
+    settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' },
+  });
 }
 
 describe('sendChangeNotification', () => {

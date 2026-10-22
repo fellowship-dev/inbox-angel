@@ -12,7 +12,7 @@ export interface RolloutStep {
   testing: boolean;
 }
 
-export const ROLLOUT_SEQUENCE: RolloutStep[] = [
+export const ROLLOUT_SEQUENCE: readonly RolloutStep[] = [
   { policy: 'none', testing: false },
   { policy: 'quarantine', testing: true },
   { policy: 'quarantine', testing: false },
@@ -23,7 +23,7 @@ export const ROLLOUT_SEQUENCE: RolloutStep[] = [
 // Minimum pass rate (0-100) required to advance to the next step.
 export const PASS_RATE_THRESHOLD = 90;
 
-const STRENGTH: Record<RolloutPolicy, number> = { none: 0, quarantine: 1, reject: 2 };
+const STRENGTH: Readonly<Record<RolloutPolicy, number>> = { none: 0, quarantine: 1, reject: 2 };
 
 function asPolicy(p: string | null | undefined): RolloutPolicy | null {
   const v = p?.trim().toLowerCase();

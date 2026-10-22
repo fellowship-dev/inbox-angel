@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { makeTenant } from '../helpers/tenant';
 import { buildFirstReportBody, sendFirstReportNotification, ReportStats } from '../../src/notifications/first-report';
-
-// ── Module mocks (only affects storeReport's import) ─────────
-
-vi.mock('../../src/env-utils', () => ({
-  reportsDomain: vi.fn(() => 'reports.acme.com'),
-  fromEmail: vi.fn(() => 'noreply@reports.acme.com'),
-  getAccountId: vi.fn(() => 'test-account-id'),
-  getWorkersSubdomain: vi.fn(() => 'testaccount'),
-}));
 
 // ── Fixtures ──────────────────────────────────────────────────
 
@@ -38,13 +30,21 @@ function makeEnv(overrides: { admin?: typeof ADMIN | null; sendEmail?: boolean; 
       .prepare("INSERT INTO settings (account_id, key, value) VALUES ('acct_default', 'custom_domain', ?)")
       .run(customDomain);
   }
-  // workers_subdomain is not cached in settings — triggers the env-utils fallback
   return {
     DB: db as unknown as D1Database,
     ...(overrides.sendEmail !== false
       ? { SEND_EMAIL: { send: vi.fn().mockResolvedValue(undefined) } as any }
       : {}),
   };
+}
+
+/** The tenant a test env belongs to. */
+function tn(env: { DB: D1Database; SEND_EMAIL?: SendEmail }) {
+  return makeTenant({
+    db: env.DB,
+    env: { SEND_EMAIL: env.SEND_EMAIL },
+    settings: { reportsDomain: 'reports.acme.com', fromEmail: 'noreply@reports.acme.com', workersSubdomain: 'testaccount' },
+  });
 }
 
 /** The real schema forbids a NULL users.name; make the admin lookup return one anyway. */
@@ -105,7 +105,7 @@ describe('sendFirstReportNotification', () => {
 
   it('sends email via SEND_EMAIL binding when configured', async () => {
     const env = makeEnv();
-    await sendFirstReportNotification(env, 'acme.com', STATS);
+    await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     expect(env.SEND_EMAIL!.send).toHaveBeenCalledOnce();
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
@@ -117,7 +117,7 @@ describe('sendFirstReportNotification', () => {
 
   it('uses custom_domain for dashboard URL', async () => {
     const env = makeEnv({ customDomain: 'mail.example.org' });
-    await sendFirstReportNotification(env, 'example.org', STATS);
+    await sendFirstReportNotification(tn(env), 'example.org', STATS);
 
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
     expect(call.text).toContain('https://mail.example.org');
@@ -125,7 +125,7 @@ describe('sendFirstReportNotification', () => {
 
   it('falls back to workers.dev with subdomain when no custom_domain', async () => {
     const env = makeEnv({ customDomain: null });
-    await sendFirstReportNotification(env, 'acme.com', STATS);
+    await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
     expect(call.text).toContain('https://inbox-angel-worker.testaccount.workers.dev');
@@ -135,7 +135,7 @@ describe('sendFirstReportNotification', () => {
     const env = makeEnv({ sendEmail: false });
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await sendFirstReportNotification(env, 'acme.com', STATS);
+    await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('would send to admin@acme.com'),
@@ -147,7 +147,7 @@ describe('sendFirstReportNotification', () => {
     const env = makeEnv({ sendEmail: false });
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await expect(sendFirstReportNotification(env, 'acme.com', STATS)).resolves.not.toThrow();
+    await expect(sendFirstReportNotification(tn(env), 'acme.com', STATS)).resolves.not.toThrow();
 
     vi.restoreAllMocks();
   });
@@ -156,7 +156,7 @@ describe('sendFirstReportNotification', () => {
     const env = makeEnv({ admin: null });
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await sendFirstReportNotification(env, 'acme.com', STATS);
+    await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('no admin user found'),
@@ -167,7 +167,7 @@ describe('sendFirstReportNotification', () => {
   it('uses fallback name "there" when admin has no name', async () => {
     const env = makeEnv();
     nullAdminName(env);
-    await sendFirstReportNotification(env, 'acme.com', STATS);
+    await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
     expect(call.text).toContain('Hi there');
@@ -238,7 +238,7 @@ describe('storeReport first-report trigger', () => {
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await storeReport(db, 1, makeReport(), null, { DB: db, SEND_EMAIL: sendEmail });
+    await storeReport(makeTenant({ db, env: { SEND_EMAIL: sendEmail as any } }), 1, makeReport(), null, true);
 
     // fire-and-forget — wait for microtask queue to flush
     await new Promise(r => setTimeout(r, 50));
@@ -254,7 +254,7 @@ describe('storeReport first-report trigger', () => {
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    await storeReport(db, 1, makeReport(), null, { DB: db, SEND_EMAIL: sendEmail });
+    await storeReport(makeTenant({ db, env: { SEND_EMAIL: sendEmail as any } }), 1, makeReport(), null, true);
 
     await new Promise(r => setTimeout(r, 10));
 
@@ -268,20 +268,20 @@ describe('storeReport first-report trigger', () => {
     const db = makeMockDb({ existingReports: 1, duplicate: true }); // report-001 already stored = duplicate
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
 
-    await storeReport(db, 1, makeReport(), null, { DB: db, SEND_EMAIL: sendEmail });
+    await storeReport(makeTenant({ db, env: { SEND_EMAIL: sendEmail as any } }), 1, makeReport(), null, true);
 
     await new Promise(r => setTimeout(r, 10));
 
     expect(sendEmail.send).not.toHaveBeenCalled();
   });
 
-  it('does NOT fire notification when env is not provided', async () => {
+  it('does NOT fire notification when it is not requested', async () => {
     const { storeReport } = await import('../../src/dmarc/store-report');
 
     const db = makeMockDb();
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
 
-    await storeReport(db, 1, makeReport());
+    await storeReport(makeTenant({ db }), 1, makeReport());
 
     await new Promise(r => setTimeout(r, 10));
 

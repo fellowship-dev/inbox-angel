@@ -5,13 +5,18 @@
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
-import { checkResults, ipInfo, passwordResetTokens, users } from '../schema';
+import { accounts, checkResults, ipInfo, passwordResetTokens, users } from '../schema';
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
 export function globalQueries(dbLike: DbLike) {
 	const db = getDb(dbLike);
 	return {
+		accounts: {
+			/** Every tenant, for crons that fan out per account. */
+			ids: () => db.select({ id: accounts.id }).from(accounts).orderBy(accounts.created_at).all().then((rows) => rows.map((r) => r.id)),
+		},
+
 		users: {
 			byEmail: (email: string) => db.select().from(users).where(eq(users.email, email)).get().then((r) => r ?? null),
 			bySession: (token: string) => db.select().from(users).where(eq(users.session_token, token)).get().then((r) => r ?? null),

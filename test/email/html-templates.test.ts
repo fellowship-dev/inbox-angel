@@ -1,15 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// Mock env-utils — module-level caches are empty in test
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    brandColor: vi.fn().mockReturnValue('#4F46E5'),
-    brandLogoUrl: vi.fn().mockReturnValue(undefined),
-  };
-});
-
 import {
   buildWeeklyDigestHtml,
   buildFreeCheckHtml,

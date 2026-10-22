@@ -7,7 +7,9 @@ import { CheckSummary, OverallStatus } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
 import { AuthResultsHeader } from './parse-headers';
-import { brandLogoUrl, brandColor } from '../env-utils';
+import { DEFAULT_BRAND_COLOR, type Brand } from '../tenancy/context';
+
+const DEFAULT_BRAND: Readonly<Brand> = { color: DEFAULT_BRAND_COLOR };
 
 // ── Primitives ────────────────────────────────────────────────
 
@@ -43,9 +45,9 @@ function pct(n: number, total: number): string {
 
 // ── Shared layout ─────────────────────────────────────────────
 
-function htmlLayout(title: string, bodyHtml: string): string {
-  const accent = esc(brandColor());
-  const logo = brandLogoUrl();
+function htmlLayout(title: string, bodyHtml: string, brand: Brand): string {
+  const accent = esc(brand.color);
+  const logo = brand.logoUrl;
   const logoHtml = logo
     ? `<img src="${esc(logo)}" alt="InboxAngel" style="height:32px;vertical-align:middle;margin-right:8px;">`
     : '';
@@ -117,6 +119,7 @@ export interface WeeklyDigestHtmlParams {
   reportsDomain: string;
   latestVersion: string | null;
   currentVersion: string;
+  brand?: Brand;
 }
 
 export function buildWeeklyDigestHtml(p: WeeklyDigestHtmlParams): string {
@@ -141,24 +144,24 @@ export function buildWeeklyDigestHtml(p: WeeklyDigestHtmlParams): string {
     body += `<p style="font-size:12px;color:#6b7280;">Update available: v${esc(p.latestVersion)} (you're on v${esc(p.currentVersion)})</p>`;
   }
 
-  return htmlLayout(`DMARC Weekly Digest — ${p.weekLabel}`, body);
+  return htmlLayout(`DMARC Weekly Digest — ${p.weekLabel}`, body, p.brand ?? DEFAULT_BRAND);
 }
 
 // ── Free-check report ─────────────────────────────────────────
 
-const STATUS_COLOR: Record<OverallStatus, string> = {
+const STATUS_COLOR: Readonly<Record<OverallStatus, string>> = {
   protected: '#16a34a',
   at_risk:   '#d97706',
   exposed:   '#dc2626',
 };
 
-const STATUS_LABEL: Record<OverallStatus, string> = {
+const STATUS_LABEL: Readonly<Record<OverallStatus, string>> = {
   protected: 'Protected',
   at_risk:   'At risk',
   exposed:   'Exposed',
 };
 
-const STATUS_DESC: Record<OverallStatus, string> = {
+const STATUS_DESC: Readonly<Record<OverallStatus, string>> = {
   protected: 'This email passed all security checks.',
   at_risk:   'Your domain has partial protection — gaps remain.',
   exposed:   'Anyone can send email pretending to be you.',
@@ -169,6 +172,7 @@ export interface FreeCheckHtmlParams {
   summary: CheckSummary;
   auth: AuthResultsHeader | null;
   dns: DnsCheckResult;
+  brand?: Brand;
 }
 
 export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
@@ -219,11 +223,11 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
   if (summary.status !== 'protected') {
     body += `<p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
 InboxAngel can walk you through each fix and monitor your domain 24/7.
-<a href="https://inboxangel.com" style="color:${esc(brandColor())};">Start free monitoring →</a>
+<a href="https://inboxangel.com" style="color:${esc((p.brand ?? DEFAULT_BRAND).color)};">Start free monitoring →</a>
 </p>`;
   }
 
-  return htmlLayout(`Email Security Check — ${summary.domain}`, body);
+  return htmlLayout(`Email Security Check — ${summary.domain}`, body, p.brand ?? DEFAULT_BRAND);
 }
 
 // ── DNS change alert ──────────────────────────────────────────
@@ -232,11 +236,12 @@ export interface DnsAlertHtmlParams {
   domain: string;
   changes: DomainChange[];
   reportsDomain: string;
+  brand?: Brand;
 }
 
 export function buildDnsAlertHtml(p: DnsAlertHtmlParams): string {
   const hasDegraded = p.changes.some(c => c.severity === 'degraded');
-  const accent = brandColor();
+  const accent = (p.brand ?? DEFAULT_BRAND).color;
 
   let body = `<h2 style="margin:0 0 12px;font-size:18px;">Email security configuration changed</h2>
 <p style="margin:0 0 16px;">We detected changes to the email security configuration of <strong>${esc(p.domain)}</strong>.</p>
@@ -263,5 +268,5 @@ Some changes may leave your domain exposed to spoofing.
     body += `<p style="color:#6b7280;font-size:13px;">No action required — these look like improvements or routine updates.</p>`;
   }
 
-  return htmlLayout(`${p.domain} email security updated`, body);
+  return htmlLayout(`${p.domain} email security updated`, body, p.brand ?? DEFAULT_BRAND);
 }

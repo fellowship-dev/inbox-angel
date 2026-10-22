@@ -3,19 +3,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Env } from '../../src/index';
 
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    enrichEnv: vi.fn().mockResolvedValue(undefined),
-    getZoneId: vi.fn().mockReturnValue(undefined),
-    getAccountId: vi.fn().mockReturnValue(undefined),
-    getBaseDomain: vi.fn().mockReturnValue(undefined),
-    reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
-    fromEmail: vi.fn().mockReturnValue('noreply@reports.example.com'),
-  };
-});
-
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import { createMigratedD1, createTestD1, applyMigrations, migrationFiles } from '@inbox-angel/db/testing';

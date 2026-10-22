@@ -63,7 +63,7 @@ async function lookupAsn(ip: string): Promise<{ asn: string | null; countryCode:
 
 // ── Friendly org names ────────────────────────────────────────
 
-const ORG_FRIENDLY: [substring: string, friendlyName: string][] = [
+const ORG_FRIENDLY: readonly (readonly [substring: string, friendlyName: string])[] = [
   ['GOOGLE', 'Google'],
   ['MICROSOFT', 'Microsoft'],
   ['AMAZON', 'Amazon'],

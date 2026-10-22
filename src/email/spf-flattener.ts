@@ -11,7 +11,8 @@
 // The pure resolution logic (collectIps / buildFlatRecord) lives in packages/dns-checks;
 // this module only adds the Cloudflare zone API writes on top.
 
-import { getZoneId } from '../env-utils';
+import type { TenantContext } from '../tenancy/context';
+import { CfError, CfNotFoundError, cfErrorText, type CfDnsRecord } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import {
   collectIps as collectIpsPure,
@@ -23,11 +24,8 @@ import {
 export { buildFlatRecord };
 export type { CollectResult };
 
-const CF_API = 'https://api.cloudflare.com/client/v4';
-
 /** Optional audit context for self-logging DNS mutations. */
 export interface SpfAuditOpts {
-  db: D1Database;
   domain_name: string;
   actor_id?: string | null;
   actor_email?: string | null;
@@ -40,10 +38,6 @@ export interface SpfFlattenResult {
   flattened_record: string;   // the new flat record written to DNS
   ip_count: number;           // number of ip4:/ip6: entries in flattened record
   cf_record_id: string;       // Cloudflare DNS record ID (for future PATCH)
-}
-
-export interface FlattenEnv {
-  CLOUDFLARE_API_TOKEN: string;
 }
 
 // ── IP collector ──────────────────────────────────────────────
@@ -63,59 +57,52 @@ export async function collectIps(domain: string): Promise<CollectResult> {
 
 // ── Cloudflare DNS API ────────────────────────────────────────
 
-function cfHeaders(token: string): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-interface CfDnsRecord {
-  id: string;
-  name: string;
-  type: string;
-  content: string;
-  ttl: number;
-}
-
-// Find the SPF TXT record for a domain in the CF zone.
-// Returns null if not found or CF creds are missing.
+// Find the SPF TXT record for a domain in that domain's own zone.
+// Returns null if the zone has no SPF record; Cloudflare errors (auth, network, no zone) propagate.
 export async function findSpfRecord(
+  tenant: TenantContext,
   domain: string,
-  env: FlattenEnv,
 ): Promise<CfDnsRecord | null> {
-  const url = `${CF_API}/zones/${getZoneId()}/dns_records?type=TXT&name=${encodeURIComponent(domain)}&per_page=100`;
-  const res = await fetch(url, { headers: cfHeaders(env.CLOUDFLARE_API_TOKEN) });
-  if (!res.ok) return null;
-  const data = await res.json() as { success: boolean; result?: CfDnsRecord[] };
-  if (!data.success || !data.result) return null;
-  return data.result.find(r => r.content.startsWith('v=spf1')) ?? null;
+  const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
+  const isSpf = (r: CfDnsRecord) => r.content.replace(/^"|"$/g, '').startsWith('v=spf1');
+  const found = (await cf.listDnsRecords(zone.id, { type: 'TXT', name: domain, per_page: 100 })).find(isSpf);
+  if (found) return found;
+  // Installs from before per-domain zones may hold the record in the base zone.
+  const legacy = tenant.legacyZoneId(zone.id);
+  if (!legacy) return null;
+  const old = (await cf.listDnsRecords(legacy, { type: 'TXT', name: domain, per_page: 100 })).find(isSpf);
+  if (old) console.warn(`[spf-flatten] ${domain}: SPF record found in the base zone (legacy location)`);
+  return old ?? null;
 }
 
-// PATCH an existing TXT record content in-place.
+// PATCH an existing TXT record content in-place (in the domain's own zone).
 export async function updateDnsRecord(
+  tenant: TenantContext,
   recordId: string,
   domain: string,
   newContent: string,
-  env: FlattenEnv,
   audit?: { opts?: SpfAuditOpts; beforeContent?: string },
 ): Promise<void> {
-  const res = await fetch(
-    `${CF_API}/zones/${getZoneId()}/dns_records/${recordId}`,
-    {
-      method: 'PATCH',
-      headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-      body: JSON.stringify({ content: newContent }),
+  const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
+  try {
+    try {
+      await cf.patchDnsRecord(zone.id, recordId, { content: newContent });
+    } catch (e) {
+      // Records written before per-domain zones live in the base zone.
+      const legacy = e instanceof CfNotFoundError ? tenant.legacyZoneId(zone.id) : undefined;
+      if (!legacy) throw e;
+      console.warn(`[spf-flatten] ${domain}: record ${recordId} not in its own zone; patching it in the base zone (legacy location)`);
+      await cf.patchDnsRecord(legacy, recordId, { content: newContent });
     }
-  );
-  if (!res.ok) {
-    const data = await res.json() as { errors?: { message: string }[] };
-    const msg = data.errors?.map(e => e.message).join(', ') ?? `HTTP ${res.status}`;
-    throw new Error(`CF DNS PATCH failed for ${domain}: ${msg}`);
+  } catch (e) {
+    if (e instanceof CfError) throw new Error(`CF DNS PATCH failed for ${domain}: ${cfErrorText(e)}`);
+    throw e;
   }
 
   if (audit?.opts) {
-    logAudit(audit.opts.db, {
+    logAudit(tenant, {
       actor_id: audit.opts.actor_id,
       actor_email: audit.opts.actor_email,
       actor_type: audit.opts.actor_type ?? 'system',
@@ -140,13 +127,13 @@ export async function updateDnsRecord(
  * 5. Return result for DB storage
  */
 export async function flattenSpf(
+  tenant: TenantContext,
   domain: string,
-  env: FlattenEnv,
   existingRecordId?: string | null,
   audit?: SpfAuditOpts,
 ): Promise<SpfFlattenResult> {
   // Step 1: find the live SPF record on CF
-  const cfRecord = await findSpfRecord(domain, env);
+  const cfRecord = await findSpfRecord(tenant, domain);
   if (!cfRecord) {
     throw new Error(`No SPF TXT record found on Cloudflare DNS for ${domain}. Make sure the zone matches.`);
   }
@@ -164,7 +151,7 @@ export async function flattenSpf(
   const flattened_record = buildFlatRecord(ips, extra, allQualifier);
 
   // Step 4: update CF DNS
-  await updateDnsRecord(cf_record_id, domain, flattened_record, env,
+  await updateDnsRecord(tenant, cf_record_id, domain, flattened_record,
     audit ? { opts: audit, beforeContent: canonical_record } : undefined);
 
   return {
@@ -180,12 +167,12 @@ export async function flattenSpf(
  * Called when user disables SPF flattening.
  */
 export async function restoreSpf(
+  tenant: TenantContext,
   domain: string,
   cf_record_id: string,
   canonical_record: string,
-  env: FlattenEnv,
   audit?: SpfAuditOpts,
 ): Promise<void> {
-  await updateDnsRecord(cf_record_id, domain, canonical_record, env,
+  await updateDnsRecord(tenant, cf_record_id, domain, canonical_record,
     audit ? { opts: audit, beforeContent: undefined } : undefined);
 }

@@ -19,22 +19,10 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
-// Mock env-utils so getZoneId returns a zone ID
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    getZoneId: vi.fn().mockReturnValue('zone-test-123'),
-    getAccountId: vi.fn().mockReturnValue('acct-test'),
-    reportsDomain: vi.fn().mockReturnValue('reports.test.com'),
-    fromEmail: vi.fn().mockReturnValue('noreply@reports.test.com'),
-    getWorkersSubdomain: vi.fn().mockReturnValue('testworker'),
-  };
-});
-
 import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
+import { seedSettings } from '../helpers/tenant';
 import { handleApi } from '../../src/api/router';
-import { getZoneId } from '../../src/env-utils';
 
 const BASE = 'https://api.inboxangel.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -56,6 +44,12 @@ function makeEnv(overrides: { cfToken?: string; flattenEnabled?: boolean } = {})
   if (flattenEnabled) {
     db.sqlite.prepare('INSERT INTO spf_flatten_config (domain_id, enabled, canonical_record) VALUES (?, 1, ?)').run(DOMAIN.id!, DOMAIN.spf_record!);
   }
+
+  // acme.com is the base domain; its zone is stored, so no zone lookup is needed for it.
+  seedSettings(db, {
+    base_domain: 'acme.com', reports_domain: 'reports.test.com', from_email: 'noreply@reports.test.com',
+    zone_id: 'zone-test-123', zone_name: 'acme.com', account_id: 'acct-test', workers_subdomain: 'testworker',
+  });
 
   return {
     DB: db as unknown as D1Database,
@@ -92,7 +86,6 @@ function mockFetch(searchResult: unknown[], cfSuccess = true): ReturnType<typeof
 
 beforeEach(() => {
   vi.unstubAllGlobals();
-  vi.mocked(getZoneId).mockReturnValue('zone-test-123');
 });
 
 // ── POST /api/domains/:id/apply-spf ──────────────────────────
@@ -364,5 +357,33 @@ describe('POST /api/spf-lookup-count', () => {
       env, ctx,
     );
     expect(res.status).toBe(400);
+  });
+});
+
+// ── Zone targeting ────────────────────────────────────────────
+
+describe('apply-spf zone targeting', () => {
+  it('writes each domain into its own zone (two domains, two zones)', async () => {
+    const cf = stubCloudflare(new FakeCloudflare({
+      'acme.com': { id: 'zone-test-123', accountId: 'acct-test' },
+      'other-company.org': { id: 'zone-other', accountId: 'acct-test' },
+    }));
+    const env = makeEnv();
+    (env.DB as any).sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (2, ?, ?)').run('other-company.org', 'rua@reports.test.com');
+
+    expect((await handleApi(req('POST', '/api/domains/1/apply-spf', { record: 'v=spf1 -all' }), env, ctx)).status).toBe(200);
+    expect((await handleApi(req('POST', '/api/domains/2/apply-spf', { record: 'v=spf1 include:mail.example.net -all' }), env, ctx)).status).toBe(200);
+
+    expect(cf.records.get('zone-test-123')).toEqual([expect.objectContaining({ name: 'acme.com', content: 'v=spf1 -all' })]);
+    expect(cf.records.get('zone-other')).toEqual([expect.objectContaining({ name: 'other-company.org', content: 'v=spf1 include:mail.example.net -all' })]);
+  });
+
+  it('400s without writing when the domain has no zone on the account', async () => {
+    const cf = stubCloudflare(new FakeCloudflare({ 'acme.com': { id: 'zone-test-123' } }));
+    const env = makeEnv();
+    (env.DB as any).sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (2, ?, ?)').run('unmanaged.net', 'rua@reports.test.com');
+    const res = await handleApi(req('POST', '/api/domains/2/apply-spf', { record: 'v=spf1 -all' }), env, ctx);
+    expect(res.status).toBe(400);
+    expect(cf.calls.filter(c => c.method !== 'GET')).toHaveLength(0);
   });
 });

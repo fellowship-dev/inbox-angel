@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildDigestBody, sendWeeklyDigests } from '../../src/digest/weekly';
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { makeTenant } from '../helpers/tenant';
 
 // ── Fixtures ──────────────────────────────────────────────────
 
@@ -125,12 +126,11 @@ function seedDomain(db: TestDb, stat: DomainWeeklyStat, failingSources: FailingS
 }
 
 function makeEnv(db: TestDb, extra: Record<string, unknown> = {}) {
-  return {
-    DB: db as unknown as D1Database,
-    FROM_EMAIL: 'noreply@reports.inboxangel.io',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-    ...extra,
-  };
+  return makeTenant({
+    db,
+    env: extra as any,
+    settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'noreply@reports.inboxangel.io' },
+  });
 }
 
 function sentText(sendEmail: { send: ReturnType<typeof vi.fn> }): string {
@@ -156,7 +156,7 @@ describe('sendWeeklyDigests', () => {
     // Weekly stats are read from the DB and rendered into the digest.
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }) as any, NOW_MS);
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }), NOW_MS);
     const text = sentText(sendEmail);
     expect(text).toContain('Domain: acme.com');
     expect(text).toContain('1,000');
@@ -168,7 +168,7 @@ describe('sendWeeklyDigests', () => {
     db.sqlite.prepare("UPDATE aggregate_reports SET date_begin = ? WHERE domain_id = 1").run(NOW_S - 8 * 86400);
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }) as any, NOW_MS);
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }), NOW_MS);
     expect(sentText(sendEmail)).toContain('No reports received this week.');
     consoleSpy.mockRestore();
   });
@@ -176,7 +176,7 @@ describe('sendWeeklyDigests', () => {
   it('fetches failing sources only for domains with failures', async () => {
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }) as any, NOW_MS);
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }), NOW_MS);
     const text = sentText(sendEmail);
     expect(text).toContain('Top failing sources:');
     expect(text).toContain('1.2.3.4 (mail.acme.com) — 20 failures');
@@ -190,7 +190,7 @@ describe('sendWeeklyDigests', () => {
     seedDomain(db, STAT_CLEAN, [{ source_ip: '9.9.9.9', total: 5, header_from: 'x.acme.io' }]);
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }) as any, NOW_MS);
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }), NOW_MS);
     const text = sentText(sendEmail);
     expect(text).toContain('Domain: acme.io');
     expect(text).not.toContain('Top failing sources:');
@@ -201,7 +201,7 @@ describe('sendWeeklyDigests', () => {
   it('sends email via SEND_EMAIL binding when configured', async () => {
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests({ ...makeEnv(db), SEND_EMAIL: sendEmail } as any, NOW_MS);
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail }), NOW_MS);
     expect(sendEmail.send).toHaveBeenCalledOnce();
     expect(sendEmail.send.mock.calls[0][0].to).toEqual(['admin@acme.com']);
     consoleSpy.mockRestore();
@@ -209,7 +209,7 @@ describe('sendWeeklyDigests', () => {
 
   it('logs instead of sending when SEND_EMAIL binding is absent', async () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await sendWeeklyDigests(makeEnv(db) as any, NOW_MS); // no SEND_EMAIL
+    await sendWeeklyDigests(makeEnv(db), NOW_MS); // no SEND_EMAIL
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('would send to admin@acme.com'));
     consoleSpy.mockRestore();
   });

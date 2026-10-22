@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    reportsDomain: vi.fn().mockReturnValue('reports.inboxangel.io'),
-  };
-});
-
 vi.mock('../../src/dns/provision', () => ({
   provisionDomain: vi.fn().mockResolvedValue({ recordId: 'dns-rec-1', recordName: 'test.com._report._dmarc.reports.inboxangel.io', manual: false }),
 }));
@@ -17,6 +9,7 @@ vi.mock('../../src/audit/log', () => ({
 }));
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { makeTenant } from '../helpers/tenant';
 import { parseDomainList, validateDomain, bulkInsertDomains } from '../../src/domains/bulk';
 
 // ── parseDomainList ───────────────────────────────────────────
@@ -102,7 +95,7 @@ describe('bulkInsertDomains', () => {
 
   it('returns imported status for a new valid domain', async () => {
     const db = makeDb(); // empty = not duplicate
-    const results = await bulkInsertDomains({ DB: db, CLOUDFLARE_API_TOKEN: 'tok' }, ['acme.com']);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' }, cfToken: 'tok' }), ['acme.com']);
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('imported');
     expect(results[0].domain).toBe('acme.com');
@@ -114,14 +107,14 @@ describe('bulkInsertDomains', () => {
   it('returns duplicate status when domain already exists', async () => {
     const db = makeDb();
     seedDomain(db, 'acme.com'); // existing row
-    const results = await bulkInsertDomains({ DB: db }, ['acme.com']);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' } }), ['acme.com']);
     expect(results[0].status).toBe('duplicate');
     expect(db.domainRows()).toHaveLength(1);
   });
 
   it('returns invalid status for a malformed domain', async () => {
     const db = makeDb();
-    const results = await bulkInsertDomains({ DB: db }, ['not a domain']);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' } }), ['not a domain']);
     expect(results[0].status).toBe('invalid');
     expect(db.domainRows()).toHaveLength(0);
   });
@@ -130,7 +123,7 @@ describe('bulkInsertDomains', () => {
     const db = makeDb();
     seedDomain(db, 'dupe.com');
 
-    const results = await bulkInsertDomains({ DB: db, CLOUDFLARE_API_TOKEN: 'tok' }, ['acme.com', 'not-valid!', 'dupe.com']);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' }, cfToken: 'tok' }), ['acme.com', 'not-valid!', 'dupe.com']);
     expect(results.find(r => r.domain === 'acme.com')?.status).toBe('imported');
     expect(results.find(r => r.domain === 'not-valid!')?.status).toBe('invalid');
     expect(results.find(r => r.domain === 'dupe.com')?.status).toBe('duplicate');
@@ -140,7 +133,7 @@ describe('bulkInsertDomains', () => {
   it('caps batch at 50 entries', async () => {
     const db = makeDb();
     const domains = Array.from({ length: 60 }, (_, i) => `domain${i}.com`);
-    const results = await bulkInsertDomains({ DB: db }, domains);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' } }), domains);
     expect(results).toHaveLength(50);
     expect(db.domainRows()).toHaveLength(50);
   });
@@ -149,7 +142,7 @@ describe('bulkInsertDomains', () => {
     const { provisionDomain } = await import('../../src/dns/provision');
     vi.mocked(provisionDomain).mockResolvedValueOnce({ recordId: null, recordName: 'acme.com._report._dmarc.reports.inboxangel.io', manual: true });
     const db = makeDb();
-    const results = await bulkInsertDomains({ DB: db }, ['acme.com']);
+    const results = await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.inboxangel.io' } }), ['acme.com']);
     expect(results[0].status).toBe('imported');
     expect(results[0].manual_dns).toBe(true);
     expect(db.domainRows()[0].dns_record_id).toBeNull();

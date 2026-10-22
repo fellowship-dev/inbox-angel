@@ -2,16 +2,6 @@
 // All I/O (fetch, D1, message.reply) is mocked — no network required.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock env-utils — module-level caches are empty in test
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    fromEmail: vi.fn().mockReturnValue('check@reports.inboxangel.io'),
-    reportsDomain: vi.fn().mockReturnValue('reports.inboxangel.io'),
-  };
-});
-
 // cloudflare:email only exists in workerd — stand-in that records the constructor args.
 vi.mock('cloudflare:email', () => ({
   EmailMessage: class {
@@ -21,6 +11,7 @@ vi.mock('cloudflare:email', () => ({
 
 import { handleFreeCheck, buildReplyRaw } from '../../src/email/free-check';
 import type { Env } from '../../src/index';
+import { makeTenant } from '../helpers/tenant';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -42,6 +33,11 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     FROM_EMAIL: 'check@reports.inboxangel.io',
     ...overrides,
   };
+}
+
+/** The tenant a test env belongs to. */
+function tn(env: Env) {
+  return makeTenant({ db: env.DB, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
 }
 
 function makeMessage(overrides: Partial<{
@@ -115,7 +111,7 @@ describe('handleFreeCheck', () => {
     mockDohAll();
     const message = makeMessage();
 
-    await handleFreeCheck(message, makeEnv(), 'test-token');
+    await handleFreeCheck(message, tn(makeEnv()), 'test-token');
 
     expect(message.reply).toHaveBeenCalledOnce();
     const reply = sentReply(message);
@@ -129,7 +125,7 @@ describe('handleFreeCheck', () => {
     mockDohAll();
     const message = makeMessage();
 
-    await handleFreeCheck(message, makeEnv(), 'test-token');
+    await handleFreeCheck(message, tn(makeEnv()), 'test-token');
 
     const { raw } = sentReply(message);
     expect(raw).toMatch(/In-Reply-To: <orig-123@mail\.example\.com>/i);
@@ -140,7 +136,7 @@ describe('handleFreeCheck', () => {
     mockDohAll();
     const message = makeMessage({ from: 'founder@startupxyz.com' });
 
-    await handleFreeCheck(message, makeEnv(), 'test-token');
+    await handleFreeCheck(message, tn(makeEnv()), 'test-token');
 
     expect(sentReply(message).raw).toContain('startupxyz.com');
   });
@@ -149,7 +145,7 @@ describe('handleFreeCheck', () => {
     mockDohAll();
     const message = makeMessage();
 
-    await handleFreeCheck(message, makeEnv(), 'test-token');
+    await handleFreeCheck(message, tn(makeEnv()), 'test-token');
 
     const raw = decodeWords(sentReply(message).raw);
     expect(raw).toMatch(/From: "?InboxAngel"? <check@reports\.inboxangel\.io>/);
@@ -164,7 +160,7 @@ describe('handleFreeCheck', () => {
     const message = makeMessage();
     const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, tn(env), 'test-token');
 
     expect(env.DB.prepare).toHaveBeenCalled();
   });
@@ -174,7 +170,7 @@ describe('handleFreeCheck', () => {
     const message = makeMessage({ from: 'hello@my-company.io' });
     const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, tn(env), 'test-token');
 
     expect(sentReply(message).raw).toContain('my-company.io');
   });
@@ -184,7 +180,7 @@ describe('handleFreeCheck', () => {
     const message = makeMessage();
     const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, tn(env), 'test-token');
 
     expect(message.reply).toHaveBeenCalledOnce();
   });
@@ -196,7 +192,7 @@ describe('handleFreeCheck', () => {
     });
     const env = makeEnv();
 
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, tn(env), 'test-token');
 
     expect(sentReply(message).raw).toContain('🚨'); // exposed status line
   });
@@ -213,7 +209,7 @@ describe('handleFreeCheck', () => {
     } as unknown as ForwardableEmailMessage;
 
     const env = makeEnv();
-    await handleFreeCheck(message, env, 'test-token');
+    await handleFreeCheck(message, tn(env), 'test-token');
 
     expect(message.reply).toHaveBeenCalledOnce();
   });
@@ -231,7 +227,7 @@ describe('handleFreeCheck', () => {
 
     const env = makeEnv({ DB: brokenDb });
     // Should not throw — DB failure is swallowed with console.error
-    const result = await handleFreeCheck(message, env, 'test-token');
+    const result = await handleFreeCheck(message, tn(env), 'test-token');
     expect(result).toHaveProperty('result');
     expect(message.reply).toHaveBeenCalledOnce();
   });

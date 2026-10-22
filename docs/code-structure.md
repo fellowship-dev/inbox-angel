@@ -6,7 +6,7 @@ Architecture and module responsibilities for Inbox Angel (repo `fellowship-dev/i
 
 ## core
 
-The core layer is the Worker entrypoint plus two cross-cutting utilities: environment resolution and telemetry.
+The core layer is the Worker entrypoint plus two cross-cutting pieces: the per-request tenant context and telemetry.
 
 ### `src/index.ts` — Worker Entrypoint
 
@@ -22,6 +22,7 @@ Exports the `Env` interface that describes every Cloudflare binding and secret t
 | `CLOUDFLARE_API_TOKEN` | secret | EMAIL token — DNS writes and email routing |
 | `API_KEY` | secret (optional) | Static API key auth for headless integrations |
 | `WORKER_NAME` | var | Defaults to `"inbox-angel-worker"` |
+| `MODE` | var (optional) | `selfhost` (default) or `saas` |
 
 Three handlers are exported:
 
@@ -53,41 +54,28 @@ All handlers run `assertSchemaReady(env.DB)` (from `@inbox-angel/db`) before bus
 
 ---
 
-### `src/env-utils.ts` — Environment Cache
+### `src/tenancy/` — Tenant context and Cloudflare client
 
-Provides a lazy-loaded, module-scoped cache for all resolved configuration values. The cache lives for the lifetime of the Worker instance (shared across requests within the same isolate — not persisted between isolates or cold starts).
+Everything one request (or one cron account) needs is built per request and thrown away with it. There is **no module-level per-tenant state** in `src/` (`test/tenancy/guards.test.ts` enforces it), so concurrent requests for different accounts in one isolate cannot see each other's zones, settings or branding.
 
-**Why a module-level cache?**  
-D1 and CF API calls are expensive. `enrichEnv()` is called at the top of every request and cron handler. The cache means only the first call per isolate does any I/O.
+| File | Role |
+|------|------|
+| `mode.ts` | `MODE=selfhost\|saas` from env; defaults to `selfhost` |
+| `resolver.ts` | `AccountResolver` seam `(request, env) => {accountId, userId?, role?} \| null`. The self-host resolver always returns the implicit account (`acct_default`); the auth lane plugs in a session-based one. Also `listCronAccounts` (self-host: just the one) |
+| `context.ts` | `TenantContext`: `accountId`, `mode`, `settings` (base/reports domain, from address, branding, stored zone), `scope` (account-scoped queries), `cf()` (the Cloudflare client factory), `zoneFor(domain)` |
+| `load.ts` | `loadTenant(env, account)` reads the tenant's settings from D1, derives defaults, resolves the base domain's zone once and persists it. Replaces the old `enrichEnv()` cache |
+| `cf-client.ts` | `CfClient`: the only code that talks to `api.cloudflare.com` |
 
-**Public getters**
+**`CfClient`** is bound to one token. `zoneFor(domain)` finds the zone of *that* domain by its registrable name (`a.b.acme.com` → `acme.com`; shortest candidate first, so `co.uk` style suffixes are skipped) and caches answers for the client's lifetime, which is one request. Every DNS write (apply-dmarc, apply-spf, the SPF flattener, MTA-STS, DMARC mode change) targets the zone of the domain it is for. Records under the reports domain (the `_report._dmarc` authorisation record, Email Routing, null-sender records) go to the reports domain's zone. Failures are typed: `CfNetworkError`, `CfAuthError` (401/403), `CfNotFoundError`, `CfApiError`, `CfZoneNotFoundError`, `CfNotConfiguredError`. The token is held in a private field and never appears in errors, JSON, `inspect` output or logs.
 
-| Function | Returns |
-|----------|---------|
-| `getZoneId()` | CF zone ID for the base domain |
-| `getAccountId()` | CF account ID |
-| `getBaseDomain()` | The configured base domain (e.g. `acme.com`) |
-| `getWorkersSubdomain()` | CF Workers subdomain (e.g. `fellowshipdev`) |
-| `reportsDomain()` | Reports subdomain (e.g. `reports.acme.com`) |
-| `fromEmail()` | Outbound from address (e.g. `noreply@reports.acme.com`) |
-| `brandLogoUrl()` | Optional brand logo URL for HTML emails |
-| `brandColor()` | Brand accent hex color — defaults to `#4F46E5` |
+**Crons** (`src/cron.ts`) fan out over the accounts, each in its own `try`, so one account's Cloudflare 403 doesn't stop the others.
 
-**`enrichEnv(env, db?)`** — main entry point
+**Credentials:** self-host uses the `CLOUDFLARE_API_TOKEN` secret. In `saas` mode no token is used until per-account credentials exist (`loadTenant`'s `cfToken` option is the seam); the operator's token is never shared across tenants.
 
-Call once at the top of request/cron handlers before reading any config value. Resolution order:
-
-1. **Module cache** — hot path, no I/O if already warm
-2. **D1 settings table** — reads `base_domain`, `zone_id`, `account_id`, `reports_domain`, `from_email`, `workers_subdomain`, `brand_logo_url`, `brand_color`
-3. **Domains table fallback** — if `base_domain` is absent from settings, falls back to `domains WHERE is_default = 1`
-4. **CF zones API** — resolves `zone_id` + `account_id` if still missing; retries with apex domain if the configured domain is a subdomain
-5. **CF workers/subdomain API** — resolves `workers_subdomain` if still missing
-6. **Derived defaults** — `reports_domain = reports.{base_domain}`, `from_email = noreply@reports.{base_domain}`
-7. **Persist to D1** — writes resolved `zone_id`, `account_id`, and `workers_subdomain` back to D1 so subsequent cold starts skip the API calls
-
-**`resetEnvCache()`**
-
-Clears all module-level caches. Called by the setup wizard after the user configures a new `base_domain` so the next request re-resolves everything from scratch.
+| Env | Purpose |
+|-----|---------|
+| `MODE` | `selfhost` (default) or `saas` |
+| `WORKER_NAME` | Worker script name; defaults to `inbox-angel-worker` (existing installs) |
 
 ---
 
@@ -96,11 +84,11 @@ Clears all module-level caches. Called by the setup wizard after the user config
 Optional, opt-in telemetry. Disabled by default. Users opt in through the dashboard settings page, which writes `telemetry_opted_in = "true"` to the D1 settings table.
 
 **Privacy guarantees**
-- Anonymous ID: `SHA-256(account_id + worker_name)[:16]` — a one-way hash, cannot be reversed
+- Anonymous ID: `SHA-256(cloudflare_account_id + worker_name)[:16]` (saas also mixes in the tenant's account id) — a one-way hash, cannot be reversed
 - Collected: event type, typed properties (counts, statuses), worker version, anonymous ID, unix timestamp
 - Never collected: domain names, email addresses, IP addresses, report contents
 
-**`track(env, props)`**
+**`track(tenant, props)`**
 
 Fire-and-forget. Never throws. Silently no-ops if telemetry is disabled or if the fetch fails.
 
@@ -118,7 +106,7 @@ Fire-and-forget. Never throws. Silently no-ops if telemetry is disabled or if th
 | `check.created` / `check.received` | Free one-shot email check |
 | `report.received` / `tls-rpt.received` | DMARC or TLS report ingested |
 
-The opt-in state is cached in a module-level variable to avoid a D1 query on every event call.
+The opt-in state is read once per `TenantContext` (not cached at module level, so it can't leak between accounts).
 
 ---
 

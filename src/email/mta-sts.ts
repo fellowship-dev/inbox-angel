@@ -13,7 +13,8 @@
 // packages/dns-checks; this module adds the Cloudflare zone API provisioning on top.
 
 import { MtaStsMode } from '../db/types';
-import { getZoneId, reportsDomain } from '../env-utils';
+import type { TenantContext } from '../tenancy/context';
+import { CfNotFoundError, cfErrorText, type CfDnsRecordInput } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import {
   buildPolicyFile,
@@ -25,21 +26,13 @@ import {
 
 export { buildPolicyFile, generatePolicyId };
 
-const CF_API = 'https://api.cloudflare.com/client/v4';
-
 /** Optional audit context for self-logging DNS mutations. */
 export interface MtaStsAuditOpts {
-  db: D1Database;
   domain_name: string;
   actor_id?: string | null;
   actor_email?: string | null;
   actor_type?: 'user' | 'system';
   ctx?: ExecutionContext;
-}
-
-export interface MtaStsProvisionEnv {
-  CLOUDFLARE_API_TOKEN: string;
-  WORKER_NAME: string;      // e.g. inbox-angel-worker
 }
 
 export interface MtaStsProvisionResult {
@@ -49,10 +42,6 @@ export interface MtaStsProvisionResult {
   mx_hosts: string[];
   policy_id: string;
   mode: MtaStsMode;
-}
-
-export interface MtaStsDeprovisionEnv {
-  CLOUDFLARE_API_TOKEN: string;
 }
 
 // ── DNS helpers ───────────────────────────────────────────────
@@ -78,77 +67,76 @@ export async function discoverMxHosts(domain: string): Promise<string[]> {
 }
 
 // ── Cloudflare DNS API ────────────────────────────────────────
-
-function cfHeaders(token: string): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
+// Every record belongs to `domain`, so every call is made in that domain's own zone.
 
 async function createDnsRecord(
-  env: MtaStsProvisionEnv,
-  record: { type: string; name: string; content: string; ttl: number; proxied?: boolean; comment?: string },
+  tenant: TenantContext,
+  domain: string,
+  record: CfDnsRecordInput,
   audit?: MtaStsAuditOpts,
 ): Promise<string> {
-  const zoneId = getZoneId();
-  const res = await fetch(`${CF_API}/zones/${zoneId}/dns_records`, {
-    method: 'POST',
-    headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-    body: JSON.stringify(record),
-  });
-  const data = await res.json() as { success: boolean; result?: { id: string }; errors?: { message: string }[] };
-  if (!data.success || !data.result?.id) {
-    const msg = data.errors?.map(e => e.message).join(', ') ?? `HTTP ${res.status}`;
-    throw new Error(`CF DNS create failed for ${record.name}: ${msg}`);
+  const zone = await tenant.zoneFor(domain);
+  let created;
+  try {
+    created = await tenant.requireCf().createDnsRecord(zone.id, record);
+  } catch (e) {
+    throw new Error(`CF DNS create failed for ${record.name}: ${cfErrorText(e)}`);
   }
+  if (!created?.id) throw new Error(`CF DNS create failed for ${record.name}: unknown error`);
 
   if (audit) {
-    logAudit(audit.db, {
+    logAudit(tenant, {
       actor_id: audit.actor_id,
       actor_email: audit.actor_email,
       actor_type: audit.actor_type ?? 'user',
       action: 'dns.create',
       resource_type: 'dns_record',
-      resource_id: data.result.id,
+      resource_id: created.id,
       resource_name: record.name,
       after_value: { type: record.type, name: record.name, content: record.content, proxied: record.proxied },
     }, audit.ctx);
   }
 
-  return data.result.id;
+  return created.id;
 }
 
+/** Patch a TXT record that lives in `domain`'s zone. */
 export async function patchCfDnsRecord(
-  env: { CLOUDFLARE_API_TOKEN: string },
+  tenant: TenantContext,
+  domain: string,
   recordId: string,
   content: string,
   audit?: MtaStsAuditOpts & { beforeContent?: string },
 ): Promise<void> {
   const auditPayload = audit ? { opts: audit, beforeContent: audit.beforeContent } : undefined;
-  await patchDnsRecord(env as MtaStsDeprovisionEnv, recordId, content, auditPayload);
+  await patchDnsRecord(tenant, domain, recordId, content, auditPayload);
 }
 
 async function patchDnsRecord(
-  env: MtaStsDeprovisionEnv,
+  tenant: TenantContext,
+  domain: string,
   recordId: string,
   content: string,
   audit?: { opts?: MtaStsAuditOpts; beforeContent?: string },
 ): Promise<void> {
-  const zoneId = getZoneId();
-  const res = await fetch(`${CF_API}/zones/${zoneId}/dns_records/${recordId}`, {
-    method: 'PATCH',
-    headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) {
-    const data = await res.json() as { errors?: { message: string }[] };
-    const msg = data.errors?.map(e => e.message).join(', ') ?? `HTTP ${res.status}`;
-    throw new Error(`CF DNS patch failed: ${msg}`);
+  const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
+  try {
+    try {
+      await cf.patchDnsRecord(zone.id, recordId, { content });
+    } catch (e) {
+      // Installs from before per-domain zones created these records in the base zone.
+      const legacy = e instanceof CfNotFoundError ? tenant.legacyZoneId(zone.id) : undefined;
+      if (!legacy) throw e;
+      console.warn(`[mta-sts] record ${recordId} not in zone of ${domain}; patching it in the base zone (legacy location)`);
+      await cf.patchDnsRecord(legacy, recordId, { content });
+    }
+  } catch (e) {
+    throw new Error(`CF DNS patch failed: ${cfErrorText(e)}`);
   }
 
   if (audit?.opts) {
-    logAudit(audit.opts.db, {
+    logAudit(tenant, {
       actor_id: audit.opts.actor_id,
       actor_email: audit.opts.actor_email,
       actor_type: audit.opts.actor_type ?? 'user',
@@ -163,21 +151,28 @@ async function patchDnsRecord(
 }
 
 async function deleteDnsRecord(
-  env: MtaStsDeprovisionEnv,
+  tenant: TenantContext,
+  domain: string,
   recordId: string,
   audit?: MtaStsAuditOpts,
 ): Promise<void> {
-  const zoneId = getZoneId();
-  const res = await fetch(`${CF_API}/zones/${zoneId}/dns_records/${recordId}`, {
-    method: 'DELETE',
-    headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-  });
-  if (!res.ok && res.status !== 404) {
-    console.warn(`[mta-sts] delete DNS record ${recordId}: HTTP ${res.status}`);
+  const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
+  try {
+    let deleted = await cf.deleteDnsRecord(zone.id, recordId); // already gone is fine
+    const legacy = deleted ? undefined : tenant.legacyZoneId(zone.id);
+    if (legacy) {
+      // Not in the domain's zone: installs from before per-domain zones created it in the base zone.
+      deleted = await cf.deleteDnsRecord(legacy, recordId);
+      if (deleted) console.warn(`[mta-sts] record ${recordId} was in the base zone (legacy location); deleted there`);
+    }
+  } catch (e) {
+    console.warn(`[mta-sts] delete DNS record ${recordId}: ${cfErrorText(e)}`);
+    return;
   }
 
-  if (audit && (res.ok || res.status === 404)) {
-    logAudit(audit.db, {
+  if (audit) {
+    logAudit(tenant, {
       actor_id: audit.actor_id,
       actor_email: audit.actor_email,
       actor_type: audit.actor_type ?? 'user',
@@ -190,24 +185,29 @@ async function deleteDnsRecord(
   }
 }
 
-// Resolve the Worker's public hostname from CF API
-async function getWorkerRoute(env: MtaStsProvisionEnv, domain: string): Promise<string> {
-  const zoneId = getZoneId();
-  // Check existing routes for this zone
-  const res = await fetch(`${CF_API}/zones/${zoneId}/workers/routes`, {
-    headers: cfHeaders(env.CLOUDFLARE_API_TOKEN),
-  });
-  if (res.ok) {
-    const data = await res.json() as { result?: { pattern: string; script: string }[] };
-    const route = data.result?.find(r => r.script === env.WORKER_NAME);
+/**
+ * Public hostname of this Worker, for the mta-sts CNAME: a route in the domain's zone if one
+ * exists, else the workers.dev address `{worker}.{account-subdomain}.workers.dev`.
+ */
+async function getWorkerRoute(tenant: TenantContext, domain: string): Promise<string> {
+  const worker = tenant.workerName;
+  try {
+    const zone = await tenant.zoneFor(domain);
+    const routes = await tenant.requireCf().request<{ pattern: string; script: string }[]>('GET', `/zones/${zone.id}/workers/routes`);
+    const route = routes?.find(r => r.script === worker);
     if (route) {
       // Extract hostname from route pattern like "worker.domain.com/*"
       const host = route.pattern.replace(/\/\*$/, '').replace(/^https?:\/\//, '');
       if (host && !host.includes('*')) return host;
     }
+  } catch { /* no route listing available: fall through to workers.dev */ }
+
+  // workers.dev addresses carry the account's workers subdomain; without it the name doesn't resolve.
+  const subdomain = await tenant.workersSubdomain();
+  if (!subdomain) {
+    throw new Error(`Cannot determine the public hostname of Worker "${worker}": no route in this zone and the workers.dev subdomain is unknown`);
   }
-  // Fallback: workers.dev subdomain (less ideal but works)
-  return `${env.WORKER_NAME}.workers.dev`;
+  return `${worker}.${subdomain}.workers.dev`;
 }
 
 // ── Main entry points ─────────────────────────────────────────
@@ -218,8 +218,8 @@ async function getWorkerRoute(env: MtaStsProvisionEnv, domain: string): Promise<
  * Always defaults to 'testing' for new setups.
  */
 export async function provisionMtaSts(
+  tenant: TenantContext,
   domain: string,
-  env: MtaStsProvisionEnv,
   audit?: MtaStsAuditOpts,
 ): Promise<MtaStsProvisionResult> {
   // Detect existing setup
@@ -233,10 +233,10 @@ export async function provisionMtaSts(
   }
 
   const policy_id = generatePolicyId();
-  const workerHost = await getWorkerRoute(env, domain);
+  const workerHost = await getWorkerRoute(tenant, domain);
 
   // Create _mta-sts TXT
-  const mta_sts_record_id = await createDnsRecord(env, {
+  const mta_sts_record_id = await createDnsRecord(tenant, domain, {
     type: 'TXT',
     name: `_mta-sts.${domain}`,
     content: `v=STSv1; id=${policy_id}`,
@@ -245,16 +245,16 @@ export async function provisionMtaSts(
   }, audit);
 
   // Create _smtp._tls TXT
-  const tls_rpt_record_id = await createDnsRecord(env, {
+  const tls_rpt_record_id = await createDnsRecord(tenant, domain, {
     type: 'TXT',
     name: `_smtp._tls.${domain}`,
-    content: `v=TLSRPTv1; rua=mailto:tls-rpt@${reportsDomain()}`,
+    content: `v=TLSRPTv1; rua=mailto:tls-rpt@${tenant.settings.reportsDomain}`,
     ttl: 3600,
     comment: `InboxAngel TLS-RPT for ${domain}`,
   }, audit);
 
   // Create mta-sts CNAME (proxied so CF handles TLS)
-  const cname_record_id = await createDnsRecord(env, {
+  const cname_record_id = await createDnsRecord(tenant, domain, {
     type: 'CNAME',
     name: `mta-sts.${domain}`,
     content: workerHost,
@@ -270,9 +270,10 @@ export async function provisionMtaSts(
  * Update the _mta-sts TXT record with a new policy_id (after mode or MX change).
  */
 export async function updateMtaStsTxtRecord(
+  tenant: TenantContext,
+  domain: string,
   recordId: string,
   policyId: string,
-  env: MtaStsDeprovisionEnv,
   audit?: MtaStsAuditOpts & { oldPolicyId?: string },
 ): Promise<void> {
   const content = `v=STSv1; id=${policyId}`;
@@ -280,19 +281,20 @@ export async function updateMtaStsTxtRecord(
     opts: audit,
     beforeContent: audit.oldPolicyId ? `v=STSv1; id=${audit.oldPolicyId}` : undefined,
   } : undefined;
-  await patchDnsRecord(env, recordId, content, auditPayload);
+  await patchDnsRecord(tenant, domain, recordId, content, auditPayload);
 }
 
 /**
  * Remove all three DNS records. Called on disable.
  */
 export async function deprovisionMtaSts(
-  env: MtaStsDeprovisionEnv,
+  tenant: TenantContext,
+  domain: string,
   ids: { mta_sts_record_id: string | null; tls_rpt_record_id: string | null; cname_record_id: string | null },
   audit?: MtaStsAuditOpts,
 ): Promise<void> {
   const tasks = [ids.mta_sts_record_id, ids.tls_rpt_record_id, ids.cname_record_id]
     .filter(Boolean)
-    .map(id => deleteDnsRecord(env, id!, audit).catch(e => console.warn(`[mta-sts] deprovision ${id}:`, e)));
+    .map(id => deleteDnsRecord(tenant, domain, id!, audit).catch(e => console.warn(`[mta-sts] deprovision ${id}:`, e)));
   await Promise.all(tasks);
 }
