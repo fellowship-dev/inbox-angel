@@ -34,8 +34,8 @@ describe('AccountResolver: session → user → membership → account', () => {
     const ownerId = rows(db, "SELECT id FROM users WHERE email = 'owner@example.com'")[0].id;
     const memberId = rows(db, "SELECT id FROM users WHERE email = 'm@example.com'")[0].id;
 
-    expect(await ask(env, owner)).toEqual({ accountId: 'acct_default', userId: ownerId, role: 'owner' });
-    expect(await ask(env, member)).toEqual({ accountId: 'acct_default', userId: memberId, role: 'member' });
+    expect(await ask(env, owner)).toMatchObject({ accountId: 'acct_default', userId: ownerId, role: 'owner', kind: 'session' });
+    expect(await ask(env, member)).toMatchObject({ accountId: 'acct_default', userId: memberId, role: 'member' });
   });
 
   it('saas: each signup resolves to its own account', async () => {
@@ -60,7 +60,7 @@ describe('AccountResolver: session → user → membership → account', () => {
 
     expect((await ask(env, a))!.accountId).toBe(accA); // oldest membership by default
     expect(await ask(env, a, { 'x-account-id': accB })).toMatchObject({ accountId: accB, role: 'member' });
-    expect(await ask(env, b, { 'x-account-id': accA })).toBeNull(); // b is not in a's account
+    await expect(ask(env, b, { 'x-account-id': accA })).rejects.toThrow(/not a member/); // b is not in a's account (403)
   });
 
   it('API keys resolve to their account; the instance key to acct_default; nothing resolves to null', async () => {
@@ -70,19 +70,19 @@ describe('AccountResolver: session → user → membership → account', () => {
     const userId = rows(db, 'SELECT id FROM users')[0].id;
     const { key } = await createApiKey(db as unknown as D1Database, { accountId: 'acct_default', userId, name: 'k' });
 
-    expect(await ask(env, key)).toEqual({ accountId: 'acct_default', userId, role: 'owner' });
-    expect(await ask(env, 'instance-secret-key')).toEqual({ accountId: 'acct_default', userId: undefined, role: 'owner' });
+    expect(await ask(env, key)).toMatchObject({ accountId: 'acct_default', userId, role: 'owner', kind: 'api_key' });
+    expect(await ask(env, 'instance-secret-key')).toMatchObject({ accountId: 'acct_default', userId: undefined, role: 'owner', kind: 'instance' });
     expect(await ask(env)).toBeNull();
     expect(await ask(env, 'nonsense')).toBeNull();
     expect(owner).toBeTruthy();
   });
 
-  it('a signed-in user with no membership resolves to null (and the API says 403)', async () => {
+  it('a signed-in user with no membership is refused (403), not given an account', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db);
     const owner = await setupOwner(env);
     db.sqlite.prepare('DELETE FROM memberships').run();
-    expect(await ask(env, owner)).toBeNull();
+    await expect(ask(env, owner)).rejects.toThrow(/not a member/);
     expect((await call(env, 'GET', '/api/domains', { key: owner })).status).toBe(403);
   });
 });

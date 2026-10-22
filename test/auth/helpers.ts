@@ -9,6 +9,8 @@ export const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 export type TestDb = ReturnType<typeof createMigratedD1>;
 
 export function makeEnv(db: TestDb = createMigratedD1(), extra: Record<string, unknown> = {}): Env {
+  // The platform's sender address, as the setup wizard would have stored it.
+  db.sqlite.prepare("INSERT OR IGNORE INTO settings (account_id, key, value) VALUES ('acct_default', 'from_email', 'noreply@reports.example.com')").run();
   return { DB: db as unknown as D1Database, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '', ...extra } as unknown as Env;
 }
 

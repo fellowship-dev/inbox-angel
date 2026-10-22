@@ -14,26 +14,13 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 const saas = () => makeEnv(createMigratedD1(), { MODE: 'saas', SAAS_ENABLED: '1' });
 const rows = (db: any, sql: string) => db.sqlite.prepare(sql).all() as any[];
 
-describe('MODE=saas fails closed until tenancy is wired', () => {
+describe('MODE=saas is an explicit opt-in', () => {
   it('is refused (503) without SAAS_ENABLED=1, but /health works', async () => {
     const env = makeEnv(createMigratedD1(), { MODE: 'saas' });
     const r = await call(env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'password-123' } });
     expect(r.status).toBe(503);
     expect((await r.json() as any).error).toContain('SAAS_ENABLED');
     expect((await call(env, 'GET', '/health')).status).toBe(200);
-  });
-
-  it('a saas sign-up gets 403 on the API and sees none of the default account’s data', async () => {
-    const db = createMigratedD1();
-    db.sqlite.prepare("INSERT INTO domains (domain, rua_address, account_id) VALUES ('secret.example.com','r@x.test','acct_default')").run();
-    const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
-    const { token } = await (await call(env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'password-123' } })).json() as any;
-    for (const [m, p] of [['GET', '/api/domains'], ['GET', '/api/team'], ['GET', '/api/audit-log'], ['POST', '/api/settings/base-domain']] as const) {
-      const res = await call(env, m, p, { key: token, body: m === 'POST' ? { domain: 'evil.com' } : undefined });
-      expect(res.status, p).toBe(403);
-      expect(await res.text()).not.toContain('secret.example.com');
-    }
-    expect(rows(db, "SELECT COUNT(*) n FROM settings WHERE key = 'base_domain'")).toEqual([{ n: 0 }]);
   });
 });
 

@@ -53,7 +53,7 @@ function presentedCredential(request: Request): string {
   return /^bearer /i.test(auth) ? auth.slice(7).trim() : '';
 }
 
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * State-changing requests must come from our own origin.

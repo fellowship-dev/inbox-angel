@@ -459,11 +459,19 @@ async function _handleApi(
   // ── Public routes ───────────────────────────────────────────
   // No credentials, no user data. They act through an explicit anonymous context: the platform's
   // implicit account (where inbound check mail lands), with no user and no role.
-  const anonymous = () => loadTenant(env, { accountId: IMPLICIT_ACCOUNT_ID });
+  // A signed-in caller's own tenant if there is one, else that anonymous context.
+  const tenantFor = async () => {
+    let who: Awaited<ReturnType<AccountResolver>> = null;
+    const hasCredential = request.headers.has('x-api-key') || request.headers.has('authorization') || request.headers.has('cookie');
+    if (hasCredential) {
+      try { who = await resolver(request, env); } catch { /* unusable credential: treated as anonymous here */ }
+    }
+    return loadTenant(env, who ?? { accountId: IMPLICIT_ACCOUNT_ID });
+  };
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
-    const tenant = await anonymous();
+    const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -483,7 +491,7 @@ async function _handleApi(
 
   // POST /api/monitor — subscribe to change alerts for a domain (unauthenticated)
   if (path === '/api/monitor' && method === 'POST') {
-    const tenant = await anonymous();
+    const tenant = await tenantFor();
     const body = await parseBody<{ email?: string; session_token?: string }>(request);
     if (!body.email || !body.session_token) return err('email and session_token are required', 400);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
@@ -505,7 +513,7 @@ async function _handleApi(
   }
 
   // /api/auth/* and /api/invites/*: status, setup, signup, login, logout, forgot, reset, OAuth, invites
-  const authResponse = await handleAuthRoute(request, env, ctx);
+  const authResponse = await handleAuthRoute(request, env, ctx, tenantFor);
   if (authResponse) return authResponse;
 
   // All /api/* routes require auth
@@ -1290,7 +1298,8 @@ async function _handleApi(
     if (monitorSubPatchMatch && method === 'PATCH') {
       const body = await parseBody<{ active?: boolean }>(request);
       if (typeof body.active !== 'boolean') return err('active (boolean) is required', 400);
-      await tenant.scope.monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
+      const upd = await tenant.scope.monitor.setActive(parseInt(monitorSubPatchMatch[1], 10), body.active);
+      if (!upd.meta.changes) return err('subscription not found', 404);
       return json({ ok: true });
     }
 
@@ -1299,7 +1308,8 @@ async function _handleApi(
     if (domainAlertsMatch && method === 'PATCH') {
       const body = await parseBody<{ alerts_enabled?: boolean }>(request);
       if (typeof body.alerts_enabled !== 'boolean') return err('alerts_enabled (boolean) is required', 400);
-      await tenant.scope.domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
+      const upd = await tenant.scope.domains.setAlertsEnabled(parseInt(domainAlertsMatch[1], 10), body.alerts_enabled);
+      if (!upd.meta.changes) return err('domain not found', 404);
       return json({ ok: true });
     }
 
@@ -1349,6 +1359,7 @@ async function _handleApi(
       if (!actor) return err('sign in as a user to remove teammates', 403);
       if (actor.id === teamMemberMatch[1]) return err('cannot remove yourself', 400);
       const removed = await tenant.scope.team.getMember(teamMemberMatch[1]).catch(() => null);
+      if (!removed) return err('team member not found', 404);
       if (removed?.role === 'owner') return err('the owner cannot be removed', 403);
       if (removed?.role === 'admin' && account.role !== 'owner') return err('only the owner can remove an admin', 403);
       await tenant.scope.team.removeUser(teamMemberMatch[1]);

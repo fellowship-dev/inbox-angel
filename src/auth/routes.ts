@@ -39,7 +39,7 @@ function auditUser(env: Env, ctx: ExecutionContext, userId: string, entry: Audit
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Better Auth endpoints reachable from outside, as `METHOD /path`. */
-const PASSTHROUGH = [
+const PASSTHROUGH: readonly RegExp[] = [
   /^GET \/get-session$/,
   /^POST \/sign-in\/social$/,
   /^GET \/callback\/(github|google)$/,
@@ -130,7 +130,12 @@ async function signUp(
   return { res, user: data.user };
 }
 
-export async function handleAuthRoute(request: Request, env: Env, ctx: ExecutionContext): Promise<Response | null> {
+/**
+ * `tenantFor` yields the TenantContext of the caller if signed in, else the anonymous platform context.
+ */
+export async function handleAuthRoute(
+  request: Request, env: Env, ctx: ExecutionContext, tenantFor: () => Promise<TenantContext>,
+): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -148,14 +153,17 @@ export async function handleAuthRoute(request: Request, env: Env, ctx: Execution
   if (path === '/api/auth/status' && method === 'GET') {
     const saas = isSaas(env);
     const configured = saas ? true : await platform(env).team.hasOwner();
+    // Account-specific facts (custom domain, base domain, domains) come from the caller's own tenant
+    // when they are signed in; an anonymous visitor gets the self-host instance's, or nothing in saas.
+    const t = await tenantFor();
+    const mine = !saas || !!t.userId ? t : null;
     const [tsKeyRow, customDomainRow, telemetryRow] = await Promise.all([
       platform(env).settings.get('turnstile_site_key'),
-      platform(env).settings.get('custom_domain'),
-      platform(env).settings.get('telemetry_opted_in'),
+      mine?.scope.settings.get('custom_domain') ?? null,
+      mine?.scope.settings.get('telemetry_opted_in') ?? null,
     ]);
-    // First-run facts about the platform's own (implicit) account; hosted signups have none of this yet.
-    const existingDomains = saas ? [] : await platform(env).domains.list();
-    const baseDomain = saas ? undefined : (await platform(env).settings.get('base_domain'))?.value;
+    const existingDomains = mine ? await mine.scope.domains.list() : [];
+    const baseDomain = mine?.settings.baseDomain;
     return json({
       configured,
       mode: saas ? 'saas' : 'self-host',

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'u' }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'u', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -48,7 +48,7 @@ function twoAccountEnv() {
   return { db, env };
 }
 
-const as = (accountId: string): AccountResolver => async () => ({ accountId });
+const as = (accountId: string): AccountResolver => async () => ({ accountId, role: 'owner' });
 
 function request(method: string, path: string, body?: unknown): Request {
   return new Request(`https://x.test${path}`, {
