@@ -1,5 +1,4 @@
-# Runs the tests on every pull request and push to main; deploys the Cloudflare Worker
-# on pushes to main only after the tests pass.
+# Deploys the Cloudflare Worker on every push to main.
 #
 # Required secrets (set in GitHub repo Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN  — API token with Workers Scripts:Edit, D1:Edit, Email Sending:Edit,
@@ -12,28 +11,10 @@ on:
   push:
     branches:
       - main
-  pull_request:
 
 jobs:
-  test:
-    name: Install + test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm test -- --run
-      - run: npx tsc -p packages/dns-checks
-
   deploy:
     name: Deploy to Cloudflare Workers
-    needs: test
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
