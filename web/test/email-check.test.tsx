@@ -90,6 +90,22 @@ describe('EmailCheckPage', () => {
 		expect(screen.getByRole('button', { name: 'Start check' })).toBeInTheDocument();
 	});
 
+	it('shows when a hosted check address expires, and says nothing in self-host', async () => {
+		const run = async (extra: object) => {
+			const { unmount } = renderApp(<EmailCheckPage />, {
+				routes: { 'GET /api/check-results': { results: [] }, 'POST /api/check-sessions': { token: 'tok', email: 'check+tok.example.io', ...extra }, 'GET /api/check-sessions/tok': { status: 'pending' } },
+			});
+			await userEvent.click(await screen.findByRole('button', { name: 'Start check' }));
+			await screen.findByTestId('check-address');
+			return unmount;
+		};
+		const unmount = await run({ expires_at: 1_800_000_000 });
+		expect(screen.getByText(/takes one email and expires at/)).toBeInTheDocument();
+		unmount();
+		await run({});
+		expect(screen.queryByText(/expires at/)).not.toBeInTheDocument();
+	});
+
 	it('shows history with error and retry when it fails to load', async () => {
 		renderApp(<EmailCheckPage />, { routes: { 'GET /api/check-results': fail(403) } });
 		expect(await screen.findByText('You do not have access to this')).toBeInTheDocument();

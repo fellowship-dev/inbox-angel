@@ -4,7 +4,8 @@ import { sumStats, wizardProgress } from '../../lib/dmarc';
 import { useCheckSummary, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
-import { assessDomain } from '../../lib/levels';
+import { useHostedInfo } from '../../lib/hosted';
+import { assessDomain, assessHostedDomain } from '../../lib/levels';
 import type { Domain } from '../../lib/types';
 
 function DomainLink({ domain }: { domain: Domain }) {
@@ -20,6 +21,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 	const summary = useCheckSummary(domain.id);
 	const stats = useStats(domain.id, 7);
 	const wizard = useWizardState(domain.id);
+	const hosted = useHostedInfo(domain.id); // null unless hosted is on for the deployment and this domain
 
 	if (summary.isPending) {
 		return (
@@ -55,7 +57,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 		);
 	}
 
-	const a = assessDomain(summary.data);
+	const a = hosted ? assessHostedDomain(summary.data, hosted) : assessDomain(summary.data);
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const progress = wizard.data ? wizardProgress(wizard.data) : null;
 
