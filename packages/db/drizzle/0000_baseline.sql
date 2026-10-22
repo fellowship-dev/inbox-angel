@@ -89,6 +89,14 @@ CREATE TABLE `auth_rate_limits` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `auth_rate_limits_key_unique` ON `auth_rate_limits` (`key`);--> statement-breakpoint
+CREATE TABLE `canary_tokens` (
+	`token_hash` text PRIMARY KEY NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`expires_at` integer NOT NULL,
+	`used_at` integer
+);
+--> statement-breakpoint
+CREATE INDEX `idx_canary_tokens_expires` ON `canary_tokens` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `check_results` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`from_email` text NOT NULL,
@@ -136,6 +144,50 @@ CREATE INDEX `idx_domains_domain` ON `domains` (`domain`);--> statement-breakpoi
 CREATE INDEX `idx_domains_parent` ON `domains` (`parent_id`);--> statement-breakpoint
 CREATE INDEX `idx_domains_account` ON `domains` (`account_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`account_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint
+CREATE TABLE `hosted_domains` (
+	`domain_id` integer PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`hosted_id` text NOT NULL,
+	`zone_key` text NOT NULL,
+	`dmarc_record_id` text,
+	`spf_record_id` text,
+	`mta_sts_txt_record_id` text,
+	`mta_sts_host_record_id` text,
+	`dmarc_pointer` text,
+	`spf_pointer` text,
+	`mta_sts_pointer` text,
+	`pointers_checked_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `hosted_domains_hosted_id_unique` ON `hosted_domains` (`hosted_id`);--> statement-breakpoint
+CREATE INDEX `idx_hosted_domains_account` ON `hosted_domains` (`account_id`);--> statement-breakpoint
+CREATE TABLE `hosted_zones` (
+	`zone_key` text PRIMARY KEY NOT NULL,
+	`zone_id` text NOT NULL,
+	`zone_name` text NOT NULL,
+	`record_count` integer DEFAULT 0 NOT NULL,
+	`rest_digest` text,
+	`checked_at` integer
+);
+--> statement-breakpoint
+CREATE TABLE `intake_tokens` (
+	`domain_id` integer PRIMARY KEY NOT NULL,
+	`account_id` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`prev_token_hash` text,
+	`prev_expires_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`rotated_at` integer,
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `intake_tokens_token_hash_unique` ON `intake_tokens` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `idx_intake_tokens_account` ON `intake_tokens` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_intake_tokens_prev` ON `intake_tokens` (`prev_token_hash`);--> statement-breakpoint
 CREATE TABLE `invites` (
 	`token` text PRIMARY KEY NOT NULL,
 	`email` text NOT NULL,

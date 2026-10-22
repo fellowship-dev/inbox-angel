@@ -106,7 +106,7 @@ describe('upgrade from a pre-Better-Auth database', () => {
 
   it('applies cleanly and keeps users, roles and data', async () => {
     const d = await legacyInstall();
-    expect(applyMigrations(d.sqlite)).toEqual(['0012_accounts.sql', '0013_better_auth.sql']);
+    expect(applyMigrations(d.sqlite)).toEqual(['0012_accounts.sql', '0013_better_auth.sql', '0014_hosted_intake.sql']);
     expect(rows(d, 'SELECT id, email, role FROM users ORDER BY created_at')).toEqual([
       { id: 'u-admin', email: 'admin@old.test', role: 'admin' },
       { id: 'u-mem', email: 'mem@old.test', role: 'member' },
