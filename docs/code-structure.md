@@ -79,6 +79,10 @@ Everything one request (or one cron account) needs is built per request and thro
 
 ---
 
+### `src/connections/` — Cloudflare connections (OAuth + pasted tokens)
+
+One Inbox Angel account holds several Cloudflare connections; each domain is linked to the one that manages its zone. `crypto.ts` seals tokens (AES-GCM, versioned key id), `oauth.ts` is the PKCE protocol and signed state, `service.ts` stores, refreshes, restricts (zone allow-list) and revokes, `routes.ts` is `/api/cloudflare/*` and `PUT /api/domains/:id/connection`, `relay.ts` is the optional self-host redirect relay (inert unless configured). `TenantContext.cfFor(domain)` is how the rest of the Worker gets a client. See [cloudflare-oauth.md](cloudflare-oauth.md).
+
 ### `src/hosted/` — Hosted (SaaS) intake and records
 
 Only active with `MODE=saas` + `SAAS_ENABLED=1`; see [hosted.md](hosted.md). `intake.ts` routes `rua+<token>@` / `tls-rpt+<token>@` mail to the token's account (no default-account fallback), `canary.ts` handles the anonymous `check+<token>@`, `records.ts` is the name-guarded writer for `*.h.<zone>`, `zones.ts` tracks the 3,500-record quota and is the shard seam, `pointers.ts` verifies the customer's CNAME/SPF pointers, `service.ts` + `routes.ts` are `/api/domains/:id/hosted`, `cron.ts` is the daily zone diff.
