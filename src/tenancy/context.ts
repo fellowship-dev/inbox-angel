@@ -120,10 +120,10 @@ export class TenantContext {
     }));
   }
 
-  /** Remember (from loadTenant) whether the account has a usable connection, for the synchronous availability checks. */
+  /** Remember (from loadTenant) whether the account has any connection, for the synchronous availability checks. */
   setHasConnections(has: boolean): void { this.#hasConnections = has; }
 
-  /** Is any Cloudflare credential available: the self-host token, or an active connection? */
+  /** Is any Cloudflare credential available: the self-host token, or a connection (whatever its status)? */
   hasCloudflare(): boolean { return !!this.#cfToken || this.#hasConnections; }
 
   /**

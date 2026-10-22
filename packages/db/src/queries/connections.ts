@@ -146,14 +146,19 @@ export function connectionQueries(db: Db, accountId: string) {
 				.all();
 		},
 
-		/** Replace the allow-list (atomic). The caller has already checked the connection is this account's. */
-		setZones(connectionId: string, zones: CfConnectionZone[]) {
+		/** Replace the allow-list (atomic). False when the connection is not this account's. */
+		async setZones(connectionId: string, zones: CfConnectionZone[]): Promise<boolean> {
+			const owned = await db.select({ id: cloudflareConnections.id }).from(cloudflareConnections).where(one(connectionId)).get();
+			if (!owned) return false;
 			const clear = db.delete(cloudflareConnectionZones).where(and(myZones, eq(cloudflareConnectionZones.connection_id, connectionId)));
-			if (zones.length === 0) return clear.run();
-			return db.batch([
-				clear,
-				db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() }))),
-			]);
+			if (zones.length === 0) await clear.run();
+			else {
+				await db.batch([
+					clear,
+					db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() }))),
+				]);
+			}
+			return true;
 		},
 
 		/** Domains linked to a connection (for the delete warning). */

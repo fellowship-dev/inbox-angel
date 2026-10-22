@@ -270,7 +270,7 @@ export class ConnectionService {
     const unknown = zoneIds.filter(z => !visible.has(z));
     if (unknown.length) throw new ConnectionInputError(`not a zone this Cloudflare connection can see: ${unknown.join(', ')}`);
     const unique = [...new Set(zoneIds)];
-    await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)! })));
+    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)! }))))) throw new CfConnectionError('missing', id);
     this.invalidate();
     return unique.map(z => ({ id: z, name: visible.get(z)! }));
   }
@@ -379,11 +379,15 @@ export class ConnectionService {
       tokens = await refreshTokens(cfg, refreshToken, this.#fetch, this.#now);
     } catch (e) {
       if (!(e instanceof OAuthError) || !e.permanent) throw e; // Cloudflare unreachable: say nothing about the grant
-      // Refresh tokens are single-use: another isolate may have refreshed first. Use what it stored.
-      const current = await q.getSecret(id);
-      if (current && current.status === 'active' && current.token_envelope !== from.envelope) {
-        const material = await this.crypt.open(current.token_envelope, aad).catch(() => null);
-        if (material && !material.expired(this.#now)) return this.#remember(id, { envelope: current.token_envelope, material });
+      // Refresh tokens are single-use: another isolate may have refreshed first. Give it a moment to
+      // store its result, and use that instead of declaring the connection broken.
+      for (const wait of [0, 300, 700]) {
+        if (wait) await new Promise(r => setTimeout(r, wait));
+        const current = await q.getSecret(id);
+        if (current && current.status === 'active' && current.token_envelope !== from.envelope) {
+          const material = await this.crypt.open(current.token_envelope, aad).catch(() => null);
+          if (material && !material.expired(this.#now)) return this.#remember(id, { envelope: current.token_envelope, material });
+        }
       }
       await this.#break(id, row.label, 'Cloudflare refused to refresh the access token: reconnect this account');
       throw new CfConnectionError('broken', id, row.label);

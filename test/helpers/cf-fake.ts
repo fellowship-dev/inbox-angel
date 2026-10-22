@@ -25,6 +25,10 @@ export class FakeCloudflare {
   readonly cname: Record<string, string> = {};
   /** Worker routes per zone id, served at /zones/:id/workers/routes. */
   readonly routes: Record<string, { pattern: string; script: string }[]> = {};
+  /** When set, a request whose bearer token is not in the set is answered 401 (a revoked / expired token). */
+  validTokens?: Set<string>;
+  /** Cloudflare accounts the token can see (GET /accounts). */
+  accounts: { id: string; name: string }[] = [];
   #nextId = 1;
 
   constructor(
@@ -69,6 +73,11 @@ export class FakeCloudflare {
     const reply = (status: number, payload: unknown) => new Response(JSON.stringify(payload), { status });
     const ok = (result: unknown) => reply(200, { success: true, result });
     const fail = (status: number, message: string) => reply(status, { success: false, errors: [{ message }] });
+
+    const bearer = headers.get('authorization')?.replace(/^Bearer /, '') ?? '';
+    if (this.validTokens && !this.validTokens.has(bearer)) return fail(401, 'Invalid access token');
+    if (url.pathname === '/client/v4/user/tokens/verify') return ok({ id: 'tok-id', status: 'active' });
+    if (url.pathname === '/client/v4/accounts' && method === 'GET') return ok(this.accounts);
 
     if (this.failWith) return fail(this.failWith.status, this.failWith.message);
     if (this.failZone && call.zoneId === this.failZone.zoneId) return fail(this.failZone.status, this.failZone.message);

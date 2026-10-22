@@ -46,7 +46,8 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
   tenant.invalidate();
   const q = tenant.scope;
   const raw = await q.settings.getMany([...KEYS]);
-  tenant.setHasConnections((await q.connections.list()).some(c => c.status === 'active'));
+  // Any connection, broken ones included: using a broken one must fail with its own error, not look unconfigured.
+  tenant.setHasConnections((await q.connections.list()).length > 0);
   // An empty value means "cleared" (the wizard blanks the zone when the base domain changes).
   const stored = { get: (key: string) => raw.get(key) || undefined };
   const s: TenantSettings = {

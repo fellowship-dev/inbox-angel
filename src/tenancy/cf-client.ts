@@ -176,11 +176,13 @@ export class CfClient {
     }
     const shown = url.pathname.slice(new URL(CF_API).pathname.length) + url.search;
 
+    // Resolved first: a token that cannot be produced (broken connection) is its own error, not a network failure.
+    const bearer = await this.#bearer();
     let res: Response;
     try {
       res = await this.#fetch(url.toString(), {
         method,
-        headers: { Authorization: `Bearer ${await this.#bearer()}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       });
     } catch (e) {
