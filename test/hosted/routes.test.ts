@@ -8,6 +8,9 @@ import worker from '../../src/index';
 import { call, makeEnv } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { hostedNames } from '../../src/hosted/records';
+import { refreshHostedMtaStsMx } from '../../src/hosted/cron';
+import { runCronForAccounts } from '../../src/cron';
+import { makeTenant } from '../helpers/tenant';
 import { HOSTED_ENV, quiet } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -127,5 +130,78 @@ describe('MTA-STS policy host', () => {
     await call(t.env, 'DELETE', '/api/domains/1/hosted', { key: t.A.token });
     expect((await worker.fetch(policyReq(hostedNames(hosted.hosted_id, APEX).mtaSts), t.env, ctx)).status).toBe(404);
     expect((await worker.fetch(policyReq('mta-sts.a-corp.com'), t.env, ctx)).status).toBe(404);
+  });
+});
+
+describe('legacy MTA-STS and domain paths on a hosted domain', () => {
+  async function hostedWithMtaSts() {
+    const t = await setup();
+    const { hosted } = await (await call(t.env, 'POST', '/api/domains/1/hosted', { key: t.A.token, body: { mta_sts: true } })).json() as any;
+    const names = hostedNames(hosted.hosted_id, APEX);
+    const rec = (name: string, type?: string) => t.cf.records.get(ZONE)!.find(r => r.name === name && (!type || r.type === type));
+    // a customer-zone record that happens to share an id with a hosted one must never be touched
+    return { ...t, names, rec, hosted };
+  }
+
+  it('PATCH changes the hosted TXT through the hosted writer, nothing else', async () => {
+    const t = await hostedWithMtaSts();
+    const before = t.rec(t.names.mtaSts, 'TXT')!.content;
+    const res = await call(t.env, 'PATCH', '/api/domains/1/mta-sts', { key: t.A.token, body: { mode: 'enforce' } });
+    expect(res.status).toBe(200);
+    expect(t.rows('SELECT mode, policy_id FROM mta_sts_config')[0].mode).toBe('enforce');
+    expect(t.rec(t.names.mtaSts, 'TXT')!.content).not.toBe(before);
+    expect(t.rec(t.names.mtaSts, 'TXT')!.content).toBe(`v=STSv1; id=${t.rows('SELECT policy_id FROM mta_sts_config')[0].policy_id}`);
+    expect(t.cf.calls.filter(c => c.method === 'PATCH').every(c => c.zoneId === ZONE)).toBe(true);
+
+    t.cf.mx['a-corp.com'] = ['10 mx9.mail.example.'];
+    expect((await call(t.env, 'PATCH', '/api/domains/1/mta-sts', { key: t.A.token, body: { refresh_mx: true } })).status).toBe(200);
+    expect(t.rows('SELECT mx_hosts FROM mta_sts_config')).toEqual([{ mx_hosts: 'mx9.mail.example' }]);
+  });
+
+  it('POST is refused (409); DELETE removes the hosted MTA-STS records but keeps DMARC, SPF and TLS-RPT', async () => {
+    const t = await hostedWithMtaSts();
+    expect((await call(t.env, 'POST', '/api/domains/1/mta-sts', { key: t.A.token, body: {} })).status).toBe(409);
+    expect((await call(t.env, 'DELETE', '/api/domains/1/mta-sts', { key: t.A.token })).status).toBe(204);
+    expect(t.rec(t.names.mtaSts)).toBeUndefined();
+    for (const n of [t.names.dmarc, t.names.spf, t.names.tlsRpt]) expect(t.rec(n)).toBeDefined();
+    expect(t.rows('SELECT * FROM mta_sts_config')).toEqual([]);
+    expect(t.rows('SELECT record_count FROM hosted_zones')).toEqual([{ record_count: 3 }]);
+    expect(t.rows('SELECT mta_sts_txt_record_id FROM hosted_domains')).toEqual([{ mta_sts_txt_record_id: null }]);
+  });
+
+  it('the legacy daily MX job skips hosted domains; the hosted job refreshes them', async () => {
+    const t = await hostedWithMtaSts();
+    t.cf.mx['a-corp.com'] = ['10 mx7.mail.example.'];
+    const tenant = makeTenant({ db: t.db, accountId: t.A.acct, env: HOSTED_ENV as any, cfToken: 'customer-token', fetch: t.cf.fetch as any });
+    t.cf.calls.length = 0;
+    await runCronForAccounts({ cron: '0 8 * * *' } as ScheduledController, t.env, ctx, { accounts: [t.A.acct], load: async () => tenant });
+    expect(t.cf.calls.filter(c => c.method === 'PATCH')).toEqual([]);
+    expect(t.rows('SELECT mx_hosts FROM mta_sts_config')).toEqual([{ mx_hosts: 'mx1.mail.example' }]);
+
+    expect(await refreshHostedMtaStsMx(t.env)).toBe(1);
+    expect(t.rows('SELECT mx_hosts FROM mta_sts_config')).toEqual([{ mx_hosts: 'mx7.mail.example' }]);
+    expect(t.rec(t.names.mtaSts, 'TXT')!.content).toBe(`v=STSv1; id=${t.rows('SELECT policy_id FROM mta_sts_config')[0].policy_id}`);
+    expect(await refreshHostedMtaStsMx(t.env)).toBe(0); // unchanged
+  });
+
+  it('deleting a domain removes its hosted records and quota first', async () => {
+    const t = await hostedWithMtaSts();
+    expect((await call(t.env, 'DELETE', '/api/domains/1', { key: t.A.token })).status).toBeLessThan(300);
+    expect(t.cf.records.get(ZONE)!.filter(r => r.name.endsWith(`.${APEX}`))).toEqual([]);
+    expect(t.rows('SELECT * FROM domains WHERE id = 1')).toEqual([]);
+    expect(t.rows('SELECT record_count FROM hosted_zones')).toEqual([{ record_count: 0 }]);
+  });
+
+  it('if the DNS cleanup fails the domain is kept, with its records and rows', async () => {
+    const t = await hostedWithMtaSts();
+    const inner = t.cf.fetch;
+    vi.stubGlobal('fetch', async (input: any, init: any) => (init?.method === 'DELETE'
+      ? new Response(JSON.stringify({ success: false, errors: [{ message: 'cf down' }] }), { status: 500 })
+      : inner(input, init)));
+    const res = await call(t.env, 'DELETE', '/api/domains/1', { key: t.A.token });
+    expect(res.status).toBe(502);
+    expect(t.rows('SELECT id FROM domains WHERE id = 1')).toHaveLength(1);
+    expect(t.rows('SELECT * FROM hosted_domains')).toHaveLength(1);
+    expect(t.rows('SELECT * FROM intake_tokens WHERE domain_id = 1')).toHaveLength(1);
   });
 });

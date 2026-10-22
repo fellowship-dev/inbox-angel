@@ -147,6 +147,8 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
     for (const cfg of mtaConfigs) {
       const domain = await tenant.scope.domains.getById(cfg.domain_id);
       if (!domain) continue;
+      // Hosted MTA-STS records live in the hosted zone: src/hosted/cron.ts refreshes those.
+      if (await tenant.scope.hosted.get(cfg.domain_id)) continue;
       try {
         const liveMx = await discoverMxHosts(domain.domain);
         if (liveMx.length === 0) {

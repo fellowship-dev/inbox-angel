@@ -61,6 +61,7 @@ import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
+import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
 import type { AuthedAccount } from '../auth/resolver';
@@ -243,6 +244,16 @@ async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { i
 
   const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
+
+  // Hosted records (and their quota) go first. If the DNS cleanup fails the domain is kept, so nothing is orphaned.
+  if (hostedEnabled(tenant.env) && await tenant.scope.hosted.get(id)) {
+    try {
+      await disableHosted(tenant, domain, {}, actor, ctx);
+    } catch (e) {
+      if (e instanceof HostedError) return err(`Could not remove the hosted records, domain not deleted: ${e.message}`, e.status);
+      throw e;
+    }
+  }
 
   await tenant.scope.domains.delete(id);
 
@@ -1507,6 +1518,39 @@ async function _handleApi(
       if (isNaN(id)) return err('invalid domain id', 400);
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
+
+      // Hosted domains keep their MTA-STS records in the hosted zone: these methods go through the hosted writer.
+      const isHosted = hostedEnabled(env) && !!(await tenant.scope.hosted.get(id));
+      if (isHosted && method !== 'GET') {
+        try {
+          if (method === 'POST') return err('MTA-STS is hosted for this domain: enable it with POST /api/domains/:id/hosted { mta_sts: true }', 409);
+          if (method === 'DELETE') {
+            await removeHostedMtaSts(tenant, domain);
+            logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'mta_sts.disable', resource_type: 'domain', resource_id: String(id), resource_name: domain.domain }, ctx);
+            return new Response(null, { status: 204 });
+          }
+          if (method === 'PATCH') {
+            const config = await tenant.scope.mtaSts.get(id);
+            if (!config?.enabled) return err('MTA-STS not enabled for this domain', 404);
+            const body = await parseBody<{ mode?: string; refresh_mx?: boolean }>(request);
+            if (body.mode === 'testing' || body.mode === 'enforce') {
+              const r = await updateHostedMtaSts(tenant, domain, { mode: body.mode });
+              return json({ ok: true, mode: body.mode, policy_id: r.policy_id });
+            }
+            if (body.refresh_mx) {
+              let mxHosts: string[];
+              try { mxHosts = await discoverMxHosts(domain.domain); } catch (e) { return err(`DNS lookup failed: ${e instanceof Error ? e.message : String(e)}`, 502); }
+              if (mxHosts.length === 0) return err('No MX records found', 400);
+              const r = await updateHostedMtaSts(tenant, domain, { mxHosts });
+              return json({ ok: true, mx_hosts: mxHosts, policy_id: r.policy_id });
+            }
+            return err('nothing to update', 400);
+          }
+        } catch (e) {
+          if (e instanceof HostedError) return err(e.message, e.status);
+          throw e;
+        }
+      }
 
       if (method === 'GET') {
         const config = await tenant.scope.mtaSts.get(id);

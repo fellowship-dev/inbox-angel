@@ -279,3 +279,56 @@ export async function verifyDomainPointers(tenant: TenantContext, domain: Domain
   await tenant.scope.hosted.setPointers(domain.id, mergePointerReport(h, report), Math.floor((deps.now?.() ?? Date.now()) / 1000));
   return (await view(tenant, domain))!;
 }
+
+// ── MTA-STS on a hosted domain ──────────────────────────────
+// The records behind mta_sts_config live in the hosted zone, so the legacy MTA-STS code (which patches the
+// customer's own zone with these ids) must never touch them. These are the hosted equivalents.
+
+/** A policy id that differs from `previous`: the timestamp id has one-second resolution, and an unchanged id would tell senders nothing changed. */
+export function nextPolicyId(previous: string | null | undefined, now = new Date()): string {
+  const id = generatePolicyId(now);
+  return id === previous ? `${id}a` : id;
+}
+
+/** New policy id and/or mode and/or MX hosts for a hosted domain's MTA-STS. */
+export async function updateHostedMtaSts(
+  tenant: TenantContext,
+  domain: DomainRow,
+  change: { mode?: 'testing' | 'enforce'; mxHosts?: string[] },
+  deps: HostedDeps = {},
+): Promise<{ policy_id: string }> {
+  const { apex } = requireHosted(tenant);
+  const h = await tenant.scope.hosted.get(domain.id);
+  const cfg = await tenant.scope.mtaSts.get(domain.id);
+  if (!h?.mta_sts_txt_record_id || !cfg) throw new HostedError('MTA-STS is not enabled for this domain', 404);
+  const writer = await writerFor(tenant, h.zone_key, deps);
+  const policyId = nextPolicyId(cfg.policy_id, new Date(deps.now?.() ?? Date.now()));
+  try {
+    await writer.setContent(h.mta_sts_txt_record_id, hostedNames(h.hosted_id, apex).mtaSts, `v=STSv1; id=${policyId}`);
+  } catch (e) {
+    throw new HostedError(`Could not update the hosted MTA-STS record: ${cfErrorText(e)}`, 502);
+  }
+  if (change.mode) await tenant.scope.mtaSts.updateMode(domain.id, change.mode, policyId);
+  if (change.mxHosts) await tenant.scope.mtaSts.updateMxHosts(domain.id, change.mxHosts.join(','), policyId);
+  return { policy_id: policyId };
+}
+
+/** Remove only the hosted MTA-STS records and config; DMARC, SPF and TLS-RPT stay. */
+export async function removeHostedMtaSts(tenant: TenantContext, domain: DomainRow, deps: HostedDeps = {}): Promise<void> {
+  const { apex } = requireHosted(tenant);
+  const h = await tenant.scope.hosted.get(domain.id);
+  if (!h) throw new HostedError('Hosted records are not enabled for this domain', 404);
+  const writer = await writerFor(tenant, h.zone_key, deps);
+  const name = hostedNames(h.hosted_id, apex).mtaSts;
+  const zones = globalQueries(tenant.db).hostedZones;
+  for (const id of [h.mta_sts_txt_record_id, h.mta_sts_host_record_id]) {
+    if (!id) continue;
+    try {
+      if (await writer.remove(id, name)) await zones.addCount(h.zone_key, -1);
+    } catch (e) {
+      throw new HostedError(`Could not remove ${name}: ${cfErrorText(e)}`, 502);
+    }
+  }
+  await tenant.scope.hosted.setRecords(domain.id, { mta_sts_txt_record_id: null, mta_sts_host_record_id: null });
+  await tenant.scope.mtaSts.delete(domain.id);
+}
