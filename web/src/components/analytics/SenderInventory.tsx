@@ -21,7 +21,7 @@ function Rate({ pct, label }: { pct: number; label: string }) {
 }
 
 /** Every source that sent as this domain: who it is, how much, whether SPF and DKIM line up, and when it appeared. */
-export function SenderInventory({ senders, total, showDomains }: { senders: Sender[]; total: number; showDomains?: boolean }) {
+export function SenderInventory({ senders, showDomains }: { senders: Sender[]; showDomains?: boolean }) {
 	if (senders.length === 0) {
 		return <EmptyState title="No senders in this window" description="Senders appear once receivers report mail sent as your domain." />;
 	}
@@ -35,8 +35,7 @@ export function SenderInventory({ senders, total, showDomains }: { senders: Send
 						<TableHead scope="col" className="text-right">Volume</TableHead>
 						<TableHead scope="col">SPF aligned</TableHead>
 						<TableHead scope="col">DKIM aligned</TableHead>
-						<TableHead scope="col">First seen</TableHead>
-						<TableHead scope="col">Last seen</TableHead>
+						<TableHead scope="col">Seen</TableHead>
 					</TableRow>
 				</TableHeader>
 				<TableBody>
@@ -67,12 +66,14 @@ export function SenderInventory({ senders, total, showDomains }: { senders: Send
 							</TableCell>
 							<TableCell className="text-right tabular-nums">
 								{formatNumber(s.messages)}
-								<span className="block text-xs text-ink-2">{fmtPct(s.share_pct)} of {formatNumber(total)}</span>
+								<span className="block text-xs text-ink-2">{fmtPct(s.share_pct)} of mail</span>
 							</TableCell>
 							<TableCell><Rate pct={s.spf_aligned_pct} label="SPF" /></TableCell>
 							<TableCell><Rate pct={s.dkim_aligned_pct} label="DKIM" /></TableCell>
-							<TableCell className="whitespace-nowrap">{formatDay(isoDay(s.first_seen))}</TableCell>
-							<TableCell className="whitespace-nowrap">{formatDay(isoDay(s.last_seen))}</TableCell>
+							<TableCell className="whitespace-nowrap text-xs">
+								<span className="block">First: {formatDay(isoDay(s.first_seen))}</span>
+								<span className="block">Last: {formatDay(isoDay(s.last_seen))}</span>
+							</TableCell>
 						</TableRow>
 					))}
 				</TableBody>

@@ -78,7 +78,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 			</Section>
 
 			<Section title="Sender inventory" description="Every source that sent mail as your domain.">
-				<SenderInventory senders={data.senders} total={data.totals.messages} showDomains={account} />
+				<SenderInventory senders={data.senders} showDomains={account} />
 				{data.sender_count > data.senders.length ? <p className="text-sm text-ink-2">Showing the {data.senders.length} biggest of {formatNumber(data.sender_count)} senders.</p> : null}
 			</Section>
 		</div>

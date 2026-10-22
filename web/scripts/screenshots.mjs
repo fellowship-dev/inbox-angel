@@ -5,6 +5,7 @@
 //   E2E_BASE_URL=http://127.0.0.1:8787 E2E_OWNER_EMAIL=… E2E_OWNER_PASSWORD=… node web/scripts/screenshots.mjs [outDir]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
+import { toWebp } from './webp.mjs';
 
 const out = new URL(process.argv[2] ?? '../screenshots/', import.meta.url).pathname;
 const base = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:8787';
@@ -17,31 +18,6 @@ if (!login.ok) throw new Error(`login failed: ${login.status}`);
 const { token } = await login.json();
 const { domains } = await (await fetch(`${base}/api/domains`, { headers: { 'X-Api-Key': token } })).json();
 const demo = domains.find((d) => d.domain === 'getacme.com') ?? domains[0];
-
-// Chromium cannot write WebP screenshots: re-encode the PNG through a canvas, lowering quality until it fits.
-async function toWebp(page, png, maxBytes = 145_000) {
-	return page.evaluate(
-		async ([data, max]) => {
-			const img = new Image();
-			img.src = 'data:image/png;base64,' + data;
-			await img.decode();
-			const c = document.createElement('canvas');
-			c.width = img.width;
-			c.height = img.height;
-			c.getContext('2d').drawImage(img, 0, 0);
-			let blob;
-			for (const q of [0.82, 0.7, 0.6, 0.5, 0.4, 0.3]) {
-				blob = await new Promise((r) => c.toBlob(r, 'image/webp', q));
-				if (blob.size <= max) break;
-			}
-			const buf = new Uint8Array(await blob.arrayBuffer());
-			let bin = '';
-			for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-			return btoa(bin);
-		},
-		[png.toString('base64'), maxBytes],
-	).then((b64) => Buffer.from(b64, 'base64'));
-}
 
 const views = [
 	{ name: 'overview', route: '/' },

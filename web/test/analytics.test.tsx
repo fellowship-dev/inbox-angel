@@ -45,7 +45,8 @@ describe('lib/analytics', () => {
 	});
 	it('formats percentages', async () => {
 		expect(fmtPct(12)).toBe('12%');
-		expect(fmtPct(12.34)).toBe('12.3%');
+		expect(fmtPct(12.6)).toBe('13%');
+		expect(fmtPct(4.25)).toBe('4.3%');
 		expect(fmtPct(null)).toBe('n/a');
 	});
 	it('folds days into Monday-start weeks, keeping totals', async () => {
@@ -85,7 +86,7 @@ async function render30() {
 
 describe('SenderInventory', () => {
 	it('says new and failing in words, with the rates as text', async () => {
-		await renderReady(<SenderInventory senders={[sender({ is_new: true }), sender({ source_ip: '1.1.1.1', provider: null, reverse_dns: null, base_domain: null, org: null, spf_aligned_pct: 100, dkim_aligned_pct: 100, dmarc_pass_pct: 100, messages: 1670, share_pct: 88 })]} total={1910} />);
+		await renderReady(<SenderInventory senders={[sender({ is_new: true }), sender({ source_ip: '1.1.1.1', provider: null, reverse_dns: null, base_domain: null, org: null, spf_aligned_pct: 100, dkim_aligned_pct: 100, dmarc_pass_pct: 100, messages: 1670, share_pct: 88 })]} />);
 		const table = await screen.findByRole('table', { name: 'Sender inventory' });
 		const rows = within(table).getAllByRole('row');
 		expect(within(rows[1]!).getByText('New sender')).toBeInTheDocument();
@@ -93,10 +94,10 @@ describe('SenderInventory', () => {
 		expect(within(rows[1]!).getByText(/SPF aligned, failing/)).toBeInTheDocument();
 		expect(within(rows[2]!).getByText(/DKIM aligned, passing/)).toBeInTheDocument();
 		expect(within(rows[2]!).queryByText('Fails DMARC')).not.toBeInTheDocument();
-		expect(within(rows[1]!).getByText('12% of 1,910')).toBeInTheDocument();
+		expect(within(rows[1]!).getByText('12% of mail')).toBeInTheDocument();
 	});
 	it('has an empty state', async () => {
-		await renderReady(<SenderInventory senders={[]} total={0} />);
+		await renderReady(<SenderInventory senders={[]} />);
 		expect(screen.getByText('No senders in this window')).toBeInTheDocument();
 	});
 });
@@ -152,7 +153,7 @@ describe('analytics pages', () => {
 		expect(await screen.findByRole('heading', { name: 'What to fix next' })).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Enforcement readiness' })).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Sender inventory' })).toBeInTheDocument();
-		expect(screen.getByText('84.3%')).toBeInTheDocument();
+		expect(screen.getByText('84%')).toBeInTheDocument();
 		await userEvent.click(screen.getByRole('button', { name: 'Last 7 days' }));
 		await waitFor(() => expect(calls.some((c) => c.path === '/api/domains/1/analytics?days=7')).toBe(true));
 	});

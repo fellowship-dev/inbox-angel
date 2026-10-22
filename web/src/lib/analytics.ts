@@ -126,8 +126,8 @@ export const READINESS_LABEL: Record<ReadinessStatus, string> = {
 
 export const SEVERITY_LABEL: Record<Fix['severity'], string> = { high: 'High impact', medium: 'Medium impact', low: 'Low impact' };
 
-/** `12.3` -> "12.3%", `12` -> "12%". */
-export const fmtPct = (n: number | null): string => (n === null ? 'n/a' : `${Number.isInteger(n) ? n : n.toFixed(1)}%`);
+/** Whole percents from 10 up, one decimal below: `12.6` -> "13%", `4.25` -> "4.3%". Matches the API's own titles. */
+export const fmtPct = (n: number | null): string => (n === null ? 'n/a' : n >= 10 || Number.isInteger(n) ? `${Math.round(n)}%` : `${n.toFixed(1)}%`);
 
 /** Daily points folded into weeks (Monday start) for the 90-day view, so bars stay readable. Order is kept. */
 export function bucketTrend(days: TrendDay[], size: 'day' | 'week'): TrendDay[] {
