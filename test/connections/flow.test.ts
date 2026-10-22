@@ -765,7 +765,8 @@ describe('a restricted client cannot discover zones', () => {
     // allowed names resolve; a sub-domain of an allowed zone resolves to the zone without asking about names that were not allowed
     await expect(cf.zoneFor('A-Corp.com')).resolves.toMatchObject({ id: Z.a1 });
     await expect(cf.zoneFor('mail.a-corp.com')).resolves.toMatchObject({ id: Z.a1 });
-    expect(w.cf.calls.map(c => new URL(c.url).searchParams.get('name'))).toEqual(['a-corp.com']);
+    // (a name below an allowed zone is probed first, to notice a child zone: see "nested zones")
+    expect(w.cf.calls.map(c => new URL(c.url).searchParams.get('name'))).toEqual(['a-corp.com', 'mail.a-corp.com']); // (the parent was cached by the first call)
     void CfZoneNotFoundError;
 
     // discovery is the explicit setup path
@@ -797,5 +798,100 @@ describe('OAuth state is single use', () => {
     const results = await Promise.all([f.callback(), f.callback(), f.callback()]);
     expect(results.map(r => r.status).sort()).toEqual([302, 400, 400]);
     expect(w.rows('SELECT id FROM cloudflare_connections')).toHaveLength(1);
+  });
+});
+
+describe('nested zones: a delegated child zone shadows the parent', () => {
+  const C = 'c1'.repeat(16);
+  const addChild = (w: World) => { w.cf.zones['child.a-corp.com'] = { id: C, accountId: 'cf-1' }; };
+  const domain = (w: World, id: number, name: string) =>
+    w.db.sqlite.prepare('INSERT INTO domains (id, account_id, domain, rua_address) VALUES (?, ?, ?, ?)').run(id, w.A.acct, name, 'rua@x');
+  const clientOf = async (w: World, id: string) => {
+    const { loadTenant } = await import('../../src/tenancy/load');
+    return (await loadTenant(w.env, { accountId: w.A.acct })).connections.clientFor(id);
+  };
+
+  it('saving the list records the visible child zones that were left off, and refuses their names (deep ones too)', async () => {
+    const w = await world();
+    addChild(w);
+    const { res } = await w.connectOAuth(w.A.token);
+    const id = w.connectionId(res);
+    await w.api(w.A.token, 'PUT', `/api/cloudflare/connections/${id}/zones`, { zone_ids: [Z.a1] });
+    expect(w.rows('SELECT zone_id, zone_name FROM cloudflare_connection_blocked_zones')).toEqual([{ zone_id: C, zone_name: 'child.a-corp.com' }]);
+
+    const cf = await clientOf(w, id);
+    const { CfZoneNotAllowedError } = await import('../../src/tenancy/cf-client');
+    w.cf.calls.length = 0;
+    for (const name of ['child.a-corp.com', 'x.child.a-corp.com', 'a.b.c.child.a-corp.com', 'CHILD.a-corp.com']) {
+      const e = await cf.zoneFor(name).catch(x => x);
+      expect(e, name).toBeInstanceOf(CfZoneNotAllowedError);
+      expect(e.kind).toBe('shadow');
+      expect(e.message).toMatch(/belongs to zone child\.a-corp\.com, which isn't on this Cloudflare connection's allow-list/);
+    }
+    expect(w.cf.calls).toEqual([]); // refused without asking Cloudflare anything
+    // the parent's own names, and its other children, still route to the parent
+    await expect(cf.zoneFor('a-corp.com')).resolves.toMatchObject({ id: Z.a1 });
+    await expect(cf.zoneFor('mail.a-corp.com')).resolves.toMatchObject({ id: Z.a1 });
+  });
+
+  it('a write for a name in the non-allowed child is refused, not written to the parent', async () => {
+    const w = await world();
+    addChild(w);
+    domain(w, 4, 'child.a-corp.com');
+    const id = await oauthFor(w, [Z.a1]);
+    const link = await w.api(w.A.token, 'PUT', '/api/domains/4/connection', { connection_id: id });
+    expect(link.status).toBe(400);
+    expect(await json(link)).toMatchObject({ code: 'cf_zone_not_allowed', error: expect.stringMatching(/belongs to zone child\.a-corp\.com/) });
+
+    w.db.sqlite.prepare('UPDATE domains SET cf_connection_id = ? WHERE id = 4').run(id); // linked before the child was left off
+    w.cf.calls.length = 0;
+    const res = await w.dmarc(w.A.token, 4);
+    expect(res.status).toBe(403);
+    expect((await json(res)).error).toMatch(/belongs to zone child\.a-corp\.com/);
+    expect(w.cf.calls.filter(c => c.method !== 'GET')).toEqual([]);
+    expect(w.cf.records.get(Z.a1)).toBeUndefined();
+  });
+
+  it('a child zone created after the list was saved is noticed when the name is used', async () => {
+    const w = await world();
+    const id = await oauthFor(w, [Z.a1]);
+    expect(w.rows('SELECT zone_id FROM cloudflare_connection_blocked_zones')).toEqual([]); // nothing known yet
+    addChild(w); // delegated later
+    const cf = await clientOf(w, id);
+    const { CfZoneNotAllowedError } = await import('../../src/tenancy/cf-client');
+    w.cf.calls.length = 0;
+    const e = await cf.zoneFor('x.y.child.a-corp.com').catch(x => x);
+    expect(e).toBeInstanceOf(CfZoneNotAllowedError);
+    expect(e.message).toMatch(/belongs to zone child\.a-corp\.com/);
+    expect(w.cf.calls.every(c => c.method === 'GET')).toBe(true);
+    expect(w.cf.calls.some(c => c.method !== 'GET')).toBe(false);
+  });
+
+  it('with the child allowed too, its names route to the child and the parent\'s to the parent', async () => {
+    const w = await world();
+    addChild(w);
+    domain(w, 4, 'child.a-corp.com');
+    domain(w, 5, 'x.y.child.a-corp.com');
+    const id = await oauthFor(w, [Z.a1, C]);
+    expect(w.rows('SELECT zone_id FROM cloudflare_connection_blocked_zones')).toEqual([]);
+    for (const d of [1, 4, 5]) expect((await w.api(w.A.token, 'PUT', `/api/domains/${d}/connection`, { connection_id: id })).status, String(d)).toBe(200);
+
+    expect((await w.dmarc(w.A.token, 1)).status).toBe(200);
+    expect((await w.dmarc(w.A.token, 4)).status).toBe(200);
+    expect((await w.dmarc(w.A.token, 5)).status).toBe(200);
+    expect(w.cf.records.get(Z.a1)?.map(r => r.name)).toEqual(['_dmarc.a-corp.com']);
+    expect(w.cf.records.get(C)?.map(r => r.name).sort()).toEqual(['_dmarc.child.a-corp.com', '_dmarc.x.y.child.a-corp.com']);
+  });
+
+  it('removing the child from the list later (or re-saving) updates what is blocked', async () => {
+    const w = await world();
+    addChild(w);
+    const id = await oauthFor(w, [Z.a1, C]);
+    await w.api(w.A.token, 'PUT', `/api/cloudflare/connections/${id}/zones`, { zone_ids: [Z.a1] });
+    expect(w.rows('SELECT zone_name FROM cloudflare_connection_blocked_zones')).toEqual([{ zone_name: 'child.a-corp.com' }]);
+    await w.api(w.A.token, 'PUT', `/api/cloudflare/connections/${id}/zones`, { zone_ids: [Z.a1, C] });
+    expect(w.rows('SELECT zone_name FROM cloudflare_connection_blocked_zones')).toEqual([]);
+    await w.api(w.A.token, 'DELETE', `/api/cloudflare/connections/${id}`);
+    expect(w.rows('SELECT * FROM cloudflare_connection_blocked_zones')).toEqual([]);
   });
 });

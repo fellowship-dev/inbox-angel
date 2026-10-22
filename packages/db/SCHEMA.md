@@ -85,6 +85,7 @@ Self-hosted installs have one account, `acct_default`. `domains.domain` stays **
 | `hosted_domains` | ✔ | 0014: a domain's opaque `hosted_id`, its records in the hosted zone, and the last pointer verification |
 | `cloudflare_connections` | ✔ | 0015: a connected Cloudflare account (OAuth or pasted token); the token only as an AES-GCM envelope |
 | `cloudflare_connection_zones` | ✔ | 0015: the zones Inbox Angel may manage through a connection (owner-picked allow-list) |
+| `cloudflare_connection_blocked_zones` | ✔ | 0015: child zones of an allowed zone that are not on the list (their names are refused, not written to the parent) |
 | `hosted_zones`, `canary_tokens` | global | 0014: record counts of the operator's hosted-records zone; expiring single-use free-check addresses |
 | `api_keys` | ✔ | per-user keys, SHA-256 at rest; looked up by hash before the account is known (`queries/auth.ts`) |
 

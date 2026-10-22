@@ -149,6 +149,7 @@ export async function handleConnectionRoutes(
       try {
         await (await svc.clientFor(target)).zoneFor(domain.domain);
       } catch (e) {
+        if (e instanceof CfZoneNotAllowedError && e.kind === 'shadow') return err(e.message, 400, 'cf_zone_not_allowed');
         if (e instanceof CfZoneNotAllowedError) return err(`the zone of ${domain.domain} is not in this connection's allow-list: allow it first`, 400, 'cf_zone_not_allowed');
         if (e instanceof CfZoneNotFoundError) return err(`this Cloudflare account has no zone for ${domain.domain}`, 400, 'cf_zone_not_found');
         throw e;

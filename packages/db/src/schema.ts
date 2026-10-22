@@ -586,6 +586,26 @@ export const cloudflareConnectionZones = sqliteTable(
 );
 
 /**
+ * Zones that sit below an allowed zone but are NOT on the allow-list, as seen when the list was saved.
+ * A child zone is delegated, so a record written for a name inside it in the parent zone is shadowed and
+ * has no effect: such names are refused (with the blocking zone named) instead of written to the parent.
+ */
+export const cloudflareConnectionBlockedZones = sqliteTable(
+	'cloudflare_connection_blocked_zones',
+	{
+		connection_id: text('connection_id').notNull().references(() => cloudflareConnections.id, { onDelete: 'cascade' }),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		zone_id: text('zone_id').notNull(),
+		zone_name: text('zone_name').notNull(),
+		created_at: integer('created_at').notNull().default(now),
+	},
+	(t) => [
+		primaryKey({ columns: [t.connection_id, t.zone_id] }),
+		index('idx_cf_connection_blocked_account').on(t.account_id),
+	],
+);
+
+/**
  * Tables with no account_id, and why. `test/account-predicates.test.ts` uses
  * this list: anything else that is tenant data must be scoped.
  */
@@ -621,4 +641,5 @@ export const ACCOUNT_OWNED_TABLES = [
 	'hosted_domains',
 	'cloudflare_connections',
 	'cloudflare_connection_zones',
+	'cloudflare_connection_blocked_zones',
 ] as const;

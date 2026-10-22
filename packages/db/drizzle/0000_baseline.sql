@@ -118,6 +118,18 @@ CREATE TABLE `check_results` (
 --> statement-breakpoint
 CREATE INDEX `idx_check_results_domain` ON `check_results` (`from_domain`);--> statement-breakpoint
 CREATE INDEX `idx_check_results_token` ON `check_results` (`session_token`);--> statement-breakpoint
+CREATE TABLE `cloudflare_connection_blocked_zones` (
+	`connection_id` text NOT NULL,
+	`account_id` text NOT NULL,
+	`zone_id` text NOT NULL,
+	`zone_name` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	PRIMARY KEY(`connection_id`, `zone_id`),
+	FOREIGN KEY (`connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_cf_connection_blocked_account` ON `cloudflare_connection_blocked_zones` (`account_id`);--> statement-breakpoint
 CREATE TABLE `cloudflare_connection_zones` (
 	`connection_id` text NOT NULL,
 	`account_id` text NOT NULL,

@@ -6,7 +6,7 @@
  */
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../client';
-import { cloudflareConnectionZones, cloudflareConnections, domains, type CfAuthType, type CfConnectionStatus } from '../schema';
+import { cloudflareConnectionBlockedZones, cloudflareConnectionZones, cloudflareConnections, domains, type CfAuthType, type CfConnectionStatus } from '../schema';
 
 const publicCols = {
 	id: cloudflareConnections.id,
@@ -146,18 +146,30 @@ export function connectionQueries(db: Db, accountId: string) {
 				.all();
 		},
 
-		/** Replace the allow-list (atomic). False when the connection is not this account's. */
-		async setZones(connectionId: string, zones: CfConnectionZone[]): Promise<boolean> {
+		/** Child zones of allowed zones that are not on the list (names inside them are refused). */
+		blockedZones(connectionId: string): Promise<{ zone_id: string; zone_name: string }[]> {
+			return db
+				.select({ zone_id: cloudflareConnectionBlockedZones.zone_id, zone_name: cloudflareConnectionBlockedZones.zone_name })
+				.from(cloudflareConnectionBlockedZones)
+				.where(and(eq(cloudflareConnectionBlockedZones.account_id, accountId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId)))
+				.all();
+		},
+
+		/** Replace the allow-list and the known blocked child zones (atomic). False when the connection is not this account's. */
+		async setZones(connectionId: string, zones: CfConnectionZone[], blocked: { zone_id: string; zone_name: string }[] = []): Promise<boolean> {
 			const owned = await db.select({ id: cloudflareConnections.id }).from(cloudflareConnections).where(one(connectionId)).get();
 			if (!owned) return false;
-			const clear = db.delete(cloudflareConnectionZones).where(and(myZones, eq(cloudflareConnectionZones.connection_id, connectionId)));
-			if (zones.length === 0) await clear.run();
-			else {
-				await db.batch([
-					clear,
-					db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase(), cf_account_id: z.cf_account_id ?? null }))),
-				]);
-			}
+			const stmts = [
+				db.delete(cloudflareConnectionZones).where(and(myZones, eq(cloudflareConnectionZones.connection_id, connectionId))),
+				db.delete(cloudflareConnectionBlockedZones).where(and(eq(cloudflareConnectionBlockedZones.account_id, accountId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId))),
+				...(zones.length
+					? [db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase(), cf_account_id: z.cf_account_id ?? null })))]
+					: []),
+				...(blocked.length
+					? [db.insert(cloudflareConnectionBlockedZones).values(blocked.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() })))]
+					: []),
+			];
+			await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
 			return true;
 		},
 

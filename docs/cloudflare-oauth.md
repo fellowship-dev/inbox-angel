@@ -93,8 +93,17 @@ Migration `0015` (`npm run migrate`) adds the tables.
   dot segments, encoded separators and look-alike ids are refused before sending. A restricted client also cannot *discover*:
   `GET /zones` and name lookups of zones that were not allowed are refused (discovery happens only through the setup path,
   `GET …/zones`), and `/accounts/*` is limited to the accounts of the connection itself and of its allowed zones (none known →
-  all `/accounts/*` refused). Allow nested zones too: a more specific zone that is not on the list is never consulted, so a
-  name inside it would resolve to the parent zone.
+  all `/accounts/*` refused).
+* **Nested (delegated) zones.** A child zone (`child.example.com` as its own Cloudflare zone) shadows the parent: a record
+  written for a name inside it to the parent zone is ignored by DNS while the API reports success. So a name is never
+  written to the parent when it falls inside a child zone that is not on the allow-list; it is refused with
+  `403 cf_zone_not_allowed` ("`x.child.example.com` belongs to zone `child.example.com`, which isn't on this Cloudflare
+  connection's allow-list"), and linking such a domain fails with the same message. Two mechanisms: (1) when the list is
+  saved, the visible child zones of each allowed zone that were left off are recorded as blocked and refused without
+  calling Cloudflare; (2) for names below an allowed zone, `zoneFor` probes Cloudflare for each more specific name
+  (read-only, `GET /zones?name=`), so a child created after the list was saved is also caught. To manage names in a child
+  zone, allow the child zone too: names then route to the child, and the parent's own names to the parent. A deep name under
+  the child is refused or routed to the child, never to the parent.
 * **Reconnecting** (`oauth/start` with `connection_id`, or `PUT …/token`) must reach the same Cloudflare account: the new grant
   has to see the recorded account and the accounts of the allowed zones, else `409 cf_account_mismatch` (OAuth: redirect with
   `?cf_error=cf_account_mismatch`, and the new grant is revoked). Add a different account as a new connection.
@@ -227,7 +236,9 @@ instance  ─► Cloudflare token endpoint: code + PKCE verifier (the verifier n
   configured without it), and keep the page's wording about the destination intact.
 * **Registered hosts.** Set `CF_OAUTH_RELAY_ALLOWED_HOSTS=host1,host2` on the relay to accept only those instance hosts
   (checked at start, at the page and at the confirm). Recommended whenever the set of instances is known; unset means any
-  https host, with the confirmation page as the only protection.
+  https host, with the confirmation page as the only protection. **The hosted relay deployment (`connect.inboxangel.io`) must
+  set `CF_OAUTH_RELAY_ALLOWED_HOSTS`** (the hosted instance's host, plus any registered self-host instances) in addition to the
+  confirmation page.
 * The relay verifies its HMAC and 10-minute expiry (`400` if tampered or expired), requires `cb` to be https with no
   credentials (and optionally a fixed path), and refuses plain-http access. It never logs a URL, code or state; responses
   are `no-store` / `no-referrer`, the page is not frameable. It can neither redeem a code nor see a token. A refusal from

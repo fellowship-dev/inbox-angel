@@ -43,10 +43,16 @@ export class CfNotConfiguredError extends Error {
 }
 /** The connection's owner did not allow Inbox Angel to manage this zone (or Cloudflare account). */
 export class CfZoneNotAllowedError extends Error {
-  constructor(readonly zone: string, readonly connectionId?: string, readonly kind: 'zone' | 'account' = 'zone') {
-    super(kind === 'zone'
-      ? `Zone ${zone} is not in this Cloudflare connection's allow-list`
-      : `Cloudflare account ${zone} is not the one this connection belongs to`);
+  /**
+   * kind 'shadow': `domain` falls inside `zone`, a child zone of an allowed zone that is not on the list. Writing it
+   * to the allowed parent would be shadowed by the delegation (it would "succeed" and do nothing), so it is refused.
+   */
+  constructor(readonly zone: string, readonly connectionId?: string, readonly kind: 'zone' | 'account' | 'shadow' = 'zone', readonly domain?: string) {
+    super(kind === 'shadow'
+      ? `${domain ?? 'this name'} belongs to zone ${zone}, which isn't on this Cloudflare connection's allow-list (writing it to the parent zone would have no effect): allow ${zone} too`
+      : kind === 'zone'
+        ? `Zone ${zone} is not in this Cloudflare connection's allow-list`
+        : `Cloudflare account ${zone} is not the one this connection belongs to`);
     this.name = 'CfZoneNotAllowedError';
   }
 }
@@ -104,8 +110,10 @@ export interface CfPolicy {
   request(method: string, path: string, query?: CfRequestOptions['query']): void;
   /** May zoneFor() ask Cloudflare whether this zone name exists? (False: it is skipped, nothing is sent.) */
   lookup(zoneName: string): boolean;
-  /** Throws to refuse a zone that zoneFor() found. */
-  zone(zone: CfZone): void;
+  /** Throws to refuse a name that falls inside a known child zone that is not allowed. */
+  blocked(name: string): void;
+  /** Throws to refuse a zone that zoneFor() found for `domain`. */
+  zone(zone: CfZone, domain: string): void;
 }
 
 export interface CfClientOptions {
@@ -238,11 +246,14 @@ export class CfClient {
   async zoneFor(domain: string): Promise<CfZone> {
     let skipped = false;
     for (const name of zoneCandidates(domain)) {
-      // A restricted client never asks about zones the owner did not allow.
+      // A name inside a known, non-allowed child zone must not fall through to the parent.
+      this.#policy?.blocked(name);
+      // A restricted client asks only about allowed zones and about names below them (a child zone created
+      // since the list was saved is found here, and refused by zone() below).
       if (this.#policy && !this.#policy.lookup(name)) { skipped = true; continue; }
       const zone = await this.#lookupZone(name);
       if (zone) {
-        this.#policy?.zone(zone);
+        this.#policy?.zone(zone, domain);
         return zone;
       }
     }

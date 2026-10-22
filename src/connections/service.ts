@@ -305,7 +305,13 @@ export class ConnectionService {
     const unknown = zoneIds.filter(z => !visible.has(z));
     if (unknown.length) throw new ConnectionInputError(`not a zone this Cloudflare connection can see: ${unknown.join(', ')}`);
     const unique = [...new Set(zoneIds)];
-    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)!.name, cf_account_id: visible.get(z)!.accountId }))))) throw new CfConnectionError('missing', id);
+    // Visible zones below an allowed zone that stay off the list: remembered, so names inside them are refused.
+    const chosen = new Set(unique);
+    const parents = unique.map(z => visible.get(z)!.name);
+    const blocked = [...visible.entries()]
+      .filter(([zid, z]) => !chosen.has(zid) && parents.some(p => z.name.endsWith(`.${p}`)))
+      .map(([zid, z]) => ({ zone_id: zid, zone_name: z.name }));
+    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)!.name, cf_account_id: visible.get(z)!.accountId })), blocked))) throw new CfConnectionError('missing', id);
     this.invalidate();
     return unique.map(z => ({ id: z, name: visible.get(z)!.name }));
   }
@@ -338,7 +344,7 @@ export class ConnectionService {
     if (row.status !== 'active') throw new CfConnectionError(row.status, id, row.label);
     this.crypt; // surface a missing key now, not mid-request
 
-    const policy: CfPolicy | undefined = restricted ? policyFor(id, await q.zones(id), row.cf_account_id) : undefined;
+    const policy: CfPolicy | undefined = restricted ? policyFor(id, await q.zones(id), await q.blockedZones(id), row.cf_account_id) : undefined;
 
     const now = this.#now;
     if (!row.last_used_at || now - row.last_used_at > LAST_USED_THROTTLE_SECONDS) await q.markUsed(id, now).catch(() => {});
@@ -488,15 +494,19 @@ const ZONE_ID = /^[0-9a-f]{32}$/;
  *  - `/accounts/<id>/…` of any Cloudflare account not derived from the connection: its recorded account and the
  *    accounts of its allowed zones. When none is known, every `/accounts/*` call is refused.
  */
-function policyFor(connectionId: string, zones: CfConnectionZone[], cfAccountId: string | null): CfPolicy {
+function policyFor(connectionId: string, zones: CfConnectionZone[], blockedZones: { zone_name: string }[], cfAccountId: string | null): CfPolicy {
   const allowed = new Set(zones.map(z => z.zone_id).filter(z => ZONE_ID.test(z)));
   const names = new Set(zones.map(z => z.zone_name.toLowerCase()));
+  const blockedNames = blockedZones.map(z => z.zone_name.toLowerCase());
+  // A name may be probed (does Cloudflare have a zone of exactly this name?) when it is an allowed zone or below one: that
+  // is how a child zone created after the list was saved is noticed. Nothing outside the allowed subtrees is asked.
+  const inScope = (name: string) => names.has(name) || [...names].some(n => name.endsWith(`.${n}`));
   const accounts = new Set<string>([...(cfAccountId ? [cfAccountId] : []), ...zones.flatMap(z => (z.cf_account_id ? [z.cf_account_id] : []))]);
   return {
     request(_method, path, query) {
       if (path === '/zones') {
         const name = typeof query?.name === 'string' ? query.name.toLowerCase() : undefined;
-        if (!name || !names.has(name)) throw new CfZoneNotAllowedError(name ?? '(zone list)', connectionId);
+        if (!name || !inScope(name)) throw new CfZoneNotAllowedError(name ?? '(zone list)', connectionId);
         return;
       }
       const zone = path.match(/^\/zones\/([^/?]+)/)?.[1];
@@ -505,10 +515,16 @@ function policyFor(connectionId: string, zones: CfConnectionZone[], cfAccountId:
       if (path.startsWith('/accounts') && (account === undefined || !accounts.has(account))) throw new CfZoneNotAllowedError(account ?? '(account list)', connectionId, 'account');
     },
     lookup(name) {
-      return names.has(name.toLowerCase());
+      return inScope(name.toLowerCase());
     },
-    zone(z) {
-      if (!allowed.has(z.id)) throw new CfZoneNotAllowedError(z.name, connectionId);
+    blocked(name) {
+      const n = name.toLowerCase();
+      const hit = blockedNames.find(b => n === b || n.endsWith(`.${b}`));
+      if (hit) throw new CfZoneNotAllowedError(hit, connectionId, 'shadow', n);
+    },
+    zone(z, domain) {
+      // Only allowed names and names below them are ever looked up, so a zone that is not allowed is a child of an allowed one.
+      if (!allowed.has(z.id)) throw new CfZoneNotAllowedError(z.name, connectionId, 'shadow', domain);
     },
   };
 }
