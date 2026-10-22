@@ -18,6 +18,7 @@
     "./providers": "./src/providers.ts",
     "./org-domain": "./src/org-domain.ts",
     "./email-service-providers": "./src/email-service-providers.ts",
+    "./sender-providers": "./src/sender-providers.ts",
     "./spf-record": "./src/spf-record.ts"
   },
   "files": [

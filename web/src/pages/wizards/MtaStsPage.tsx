@@ -9,7 +9,8 @@ import { StepFooter, StepNav } from '../../components/wizard/StepNav';
 import { useRouteDomainId } from '../../components/wizard/useRouteDomainId';
 import { WizardHeader } from '../../components/wizard/WizardHeader';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
-import { api, errorMessage } from '../../lib/api';
+import { ApiError, api, errorMessage } from '../../lib/api';
+import { useHostedInfo } from '../../lib/hosted';
 import type { MtaStsStatus } from '../../lib/types';
 
 type Mode = 'testing' | 'enforce';
@@ -38,6 +39,7 @@ export function MtaStsPage() {
 	const qc = useQueryClient();
 	const path = `/api/domains/${domainId}/mta-sts`;
 	const queryKey = ['mta-sts', domainId] as const;
+	const hosted = useHostedInfo(domainId);
 	const q = useQuery({ queryKey, queryFn: () => api<MtaStsStatus>(path), staleTime: 0, refetchOnMount: 'always' });
 
 	const [step, setStep] = useState(0);
@@ -78,6 +80,8 @@ export function MtaStsPage() {
 		const hosts = mxHosts ?? splitHosts(status.config?.mx_hosts);
 		const partial = provisioned && enforce.isError;
 		const busy = enable.isPending || enforce.isPending;
+		// The domain's MTA-STS is run by hosted records: the server answers 409 to the legacy enable.
+		const hostedMta = !active && (!!hosted || (enable.error instanceof ApiError && enable.error.status === 409));
 
 		body = (
 			<>
@@ -153,6 +157,13 @@ export function MtaStsPage() {
 									</Button>
 								</div>
 							</Alert>
+						) : hostedMta ? (
+							<Alert variant="info" title="This domain's MTA-STS is hosted by Inbox Angel">
+								<p>
+									Hosted records manage MTA-STS for this domain, so it cannot be enabled here. To turn it on, enable hosted records with MTA-STS in{' '}
+									<Link to={back}>Hosted records on the domain page</Link>.
+								</p>
+							</Alert>
 						) : enable.isError ? (
 							<Alert variant="danger" title="Could not enable MTA-STS">
 								{errorMessage(enable.error)}
@@ -173,7 +184,7 @@ export function MtaStsPage() {
 							end={
 								active ? (
 									<Button onClick={() => setStep(3)}>Continue</Button>
-								) : provisioned ? null : (
+								) : provisioned || hostedMta ? null : (
 									<WriteButton loading={busy} disabled={!status.available} onClick={() => enable.mutate()}>
 										{busy ? 'Provisioning…' : 'Enable MTA-STS'}
 									</WriteButton>

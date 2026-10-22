@@ -387,20 +387,22 @@ Library: `jspdf`, client-side only, A4 mm, filename `email-auth-report.pdf` (`do
 - [x] Domain overview as Level cards (Delivering → Authenticated → Protected) with findings (`web/src/lib/levels.ts`).
 - [x] Domain detail DNS records as RecordBlocks with copy, "Lookup failed" vs "Not found" per record, role-gated apply buttons and the RFC 9989 rollout step and note.
 
-## Follow-ups from #111 (hosted intake and records): not built here
+## Follow-ups from #111 (hosted intake and records)
 
-The dashboard does not yet surface these hosted routes (`docs/hosted.md`, API section):
+Built. The hosted UI only appears when `GET /api/hosted/config` says `enabled` (`useHostedConfig` in `web/src/lib/hosted.ts`); a disabled or failed config shows nothing and makes no other hosted request (`docs/hosted.md`, API section).
 
-- [ ] Enable hosted records on a domain: `POST /api/domains/:id/hosted` (`spf_record?`, `mta_sts?`); show the intake addresses (`rua`, `tls_rpt`) once, with copy, and the pointer records to publish (`pointers[]` as RecordBlocks).
-- [ ] Hosted status on domain detail: `GET /api/domains/:id/hosted` (`pointer_status`: ok / missing / wrong / error per purpose, `checked_at`); `error` must read as "Lookup failed", never as missing.
-- [ ] Verify pointers now: `POST …/hosted/verify`.
-- [ ] Rotate token (addresses shown once; previous token valid 72 h): `POST …/hosted/rotate-token`.
-- [ ] Disable hosted records: `DELETE …/hosted`.
-- [ ] Level cards for hosted domains should read `level_inputs` (`dmarc_published`, `spf_published`, `mta_sts_published`) from the hosted status instead of the stored summary.
-- [ ] MTA-STS wizard on a hosted domain: `POST /api/domains/:id/mta-sts` answers `409` (use `mta_sts: true` on enable); the wizard currently shows that as a generic error.
-- [ ] Domain delete may answer `502` when hosted DNS cleanup fails (the domain is kept): show that message and a retry.
-- [ ] Email check in `saas`: `POST /api/check-sessions` now returns `expires_at` (1 hour, one email); the page works with `email`/`token` but does not show the expiry.
-- [ ] Hosted writes need owner/admin like the rest; reuse `WriteButton`.
+- [x] Enable hosted records on a domain: dialog with optional `spf_record` and `mta_sts`; the intake addresses (`rua`, `tls_rpt`) are shown once with copy, held in component state only; pointers as RecordBlocks. → `web/src/components/hosted/HostedPanel.tsx`, `EnableDialog.tsx`, `AddressesAlert.tsx`, `PointerList.tsx`
+- [x] Hosted status on domain detail: per-pointer ok / missing / wrong / error as a Badge with icon and words, `checked_at` relative; `error` reads "Lookup failed", never missing. → `web/src/components/hosted/PointerList.tsx`, `web/src/lib/hosted.ts`
+- [x] Verify pointers now: `POST …/hosted/verify`. → `web/src/components/hosted/HostedPanel.tsx`
+- [x] Rotate token (confirm dialog, addresses shown once, previous token valid 72 h). → `web/src/components/hosted/HostedPanel.tsx`
+- [x] Disable hosted records (confirm dialog; reminds the customer to remove the pointers). → `web/src/components/hosted/HostedPanel.tsx`
+- [x] Level cards for hosted domains read `level_inputs`, and a record whose pointer is not `ok` does not count as published (finding "pointer not verified yet"). → `web/src/lib/levels.ts` (`applyHostedInputs`, `assessHostedDomain`), `web/src/components/domain/DomainLevelCard.tsx`
+- [x] MTA-STS wizard on a hosted domain: the `409` shows "This domain's MTA-STS is hosted by Inbox Angel" and the enable button is hidden. → `web/src/pages/wizards/MtaStsPage.tsx`
+- [x] Domain delete `502` (hosted DNS cleanup failed): shows the server message, says the domain was NOT deleted, offers Retry. → `web/src/pages/domains/DomainSettingsPage.tsx`
+- [x] Hosted writes need owner/admin like the rest (`WriteButton`); members see the status read-only. → `web/src/components/hosted/HostedPanel.tsx`
+- [x] Email check in `saas`: `POST /api/check-sessions` now returns `expires_at` (1 hour, one email); the page shows the expiry when present. → `web/src/pages/check/EmailCheckPage.tsx`
+
+Error handling (`hostedError`): `409` refetches and shows the status, `422` keeps the form open with the server message, `502` offers Retry, `507` shows the message with no retry.
 
 ## Gaps
 

@@ -7,7 +7,7 @@ import { useDomainId } from '../../app';
 import { ConfirmDialog } from '../../components/domain/ConfirmDialog';
 import { CopyField } from '../../components/domain/CopyField';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section, WriteButton } from '../../components/states';
-import { api, errorMessage } from '../../lib/api';
+import { ApiError, api, errorMessage } from '../../lib/api';
 import { domainKeys, invalidateDomain, useMonitorSubs, type MonitorSub } from '../../lib/domain-queries';
 import { downloadFile } from '../../lib/download';
 import { formatDate } from '../../lib/format';
@@ -182,6 +182,8 @@ function DangerZone({ domain }: { domain: Domain }) {
 			navigate('/');
 		},
 	});
+	// 502: hosted DNS cleanup failed and the server kept the domain. Say so, and let the user try again.
+	const cleanupFailed = remove.error instanceof ApiError && remove.error.status === 502;
 	return (
 		<Section title="Danger zone">
 			<div className="space-y-3 rounded-lg border border-danger/40 p-4">
@@ -198,11 +200,11 @@ function DangerZone({ domain }: { domain: Domain }) {
 				}}
 				title={`Remove ${domain.domain}?`}
 				description="All reports and statistics for this domain are deleted. DNS records you added stay where they are. This cannot be undone."
-				confirmLabel="Yes, remove"
+				confirmLabel={cleanupFailed ? 'Retry' : 'Yes, remove'}
 				busyLabel="Removing…"
 				variant="danger"
 				busy={remove.isPending}
-				error={remove.isError ? errorMessage(remove.error) : null}
+				error={remove.isError ? (cleanupFailed ? `${errorMessage(remove.error)} ${domain.domain} was NOT deleted. Nothing was removed, so you can retry.` : errorMessage(remove.error)) : null}
 				onConfirm={() => remove.mutate()}
 			/>
 		</Section>

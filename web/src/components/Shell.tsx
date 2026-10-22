@@ -11,7 +11,7 @@ import {
 	LogoMark,
 	type RenderNavLink,
 } from '@inbox-angel/ui';
-import { Globe, History, KeyRound, LogOut, Mail, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
+import { BarChart3, Globe, History, KeyRound, LogOut, Mail, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { Link, Outlet, useLocation } from 'react-router';
 import { useTheme } from '../lib/theme';
 import { useSession } from '../lib/session';
@@ -30,6 +30,7 @@ export function Shell() {
 	const { theme, toggle } = useTheme();
 	const items = [
 		{ label: 'Domains', href: '/', icon: <Globe /> },
+		{ label: 'Analytics', href: '/analytics', icon: <BarChart3 /> },
 		{ label: 'Email check', href: '/check', icon: <Mail /> },
 		{ label: 'Team', href: '/team', icon: <Users /> },
 		{ label: 'API keys', href: '/keys', icon: <KeyRound /> },

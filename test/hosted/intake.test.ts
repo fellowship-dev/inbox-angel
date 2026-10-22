@@ -19,6 +19,9 @@ const RUA = 'rua.inboxangel.io';
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+/** Building, gzipping and inflating ~26 MiB took ~6 s under load against the 5 s default. The assertions stay as they are. */
+const BIG_REPORT_TIMEOUT = 30_000;
+
 describe('tokens', () => {
   it('are at least 128 bits, random, lowercase base32 and survive a + sub-address', () => {
     const t = generateToken();
@@ -123,7 +126,7 @@ describe('DMARC aggregate reports', () => {
     await handleHostedEmail(m2, w.env);
     expect(m2.setReject).toHaveBeenCalledWith('Report is larger than 25 MiB');
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
-  });
+  }, BIG_REPORT_TIMEOUT);
 
   it('accepts a report just under the cap', async () => {
     const w = await twoAccounts();
@@ -132,7 +135,7 @@ describe('DMARC aggregate reports', () => {
     await handleHostedEmail(m, w.env);
     expect(m.setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'big' }]);
-  });
+  }, BIG_REPORT_TIMEOUT);
 });
 
 describe('what a token may file', () => {
@@ -217,7 +220,7 @@ describe('TLS-RPT reports', () => {
     const m = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(huge, true));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).toHaveBeenCalledWith('TLS-RPT report is too large');
-  });
+  }, BIG_REPORT_TIMEOUT);
 });
 
 describe('saas has no default account', () => {

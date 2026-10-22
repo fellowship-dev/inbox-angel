@@ -20,6 +20,7 @@ import type { AccountResolver } from '../../src/tenancy/resolver';
 import { buildDnsAlertHtml } from '../../src/email/html-templates';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { makeTenant, seedSettings } from '../helpers/tenant';
+import { lastDays, seedDomainReports } from '../analytics/world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -135,5 +136,60 @@ describe('two concurrent requests for different accounts in one isolate', () => 
     expect(zb.id).toBe('zone-shared-b');
     expect(cfA.calls[0].auth).toBe('Bearer tok-a');
     expect(cfB.calls[0].auth).toBe('Bearer tok-b');
+  });
+});
+
+// The read-only analytics endpoints (src/analytics/routes.ts): each account's sender inventory, trend, fixes and
+// readiness come only from its own domains, whichever domain id or window the caller asks for.
+describe('analytics endpoints under concurrent tenants', () => {
+  const OWN: Record<string, { ip: string; domain: string; id: number }> = {
+    acct_a: { ip: '198.51.100.10', domain: 'a-corp.com', id: 1 },
+    acct_b: { ip: '203.0.113.20', domain: 'b-corp.org', id: 2 },
+  };
+
+  async function seeded() {
+    const { db, env } = twoAccountEnv();
+    for (const [acct, o] of Object.entries(OWN)) {
+      await seedDomainReports(db, acct, o.id, o.domain, lastDays(10), [
+        { ip: o.ip, count: 50, pass: false, spf: ['pass', 'mcsv.net'], dkim: ['pass', 'mcsv.net'], reverse_dns: 'mail1.mcsv.net', base_domain: 'mcsv.net' },
+        { ip: '192.0.2.1', count: 50, pass: true },
+      ]);
+    }
+    return { db, env };
+  }
+
+  it('account-wide and per-domain answers never include another account', async () => {
+    const { env } = await seeded();
+    vi.stubGlobal('fetch', async () => { await sleep(Math.random() * 10); return new Response(JSON.stringify({ Status: 3 })); });
+    const ask = async (acct: string, path: string) => (await handleApi(request('GET', path), env, ctx, as(acct))).json() as Promise<any>;
+
+    for (let i = 0; i < 4; i++) {
+      const [wa, wb, da, db_] = await Promise.all([
+        ask('acct_a', '/api/analytics?days=30'), ask('acct_b', '/api/analytics?days=30'),
+        ask('acct_a', '/api/domains/1/analytics'), ask('acct_b', '/api/domains/2/analytics'),
+      ]);
+      for (const [acct, wide, one] of [['acct_a', wa, da], ['acct_b', wb, db_]] as const) {
+        const mine = OWN[acct]!;
+        const other = OWN[acct === 'acct_a' ? 'acct_b' : 'acct_a']!;
+        for (const body of [wide, one]) {
+          const text = JSON.stringify(body);
+          expect(text).toContain(mine.ip);
+          expect(text).not.toContain(other.ip);
+          expect(text).not.toContain(other.domain);
+        }
+        expect(wide.domains.map((d: any) => d.domain)).toEqual([mine.domain]);
+        expect(wide.totals.messages).toBe(10 * 100);
+        expect(one.totals.messages).toBe(10 * 100);
+        expect(wide.fixes.every((f: any) => f.domain === mine.domain)).toBe(true);
+      }
+    }
+  });
+
+  it('a domain id from another account is a 404, in both directions', async () => {
+    const { env } = await seeded();
+    const status = async (acct: string, path: string) => (await handleApi(request('GET', path), env, ctx, as(acct))).status;
+    expect(await status('acct_a', '/api/domains/2/analytics')).toBe(404);
+    expect(await status('acct_b', '/api/domains/1/analytics')).toBe(404);
+    expect(await status('acct_a', '/api/domains/1/analytics')).toBe(200);
   });
 });
