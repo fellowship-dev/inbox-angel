@@ -9,12 +9,23 @@
 // The CNAME mta-sts.domain.com → WORKER_HOST is also provisioned so the Worker
 // can serve the policy file on the correct hostname over CF's Universal SSL.
 
+// The pure parts (DoH lookups, policy parsing/building, policy ids) live in
+// packages/dns-checks; this module adds the Cloudflare zone API provisioning on top.
+
 import { MtaStsMode } from '../db/types';
 import { getZoneId, reportsDomain } from '../env-utils';
 import { logAudit } from '../audit/log';
+import {
+  buildPolicyFile,
+  createResolver,
+  detectExistingMtaStsMode as detectExistingMtaStsModePure,
+  generatePolicyId,
+  lookupMx,
+} from '../../packages/dns-checks/src';
+
+export { buildPolicyFile, generatePolicyId };
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
-const DOH_URL = 'https://cloudflare-dns.com/dns-query';
 
 /** Optional audit context for self-logging DNS mutations. */
 export interface MtaStsAuditOpts {
@@ -46,78 +57,23 @@ export interface MtaStsDeprovisionEnv {
 
 // ── DNS helpers ───────────────────────────────────────────────
 
-async function queryMx(domain: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${DOH_URL}?name=${encodeURIComponent(domain)}&type=MX`, {
-      headers: { Accept: 'application/dns-json' },
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { Answer?: { type: number; data: string }[] };
-    return (data.Answer ?? [])
-      .filter(r => r.type === 15) // MX = 15
-      .map(r => {
-        // data format: "10 mail.example.com." — extract just the hostname
-        const parts = r.data.trim().split(/\s+/);
-        return (parts[1] ?? parts[0]).replace(/\.$/, '').toLowerCase();
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-async function queryTxt(domain: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${DOH_URL}?name=${encodeURIComponent(domain)}&type=TXT`, {
-      headers: { Accept: 'application/dns-json' },
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { Answer?: { type: number; data: string }[] };
-    return (data.Answer ?? [])
-      .filter(r => r.type === 16)
-      .map(r => r.data.replace(/^"|"$/g, '').replace(/"\s*"/g, ''));
-  } catch {
-    return [];
-  }
-}
-
-// ── Policy helpers ────────────────────────────────────────────
-
-export function generatePolicyId(): string {
-  return new Date().toISOString().replace(/\D/g, '').slice(0, 14); // YYYYMMDDHHMMSS
-}
-
-export function buildPolicyFile(mode: MtaStsMode, mxHosts: string[], maxAge: number): string {
-  const lines = [
-    'version: STSv1',
-    `mode: ${mode}`,
-    ...mxHosts.map(mx => `mx: ${mx}`),
-    `max_age: ${maxAge}`,
-  ];
-  return lines.join('\n') + '\n';
-}
-
-// Read existing MTA-STS mode from live DNS (for "preserve existing" on first enable)
+/**
+ * Mode of an already-published policy (to "preserve existing" on first enable), or null if none.
+ * Throws on DNS/network failure: a transient error must not look like "no policy" and reset
+ * an enforce policy to testing.
+ */
 export async function detectExistingMtaStsMode(domain: string): Promise<MtaStsMode | null> {
-  const records = await queryTxt(`_mta-sts.${domain}`);
-  const sts = records.find(r => r.startsWith('v=STSv1'));
-  if (!sts) return null;
-
-  // Fetch the policy file to read mode
-  try {
-    const res = await fetch(`https://mta-sts.${domain}/.well-known/mta-sts.txt`);
-    if (!res.ok) return null;
-    const text = await res.text();
-    const match = text.match(/^mode:\s*(testing|enforce)/m);
-    return (match?.[1] as MtaStsMode) ?? null;
-  } catch {
-    return null;
-  }
+  return detectExistingMtaStsModePure(createResolver(), domain);
 }
 
+/**
+ * Current MX hostnames for `domain` ([] when the domain has no MX / a null MX).
+ * Throws on DNS failure so callers never treat an outage as "MX records removed".
+ */
 export async function discoverMxHosts(domain: string): Promise<string[]> {
-  const hosts = await queryMx(domain);
-  return hosts.length > 0 ? hosts : [];
+  const mx = await lookupMx(createResolver(), domain);
+  if (mx.status === 'error') throw new Error(`MX lookup for ${domain} failed: ${mx.error}`);
+  return mx.hosts.map(h => h.host);
 }
 
 // ── Cloudflare DNS API ────────────────────────────────────────

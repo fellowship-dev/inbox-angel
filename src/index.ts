@@ -166,8 +166,16 @@ export default {
         if (!domain) continue;
         try {
           const liveMx = await discoverMxHosts(domain.domain);
+          if (liveMx.length === 0) {
+            // No MX answer: never publish an MTA-STS policy that lists no mx hosts.
+            console.warn(`[mta-sts] ${domain.domain}: no MX records found, leaving policy unchanged`);
+            continue;
+          }
           const storedMx = cfg.mx_hosts ? cfg.mx_hosts.split(',').filter(Boolean) : [];
-          const changed = liveMx.length !== storedMx.length || liveMx.some((h, i) => h !== storedMx[i]);
+          // Compare as sets: DNS answer order is not stable
+          const sortedLive = [...liveMx].sort();
+          const sortedStored = [...storedMx].sort();
+          const changed = sortedLive.length !== sortedStored.length || sortedLive.some((h, i) => h !== sortedStored[i]);
           if (changed && cfg.mta_sts_record_id) {
             const newPolicyId = generatePolicyId();
             await updateMtaStsTxtRecord(cfg.mta_sts_record_id, newPolicyId, patchEnv);
@@ -195,7 +203,10 @@ export default {
 
     for (const sub of subscriptions) {
       try {
-        const { changes, newBaseline } = await checkSubscription(sub);
+        const { changes, newBaseline, errors } = await checkSubscription(sub);
+        if (errors.spf || errors.dmarc) {
+          console.warn(`[monitor] ${sub.domain}: DNS lookup failed, baseline kept (${[errors.spf, errors.dmarc].filter(Boolean).join('; ')})`);
+        }
         await updateSubscriptionBaseline(env.DB, sub.id, newBaseline);
 
         if (changes.length > 0) {
