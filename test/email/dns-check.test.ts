@@ -7,6 +7,8 @@ import {
   lookupDkim,
   lookupDmarc,
   checkDomain,
+  DnsLookupError,
+  countSpfLookupsFromRecord,
 } from '../../src/email/dns-check';
 
 // ── Pure parsing tests (no network) ──────────────────────────
@@ -131,14 +133,19 @@ function makeDohResponse(txtRecords: string[]) {
     ok: true,
     json: () =>
       Promise.resolve({
+        Status: 0,
         Answer: txtRecords.map(data => ({ type: 16, data: `"${data}"` })),
       }),
   } as unknown as Response;
 }
 
+function dohStatus(Status: number) {
+  return { ok: true, status: 200, json: () => Promise.resolve({ Status }) } as unknown as Response;
+}
+
 const emptyDohResponse = {
   ok: true,
-  json: () => Promise.resolve({ Answer: [] }),
+  json: () => Promise.resolve({ Status: 0 }),
 } as unknown as Response;
 
 describe('lookupSpf', () => {
@@ -148,9 +155,8 @@ describe('lookupSpf', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('returns parsed SPF record when TXT includes v=spf1', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeDohResponse(['v=spf1 include:sendgrid.net -all'])
-    );
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      url.toString().includes('name=sendgrid.net') ? makeDohResponse(['v=spf1 ip4:1.2.3.4 -all']) : makeDohResponse(['v=spf1 include:sendgrid.net -all']));
     const r = await lookupSpf('example.com');
     expect(r).not.toBeNull();
     expect(r!.verdict).toBe('strict');
@@ -164,10 +170,51 @@ describe('lookupSpf', () => {
     expect(r).toBeNull();
   });
 
-  it('returns null on fetch failure', async () => {
+  it('THROWS (never returns null) on fetch failure', async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('network error'));
+    await expect(lookupSpf('example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
+  it('returns null for NXDOMAIN', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(3));
+    expect(await lookupSpf('example.com')).toBeNull();
+  });
+
+  it.each([2, 5])('throws on RCODE %i', async rcode => {
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(rcode));
+    await expect(lookupSpf('example.com')).rejects.toThrow(/SPF lookup/);
+  });
+
+  it('throws on a DoH HTTP error', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 503, json: () => Promise.resolve({}) } as unknown as Response);
+    await expect(lookupSpf('example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
+  it('throws on a malformed answer', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ Status: 0, Answer: 'x' }) } as unknown as Response);
+    await expect(lookupSpf('example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
+  it('throws when the SPF record includes a domain whose lookup fails', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      url.toString().includes('name=example.com') ? makeDohResponse(['v=spf1 include:broken.test -all']) : dohStatus(2));
+    await expect(lookupSpf('example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
+  it('reports the RFC lookup count on the record', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const u = url.toString();
+      if (u.includes('name=example.com')) return makeDohResponse(['v=spf1 include:a.test ip4:1.2.3.4 mx -all']);
+      if (u.includes('name=a.test')) return makeDohResponse(['v=spf1 ip4:5.6.7.8 -all']);
+      return makeDohResponse(['10 mx.example.com.']);
+    });
     const r = await lookupSpf('example.com');
-    expect(r).toBeNull();
+    expect(r!.lookup_count).toBe(2); // include + mx (ip4/all free)
+  });
+
+  it('flags multiple SPF records as an error rather than picking one', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['v=spf1 -all', 'v=spf1 +all']));
+    await expect(lookupSpf('example.com')).rejects.toThrow(/SPF lookup/);
   });
 
   it('strips quotes from DoH response', async () => {
@@ -205,6 +252,28 @@ describe('lookupDkim', () => {
   });
 });
 
+describe('lookupDkim errors', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+  it('throws on SERVFAIL, null on NXDOMAIN', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(2));
+    await expect(lookupDkim('example.com', 's')).rejects.toBeInstanceOf(DnsLookupError);
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(3));
+    expect(await lookupDkim('example.com', 's')).toBeNull();
+  });
+});
+
+describe('countSpfLookupsFromRecord', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+  it('counts per RFC 7208 and throws on DNS failure', async () => {
+    vi.mocked(fetch).mockResolvedValue(makeDohResponse(['v=spf1 ip4:1.1.1.1 -all']));
+    expect(await countSpfLookupsFromRecord('v=spf1 include:a.test ip4:1.2.3.4 ptr -all')).toBe(2);
+    vi.mocked(fetch).mockResolvedValue(dohStatus(2));
+    await expect(countSpfLookupsFromRecord('v=spf1 include:a.test -all')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+});
+
 describe('lookupDmarc', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
@@ -229,6 +298,29 @@ describe('lookupDmarc', () => {
     expect(r!.policy).toBe('reject');
   });
 
+  it('uses the Public Suffix List for the org-domain fallback (never co.uk)', async () => {
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockImplementation(async (url) =>
+      url.toString().includes('name=_dmarc.example.co.uk')
+        ? makeDohResponse(['v=DMARC1; p=reject'])
+        : url.toString().includes('name=_dmarc.co.uk')
+          ? makeDohResponse(['v=DMARC1; p=none'])
+          : dohStatus(3));
+    const r = await lookupDmarc('mail.example.co.uk');
+    expect(r!.policy).toBe('reject');
+    expect(mockFetch.mock.calls.map(c => c[0] as string).some(u => u.includes('name=_dmarc.co.uk'))).toBe(false);
+  });
+
+  it('throws on a DNS error instead of returning null', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(2));
+    await expect(lookupDmarc('example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
+  it('throws on a DNS error during the org-domain fallback', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(dohStatus(3)).mockResolvedValueOnce(dohStatus(2));
+    await expect(lookupDmarc('mail.example.com')).rejects.toBeInstanceOf(DnsLookupError);
+  });
+
   it('returns null when no DMARC record anywhere', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(emptyDohResponse)
@@ -242,42 +334,51 @@ describe('checkDomain', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
 
-  it('runs all three lookups in parallel and returns combined result', async () => {
-    const mockFetch = vi.mocked(fetch);
-    // SPF, DMARC, DKIM — three DoH calls
-    mockFetch
-      .mockResolvedValueOnce(makeDohResponse(['v=spf1 -all']))         // SPF
-      .mockResolvedValueOnce(makeDohResponse(['v=DMARC1; p=reject']))  // DMARC
-      .mockResolvedValueOnce(makeDohResponse(['v=DKIM1; k=rsa; p=X'])); // DKIM
+  function mockByName(map: Record<string, Response>) {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const name = new URL(url.toString()).searchParams.get('name')!;
+      return map[name] ?? dohStatus(3);
+    });
+  }
 
+  it('runs all three lookups and returns the combined result', async () => {
+    mockByName({
+      'example.com': makeDohResponse(['v=spf1 -all']),
+      '_dmarc.example.com': makeDohResponse(['v=DMARC1; p=reject']),
+      'sel._domainkey.example.com': makeDohResponse(['v=DKIM1; k=rsa; p=X']),
+    });
     const result = await checkDomain('example.com', 'sel');
     expect(result.domain).toBe('example.com');
     expect(result.spf!.verdict).toBe('strict');
     expect(result.dmarc!.policy).toBe('reject');
     expect(result.dkim!.present).toBe(true);
+    expect(result.errors).toBeUndefined();
   });
 
   it('skips DKIM lookup when no selector provided', async () => {
-    const mockFetch = vi.mocked(fetch);
-    mockFetch
-      .mockResolvedValueOnce(makeDohResponse(['v=spf1 ~all']))  // SPF TXT lookup
-      .mockResolvedValueOnce(emptyDohResponse)                  // DMARC lookup
-      .mockResolvedValue(emptyDohResponse);                     // walkSpfLookups (may do extra lookups)
-
+    mockByName({ 'example.com': makeDohResponse(['v=spf1 ~all']) });
     const result = await checkDomain('example.com');
     expect(result.dkim).toBeNull();
-    // SPF + DMARC + walkSpfLookups — no longer exactly 2 calls
-    expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const urls = vi.mocked(fetch).mock.calls.map(c => c[0] as string);
+    expect(urls.some(u => u.includes('_domainkey'))).toBe(false);
   });
 
-  it('tolerates partial DNS failures', async () => {
-    const mockFetch = vi.mocked(fetch);
-    mockFetch
-      .mockRejectedValueOnce(new Error('timeout'))    // SPF fails
-      .mockResolvedValueOnce(emptyDohResponse);       // DMARC empty
-
+  it('records which lookups FAILED instead of reporting them as missing', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const name = new URL(url.toString()).searchParams.get('name')!;
+      if (name === 'example.com') throw new Error('timeout');
+      return dohStatus(3);
+    });
     const result = await checkDomain('example.com');
     expect(result.spf).toBeNull();
+    expect(result.errors?.spf).toMatch(/timeout/);
     expect(result.dmarc).toBeNull();
+    expect(result.errors?.dmarc).toBeUndefined(); // genuinely absent: NXDOMAIN
+  });
+
+  it('a DMARC SERVFAIL is an error, not "no DMARC"', async () => {
+    mockByName({ 'example.com': makeDohResponse(['v=spf1 -all']), '_dmarc.example.com': dohStatus(2) });
+    const result = await checkDomain('example.com');
+    expect(result.errors?.dmarc).toMatch(/SERVFAIL/);
   });
 });
