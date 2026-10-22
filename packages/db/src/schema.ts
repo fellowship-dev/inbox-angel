@@ -448,6 +448,82 @@ export const apiKeys = sqliteTable(
 	(t) => [index('idx_api_keys_account').on(t.account_id), index('idx_api_keys_user').on(t.user_id)],
 );
 
+// ── Hosted (SaaS) intake ────────────────────────────────────
+
+/**
+ * Per-domain intake token for the central report address (`rua+<token>@rua.<intake domain>`).
+ * Only the SHA-256 of the token is stored. Rotation keeps the previous hash valid until
+ * `prev_expires_at` so reports already in flight (receivers cache the rua address) still arrive.
+ * Looked up by hash before the account is known (queries/intake.ts).
+ */
+export const intakeTokens = sqliteTable(
+	'intake_tokens',
+	{
+		domain_id: integer('domain_id').primaryKey().references(() => domains.id, { onDelete: 'cascade' }),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		token_hash: text('token_hash').notNull().unique(),
+		prev_token_hash: text('prev_token_hash'),
+		prev_expires_at: integer('prev_expires_at'),
+		created_at: integer('created_at').notNull().default(now),
+		rotated_at: integer('rotated_at'),
+	},
+	(t) => [index('idx_intake_tokens_account').on(t.account_id), index('idx_intake_tokens_prev').on(t.prev_token_hash)],
+);
+
+/**
+ * A domain's records in the operator's hosted-records zone (`<hosted_id>._dmarc.h.<zone>`, …).
+ * `hosted_id` is opaque and never derived from the customer domain. The `*_pointer` columns hold the
+ * last verification of the records the customer adds in their own DNS.
+ */
+export const hostedDomains = sqliteTable(
+	'hosted_domains',
+	{
+		domain_id: integer('domain_id').primaryKey().references(() => domains.id, { onDelete: 'cascade' }),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		hosted_id: text('hosted_id').notNull().unique(),
+		/** Which hosted zone holds the records (the shard seam; see src/hosted/zones.ts). */
+		zone_key: text('zone_key').notNull(),
+		dmarc_record_id: text('dmarc_record_id'),
+		spf_record_id: text('spf_record_id'),
+		mta_sts_txt_record_id: text('mta_sts_txt_record_id'),
+		mta_sts_host_record_id: text('mta_sts_host_record_id'),
+		tls_rpt_record_id: text('tls_rpt_record_id'),
+		/** The customer's own SPF record at enable time: what the hosted (flattened) record is built from. */
+		spf_source: text('spf_source'),
+		dmarc_pointer: text('dmarc_pointer'),
+		spf_pointer: text('spf_pointer'),
+		mta_sts_pointer: text('mta_sts_pointer'),
+		tls_rpt_pointer: text('tls_rpt_pointer'),
+		pointers_checked_at: integer('pointers_checked_at'),
+		created_at: integer('created_at').notNull().default(now),
+	},
+	(t) => [index('idx_hosted_domains_account').on(t.account_id)],
+);
+
+/** Record counts of the operator's hosted-records zone(s): quota tracking and the daily diff. */
+export const hostedZones = sqliteTable('hosted_zones', {
+	zone_key: text('zone_key').primaryKey(),
+	zone_id: text('zone_id').notNull(),
+	zone_name: text('zone_name').notNull(),
+	/** Every record in the zone, ours or not: the plan limit counts them all. */
+	record_count: integer('record_count').notNull().default(0),
+	/** Digest of the records outside the hosted label, to notice changes we did not make. */
+	rest_digest: text('rest_digest'),
+	checked_at: integer('checked_at'),
+});
+
+/** Addresses handed out for the anonymous free check. Only the hash is kept; single use. */
+export const canaryTokens = sqliteTable(
+	'canary_tokens',
+	{
+		token_hash: text('token_hash').primaryKey(),
+		created_at: integer('created_at').notNull().default(now),
+		expires_at: integer('expires_at').notNull(),
+		used_at: integer('used_at'),
+	},
+	(t) => [index('idx_canary_tokens_expires').on(t.expires_at)],
+);
+
 /**
  * Tables with no account_id, and why. `test/account-predicates.test.ts` uses
  * this list: anything else that is tenant data must be scoped.
@@ -462,6 +538,8 @@ export const GLOBAL_TABLES = {
 	auth_accounts: 'login methods of a user (password / OAuth link), keyed by user',
 	verifications: 'one-time auth tokens (password reset), keyed by identifier',
 	auth_rate_limits: 'auth endpoint rate-limit counters, keyed by IP and path',
+	hosted_zones: 'operator-owned: record counts of the hosted-records zone(s), not tenant data',
+	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any account',
 } as const;
 
 /** Tables that must carry an `account_id` column. */
@@ -478,4 +556,6 @@ export const ACCOUNT_OWNED_TABLES = [
 	'invites',
 	'audit_log',
 	'api_keys',
+	'intake_tokens',
+	'hosted_domains',
 ] as const;

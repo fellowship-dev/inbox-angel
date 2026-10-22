@@ -9,11 +9,23 @@ import type { TenantContext } from '../tenancy/context';
 import { extractAttachmentBytes, MimeExtractError } from './mime-extract';
 import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
+import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { storeReport } from '../dmarc/store-report';
+
+export interface ReportOptions {
+  /** Hosted intake: cap on the decompressed report. Self-host passes nothing and keeps its unlimited behaviour. */
+  maxBytes?: number;
+  /**
+   * Hosted intake: the domain the recipient's token belongs to. The report must be for that domain or a subdomain
+   * and is filed under it; any other domain is rejected, even one the same account owns.
+   */
+  token?: TokenDomain;
+}
 
 export async function handleDmarcReport(
   message: ForwardableEmailMessage,
   tenant: TenantContext,
+  opts: ReportOptions = {},
 ): Promise<{ failure_count: number }> {
   // 1. Extract attachment bytes from raw MIME stream
   let bytes: Uint8Array;
@@ -32,7 +44,9 @@ export async function handleDmarcReport(
   let report;
   let rawXml: string | null = null;
   try {
-    report = await parseDmarcEmail(bytes, false, tenant.db);
+    report = opts.maxBytes === undefined
+      ? await parseDmarcEmail(bytes, false, tenant.db)
+      : await parseDmarcEmail(bytes, false, tenant.db, { maxBytes: opts.maxBytes });
 
     // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
     try {
@@ -54,7 +68,13 @@ export async function handleDmarcReport(
 
   // 3. Resolve domain from the policy_domain in the report
   const policyDomain = report.policy_published.domain;
-  const domain = await resolveDomain(tenant, policyDomain);
+  let domain;
+  if (opts.token) {
+    // Hosted: the token's own domain (or a subdomain of it), filed under the token's domain.
+    domain = coversDomain(opts.token.domain, policyDomain) ? await tenant.scope.domains.getById(opts.token.id) : null;
+  } else {
+    domain = await resolveDomain(tenant, policyDomain);
+  }
   if (!domain) {
     console.warn('dmarc-report: no domain found for policy_domain', policyDomain);
     message.setReject(`Unknown domain ${policyDomain} — not a registered InboxAngel inbox`);

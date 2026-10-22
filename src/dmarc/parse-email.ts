@@ -25,16 +25,18 @@ export class ParseEmailError extends Error {
  *
  * @param bytes    Raw bytes from the email attachment.
  * @param offline  Skip IP geolocation lookups (default: false).
+ * @param opts     `maxBytes`: refuse reports that decompress to more than this (hosted intake caps at 25 MiB).
  */
 export async function parseDmarcEmail(
   bytes: Uint8Array,
   offline = false,
   db?: D1Database,
+  opts: { maxBytes?: number } = {},
 ): Promise<AggregateReport> {
   let xml: string;
 
   try {
-    xml = extractReport(bytes);
+    xml = extractReport(bytes, opts);
   } catch (err) {
     if (err instanceof ParserError) {
       throw new ParseEmailError(`Could not extract XML from attachment: ${err.message}`, err);

@@ -21,6 +21,8 @@ export class FakeCloudflare {
   readonly records = new Map<string, FakeRecord[]>();
   /** MX answers for DNS-over-HTTPS lookups: name -> `10 mx.host.` strings. */
   readonly mx: Record<string, string[]> = {};
+  /** CNAME answers for DNS-over-HTTPS lookups: name -> target. */
+  readonly cname: Record<string, string> = {};
   /** Worker routes per zone id, served at /zones/:id/workers/routes. */
   readonly routes: Record<string, { pattern: string; script: string }[]> = {};
   #nextId = 1;
@@ -52,10 +54,11 @@ export class FakeCloudflare {
     const headers = new Headers(init?.headers as HeadersInit | undefined);
     if (url.hostname === 'cloudflare-dns.com') {
       const name = url.searchParams.get('name') ?? '';
-      const isMx = (url.searchParams.get('type') ?? '').toUpperCase() === 'MX';
-      const answers = isMx ? this.mx[name] : this.doh[name];
+      const qtype = (url.searchParams.get('type') ?? '').toUpperCase();
+      const isMx = qtype === 'MX';
+      const answers = qtype === 'CNAME' ? (this.cname[name] ? [this.cname[name]] : undefined) : isMx ? this.mx[name] : this.doh[name];
       const payload = answers
-        ? { Status: 0, Answer: answers.map(data => (isMx ? { type: 15, data } : { type: 16, data: `"${data}"` })) }
+        ? { Status: 0, Answer: answers.map(data => (isMx ? { type: 15, data } : qtype === 'CNAME' ? { type: 5, data: `${data}.` } : { type: 16, data: `"${data}"` })) }
         : { Status: 3 };
       return new Response(JSON.stringify(payload), { status: 200 });
     }
@@ -87,7 +90,10 @@ export class FakeCloudflare {
       if (rest === '/dns_records' && method === 'GET') {
         const type = url.searchParams.get('type');
         const name = url.searchParams.get('name');
-        return ok(list.filter(r => (!type || r.type === type) && (!name || r.name === name)));
+        const matching = list.filter(r => (!type || r.type === type) && (!name || r.name === name));
+        const per = Number(url.searchParams.get('per_page')) || matching.length || 1;
+        const page = Number(url.searchParams.get('page')) || 1;
+        return ok(matching.slice((page - 1) * per, page * per));
       }
       if (rest === '/dns_records' && method === 'POST') {
         const r = { id: `rec-${this.#nextId++}`, type: body.type, name: body.name, content: body.content };
@@ -95,6 +101,10 @@ export class FakeCloudflare {
         return ok(r);
       }
       const one = rest.match(/^\/dns_records\/([^/]+)$/);
+      if (one && method === 'GET') {
+        const rec = list.find(r => r.id === one[1]);
+        return rec ? ok(rec) : fail(404, 'record not found');
+      }
       if (one && method === 'PATCH') {
         const rec = list.find(r => r.id === one[1]);
         if (!rec) return fail(404, 'record not found');

@@ -6,7 +6,7 @@
 // Unauthenticated:
 //   GET  /health                              — liveness probe
 //   GET  /api/version                         — running vs latest version
-//   POST /api/check-sessions                  — create a free-check session
+//   POST /api/check-sessions                  — create a free-check session (hosted: expiring check+<token>@canary address)
 //   GET  /api/check-sessions/:token           — poll for free-check result
 //   POST /api/monitor                         — subscribe to change alerts (unauthenticated)
 //   GET  /api/auth/status                     — owner configured? OAuth providers, mode
@@ -31,6 +31,7 @@
 //   GET    /api/domains/:id/anomalies         — failing sources with Active/Older split
 //   GET    /api/domains/:id/export            — CSV export
 //   GET    /api/domains/:id/dns-check         — check _dmarc TXT record in DNS
+//   GET/POST/DELETE /api/domains/:id/hosted, POST …/hosted/rotate-token, …/hosted/verify — hosted records (MODE=saas; src/hosted/routes.ts)
 //   GET    /api/domains/:id/rollout-next      — current rollout step, next step, DNS preview, safety
 //   POST   /api/domains/:id/rollout-advance   — persist recommended rollout step
 //   PUT    /api/domains/:id/set-default       — designate domain as default (infrastructure hub)
@@ -59,6 +60,10 @@ import { version } from '../../package.json';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
+import { handleHostedRoutes } from '../hosted/routes';
+import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
+import { hostedConfig, hostedEnabled } from '../hosted/config';
+import { issueCanary } from '../hosted/canary';
 import type { AuthedAccount } from '../auth/resolver';
 import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 import { getMode } from '../tenancy/mode';
@@ -239,6 +244,16 @@ async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { i
 
   const domain = await tenant.scope.domains.getById(id);
   if (!domain) return err('domain not found', 404);
+
+  // Hosted records (and their quota) go first. If the DNS cleanup fails the domain is kept, so nothing is orphaned.
+  if (hostedEnabled(tenant.env) && await tenant.scope.hosted.get(id)) {
+    try {
+      await disableHosted(tenant, domain, {}, actor, ctx);
+    } catch (e) {
+      if (e instanceof HostedError) return err(`Could not remove the hosted records, domain not deleted: ${e.message}`, e.status);
+      throw e;
+    }
+  }
 
   await tenant.scope.domains.delete(id);
 
@@ -471,6 +486,11 @@ async function _handleApi(
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
+    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no account.
+    if (hostedEnabled(env) && hostedConfig(env).canaryDomain) {
+      const canary = await issueCanary(env);
+      return json(canary, 201);
+    }
     const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
@@ -1499,6 +1519,39 @@ async function _handleApi(
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
+      // Hosted domains keep their MTA-STS records in the hosted zone: these methods go through the hosted writer.
+      const isHosted = hostedEnabled(env) && !!(await tenant.scope.hosted.get(id));
+      if (isHosted && method !== 'GET') {
+        try {
+          if (method === 'POST') return err('MTA-STS is hosted for this domain: enable it with POST /api/domains/:id/hosted { mta_sts: true }', 409);
+          if (method === 'DELETE') {
+            await removeHostedMtaSts(tenant, domain);
+            logAudit(tenant, { actor_id: userBySession?.id, actor_email: userBySession?.email, actor_type: 'user', action: 'mta_sts.disable', resource_type: 'domain', resource_id: String(id), resource_name: domain.domain }, ctx);
+            return new Response(null, { status: 204 });
+          }
+          if (method === 'PATCH') {
+            const config = await tenant.scope.mtaSts.get(id);
+            if (!config?.enabled) return err('MTA-STS not enabled for this domain', 404);
+            const body = await parseBody<{ mode?: string; refresh_mx?: boolean }>(request);
+            if (body.mode === 'testing' || body.mode === 'enforce') {
+              const r = await updateHostedMtaSts(tenant, domain, { mode: body.mode });
+              return json({ ok: true, mode: body.mode, policy_id: r.policy_id });
+            }
+            if (body.refresh_mx) {
+              let mxHosts: string[];
+              try { mxHosts = await discoverMxHosts(domain.domain); } catch (e) { return err(`DNS lookup failed: ${e instanceof Error ? e.message : String(e)}`, 502); }
+              if (mxHosts.length === 0) return err('No MX records found', 400);
+              const r = await updateHostedMtaSts(tenant, domain, { mxHosts });
+              return json({ ok: true, mx_hosts: mxHosts, policy_id: r.policy_id });
+            }
+            return err('nothing to update', 400);
+          }
+        } catch (e) {
+          if (e instanceof HostedError) return err(e.message, e.status);
+          throw e;
+        }
+      }
+
       if (method === 'GET') {
         const config = await tenant.scope.mtaSts.get(id);
         const tlsSince = Math.floor(Date.now() / 1000) - 30 * 86400; // last 30 days
@@ -1691,6 +1744,10 @@ async function _handleApi(
         return err(e.message ?? 'CT log lookup failed', 502);
       }
     }
+
+    // /api/domains/:id/hosted — hosted records (MODE=saas only)
+    const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
+    if (hostedResponse) return hostedResponse;
 
     // /api/keys — per-user API keys
     const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: account.role, kind: (account as AuthedAccount).kind, user: userBySession });

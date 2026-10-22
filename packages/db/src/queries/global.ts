@@ -3,9 +3,9 @@
  * in schema.ts): credentials lookups, anonymous free-check results, the shared
  * IP cache. Anything here must not return or modify tenant data.
  */
-import { and, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
-import { accounts, authRateLimits, checkResults, ipInfo, users, verifications } from '../schema';
+import { accounts, authRateLimits, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
@@ -70,6 +70,36 @@ export function globalQueries(dbLike: DbLike) {
 				domains.length === 0
 					? Promise.resolve([])
 					: db.select().from(checkResults).where(inArray(checkResults.from_domain, domains)).orderBy(sql`${checkResults.created_at} DESC`).limit(limit).all(),
+		},
+
+		/** Record counts of the operator's hosted-records zone(s). */
+		hostedZones: {
+			get: (zoneKey: string) => db.select().from(hostedZones).where(eq(hostedZones.zone_key, zoneKey)).get().then((r) => r ?? null),
+			list: () => db.select().from(hostedZones).all(),
+			/** Register a zone, or refresh its Cloudflare id/name; the count is left alone. */
+			upsert: (z: { zone_key: string; zone_id: string; zone_name: string }) =>
+				db.insert(hostedZones).values(z).onConflictDoUpdate({ target: hostedZones.zone_key, set: { zone_id: sql`excluded.zone_id`, zone_name: sql`excluded.zone_name` } }).run(),
+			/** Our own bookkeeping between daily counts: one statement, so concurrent writers do not lose updates. */
+			addCount: (zoneKey: string, delta: number) =>
+				db.update(hostedZones).set({ record_count: sql`MAX(0, ${hostedZones.record_count} + ${delta})` }).where(eq(hostedZones.zone_key, zoneKey)).run(),
+			/** The daily count from Cloudflare itself (every record in the zone). */
+			setObserved: (zoneKey: string, recordCount: number, restDigest: string, nowSeconds: number) =>
+				db.update(hostedZones).set({ record_count: recordCount, rest_digest: restDigest, checked_at: nowSeconds }).where(eq(hostedZones.zone_key, zoneKey)).run(),
+		},
+
+		/** Addresses for the anonymous free check: expiring, single use, hash only. */
+		canary: {
+			issue: (tokenHash: string, expiresAt: number) => db.insert(canaryTokens).values({ token_hash: tokenHash, expires_at: expiresAt }).run(),
+			/** Use a token once. True when it existed, had not expired and had not been used. */
+			consume: (tokenHash: string, nowSeconds: number) =>
+				db
+					.update(canaryTokens)
+					.set({ used_at: nowSeconds })
+					.where(and(eq(canaryTokens.token_hash, tokenHash), isNull(canaryTokens.used_at), gt(canaryTokens.expires_at, nowSeconds)))
+					.returning({ h: canaryTokens.token_hash })
+					.all()
+					.then((rows) => rows.length > 0),
+			purgeExpired: (nowSeconds: number) => db.delete(canaryTokens).where(lt(canaryTokens.expires_at, nowSeconds - 86400)).run(),
 		},
 
 		ipInfo: {

@@ -74,6 +74,9 @@
 		"crons": ["0 8 * * *", "0 9 * * 1", "0 10 * * *", "0 11 * * *"]
 	},
 
+	// Hosted service only (MODE=saas + SAAS_ENABLED=1, see docs/hosted.md): INTAKE_DOMAIN, CANARY_DOMAIN,
+	// HOSTED_RECORDS_ZONE, HOSTED_RECORDS_LABEL, and the secret HOSTED_RECORDS_TOKEN. Self-hosters ignore these.
+
 	// Environment variables
 	"vars": {
 		"WORKER_NAME": "inbox-angel-worker"

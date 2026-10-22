@@ -10,18 +10,19 @@ import { ACCOUNT_OWNED_TABLES } from '@inbox-angel/db';
 import { call, makeEnv } from './helpers';
 import { createApiKey } from '../../src/auth/api-keys';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
+import { HOSTED_ENV } from '../hosted/world';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 
 /** Strings that exist only in B's data: none may ever appear in a response to A. */
-const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77'];
+const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77', 'b-hosted-id-secret', 'b-intake-hash-secret'];
 
 const rows = (db: any, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 
 async function world() {
   const db = createMigratedD1();
-  const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
+  const env = makeEnv(db, { ...HOSTED_ENV });
   const signup = async (email: string) => {
     const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
     expect(r.status).toBe(201);
@@ -51,6 +52,8 @@ async function world() {
   db.sqlite.prepare("INSERT INTO invites (token, email, role, invited_by, expires_at, account_id) VALUES ('b-invite-token', 'b-member@example.com', 'member', 'b-owner@example.com', 9999999999, ?)").run(b);
   db.sqlite.prepare("INSERT INTO audit_log (id, action, resource_name, account_id) VALUES (40, 'domain.add', 'b-secret.example.com', ?)").run(b);
   db.sqlite.prepare("INSERT INTO settings (account_id, key, value) VALUES (?, 'custom_value', 'b-secret-settings-value')").run(b);
+  db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, account_id, hosted_id, zone_key, dmarc_record_id) VALUES (2, ?, 'b-hosted-id-secret', 'z1', 'rec-b')").run(b);
+  db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, account_id, token_hash) VALUES (2, ?, 'b-intake-hash-secret')").run(b);
   db.sqlite.prepare("INSERT INTO users (id, email, name) VALUES ('u-b-member', 'b-member@example.com', 'B Member')").run();
   db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES (?, 'u-b-member', 'member')").run(b);
 
@@ -106,6 +109,13 @@ const ROUTES: Route[] = [
   { method: 'PUT', path: '/api/domains/2/mta-sts', body: { mode: 'enforce' }, kind: 'denied' },
   { method: 'DELETE', path: '/api/domains/2/mta-sts', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/mta-sts/policy', kind: 'denied' },
+  // hosted records (MODE=saas): src/hosted/routes.ts
+  { method: 'GET', path: '/api/domains/2/hosted', kind: 'denied' },
+  { method: 'POST', path: '/api/domains/2/hosted', body: { mta_sts: true }, kind: 'denied' },
+  { method: 'DELETE', path: '/api/domains/2/hosted', kind: 'denied' },
+  { method: 'POST', path: '/api/domains/2/hosted/rotate-token', body: {}, kind: 'denied' },
+  { method: 'POST', path: '/api/domains/2/hosted/verify', body: {}, kind: 'denied' },
+  { method: 'GET', path: '/api/domains/1/hosted', kind: 'scoped' },
   { method: 'POST', path: '/api/domains/bulk-import', body: { domains: 'fresh-a.example.net' }, kind: 'scoped' },
   { method: 'GET', path: '/api/domains/ct-discover?domain=example.net', kind: 'scoped' },
   // reports & monitoring
@@ -215,6 +225,20 @@ describe('two hosted accounts: A cannot reach B', () => {
     expect(anonCheck).toBe(401);
     // an anonymous visitor to a hosted instance sees no account's domains in status
     expect(JSON.parse(status)).toMatchObject({ has_domain: false, base_domain: null, custom_domain: null });
+  });
+
+  it('table covers every route of the hosted-records module (add new routes here)', () => {
+    const src = readFileSync(join(__dirname, '../../src/hosted/routes.ts'), 'utf8');
+    const documented = [...src.matchAll(/^\/\/\s+(GET|POST|PUT|DELETE)\s+(\/api\/\S+)/gm)].map(m => `${m[1]} ${m[2].replace(':id', '2')}`);
+    expect(documented.length).toBe(5);
+    const covered = ROUTES.filter(r => r.kind === 'denied').map(r => `${r.method} ${r.path}`);
+    expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+  });
+
+  it('hosted intake: A’s token cannot file or reveal anything in B (see test/hosted/intake.test.ts for the report-level checks)', async () => {
+    const w = await world();
+    const res = await call(w.env, 'GET', '/api/domains/1/hosted', { key: w.A.token });
+    expect(JSON.stringify(await res.json())).not.toMatch(/b-hosted-id-secret|b-intake-hash-secret/);
   });
 
   it('table covers every account-data route in the router (add new routes here)', () => {

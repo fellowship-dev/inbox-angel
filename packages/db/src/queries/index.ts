@@ -5,6 +5,7 @@ import { auditQueries } from './audit';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
 import { heartbeatStats } from './heartbeat';
+import { hostedQueries, intakeQueries } from './intake';
 import { monitorQueries } from './monitor';
 import { reportQueries } from './reports';
 import { settingsQueries } from './settings';
@@ -15,6 +16,7 @@ export * from './audit';
 export * from './team';
 export * from './api-keys';
 export { authLookups } from './auth';
+export { intakeLookups, TOKEN_ROTATION_GRACE_SECONDS, type IntakeTarget, type HostedDomainRow, type PointerStatus } from './intake';
 export * from './heartbeat';
 export type { MtaStsMode } from './domain-config';
 export { globalQueries } from './global';
@@ -39,6 +41,8 @@ export function forAccount(db: DbLike, accountId: string) {
 		audit: auditQueries(d, accountId),
 		team: teamQueries(d, accountId),
 		apiKeys: apiKeyQueries(d, accountId),
+		intake: intakeQueries(d, accountId),
+		hosted: hostedQueries(d, accountId),
 		heartbeat: () => heartbeatStats(d, accountId),
 	};
 }

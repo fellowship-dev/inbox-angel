@@ -8,7 +8,7 @@
 // that as "unauthenticated".
 
 import type { Env } from '../index';
-import { IMPLICIT_ACCOUNT_ID, globalQueries } from '@inbox-angel/db';
+import { IMPLICIT_ACCOUNT_ID, globalQueries, intakeLookups } from '@inbox-angel/db';
 import { getMode } from './mode';
 import { sessionAccountResolver } from '../auth/resolver';
 
@@ -41,17 +41,22 @@ export async function listCronAccounts(env: Env): Promise<string[]> {
 }
 
 /**
- * Account an inbound email belongs to. Self-host: the implicit account. For saas this is
- * where routing by recipient (reports domain / per-account address) will live.
+ * Account an inbound email belongs to. Self-host: the implicit account. In saas there is deliberately
+ * no answer here: mail is routed by the token in its address (src/hosted/intake.ts), and falling back
+ * to a default account would file one customer's reports under another's.
  */
-export async function resolveInboundAccount(_env: Env, _toAddress: string): Promise<string> {
+export async function resolveInboundAccount(env: Env, _toAddress: string): Promise<string> {
+  if (getMode(env) === 'saas') throw new Error('resolveInboundAccount: MODE=saas routes inbound mail by token (src/hosted/intake.ts)');
   return IMPLICIT_ACCOUNT_ID;
 }
 
 /**
  * Account that owns a monitored domain, for unauthenticated lookups keyed by hostname
- * (the MTA-STS policy file). Self-host: the implicit account. Saas will look the domain up.
+ * (the MTA-STS policy file). Self-host: the implicit account. Saas: the account of the hosted
+ * domain, or null when nobody hosts it (the caller answers 404).
  */
-export async function resolveDomainOwner(_env: Env, _domain: string): Promise<string> {
-  return IMPLICIT_ACCOUNT_ID;
+export async function resolveDomainOwner(env: Env, domain: string): Promise<string | null> {
+  if (getMode(env) !== 'saas') return IMPLICIT_ACCOUNT_ID;
+  if (!env.DB) return null;
+  return (await intakeLookups(env.DB).hostedByDomain(domain.toLowerCase()))?.account_id ?? null;
 }

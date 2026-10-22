@@ -74,3 +74,8 @@ and `email_verified`/`image`/`updated_at` on `users`.
 * `password_reset_tokens` stays but is unused; outstanding reset links stop working. Reset tokens now live in `verifications`.
 * Roles come from `memberships` (0012). Members are read-only in the API.
 * Roll back by restoring the backup with the previous Worker, as for 0012.
+
+## 0014: hosted intake
+
+Migration `0014_hosted_intake.sql` adds `intake_tokens`, `hosted_domains`, `hosted_zones` and `canary_tokens`. Purely additive; self-host installs
+never write to them (they only matter with `MODE=saas`). Roll back by restoring the backup with the previous Worker.
