@@ -1,0 +1,54 @@
+<svg viewBox="0 0 280 160" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .envelope { fill: #fff; stroke: #333; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .flap { fill: #fad172; stroke: #333; stroke-width: 2; }
+    .wing { fill: none; stroke: #333; stroke-width: 1.8; stroke-linecap: round; }
+    .eye { fill: #333; }
+    .smile { fill: none; stroke: #333; stroke-width: 2; stroke-linecap: round; }
+    .blush { fill: #fca0a4; opacity: 0.7; }
+    .halo { fill: #fad172; stroke: #333; stroke-width: 2; }
+  </style>
+
+  <!-- Halo - floating above -->
+  <ellipse class="halo" cx="140" cy="12" rx="42" ry="10"/>
+
+  <!-- Left Wing - angel-style, 4 graceful feathers -->
+  <g class="wing">
+    <path d="M 48 58 Q 22 48, 5 30"/>
+    <path d="M 48 72 Q 18 60, -2 40"/>
+    <path d="M 48 86 Q 20 76, 5 58"/>
+    <path d="M 48 100 Q 25 92, 12 78"/>
+  </g>
+
+  <!-- Right Wing - angel-style, 4 graceful feathers -->
+  <g class="wing">
+    <path d="M 232 58 Q 258 48, 275 30"/>
+    <path d="M 232 72 Q 262 60, 282 40"/>
+    <path d="M 232 86 Q 260 76, 275 58"/>
+    <path d="M 232 100 Q 255 92, 268 78"/>
+  </g>
+
+  <!-- Envelope Body - wider/more landscape -->
+  <rect class="envelope" x="48" y="45" width="184" height="105" rx="6"/>
+
+  <!-- Envelope Flap (golden) -->
+  <path class="flap" d="M 48 45 L 140 15 L 232 45 Z"/>
+
+  <!-- Inner flap line -->
+  <path class="envelope" fill="none" d="M 52 49 L 140 90 L 228 49"/>
+
+  <!-- Blush marks -->
+  <ellipse class="blush" cx="78" cy="118" rx="16" ry="7"/>
+  <ellipse class="blush" cx="202" cy="118" rx="16" ry="7"/>
+
+  <!-- Eyes -->
+  <circle class="eye" cx="100" cy="105" r="7"/>
+  <circle class="eye" cx="180" cy="105" r="7"/>
+
+  <!-- Eye shine -->
+  <circle fill="#fff" cx="102" cy="103" r="2.5"/>
+  <circle fill="#fff" cx="182" cy="103" r="2.5"/>
+
+  <!-- Smile -->
+  <path class="smile" d="M 115 128 Q 140 142, 165 128"/>
+</svg>
