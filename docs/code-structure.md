@@ -1,6 +1,6 @@
 # Code Structure
 
-Architecture and module responsibilities for inbox-angel-worker.
+Architecture and module responsibilities for Inbox Angel (repo `fellowship-dev/inbox-angel`; the Cloudflare Worker script is still named `inbox-angel-worker` by default).
 
 ---
 

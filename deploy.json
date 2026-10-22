@@ -1,8 +1,8 @@
 {
   "button_title": "Deploy InboxAngel Worker",
   "button_description": "Self-hosted email security monitoring — SPF/DKIM/DMARC dashboard on Cloudflare Workers + D1",
-  "preview_image_url": "https://raw.githubusercontent.com/Fellowship-dev/inbox-angel-worker/main/docs/preview.png",
-  "success_url": "https://github.com/Fellowship-dev/inbox-angel-worker#post-deploy",
+  "preview_image_url": "https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/docs/preview.png",
+  "success_url": "https://github.com/fellowship-dev/inbox-angel#post-deploy",
   "workers_dev": true,
   "build": {
     "command": "npm install && npm install --prefix dashboard && npm run build:dashboard"

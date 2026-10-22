@@ -1,3 +1,3 @@
 FROM mcr.microsoft.com/devcontainers/base:bullseye
 
-WORKDIR /workspaces/inbox-angel-worker
+WORKDIR /workspaces/inbox-angel

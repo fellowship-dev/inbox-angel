@@ -480,7 +480,7 @@ async function _handleApi(
   // GET /api/version — compares running version against latest GitHub release
   // Cached for 24h per-instance via CF Cache API — one GitHub request per day max
   if (path === '/api/version' && method === 'GET') {
-    const GH_RAW = 'https://raw.githubusercontent.com/Fellowship-dev/inbox-angel-worker/main/package.json';
+    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
     const cacheKey = new Request(GH_RAW);
     let latest: string | null = null;
     try {
@@ -503,7 +503,7 @@ async function _handleApi(
       current: version,
       latest,
       update_available: latest !== null && latest !== version,
-      release_url: 'https://github.com/Fellowship-dev/inbox-angel-worker/releases/latest',
+      release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
     });
   }
 

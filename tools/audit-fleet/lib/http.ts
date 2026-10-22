@@ -1,5 +1,5 @@
 // Polite HTTP helper for the public-listing sourcing scripts (read-only GETs, identified UA, retries).
-export const USER_AGENT = 'inbox-angel-audit-fleet/1.0 (+https://github.com/fellowship-dev/inbox-angel-worker; public listings, read-only)';
+export const USER_AGENT = 'inbox-angel-audit-fleet/1.0 (+https://github.com/fellowship-dev/inbox-angel; public listings, read-only)';
 
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
