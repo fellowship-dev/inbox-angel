@@ -116,3 +116,17 @@ export function stubCloudflare(fake: FakeCloudflare): FakeCloudflare {
   vi.stubGlobal('fetch', fake.fetch);
   return fake;
 }
+
+/**
+ * Wrap a sequential fetch mock so zone-by-name lookups answer "no such zone" without consuming
+ * the mock's queued responses (a subdomain is checked for a zone of its own before the stored parent).
+ */
+export function skipZoneLookups(inner: (...a: Parameters<typeof fetch>) => Promise<Response>): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+    if (url.pathname === '/client/v4/zones' && url.searchParams.has('name')) {
+      return new Response(JSON.stringify({ success: true, result: [] }), { status: 200 });
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+}

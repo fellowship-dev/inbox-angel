@@ -107,6 +107,15 @@ export class TenantContext {
     return this.requireCf().zoneFor(domain);
   }
 
+  /**
+   * Zone id of the base domain when it differs from `zoneId`: where installs from before per-domain
+   * zones wrote every domain's MTA-STS/SPF records. Used to find legacy records that 404 in their own zone.
+   */
+  legacyZoneId(zoneId: string): string | undefined {
+    const base = this.settings.zoneId;
+    return base && base !== zoneId ? base : undefined;
+  }
+
   /** Zone of the reports domain; throws CfZoneNotFoundError when it isn't configured or has no zone. */
   reportsZone(): Promise<CfZone> {
     const rd = this.settings.reportsDomain;
@@ -141,6 +150,10 @@ export class TenantContext {
     this.#telemetry ??= this.scope.settings.get('telemetry_opted_in').then(r => r?.value === 'true');
     return this.#telemetry;
   }
+
+  // env holds secrets (CLOUDFLARE_API_TOKEN, API_KEY): never let a log line or JSON.stringify reach it.
+  toJSON(): { redacted: true; accountId: string } { return { redacted: true, accountId: this.accountId }; }
+  [Symbol.for('nodejs.util.inspect.custom')](): string { return `TenantContext { accountId: '${this.accountId}', mode: '${this.mode}' }`; }
 
   /** Forget the Cloudflare client and cached flags after settings changed. */
   invalidate(): void {

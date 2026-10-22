@@ -113,3 +113,37 @@ describe('MTA-STS record updates and removal stay in the domain\'s zone', () => 
     expect(cf.records.get('zone-other')).toEqual([]);
   });
 });
+
+describe('legacy records in the base zone (installs from before per-domain zones)', () => {
+  // Old code created every domain's records in the base zone (zone-acme), even other-company.org's.
+  it('patches a record that 404s in the domain\'s own zone in the base zone instead', async () => {
+    const cf = world();
+    const rec = cf.seed('zone-acme', { type: 'TXT', name: '_mta-sts.other-company.org', content: 'v=STSv1; id=1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await updateMtaStsTxtRecord(tenant(), 'other-company.org', rec.id, '2');
+    expect(cf.records.get('zone-acme')![0].content).toBe('v=STSv1; id=2');
+    expect(warn.mock.calls.flat().join(' ')).toMatch(/legacy location/);
+  });
+
+  it('deletes a record that is only in the base zone, and logs it', async () => {
+    const cf = world();
+    const rec = cf.seed('zone-acme', { type: 'TXT', name: '_mta-sts.other-company.org', content: 'x' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await deprovisionMtaSts(tenant(), 'other-company.org', { mta_sts_record_id: rec.id, tls_rpt_record_id: null, cname_record_id: null });
+    expect(cf.records.get('zone-acme')).toEqual([]);
+    expect(warn.mock.calls.flat().join(' ')).toMatch(/legacy location/);
+  });
+
+  it('prefers the domain\'s own zone, and does not touch the base zone when the record is there', async () => {
+    const cf = world();
+    const own = cf.seed('zone-other', { type: 'TXT', name: '_mta-sts.other-company.org', content: 'x' });
+    await deprovisionMtaSts(tenant(), 'other-company.org', { mta_sts_record_id: own.id, tls_rpt_record_id: null, cname_record_id: null });
+    expect(cf.records.get('zone-other')).toEqual([]);
+    expect(cf.calls.filter(c => c.zoneId === 'zone-acme' && c.method === 'DELETE')).toHaveLength(0);
+  });
+
+  it('still fails when the record is in neither zone', async () => {
+    world();
+    await expect(updateMtaStsTxtRecord(tenant(), 'other-company.org', 'nowhere', '2')).rejects.toThrow(/CF DNS patch failed/);
+  });
+});

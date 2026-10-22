@@ -6,7 +6,7 @@ import { DomainChange } from './check';
 import type { TenantContext } from '../tenancy/context';
 import { buildDnsAlertHtml } from '../email/html-templates';
 
-const SEVERITY_EMOJI: Record<DomainChange['severity'], string> = {
+const SEVERITY_EMOJI: Readonly<Record<DomainChange['severity'], string>> = {
   improved: '✅',
   degraded: '🚨',
   changed: '⚠️',

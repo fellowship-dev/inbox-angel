@@ -79,15 +79,16 @@ export interface CfRequestOptions {
 interface CfEnvelope<T> { success?: boolean; result?: T; errors?: CfErrorDetail[] }
 
 /**
- * Candidate zone names for a domain, shortest first, never below two labels:
- * `a.b.acme.com` -> `acme.com`, `b.acme.com`, `a.b.acme.com`. Cloudflare zones
- * are registrable names, so the first candidate that exists on the account is
- * the zone; names Cloudflare doesn't know (`co.uk`) simply don't match.
+ * Candidate zone names for a domain, longest first, never below two labels:
+ * `a.b.acme.com` -> `a.b.acme.com`, `b.acme.com`, `acme.com`. Zones can nest
+ * (`example.com` and a delegated `sub.example.com`), and the most specific zone is the one
+ * that serves the name, so the longest candidate that exists on the account wins. Names
+ * Cloudflare doesn't know (`co.uk`, `b.acme.com` when it isn't a zone) simply don't match.
  */
 export function zoneCandidates(domain: string): string[] {
   const labels = domain.toLowerCase().replace(/\.$/, '').split('.').filter(Boolean);
   const out: string[] = [];
-  for (let i = labels.length - 2; i >= 0; i--) out.push(labels.slice(i).join('.'));
+  for (let i = 0; i <= labels.length - 2; i++) out.push(labels.slice(i).join('.'));
   return out;
 }
 
@@ -146,7 +147,10 @@ export class CfClient {
 
   // ── Zones ───────────────────────────────────────────────────
 
-  /** Pre-load a zone we already know (e.g. from stored settings), so no lookup is needed. */
+  /**
+   * Pre-load a zone we already know (e.g. from stored settings). It answers for its own name; a
+   * longer candidate (a nested zone) is still looked up first, so the seed never shadows it.
+   */
   seedZone(zone: CfZone): void {
     this.#zones.set(zone.name.toLowerCase(), Promise.resolve(zone));
   }
@@ -197,12 +201,14 @@ export class CfClient {
     return this.request('PATCH', `/zones/${zoneId}/dns_records/${recordId}`, { body: patch });
   }
 
-  /** Idempotent: a record that is already gone is not an error. */
-  async deleteDnsRecord(zoneId: string, recordId: string): Promise<void> {
+  /** Idempotent: a record that is already gone is not an error. Returns whether something was deleted. */
+  async deleteDnsRecord(zoneId: string, recordId: string): Promise<boolean> {
     try {
       await this.request('DELETE', `/zones/${zoneId}/dns_records/${recordId}`);
+      return true;
     } catch (e) {
       if (!(e instanceof CfNotFoundError)) throw e;
+      return false;
     }
   }
 

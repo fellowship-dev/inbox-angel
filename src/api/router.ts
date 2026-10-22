@@ -81,7 +81,7 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────
 
-const SECURITY_HEADERS: Record<string, string> = {
+const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',

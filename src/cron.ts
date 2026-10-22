@@ -17,6 +17,15 @@ import { flattenSpf } from './email/spf-flattener';
 import { lookupSpf } from './email/dns-check';
 import { discoverMxHosts, generatePolicyId, updateMtaStsTxtRecord } from './email/mta-sts';
 
+const SPF_REFRESH_CONCURRENCY = 5;
+
+/** Run `fn` over `items` with at most `limit` in flight. `fn` must not throw. */
+export async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => { while (next < items.length) await fn(items[next++]); };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 export interface CronOptions {
   /** Accounts to cover. Default: listCronAccounts(env). */
   accounts?: string[];
@@ -94,15 +103,17 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
   // Daily monitor check — every day 8am UTC (default / catch-all)
   // Also refresh SPF lookup counts for all domains
   const allDomains = await tenant.scope.domains.list();
-  for (const d of allDomains) {
-    lookupSpf(d.domain)
-      .then(spf => {
-        if (spf?.lookup_count !== undefined) {
-          return tenant.scope.domains.updateSpfLookupCount(d.id, spf.lookup_count);
-        }
-      })
-      .catch(e => console.warn(`[monitor] SPF lookup refresh failed for ${d.domain}:`, e));
-  }
+  // Awaited (a floating promise can be cut off when the invocation ends), a few at a time.
+  await mapLimit(allDomains, SPF_REFRESH_CONCURRENCY, async d => {
+    try {
+      const spf = await lookupSpf(d.domain);
+      if (spf?.lookup_count !== undefined) {
+        await tenant.scope.domains.updateSpfLookupCount(d.id, spf.lookup_count);
+      }
+    } catch (e) {
+      console.warn(`[monitor] SPF lookup refresh failed for ${d.domain}:`, e);
+    }
+  });
 
   // Rollback regression check — for domains actively in a staged rollout
   for (const d of allDomains) {

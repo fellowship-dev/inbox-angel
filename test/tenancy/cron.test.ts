@@ -101,6 +101,43 @@ describe('cron iterates accounts, each in its own try', () => {
   });
 });
 
+describe('SPF lookup-count refresh in the default cron', () => {
+  const DAILY = { cron: '0 8 * * *' } as ScheduledController;
+
+  it('is finished (awaited) when the cron returns, with bounded concurrency', async () => {
+    const { db, cf, env, load } = setup();
+    for (let i = 10; i < 22; i++) {
+      db.sqlite.prepare('INSERT INTO domains (id, account_id, domain, rua_address) VALUES (?, ?, ?, ?)').run(i, 'acct_a', `d${i}.a-corp.com`, 'r@x');
+      cf.doh[`d${i}.a-corp.com`] = ['v=spf1 ip4:192.0.2.9 -all'];
+    }
+    let inFlight = 0, peak = 0;
+    const base = cf.fetch.getMockImplementation()!;
+    cf.fetch.mockImplementation(async (input, init) => {
+      if (new URL(String(input)).hostname === 'cloudflare-dns.com') {
+        inFlight++; peak = Math.max(peak, inFlight);
+        await new Promise(r => setTimeout(r, 5));
+        inFlight--;
+      }
+      return base(input, init);
+    });
+
+    await runCronForAccounts(DAILY, env, ctx, { accounts: ['acct_a'], load });
+
+    expect(inFlight).toBe(0); // nothing still running after the cron resolved
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(5);
+    const counted = db.sqlite.prepare("SELECT COUNT(*) AS n FROM domains WHERE account_id = 'acct_a' AND spf_lookup_count IS NOT NULL").get() as any;
+    expect(counted.n).toBe(13); // all 12 added + a-corp.com
+  });
+
+  it('mapLimit never runs more than the limit at once', async () => {
+    const { mapLimit } = await import('../../src/cron');
+    let n = 0, peak = 0;
+    await mapLimit([...Array(20).keys()], 3, async () => { n++; peak = Math.max(peak, n); await new Promise(r => setTimeout(r, 1)); n--; });
+    expect(peak).toBe(3);
+  });
+});
+
 describe('listCronAccounts', () => {
   it('self-host covers exactly the implicit account, without touching the database', async () => {
     expect(await listCronAccounts({ DB: undefined } as any)).toEqual(['acct_default']);

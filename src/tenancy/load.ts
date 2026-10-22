@@ -9,7 +9,7 @@ import { CfError } from './cf-client';
 import { getMode, type Mode } from './mode';
 import type { ResolvedAccount } from './resolver';
 
-const KEYS = [
+const KEYS: readonly string[] = [
   'base_domain', 'zone_id', 'zone_name', 'account_id', 'reports_domain', 'from_email', 'workers_subdomain',
   'brand_logo_url', 'brand_color',
 ];
@@ -45,7 +45,7 @@ export async function loadTenant(env: BoundEnv, account: ResolvedAccount, opts: 
 export async function refreshTenant(tenant: TenantContext): Promise<void> {
   tenant.invalidate();
   const q = tenant.scope;
-  const raw = await q.settings.getMany(KEYS);
+  const raw = await q.settings.getMany([...KEYS]);
   // An empty value means "cleared" (the wizard blanks the zone when the base domain changes).
   const stored = { get: (key: string) => raw.get(key) || undefined };
   const s: TenantSettings = {

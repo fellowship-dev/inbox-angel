@@ -9,7 +9,7 @@ import { DnsCheckResult } from './dns-check';
 import { AuthResultsHeader } from './parse-headers';
 import { DEFAULT_BRAND_COLOR, type Brand } from '../tenancy/context';
 
-const DEFAULT_BRAND: Brand = { color: DEFAULT_BRAND_COLOR };
+const DEFAULT_BRAND: Readonly<Brand> = { color: DEFAULT_BRAND_COLOR };
 
 // ── Primitives ────────────────────────────────────────────────
 
@@ -149,19 +149,19 @@ export function buildWeeklyDigestHtml(p: WeeklyDigestHtmlParams): string {
 
 // ── Free-check report ─────────────────────────────────────────
 
-const STATUS_COLOR: Record<OverallStatus, string> = {
+const STATUS_COLOR: Readonly<Record<OverallStatus, string>> = {
   protected: '#16a34a',
   at_risk:   '#d97706',
   exposed:   '#dc2626',
 };
 
-const STATUS_LABEL: Record<OverallStatus, string> = {
+const STATUS_LABEL: Readonly<Record<OverallStatus, string>> = {
   protected: 'Protected',
   at_risk:   'At risk',
   exposed:   'Exposed',
 };
 
-const STATUS_DESC: Record<OverallStatus, string> = {
+const STATUS_DESC: Readonly<Record<OverallStatus, string>> = {
   protected: 'This email passed all security checks.',
   at_risk:   'Your domain has partial protection — gaps remain.',
   exposed:   'Anyone can send email pretending to be you.',

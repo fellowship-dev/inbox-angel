@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ensureNullSenderRecords } from '../../src/setup/email-routing';
 import { makeTenant } from '../helpers/tenant';
+import { skipZoneLookups } from '../helpers/cf-fake';
 
 const TOKEN = 'test-token';
 const ZONE = 'zone-123';
@@ -9,7 +10,7 @@ const REPORTS = 'reports.example.com';
 let fetchMock: ReturnType<typeof vi.fn>;
 
 // The reports domain's zone is already known to the tenant, so no zone lookup hits the mock.
-const tenant = () => makeTenant({ cfToken: TOKEN, settings: { zoneId: ZONE, zoneName: 'example.com' } });
+const tenant = () => makeTenant({ cfToken: TOKEN, fetch: skipZoneLookups((...a) => fetchMock(...a)), settings: { zoneId: ZONE, zoneName: 'example.com' } });
 
 beforeEach(() => {
   fetchMock = vi.fn();

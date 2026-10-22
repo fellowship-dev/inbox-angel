@@ -55,3 +55,23 @@ describe('SPF flattening uses the zone of the domain being flattened', () => {
     await expect(findSpfRecord(tenant(), 'acme.com')).rejects.toThrow(/Authentication error/);
   });
 });
+
+describe('legacy SPF records in the base zone', () => {
+  it('finds and patches a record the old code left in the base zone', async () => {
+    const cf = world();
+    cf.records.set('zone-other', []);
+    cf.seed('zone-acme', { id: 'legacy-spf', type: 'TXT', name: 'other-company.org', content: 'v=spf1 include:_spf.mail.test -all' });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await flattenSpf(tenant(), 'other-company.org');
+    expect(result.cf_record_id).toBe('legacy-spf');
+    expect(cf.records.get('zone-acme')!.find(r => r.id === 'legacy-spf')!.content).toBe('v=spf1 ip4:192.0.2.7 -all');
+  });
+
+  it('restores a legacy record by id in the base zone when it 404s in the domain\'s zone', async () => {
+    const cf = world();
+    const rec = cf.seed('zone-acme', { type: 'TXT', name: 'other-company.org', content: 'flat' });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await restoreSpf(tenant(), 'other-company.org', rec.id, 'v=spf1 -all');
+    expect(cf.records.get('zone-acme')!.find(r => r.id === rec.id)!.content).toBe('v=spf1 -all');
+  });
+});

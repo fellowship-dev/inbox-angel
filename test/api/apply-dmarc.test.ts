@@ -147,3 +147,14 @@ describe('apply-dmarc zone targeting (two domains, two zones)', () => {
     expect(cf.forZone('zone-acme')).toHaveLength(0);
   });
 });
+
+describe('apply-dmarc with nested zones', () => {
+  it('writes to the child zone even though the parent zone is the stored base zone', async () => {
+    cf.zones['sub.acme.com'] = { id: 'zone-sub', accountId: 'cf-acct' };
+    const env = makeEnv([{ id: 5, domain: 'sub.acme.com' }, { id: 6, domain: 'www.acme.com' }]);
+    await handleApi(applyDmarc(5), env, ctx);
+    await handleApi(applyDmarc(6), env, ctx);
+    expect(cf.records.get('zone-sub')).toEqual([expect.objectContaining({ name: '_dmarc.sub.acme.com' })]);
+    expect(cf.records.get('zone-acme')).toEqual([expect.objectContaining({ name: '_dmarc.www.acme.com' })]);
+  });
+});

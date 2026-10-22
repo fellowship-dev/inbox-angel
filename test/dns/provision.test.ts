@@ -10,8 +10,7 @@ const ENV = makeTenant({
 });
 
 function mockFetch(status: number, body: unknown): void {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(body), { status })
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify(body), { status })
   ));
 }
 
@@ -31,8 +30,7 @@ describe('provisionDomain', () => {
 
   it('POSTs to the correct CF API endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, result: { id: 'rec-1' } }), { status: 200 })
-    );
+      new Response(JSON.stringify({ success: true, result: { id: 'rec-1' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await provisionDomain(ENV, 'example.com');
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -41,9 +39,7 @@ describe('provisionDomain', () => {
   });
 
   it('sends correct TXT record payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, result: { id: 'rec-1' } }), { status: 200 })
-    );
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, result: { id: 'rec-1' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await provisionDomain(ENV, 'example.com');
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -53,9 +49,7 @@ describe('provisionDomain', () => {
   });
 
   it('includes Authorization header', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, result: { id: 'r' } }), { status: 200 })
-    );
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, result: { id: 'r' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await provisionDomain(ENV, 'acme.com');
     const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
@@ -93,18 +87,20 @@ describe('provisionDomain', () => {
 
   it('writes into the reports domain\'s zone, looked up by name when not already known', async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, result: [] }), { status: 200 })) // reports.other.io: not a zone
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, result: [{ id: 'zone-lookup', name: 'other.io' }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, result: { id: 'rec-9' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const tenant = makeTenant({ cfToken: 'tok', settings: { reportsDomain: 'reports.other.io' } });
     const result = await provisionDomain(tenant, 'acme.com');
-    expect(fetchMock.mock.calls[0][0]).toBe('https://api.cloudflare.com/client/v4/zones?name=other.io');
-    expect(fetchMock.mock.calls[1][0]).toBe('https://api.cloudflare.com/client/v4/zones/zone-lookup/dns_records');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.cloudflare.com/client/v4/zones?name=reports.other.io');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://api.cloudflare.com/client/v4/zones?name=other.io');
+    expect(fetchMock.mock.calls[2][0]).toBe('https://api.cloudflare.com/client/v4/zones/zone-lookup/dns_records');
     expect(result.recordId).toBe('rec-9');
   });
 
   it('falls back to manual mode when the token has no zone for the reports domain', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, result: [] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, result: [] }), { status: 200 })));
     const tenant = makeTenant({ cfToken: 'tok', settings: { reportsDomain: 'reports.nozone.io' } });
     const result = await provisionDomain(tenant, 'acme.com');
     expect(result).toMatchObject({ manual: true, recordId: null });
@@ -115,7 +111,7 @@ describe('provisionDomain', () => {
 
 describe('deprovisionDomain', () => {
   it('DELETEs the correct CF API endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await deprovisionDomain(ENV, 'dns-record-1');
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];

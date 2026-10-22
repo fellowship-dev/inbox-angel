@@ -12,7 +12,7 @@
 // this module only adds the Cloudflare zone API writes on top.
 
 import type { TenantContext } from '../tenancy/context';
-import { CfError, cfErrorText, type CfDnsRecord } from '../tenancy/cf-client';
+import { CfError, CfNotFoundError, cfErrorText, type CfDnsRecord } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import {
   collectIps as collectIpsPure,
@@ -64,8 +64,16 @@ export async function findSpfRecord(
   domain: string,
 ): Promise<CfDnsRecord | null> {
   const zone = await tenant.zoneFor(domain);
-  const records = await tenant.requireCf().listDnsRecords(zone.id, { type: 'TXT', name: domain, per_page: 100 });
-  return records.find(r => r.content.replace(/^"|"$/g, '').startsWith('v=spf1')) ?? null;
+  const cf = tenant.requireCf();
+  const isSpf = (r: CfDnsRecord) => r.content.replace(/^"|"$/g, '').startsWith('v=spf1');
+  const found = (await cf.listDnsRecords(zone.id, { type: 'TXT', name: domain, per_page: 100 })).find(isSpf);
+  if (found) return found;
+  // Installs from before per-domain zones may hold the record in the base zone.
+  const legacy = tenant.legacyZoneId(zone.id);
+  if (!legacy) return null;
+  const old = (await cf.listDnsRecords(legacy, { type: 'TXT', name: domain, per_page: 100 })).find(isSpf);
+  if (old) console.warn(`[spf-flatten] ${domain}: SPF record found in the base zone (legacy location)`);
+  return old ?? null;
 }
 
 // PATCH an existing TXT record content in-place (in the domain's own zone).
@@ -77,8 +85,17 @@ export async function updateDnsRecord(
   audit?: { opts?: SpfAuditOpts; beforeContent?: string },
 ): Promise<void> {
   const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
   try {
-    await tenant.requireCf().patchDnsRecord(zone.id, recordId, { content: newContent });
+    try {
+      await cf.patchDnsRecord(zone.id, recordId, { content: newContent });
+    } catch (e) {
+      // Records written before per-domain zones live in the base zone.
+      const legacy = e instanceof CfNotFoundError ? tenant.legacyZoneId(zone.id) : undefined;
+      if (!legacy) throw e;
+      console.warn(`[spf-flatten] ${domain}: record ${recordId} not in its own zone; patching it in the base zone (legacy location)`);
+      await cf.patchDnsRecord(legacy, recordId, { content: newContent });
+    }
   } catch (e) {
     if (e instanceof CfError) throw new Error(`CF DNS PATCH failed for ${domain}: ${cfErrorText(e)}`);
     throw e;

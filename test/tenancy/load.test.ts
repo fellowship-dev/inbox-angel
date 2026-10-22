@@ -38,9 +38,12 @@ describe('loadTenant', () => {
     const second = await loadTenant(env, ACCT);
     expect(second.settings.zoneId).toBe('zone-1');
     expect(cf.calls).toHaveLength(1);
-    // the stored zone is also what zoneFor() uses for that domain
-    expect((await second.zoneFor('www.acme.com')).id).toBe('zone-1');
+    // the stored zone is what zoneFor() uses for the base domain itself, with no lookup
+    expect((await second.zoneFor('acme.com')).id).toBe('zone-1');
     expect(cf.calls).toHaveLength(1);
+    // a subdomain checks for a zone of its own first, then falls back to the stored one
+    expect((await second.zoneFor('www.acme.com')).id).toBe('zone-1');
+    expect(cf.calls).toHaveLength(2);
   });
 
   it('resolves a subdomain base domain to the apex zone', async () => {

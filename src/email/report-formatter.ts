@@ -55,13 +55,13 @@ export function buildSummary(
 
 // ── Plain text email report ───────────────────────────────────
 
-const STATUS_LINE: Record<OverallStatus, string> = {
+const STATUS_LINE: Readonly<Record<OverallStatus, string>> = {
   protected: '✅ Your domain is protected — this email passed all security checks.',
   at_risk:   '⚠️  Your domain has partial protection — but gaps exist that scammers can exploit.',
   exposed:   '🚨 Your domain is not protected — anyone can send emails pretending to be you.',
 };
 
-const STATUS_HEADING: Record<OverallStatus, string> = {
+const STATUS_HEADING: Readonly<Record<OverallStatus, string>> = {
   protected: 'Good news',
   at_risk:   'You have some protection, but not full coverage',
   exposed:   'Your domain is wide open to impersonation',

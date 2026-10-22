@@ -14,7 +14,7 @@
 
 import { MtaStsMode } from '../db/types';
 import type { TenantContext } from '../tenancy/context';
-import { cfErrorText, type CfDnsRecordInput } from '../tenancy/cf-client';
+import { CfNotFoundError, cfErrorText, type CfDnsRecordInput } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import {
   buildPolicyFile,
@@ -120,8 +120,17 @@ async function patchDnsRecord(
   audit?: { opts?: MtaStsAuditOpts; beforeContent?: string },
 ): Promise<void> {
   const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
   try {
-    await tenant.requireCf().patchDnsRecord(zone.id, recordId, { content });
+    try {
+      await cf.patchDnsRecord(zone.id, recordId, { content });
+    } catch (e) {
+      // Installs from before per-domain zones created these records in the base zone.
+      const legacy = e instanceof CfNotFoundError ? tenant.legacyZoneId(zone.id) : undefined;
+      if (!legacy) throw e;
+      console.warn(`[mta-sts] record ${recordId} not in zone of ${domain}; patching it in the base zone (legacy location)`);
+      await cf.patchDnsRecord(legacy, recordId, { content });
+    }
   } catch (e) {
     throw new Error(`CF DNS patch failed: ${cfErrorText(e)}`);
   }
@@ -148,8 +157,15 @@ async function deleteDnsRecord(
   audit?: MtaStsAuditOpts,
 ): Promise<void> {
   const zone = await tenant.zoneFor(domain);
+  const cf = tenant.requireCf();
   try {
-    await tenant.requireCf().deleteDnsRecord(zone.id, recordId); // already gone is fine
+    let deleted = await cf.deleteDnsRecord(zone.id, recordId); // already gone is fine
+    const legacy = deleted ? undefined : tenant.legacyZoneId(zone.id);
+    if (legacy) {
+      // Not in the domain's zone: installs from before per-domain zones created it in the base zone.
+      deleted = await cf.deleteDnsRecord(legacy, recordId);
+      if (deleted) console.warn(`[mta-sts] record ${recordId} was in the base zone (legacy location); deleted there`);
+    }
   } catch (e) {
     console.warn(`[mta-sts] delete DNS record ${recordId}: ${cfErrorText(e)}`);
     return;
