@@ -36,9 +36,18 @@ export class CfNotFoundError extends CfError {}
 export class CfApiError extends CfError {}
 /** No API token is available for this tenant. */
 export class CfNotConfiguredError extends Error {
-  constructor() {
-    super('Cloudflare credentials not configured');
+  constructor(message = 'Cloudflare credentials not configured') {
+    super(message);
     this.name = 'CfNotConfiguredError';
+  }
+}
+/** The connection's owner did not allow Inbox Angel to manage this zone (or Cloudflare account). */
+export class CfZoneNotAllowedError extends Error {
+  constructor(readonly zone: string, readonly connectionId?: string, readonly kind: 'zone' | 'account' = 'zone') {
+    super(kind === 'zone'
+      ? `Zone ${zone} is not in this Cloudflare connection's allow-list`
+      : `Cloudflare account ${zone} is not the one this connection belongs to`);
+    this.name = 'CfZoneNotAllowedError';
   }
 }
 /** None of the domain's candidate zones exists on the token's Cloudflare account. */
@@ -46,6 +55,20 @@ export class CfZoneNotFoundError extends Error {
   constructor(readonly domain: string) {
     super(`No Cloudflare zone found for ${domain}`);
     this.name = 'CfZoneNotFoundError';
+  }
+}
+
+/** The domain's Cloudflare connection cannot be used: it needs reconnecting (`broken`), was disconnected (`revoked`), or is gone (`missing`). */
+export class CfConnectionError extends Error {
+  constructor(
+    readonly code: 'broken' | 'revoked' | 'missing',
+    readonly connectionId: string,
+    readonly label?: string,
+  ) {
+    super(code === 'missing'
+      ? 'Cloudflare connection not found'
+      : `Cloudflare connection "${label ?? connectionId}" is ${code}: ${code === 'broken' ? 'reconnect it' : 'it was disconnected'}`);
+    this.name = 'CfConnectionError';
   }
 }
 
@@ -71,6 +94,28 @@ export type CfDnsRecordInput = {
   comment?: string;
 };
 
+/**
+ * What a client may touch. A client built for a stored connection carries the owner's allow-list: it
+ * refuses (before any request leaves the Worker) everything under a zone that is not on the list,
+ * whatever the token itself could do.
+ */
+export interface CfPolicy {
+  /** Throws to refuse `method path` (the path as passed to request(), without the API prefix). */
+  request(method: string, path: string): void;
+  /** Throws to refuse a zone that zoneFor() found. */
+  zone(zone: CfZone): void;
+}
+
+export interface CfClientOptions {
+  fetch?: typeof fetch;
+  policy?: CfPolicy;
+  /**
+   * Called once when Cloudflare answers 401 to the current token; returns a fresh token to retry the
+   * request with, or null. (OAuth access tokens: refresh once, then retry.)
+   */
+  onUnauthorized?: () => Promise<string | null>;
+}
+
 export interface CfRequestOptions {
   query?: Record<string, string | number | undefined>;
   body?: unknown;
@@ -93,13 +138,18 @@ export function zoneCandidates(domain: string): string[] {
 }
 
 export class CfClient {
-  readonly #token: string;
+  #token: string | (() => Promise<string>);
   readonly #fetch: typeof fetch;
+  readonly #policy?: CfPolicy;
+  readonly #onUnauthorized?: () => Promise<string | null>;
   readonly #zones = new Map<string, Promise<CfZone | null>>();
 
-  constructor(token: string, opts: { fetch?: typeof fetch } = {}) {
+  /** `token` may be a function, called for every request (so an expiring token is refreshed lazily). */
+  constructor(token: string | (() => Promise<string>), opts: CfClientOptions = {}) {
     if (!token) throw new CfNotConfiguredError();
     this.#token = token;
+    this.#policy = opts.policy;
+    this.#onUnauthorized = opts.onUnauthorized;
     // Looked up per call (not captured) so stubbing globalThis.fetch in tests works.
     this.#fetch = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
@@ -115,6 +165,11 @@ export class CfClient {
    * counts as success when the HTTP status is ok.
    */
   async request<T = unknown>(method: string, path: string, opts: CfRequestOptions = {}): Promise<T> {
+    this.#policy?.request(method.toUpperCase(), path);
+    return this.#send<T>(method, path, opts, false);
+  }
+
+  async #send<T>(method: string, path: string, opts: CfRequestOptions, retried: boolean): Promise<T> {
     const url = new URL(CF_API + path);
     for (const [k, v] of Object.entries(opts.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -125,7 +180,7 @@ export class CfClient {
     try {
       res = await this.#fetch(url.toString(), {
         method,
-        headers: { Authorization: `Bearer ${this.#token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${await this.#bearer()}`, 'Content-Type': 'application/json' },
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       });
     } catch (e) {
@@ -140,9 +195,20 @@ export class CfClient {
     const details = data.errors ?? [];
     const reason = details.map(e => e.message).join(', ') || `HTTP ${res.status}`;
     const message = `Cloudflare ${method} ${shown}: ${reason}`;
+    if (res.status === 401 && !retried && this.#onUnauthorized) {
+      const fresh = await this.#onUnauthorized();
+      if (fresh) {
+        this.#token = fresh;
+        return this.#send<T>(method, path, opts, true);
+      }
+    }
     if (res.status === 401 || res.status === 403) throw new CfAuthError(message, method, shown, res.status, details);
     if (res.status === 404) throw new CfNotFoundError(message, method, shown, res.status, details);
     throw new CfApiError(message, method, shown, res.status, details);
+  }
+
+  async #bearer(): Promise<string> {
+    return typeof this.#token === 'function' ? this.#token() : this.#token;
   }
 
   // ── Zones ───────────────────────────────────────────────────
@@ -159,7 +225,10 @@ export class CfClient {
   async zoneFor(domain: string): Promise<CfZone> {
     for (const name of zoneCandidates(domain)) {
       const zone = await this.#lookupZone(name);
-      if (zone) return zone;
+      if (zone) {
+        this.#policy?.zone(zone);
+        return zone;
+      }
     }
     throw new CfZoneNotFoundError(domain);
   }
@@ -183,8 +252,16 @@ export class CfClient {
     return this.request('GET', `/zones/${zoneId}`);
   }
 
-  listZones(): Promise<{ id: string; name: string; status: string }[]> {
-    return this.request('GET', '/zones', { query: { per_page: 200, status: 'active' } });
+  /** Every active zone the token can see (paged: Cloudflare caps a page at 50). */
+  async listZones(): Promise<{ id: string; name: string; status: string }[]> {
+    const PER_PAGE = 50;
+    const out: { id: string; name: string; status: string }[] = [];
+    for (let page = 1; page <= 40; page++) {
+      const batch = (await this.request<{ id: string; name: string; status: string }[]>('GET', '/zones', { query: { per_page: PER_PAGE, page, status: 'active' } })) ?? [];
+      out.push(...batch);
+      if (batch.length < PER_PAGE) break;
+    }
+    return out;
   }
 
   // ── DNS records ─────────────────────────────────────────────
@@ -213,6 +290,16 @@ export class CfClient {
   }
 
   // ── Account-level ───────────────────────────────────────────
+
+  /** API tokens only: is this token valid (`status: active`)? */
+  verifyToken(): Promise<{ id?: string; status: string; expires_on?: string }> {
+    return this.request('GET', '/user/tokens/verify');
+  }
+
+  /** Cloudflare accounts the token can see. */
+  listAccounts(): Promise<{ id: string; name: string }[]> {
+    return this.request<{ id: string; name: string }[]>('GET', '/accounts', { query: { per_page: 50 } }).then(r => r ?? []);
+  }
 
   workersSubdomain(accountId: string): Promise<{ subdomain: string } | null> {
     return this.request('GET', `/accounts/${accountId}/workers/subdomain`);

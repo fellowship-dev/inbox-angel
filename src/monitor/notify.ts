@@ -73,3 +73,39 @@ export async function sendChangeNotification(
     console.error(`[notify] send failed for ${email}:`, e);
   }
 }
+
+/**
+ * Tell the account's owner and admins that a Cloudflare connection stopped working: DNS changes for the
+ * domains behind it fail until someone reconnects. Same channel as the change alerts (SEND_EMAIL, else a log line).
+ */
+export async function notifyConnectionBroken(
+  tenant: TenantContext,
+  info: { id: string; label: string; detail: string },
+): Promise<void> {
+  const team = await tenant.scope.team.list();
+  const to = team.filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.email);
+  const subject = `Cloudflare connection "${info.label}" needs attention`;
+  const body = [
+    `Inbox Angel can no longer use your Cloudflare connection "${info.label}".`,
+    '',
+    info.detail,
+    '',
+    'DNS changes for the domains managed through it will fail until it is reconnected:',
+    'open your dashboard → Settings → Cloudflare and reconnect it.',
+    '',
+    '—',
+    'InboxAngel',
+  ].join('\n');
+
+  if (!tenant.env.SEND_EMAIL || !tenant.settings.fromEmail || to.length === 0) {
+    console.warn(`[connections] ${tenant.accountId}: connection ${info.id} is broken (${info.detail}); no alert email could be sent`);
+    return;
+  }
+  for (const email of to) {
+    try {
+      await tenant.env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: tenant.settings.fromEmail }, to: [email], subject, text: body });
+    } catch (e) {
+      console.error(`[connections] alert to ${email} failed:`, e instanceof Error ? e.name : 'error');
+    }
+  }
+}

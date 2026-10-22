@@ -13,7 +13,7 @@
 // domains.dns_record_id so we can delete it when the domain is removed.
 
 import type { TenantContext } from '../tenancy/context';
-import { CfNetworkError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
+import { CfNetworkError, CfNotConfiguredError, CfZoneNotFoundError, cfErrorText, type CfClient } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 
 /** Optional audit context — pass to enable self-logging of DNS mutations. */
@@ -53,19 +53,20 @@ export async function provisionDomain(
   const reportsDomain = tenant.settings.reportsDomain;
   // RFC 7489 §7.1 cross-domain authorization record name
   const recordName = `${policyDomain}._report._dmarc.${reportsDomain}`;
-  const cf = tenant.cf();
 
-  if (!cf || !reportsDomain) {
+  if (!tenant.hasCloudflare() || !reportsDomain) {
     // Manual mode — caller must add the DNS record themselves
     return { recordId: null, recordName, manual: true };
   }
 
+  let cf: CfClient;
   let zoneId: string;
   try {
-    zoneId = (await tenant.zoneFor(reportsDomain)).id;
+    cf = await tenant.cfFor(reportsDomain);
+    zoneId = (await cf.zoneFor(reportsDomain)).id;
   } catch (e) {
-    // The token's account has no zone for the reports domain: the user adds the record by hand.
-    if (e instanceof CfZoneNotFoundError) return { recordId: null, recordName, manual: true };
+    // The token's account has no zone for the reports domain (or the domain is not linked to a connection): the user adds the record by hand.
+    if (e instanceof CfZoneNotFoundError || e instanceof CfNotConfiguredError) return { recordId: null, recordName, manual: true };
     throw new DnsProvisionError(`DNS provision failed: ${cfErrorText(e)}`, e);
   }
 
@@ -109,14 +110,14 @@ export async function deprovisionDomain(
   recordId: string,
   audit?: DnsAuditOpts,
 ): Promise<void> {
-  const cf = tenant.cf();
   const reportsDomain = tenant.settings.reportsDomain;
 
   // If CF creds aren't configured, there's nothing to clean up
-  if (!cf || !reportsDomain) return;
+  if (!tenant.hasCloudflare() || !reportsDomain) return;
 
   try {
-    const zone = await tenant.zoneFor(reportsDomain);
+    const cf = await tenant.cfFor(reportsDomain);
+    const zone = await cf.zoneFor(reportsDomain);
     await cf.deleteDnsRecord(zone.id, recordId);
   } catch (e) {
     // Domain delete must still succeed: warn and move on.

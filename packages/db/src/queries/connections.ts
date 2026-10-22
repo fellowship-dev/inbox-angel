@@ -62,6 +62,7 @@ export function connectionQueries(db: Db, accountId: string) {
 					token_envelope: cloudflareConnections.token_envelope,
 					cf_account_id: cloudflareConnections.cf_account_id,
 					label: cloudflareConnections.label,
+					last_used_at: cloudflareConnections.last_used_at,
 				})
 				.from(cloudflareConnections)
 				.where(one(id))
@@ -99,8 +100,28 @@ export function connectionQueries(db: Db, accountId: string) {
 			return (r.meta.changes ?? 0) > 0;
 		},
 
+		/** Reconnect: store a new envelope and make the connection active again. */
+		async reactivate(id: string, envelope: string, scopes: string | null): Promise<boolean> {
+			const r = await db
+				.update(cloudflareConnections)
+				.set({ token_envelope: envelope, scopes, status: 'active', status_detail: null })
+				.where(one(id))
+				.run();
+			return (r.meta.changes ?? 0) > 0;
+		},
+
 		setStatus(id: string, status: CfConnectionStatus, detail: string | null = null) {
 			return db.update(cloudflareConnections).set({ status, status_detail: detail }).where(one(id)).run();
+		},
+
+		/** active → broken. Returns whether this call made the change (so the alert goes out once). */
+		async markBroken(id: string, detail: string): Promise<boolean> {
+			const r = await db
+				.update(cloudflareConnections)
+				.set({ status: 'broken', status_detail: detail })
+				.where(and(one(id), eq(cloudflareConnections.status, 'active')))
+				.run();
+			return (r.meta.changes ?? 0) > 0;
 		},
 
 		markUsed(id: string, nowSeconds: number) {
