@@ -1,6 +1,205 @@
-import { PageSkeleton } from '../../components/states';
+import {
+	Badge,
+	Button,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	EmptyState,
+	FieldError,
+	Input,
+	PageHeader,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	toast,
+} from '@inbox-angel/ui';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Copy, Users } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { ListSkeleton, LoadError, ReadOnlyNotice, Section, WriteButton } from '../../components/states';
+import { api, ApiError, errorMessage } from '../../lib/api';
+import { formatDate } from '../../lib/format';
+import { useSession } from '../../lib/session';
+import type { Role } from '../../lib/types';
+import { Field } from '../auth/AuthLayout';
 
-/** TODO(lane): replaced by the real page. */
+interface TeamMember {
+	id: string;
+	email: string;
+	name: string;
+	role: Role;
+	last_login_at: number | null;
+	created_at: number;
+}
+interface TeamResponse {
+	users: TeamMember[];
+	current_user_id: string | null;
+}
+
+const teamKey = ['team'] as const;
+
+export function inviteLink(token: string): string {
+	return `${window.location.origin}/#/invite/${token}`;
+}
+
 export function TeamPage() {
-	return <PageSkeleton label="TeamPage" />;
+	const { role: myRole, canWrite } = useSession();
+	const team = useQuery({
+		queryKey: teamKey,
+		queryFn: () => api<TeamResponse>('/api/team'),
+		// Members get 403 by design: that is an explanation, not a failure to retry.
+		retry: false,
+		enabled: canWrite,
+	});
+
+	return (
+		<div className="space-y-8">
+			<PageHeader title="Team" description="Everyone here can see all domains and reports. Owners and admins can change things." />
+			<ReadOnlyNotice />
+			{!canWrite ? (
+				<EmptyState icon={<Users />} title="Only owners and admins can see the team" description="Ask an owner if you need to know who has access, or want someone invited." />
+			) : team.isPending ? (
+				<ListSkeleton rows={3} label="Loading team" />
+			) : team.isError ? (
+				<LoadError error={team.error} onRetry={() => team.refetch()} title="Could not load the team" />
+			) : (
+				<>
+					<Section title="Members">
+						<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1" aria-label="Team members">
+							{team.data.users.map((m) => (
+								<MemberRow key={m.id} member={m} isSelf={m.id === team.data.current_user_id} myRole={myRole} />
+							))}
+						</ul>
+					</Section>
+					<InviteSection />
+				</>
+			)}
+		</div>
+	);
+}
+
+function MemberRow({ member, isSelf, myRole }: { member: TeamMember; isSelf: boolean; myRole: Role | null }) {
+	const qc = useQueryClient();
+	const [confirming, setConfirming] = useState(false);
+	const remove = useMutation({
+		mutationFn: () => api(`/api/team/${member.id}`, { method: 'DELETE' }),
+		onSuccess: async () => {
+			setConfirming(false);
+			toast({ variant: 'success', title: `${member.email} removed` });
+			await qc.invalidateQueries({ queryKey: teamKey });
+		},
+	});
+
+	// The API refuses these; say so up front instead of offering a button that fails.
+	let blocked: string | null = null;
+	if (isSelf) blocked = 'You cannot remove yourself.';
+	else if (member.role === 'owner') blocked = 'The owner cannot be removed.';
+	else if (member.role === 'admin' && myRole !== 'owner') blocked = 'Only the owner can remove an admin.';
+
+	return (
+		<li className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+			<span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-sm font-semibold text-brand-ink">
+				{(member.name || member.email).charAt(0).toUpperCase()}
+			</span>
+			<div className="min-w-0 flex-1">
+				<p className="truncate font-medium">
+					{member.name || member.email}
+					{isSelf ? <span className="ml-2 text-sm font-normal text-ink-2">(you)</span> : null}
+				</p>
+				<p className="truncate text-sm text-ink-2">{member.email}</p>
+			</div>
+			<Badge variant={member.role === 'member' ? 'neutral' : 'brand'}>{member.role}</Badge>
+			<p className="text-sm text-ink-2">{member.last_login_at ? `Last sign-in ${formatDate(member.last_login_at)}` : 'Never signed in'}</p>
+			<WriteButton variant="secondary" size="sm" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setConfirming(true)} aria-label={`Remove ${member.email}`}>
+				Remove
+			</WriteButton>
+			<Dialog open={confirming} onOpenChange={setConfirming}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Remove {member.email}?</DialogTitle>
+						<DialogDescription>They lose access immediately, and their API keys stop working. This cannot be undone.</DialogDescription>
+					</DialogHeader>
+					{remove.isError ? <FieldError>{errorMessage(remove.error)}</FieldError> : null}
+					<DialogFooter>
+						<Button variant="secondary" onClick={() => setConfirming(false)}>
+							Cancel
+						</Button>
+						<Button variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>
+							Remove member
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</li>
+	);
+}
+
+function InviteSection() {
+	const [email, setEmail] = useState('');
+	const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
+	const [link, setLink] = useState<string | null>(null);
+	const invite = useMutation({
+		mutationFn: () => api<{ token: string }>('/api/team/invite', { method: 'POST', body: { email: email.trim(), role: inviteRole } }),
+		onSuccess: ({ token }) => {
+			setLink(inviteLink(token));
+			setEmail('');
+		},
+	});
+
+	function submit(e: FormEvent) {
+		e.preventDefault();
+		setLink(null);
+		invite.mutate();
+	}
+
+	return (
+		<Section title="Invite a teammate" description="We do not send email: you get a one-time link to pass on. It expires in 7 days.">
+			<form onSubmit={submit} className="grid gap-4 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+				<Field id="invite-email" label="Email">
+					<Input id="invite-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@yourcompany.com" />
+				</Field>
+				<Field id="invite-role" label="Role">
+					<Select value={inviteRole} onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}>
+						<SelectTrigger id="invite-role" aria-label="Role">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="member">Member (read-only)</SelectItem>
+							<SelectItem value="admin">Admin</SelectItem>
+						</SelectContent>
+					</Select>
+				</Field>
+				<WriteButton type="submit" loading={invite.isPending}>
+					Create invite link
+				</WriteButton>
+			</form>
+			{invite.isError ? <FieldError>{invite.error instanceof ApiError && invite.error.status === 409 ? 'Someone with this email already has an account.' : errorMessage(invite.error)}</FieldError> : null}
+			{link ? (
+				<div className="space-y-2 rounded-lg border border-line bg-surface-2 p-4" role="status">
+					<p className="text-sm font-medium">Send this link to your teammate. It works once.</p>
+					<div className="flex items-center gap-2">
+						<code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface-1 px-3 py-2 font-mono text-sm" data-testid="invite-link">
+							{link}
+						</code>
+						<Button
+							variant="secondary"
+							size="sm"
+							onClick={async () => {
+								await navigator.clipboard?.writeText(link).catch(() => {});
+								toast({ variant: 'success', title: 'Invite link copied' });
+							}}
+						>
+							<Copy aria-hidden />
+							Copy
+						</Button>
+					</div>
+				</div>
+			) : null}
+		</Section>
+	);
 }

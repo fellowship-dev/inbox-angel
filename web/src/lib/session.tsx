@@ -34,7 +34,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 		queryKey: ['me'],
 		queryFn: async () => {
 			try {
-				return await api<Me>('/api/me');
+				return await api<Me>('/api/me', { quiet401: true });
 			} catch (e) {
 				if (e instanceof ApiError && e.status === 401) {
 					tokenStore.clear();
@@ -59,7 +59,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
 	const clearSession = useCallback(() => {
 		tokenStore.clear();
-		qc.clear();
+		// Forget everything a signed-in user could see, but keep the session queries mounted: they now answer "nobody".
+		qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' && q.queryKey[0] !== 'auth-status' });
 		qc.setQueryData(['me'], null);
 	}, [qc]);
 

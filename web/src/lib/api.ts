@@ -44,6 +44,8 @@ export interface RequestOptions {
 	method?: string;
 	body?: unknown;
 	signal?: AbortSignal;
+	/** The caller handles 401 itself (the session probe): don't sign out and wipe the cache. */
+	quiet401?: boolean;
 }
 
 export async function api<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -79,7 +81,7 @@ export async function api<T = unknown>(path: string, opts: RequestOptions = {}):
 	}
 	const serverMessage = (body as { error?: string } | undefined)?.error;
 	// Credential-less endpoints (login, setup …) answer 401 for a wrong password: that is not "session ended".
-	if (res.status === 401 && !path.startsWith('/api/auth/') && !path.startsWith('/api/invites/')) unauthorizedHandler?.();
+	if (res.status === 401 && !opts.quiet401 && !path.startsWith('/api/auth/') && !path.startsWith('/api/invites/')) unauthorizedHandler?.();
 	throw new ApiError(res.status, serverMessage ?? FALLBACK[res.status] ?? `Unexpected error (${res.status})`, body);
 }
 
