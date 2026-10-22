@@ -25,25 +25,16 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
   };
 });
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const DOMAIN: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.test.com', dns_record_id: null };
 
 function makeEnv(): Env {
-  const first = (sql: string) =>
-    sql.includes('FROM domains') ? Promise.resolve(DOMAIN) : Promise.resolve(null);
-  return {
-    DB: {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn().mockReturnValue({ first: () => first(sql), run: vi.fn().mockResolvedValue({ success: true }), all: vi.fn().mockResolvedValue({ results: [] }) }),
-        first: () => first(sql),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database,
-    API_KEY: 'k',
-  } as unknown as Env;
+  const db = createMigratedD1();
+  db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, dns_record_id) VALUES (?, ?, ?, ?)').run(DOMAIN.id!, DOMAIN.domain!, DOMAIN.rua_address!, null);
+  return { DB: db as unknown as D1Database, API_KEY: 'k' } as unknown as Env;
 }
 
 const get = (path: string) => new Request(`https://api.inboxangel.com${path}`, { method: 'GET' });

@@ -12,8 +12,7 @@
 
 import { Env } from '../index';
 import { extractTextBody } from './mime-extract';
-import { getDomainByName } from '../db/queries';
-import { insertTlsReport } from '../db/queries';
+import { scope } from '../db/scope';
 
 // RFC 8460 § 4.3 — subset of fields we care about
 interface TlsRptFailureDetail {
@@ -93,7 +92,7 @@ export async function handleTlsRptReport(
     const policyDomain = policy.policy?.['policy-domain'];
     if (!policyDomain) continue;
 
-    const domain = await getDomainByName(env.DB, policyDomain);
+    const domain = await scope(env.DB).domains.getByName(policyDomain);
     if (!domain) {
       console.warn(`[tls-rpt] unknown domain ${policyDomain} — skipping policy`);
       continue;
@@ -107,7 +106,7 @@ export async function handleTlsRptReport(
       : null;
 
     try {
-      await insertTlsReport(env.DB, {
+      await scope(env.DB).reports.insertTls({
         domain_id: domain.id,
         org_name: orgName,
         date_begin: dateBegin,

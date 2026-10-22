@@ -10,7 +10,7 @@ import { extractAuthResults } from './parse-headers';
 import { checkDomain } from './dns-check';
 import { buildSummary, formatCheckReport } from './report-formatter';
 import { buildFreeCheckHtml } from './html-templates';
-import { insertCheckResult } from '../db/queries';
+import { globals } from '../db/scope';
 import { fromEmail as derivedFromEmail } from '../env-utils';
 
 function extractDomain(email: string): string {
@@ -71,7 +71,7 @@ export async function handleFreeCheck(
 
   // 6. Store result in D1 (best-effort — don't let DB failure break the email flow)
   try {
-    await insertCheckResult(env.DB, {
+    await globals(env.DB).checkResults.insert({
       from_email: fromEmail,
       from_domain: domain,
       spf_result: (auth?.spf?.result ?? null) as any,

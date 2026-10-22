@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { storeReport } from '../../src/dmarc/store-report';
 import type { AggregateReport, ReportRecord } from '../../src/dmarc/types';
 
@@ -83,127 +84,77 @@ function makeReport(overrides: Partial<{
   };
 }
 
-// ── D1 mock builder ───────────────────────────────────────────
-//
-// Tracks: insertAggregateReport calls → lastRowId, insertReportRecords batch calls
+// ── Real in-memory D1 ─────────────────────────────────────────
 
-interface MockDb {
-  db: D1Database;
-  aggregateInserts: any[][];   // args to each insertAggregateReport call
-  recordBatches: any[][][];    // args per batch call (array of statement bind args)
-  lastRowId: number;
-}
-
-function makeDb(lastRowId = 42): MockDb {
-  const aggregateInserts: any[][] = [];
-  const recordBatches: any[][][] = [];
-
-  // The prepared statement: .bind(...) → .run() / .batch()
-  const stmtFor = (sql: string) => ({
-    bind: vi.fn((...args: any[]) => {
-      if (sql.includes('aggregate_reports')) aggregateInserts.push(args);
-      return {
-        run: vi.fn().mockResolvedValue({ meta: { last_row_id: lastRowId } }),
-      };
-    }),
-  });
-
-  const db = {
-    prepare: vi.fn((sql: string) => stmtFor(sql)),
-    batch: vi.fn((stmts: any[]) => {
-      // Capture bind args from each statement
-      const batchArgs = stmts.map(s => s); // already bound
-      recordBatches.push(batchArgs);
-      return Promise.resolve(stmts.map(() => ({ success: true, meta: {} })));
-    }),
-  } as unknown as D1Database;
-
-  return { db, aggregateInserts, recordBatches, lastRowId };
+function makeDb() {
+  const db = createMigratedD1();
+  db.sqlite
+    .prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'example.com', 'rua@reports.inboxangel.io')")
+    .run();
+  const reports = () => db.sqlite.prepare('SELECT * FROM aggregate_reports ORDER BY id').all() as Record<string, any>[];
+  const records = () => db.sqlite.prepare('SELECT * FROM report_records ORDER BY id').all() as Record<string, any>[];
+  return { db: db as unknown as D1Database, reports, records };
 }
 
 // ── Tests ─────────────────────────────────────────────────────
 
 describe('storeReport', () => {
   it('returns stored=true and reportId on first insert', async () => {
-    const { db } = makeDb(42);
+    const { db, reports } = makeDb();
     const result = await storeReport(db, 1, makeReport());
 
     expect(result.stored).toBe(true);
-    expect(result.reportId).toBe(42);
+    expect(result.reportId).toBe(reports()[0].id);
+    expect(reports()).toHaveLength(1);
   });
 
-  it('returns stored=false when INSERT OR IGNORE skips (last_row_id=0)', async () => {
-    const { db } = makeDb(0); // 0 = ignored
+  it('returns stored=false when INSERT OR IGNORE skips (duplicate report_id)', async () => {
+    const { db, reports } = makeDb();
+    await storeReport(db, 1, makeReport());
     const result = await storeReport(db, 1, makeReport());
 
     expect(result.stored).toBe(false);
     expect(result.reportId).toBeUndefined();
+    expect(reports()).toHaveLength(1);
   });
 
   it('does not insert records when report was a duplicate', async () => {
-    const { db, recordBatches } = makeDb(0);
+    const { db, records } = makeDb();
+    await storeReport(db, 1, makeReport());
+    expect(records()).toHaveLength(1);
     await storeReport(db, 1, makeReport());
 
-    expect(recordBatches).toHaveLength(0);
+    expect(records()).toHaveLength(1);
   });
 
   it('inserts records batch when report is new', async () => {
     const report = makeReport({
       records: [makeRecord({ ip: '10.0.0.1' }), makeRecord({ ip: '10.0.0.2' })],
     });
-    const { db } = makeDb(7);
-    const prepareMock = vi.fn((sql: string) => ({
-      bind: vi.fn((...args: any[]) => ({
-        run: vi.fn().mockResolvedValue({ meta: { last_row_id: 7 } }),
-      })),
-    }));
-    const batchCalls: any[] = [];
-    const mockDb = {
-      prepare: prepareMock,
-      batch: vi.fn((stmts) => {
-        batchCalls.push(stmts);
-        return Promise.resolve(stmts.map(() => ({ success: true, meta: {} })));
-      }),
-    } as unknown as D1Database;
+    const { db, records } = makeDb();
 
-    await storeReport(mockDb, 1, report);
-    // batch called once with 2 statements (one per record)
-    expect(batchCalls).toHaveLength(1);
-    expect(batchCalls[0]).toHaveLength(2);
+    const result = await storeReport(db, 1, report);
+    // one row per record, all linked to the new report
+    expect(records()).toHaveLength(2);
+    expect(records().map(r => r.source_ip)).toEqual(['10.0.0.1', '10.0.0.2']);
+    expect(records().every(r => r.report_id === result.reportId)).toBe(true);
   });
 
   it('skips batch insert entirely when report has no records', async () => {
-    const batchCalls: any[] = [];
-    const mockDb = {
-      prepare: vi.fn(() => ({
-        bind: vi.fn(() => ({
-          run: vi.fn().mockResolvedValue({ meta: { last_row_id: 5 } }),
-        })),
-      })),
-      batch: vi.fn((stmts) => { batchCalls.push(stmts); return Promise.resolve([]); }),
-    } as unknown as D1Database;
+    const { db, reports, records } = makeDb();
 
     const report = makeReport({ records: [] });
-    const result = await storeReport(mockDb, 1, report);
+    const result = await storeReport(db, 1, report);
 
     expect(result.stored).toBe(true);
-    expect(batchCalls).toHaveLength(0);
+    expect(reports()).toHaveLength(1);
+    expect(records()).toHaveLength(0);
   });
 
   // ── count arithmetic ─────────────────────────────────────────
 
   it('computes total_count as sum of all record.count values', async () => {
-    const captured: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('aggregate_reports')) captured.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
-
+    const { db, reports } = makeDb();
     const report = makeReport({
       records: [
         makeRecord({ count: 10 }),
@@ -211,26 +162,13 @@ describe('storeReport', () => {
         makeRecord({ count: 3 }),
       ],
     });
-    await storeReport(mockDb, 1, report);
+    await storeReport(db, 1, report);
 
-    // total_count is the 6th bind arg: (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, raw_xml)
-    const args = captured[0];
-    const totalCount = args[5];
-    expect(totalCount).toBe(18); // 10+5+3
+    expect(reports()[0].total_count).toBe(18); // 10+5+3
   });
 
   it('counts pass_count weighted by message count (dkim pass)', async () => {
-    const captured: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('aggregate_reports')) captured.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
-
+    const { db, reports } = makeDb();
     const report = makeReport({
       records: [
         makeRecord({ count: 10, dkimResult: 'pass', spfResult: 'fail' }), // passes
@@ -238,110 +176,57 @@ describe('storeReport', () => {
         makeRecord({ count: 3,  dkimResult: 'fail', spfResult: 'pass' }), // passes (via SPF)
       ],
     });
-    await storeReport(mockDb, 1, report);
+    await storeReport(db, 1, report);
 
-    const args = captured[0];
-    // (domain_id[0], org_name[1], report_id[2], date_begin[3], date_end[4], total_count[5], pass_count[6], fail_count[7], raw_xml[8])
-    expect(args[5]).toBe(18);  // total
-    expect(args[6]).toBe(13);  // pass: 10+3
-    expect(args[7]).toBe(5);   // fail: 5
+    const row = reports()[0];
+    expect(row.total_count).toBe(18);
+    expect(row.pass_count).toBe(13);  // pass: 10+3
+    expect(row.fail_count).toBe(5);   // fail: 5
   });
 
   it('converts ISO date strings to unix timestamps', async () => {
-    const captured: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('aggregate_reports')) captured.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
-
+    const { db, reports } = makeDb();
     const report = makeReport({
       beginDate: '2024-06-13T00:00:00Z',
       endDate:   '2024-06-13T23:59:59Z',
     });
-    await storeReport(mockDb, 1, report);
+    await storeReport(db, 1, report);
 
-    const args = captured[0];
-    expect(args[3]).toBe(1718236800); // 2024-06-13 00:00:00 UTC
-    expect(args[4]).toBe(1718323199); // 2024-06-13 23:59:59 UTC
+    expect(reports()[0].date_begin).toBe(1718236800); // 2024-06-13 00:00:00 UTC
+    expect(reports()[0].date_end).toBe(1718323199);   // 2024-06-13 23:59:59 UTC
   });
 
   it('passes rawXml to the insert', async () => {
-    const captured: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('aggregate_reports')) captured.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
-
-    await storeReport(mockDb, 1, makeReport(), '<xml>raw</xml>');
-    expect(captured[0][8]).toBe('<xml>raw</xml>');
+    const { db, reports } = makeDb();
+    await storeReport(db, 1, makeReport(), '<xml>raw</xml>');
+    expect(reports()[0].raw_xml).toBe('<xml>raw</xml>');
   });
 
   it('passes null rawXml when not provided', async () => {
-    const captured: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('aggregate_reports')) captured.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database;
-
-    await storeReport(mockDb, 1, makeReport());
-    expect(captured[0][8]).toBeNull();
+    const { db, reports } = makeDb();
+    await storeReport(db, 1, makeReport());
+    expect(reports()[0].raw_xml).toBeNull();
   });
 
   it('maps record source_ip from source.ip', async () => {
-    const batchArgs: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('report_records')) batchArgs.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn((stmts) => Promise.resolve(stmts.map(() => ({ success: true })))),
-    } as unknown as D1Database;
-
+    const { db, records } = makeDb();
     const report = makeReport({ records: [makeRecord({ ip: '192.168.1.100' })] });
-    await storeReport(mockDb, 1, report);
+    await storeReport(db, 1, report);
 
-    // source_ip is the 2nd bind arg (report_id, source_ip, ...)
-    expect(batchArgs[0][1]).toBe('192.168.1.100');
+    expect(records()[0].source_ip).toBe('192.168.1.100');
   });
 
   it('handles record with no DKIM auth result gracefully (null fields)', async () => {
-    const batchArgs: any[] = [];
-    const mockDb = {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...args: any[]) => {
-          if (sql.includes('report_records')) batchArgs.push(args);
-          return { run: vi.fn().mockResolvedValue({ meta: { last_row_id: 1 } }) };
-        }),
-      })),
-      batch: vi.fn((stmts) => Promise.resolve(stmts.map(() => ({ success: true })))),
-    } as unknown as D1Database;
-
+    const { db, records } = makeDb();
     const rec: ReportRecord = {
       ...makeRecord(),
       auth_results: { dkim: [], spf: [] }, // empty auth results
     };
     const report = makeReport({ records: [rec] });
-    await storeReport(mockDb, 1, report);
+    await storeReport(db, 1, report);
 
     // dkim_result and spf_result should be null (not crash)
-    expect(batchArgs[0][4]).toBeNull(); // dkim_result
-    expect(batchArgs[0][6]).toBeNull(); // spf_result
+    expect(records()[0].dkim_result).toBeNull();
+    expect(records()[0].spf_result).toBeNull();
   });
 });

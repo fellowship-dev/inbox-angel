@@ -35,6 +35,7 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const BASE = 'https://api.inboxangel.com';
@@ -50,21 +51,9 @@ function req(method: string, path: string, body?: unknown): Request {
   });
 }
 
-function makeEnv(dbOverrides: Partial<{ prepare: any; batch: any }> = {}): Env {
+function makeEnv(): Env {
   return {
-    DB: {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-          first: vi.fn().mockResolvedValue(null),
-          all:   vi.fn().mockResolvedValue({ results: [] }),
-        }),
-        first: vi.fn().mockResolvedValue(null),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-      batch: vi.fn().mockResolvedValue([{ success: true }, { success: true }]),
-      ...dbOverrides,
-    } as unknown as D1Database,
+    DB: createMigratedD1() as unknown as D1Database,
     API_KEY: 'test-key',
     CLOUDFLARE_API_TOKEN: 'tok-test',
   };
@@ -109,25 +98,17 @@ describe('GET /api/zones', () => {
 
 describe('PUT /api/domains/:id/set-default', () => {
   it('returns 200 with warning on success', async () => {
-    const env = makeEnv({
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          first: vi.fn().mockResolvedValue({ id: 3, domain: 'example.com' }),
-          run: vi.fn().mockResolvedValue({ success: true }),
-          all: vi.fn().mockResolvedValue({ results: [] }),
-        }),
-        first: vi.fn().mockResolvedValue(null),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
+    const env = makeEnv();
+    const sqlite = (env.DB as any).sqlite;
+    sqlite.exec("INSERT INTO domains (id, domain, rua_address, is_default) VALUES (1, 'old.com', 'r@x.com', 1), (3, 'example.com', 'r@x.com', 0)");
 
     const res = await handleApi(req('PUT', '/api/domains/3/set-default'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.ok).toBe(true);
     expect(typeof body.warning).toBe('string');
-    // batch must be called to atomically swap is_default
-    expect(env.DB!.batch).toHaveBeenCalled();
+    // is_default is atomically swapped to the target
+    expect(sqlite.prepare('SELECT id FROM domains WHERE is_default = 1').all()).toEqual([{ id: 3 }]);
   });
 
   it('returns 404 when domain does not exist', async () => {
@@ -179,28 +160,15 @@ describe('enrichEnv() fallback to is_default=1', () => {
     // Reset caches so enrichEnv reads fresh
     resetEnvCache();
 
-    const mockDb = {
-      prepare: vi.fn().mockImplementation((sql: string) => {
-        const isDefaultQuery = sql.includes('is_default');
-        return {
-          // getSettings calls .bind(...keys).all()
-          bind: vi.fn().mockReturnValue({
-            all: vi.fn().mockResolvedValue({ results: [] }), // no settings rows → no base_domain
-            first: vi.fn().mockResolvedValue(null),
-            run: vi.fn().mockResolvedValue({ success: true }),
-          }),
-          // enrichEnv fallback calls .first() directly (no bind) for is_default query
-          first: vi.fn().mockResolvedValue(isDefaultQuery ? { domain: 'fallback.com' } : null),
-          all: vi.fn().mockResolvedValue({ results: [] }),
-        };
-      }),
-    } as unknown as D1Database;
+    const db = createMigratedD1();
+    // no base_domain in settings, but a default domain exists
+    db.sqlite.exec("INSERT INTO domains (id, domain, rua_address, is_default) VALUES (1, 'fallback.com', 'r@x.com', 1)");
 
-    const fakeEnv = { DB: mockDb, CLOUDFLARE_API_TOKEN: undefined } as any;
-    await enrichEnv(fakeEnv, mockDb);
+    const fakeEnv = { DB: db, CLOUDFLARE_API_TOKEN: undefined } as any;
+    await enrichEnv(fakeEnv, db as unknown as D1Database);
 
-    // The query for is_default=1 should have been called
-    const calls = (mockDb.prepare as any).mock.calls.map(([sql]: [string]) => sql);
-    expect(calls.some((sql: string) => sql.includes('is_default'))).toBe(true);
+    // The base domain is derived from the is_default=1 domain
+    const { getBaseDomain } = await vi.importActual<typeof import('../../src/env-utils')>('../../src/env-utils');
+    expect(getBaseDomain()).toBe('fallback.com');
   });
 });

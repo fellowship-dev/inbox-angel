@@ -1,10 +1,10 @@
 import { handleEmail } from './email/handler';
 import { handleApi } from './api/router';
-import { getActiveSubscriptions, updateSubscriptionBaseline, getAllEnabledSpfFlattenConfigs, updateSpfFlattenResult, updateSpfFlattenError, getDomainById, getAllDomains, updateDomainSpfLookupCount, getAllEnabledMtaStsConfigs, getMtaStsConfigByDomain, updateMtaStsMxHosts, updateMtaStsError, getHeartbeatStats, getDomainStats } from './db/queries';
+import { scope } from './db/scope';
 import { checkSubscription, detectRollbackRisk } from './monitor/check';
 import { sendChangeNotification } from './monitor/notify';
 import { sendWeeklyDigests } from './digest/weekly';
-import { ensureMigrated } from './db/migrate';
+import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
 import { enrichEnv, getZoneId } from './env-utils';
 import { logAudit } from './audit/log';
 import { track } from './telemetry';
@@ -33,7 +33,12 @@ export type BoundEnv = Env & { DB: D1Database };
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (!env.DB) return setupPage();
-    await ensureMigrated(env.DB);
+    try {
+      await assertSchemaReady(env.DB);
+    } catch (e) {
+      if (e instanceof SchemaNotReadyError) return new Response(e.message, { status: 503 });
+      throw e;
+    }
     const url = new URL(request.url);
     const { pathname, hostname } = url;
 
@@ -41,7 +46,7 @@ export default {
     // mta-sts.domain.com CNAME → this Worker; CF Universal SSL covers HTTPS
     if (hostname.startsWith('mta-sts.') && pathname === '/.well-known/mta-sts.txt') {
       const domain = hostname.slice('mta-sts.'.length);
-      const config = await getMtaStsConfigByDomain(env.DB, domain);
+      const config = await scope(env.DB).mtaSts.getEnabledByDomain(domain);
       if (!config) return new Response('MTA-STS not configured for this domain', { status: 404 });
       const mxHosts = config.mx_hosts ? config.mx_hosts.split(',').filter(Boolean) : [];
       const policy = buildPolicyFile(config.mode, mxHosts, 86400);
@@ -62,20 +67,33 @@ export default {
   // Email Worker (inbound: free check + DMARC RUA reports)
   async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.DB) { console.error('[email] DB binding missing — D1 not configured'); return; }
-    await ensureMigrated(env.DB);
+    try {
+      await assertSchemaReady(env.DB);
+    } catch (e) {
+      console.error('[email]', e instanceof Error ? e.message : e);
+      // Throw (don't return): returning would accept the message and silently drop the report.
+      // An uncaught Worker error is a delivery failure, so the sending MTA retries. (setReject()
+      // is a permanent 5xx and senders would give up.)
+      throw e;
+    }
     await handleEmail(message, env as BoundEnv, ctx);
   },
 
   // Cron dispatcher — routes by schedule expression
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (!env.DB) { console.error('[cron] DB binding missing — D1 not configured'); return; }
-    await ensureMigrated(env.DB);
+    try {
+      await assertSchemaReady(env.DB);
+    } catch (e) {
+      console.error('[cron]', e instanceof Error ? e.message : e);
+      return;
+    }
     await enrichEnv(env, env.DB);
 
     // Daily telemetry heartbeat — every day 11am UTC
     if (event.cron === '0 11 * * *') {
       try {
-        const stats = await getHeartbeatStats(env.DB!);
+        const stats = await scope(env.DB!).heartbeat();
         await track(env, { event: 'instance.heartbeat', ...stats });
       } catch (e) {
         console.error('[telemetry] heartbeat failed:', e);
@@ -92,16 +110,16 @@ export default {
     // Daily SPF flatten refresh — every day 10am UTC
     if (event.cron === '0 10 * * *') {
       if (env.CLOUDFLARE_API_TOKEN && getZoneId()) {
-        const { results: configs } = await getAllEnabledSpfFlattenConfigs(env.DB);
+        const configs = await scope(env.DB).spf.allEnabled();
         console.log(`[spf-flatten] refreshing ${configs.length} flattened domains`);
         for (const config of configs) {
-          const domain = await getDomainById(env.DB, config.domain_id);
+          const domain = await scope(env.DB).domains.getById(config.domain_id);
           if (!domain) continue;
           try {
             const result = await flattenSpf(domain.domain, {
               CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
             }, config.cf_record_id);
-            await updateSpfFlattenResult(env.DB, config.domain_id, result.flattened_record, result.ip_count, result.cf_record_id);
+            await scope(env.DB).spf.updateResult(config.domain_id, result.flattened_record, result.ip_count, result.cf_record_id);
             console.log(`[spf-flatten] ${domain.domain}: updated (${result.ip_count} IPs)`);
             logAudit(env.DB, {
               actor_type: 'system',
@@ -113,7 +131,7 @@ export default {
             }, ctx);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            await updateSpfFlattenError(env.DB, config.domain_id, msg);
+            await scope(env.DB).spf.updateError(config.domain_id, msg);
             console.error(`[spf-flatten] ${domain.domain}: error — ${msg}`);
           }
         }
@@ -123,12 +141,12 @@ export default {
 
     // Daily monitor check — every day 8am UTC (default / catch-all)
     // Also refresh SPF lookup counts for all domains
-    const { results: allDomains } = await getAllDomains(env.DB);
+    const allDomains = await scope(env.DB).domains.list();
     for (const d of allDomains) {
       lookupSpf(d.domain)
         .then(spf => {
           if (spf?.lookup_count !== undefined) {
-            return updateDomainSpfLookupCount(env.DB!, d.id, spf.lookup_count);
+            return scope(env.DB!).domains.updateSpfLookupCount(d.id, spf.lookup_count);
           }
         })
         .catch(e => console.warn(`[monitor] SPF lookup refresh failed for ${d.domain}:`, e));
@@ -140,11 +158,11 @@ export default {
       try {
         const now = Math.floor(Date.now() / 1000);
         const [curr, prev] = await Promise.all([
-          getDomainStats(env.DB!, d.id, now - 7 * 86400),
-          getDomainStats(env.DB!, d.id, now - 14 * 86400),
+          scope(env.DB!).reports.dailyStats(d.id, now - 7 * 86400),
+          scope(env.DB!).reports.dailyStats(d.id, now - 14 * 86400),
         ]);
-        const currRows = curr.results ?? [];
-        const prevRows = prev.results?.filter(r => r.day < new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)) ?? [];
+        const currRows = curr;
+        const prevRows = prev.filter(r => r.day < new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10));
         const rate = (rows: typeof currRows) => {
           const t = rows.reduce((n, r) => n + r.total, 0);
           const p = rows.reduce((n, r) => n + r.passed, 0);
@@ -162,10 +180,10 @@ export default {
 
     // MTA-STS MX refresh — update policy_id in DNS if MX hosts changed
     if (env.CLOUDFLARE_API_TOKEN && getZoneId()) {
-      const { results: mtaConfigs } = await getAllEnabledMtaStsConfigs(env.DB);
+      const mtaConfigs = await scope(env.DB).mtaSts.allEnabled();
       const patchEnv = { CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN };
       for (const cfg of mtaConfigs) {
-        const domain = await getDomainById(env.DB, cfg.domain_id);
+        const domain = await scope(env.DB).domains.getById(cfg.domain_id);
         if (!domain) continue;
         try {
           const liveMx = await discoverMxHosts(domain.domain);
@@ -182,7 +200,7 @@ export default {
           if (changed && cfg.mta_sts_record_id) {
             const newPolicyId = generatePolicyId();
             await updateMtaStsTxtRecord(cfg.mta_sts_record_id, newPolicyId, patchEnv);
-            await updateMtaStsMxHosts(env.DB, cfg.domain_id, liveMx.join(','), newPolicyId);
+            await scope(env.DB).mtaSts.updateMxHosts(cfg.domain_id, liveMx.join(','), newPolicyId);
             console.log(`[mta-sts] ${domain.domain}: MX changed, policy_id updated`);
             logAudit(env.DB, {
               actor_type: 'system',
@@ -195,13 +213,13 @@ export default {
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          await updateMtaStsError(env.DB, cfg.domain_id, msg);
+          await scope(env.DB).mtaSts.updateError(cfg.domain_id, msg);
           console.error(`[mta-sts] ${domain.domain}: MX refresh error — ${msg}`);
         }
       }
     }
 
-    const { results: subscriptions } = await getActiveSubscriptions(env.DB, 200);
+    const subscriptions = await scope(env.DB).monitor.active(200);
     console.log(`[monitor] checking ${subscriptions.length} subscriptions`);
 
     for (const sub of subscriptions) {
@@ -210,7 +228,7 @@ export default {
         if (errors.spf || errors.dmarc) {
           console.warn(`[monitor] ${sub.domain}: DNS lookup failed, baseline kept (${[errors.spf, errors.dmarc].filter(Boolean).join('; ')})`);
         }
-        await updateSubscriptionBaseline(env.DB, sub.id, newBaseline);
+        await scope(env.DB).monitor.updateBaseline(sub.id, newBaseline);
 
         if (changes.length > 0) {
           console.log(`[monitor] ${sub.domain} changed: ${changes.map(c => c.field).join(', ')}`);

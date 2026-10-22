@@ -30,6 +30,7 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const BASE = 'https://api.example.com';
@@ -46,21 +47,12 @@ const domain: Partial<Domain> = {
 };
 
 function makeEnv(domainRow: Partial<Domain> | null = domain): Env {
-  return {
-    DB: {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 5 } }),
-          first: vi.fn().mockResolvedValue(domainRow),
-          all:   vi.fn().mockResolvedValue({ results: [] }),
-        }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database,
-    API_KEY: 'test-key',
-  } as Env;
+  const db = createMigratedD1();
+  if (domainRow) {
+    db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, dmarc_policy, dmarc_pct) VALUES (?, ?, ?, ?, ?)')
+      .run(domainRow.id!, domainRow.domain!, domainRow.rua_address!, domainRow.dmarc_policy ?? null, domainRow.dmarc_pct ?? null);
+  }
+  return { DB: db as unknown as D1Database, API_KEY: 'test-key' } as Env;
 }
 
 function req(method: string, path: string, body?: unknown): Request {
@@ -77,8 +69,11 @@ function req(method: string, path: string, body?: unknown): Request {
 
 describe('POST /api/domains/:id/rollout-advance', () => {
   it('persists a testing (t=y) step', async () => {
-    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', testing: true }), makeEnv(), ctx);
+    const env = makeEnv();
+    const res = await handleApi(req('POST', '/api/domains/5/rollout-advance', { policy: 'quarantine', testing: true }), env, ctx);
     expect(res.status).toBe(200);
+    expect((env.DB as any).sqlite.prepare('SELECT rollout_rec_policy, rollout_rec_pct FROM domains WHERE id = 5').get())
+      .toMatchObject({ rollout_rec_policy: 'quarantine', rollout_rec_pct: 0 });
     const body = await res.json() as any;
     expect(body.ok).toBe(true);
     expect(body.rollout_rec_policy).toBe('quarantine');

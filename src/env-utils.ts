@@ -1,5 +1,5 @@
 import { Env } from './index';
-import { getSettings, persistConfig } from './db/queries';
+import { scope } from './db/scope';
 
 // Module-level cache — lives for the lifetime of the Worker instance (reused across requests)
 let _enrichedOnce = false;
@@ -130,7 +130,7 @@ export async function enrichEnv(env: Env, db?: D1Database): Promise<void> {
 
   // 1. Load from D1 if we have a database and haven't loaded yet
   if (effectiveDb && !_enrichedOnce) {
-    const settings = await getSettings(effectiveDb, [
+    const settings = await scope(effectiveDb).settings.getMany([
       'base_domain', 'zone_id', 'account_id', 'reports_domain', 'from_email', 'workers_subdomain',
       'brand_logo_url', 'brand_color',
     ]);
@@ -148,9 +148,7 @@ export async function enrichEnv(env: Env, db?: D1Database): Promise<void> {
     // Fallback: derive base domain from domains.is_default=1 if not in settings.
     // This supports the multi-domain model where base_domain migrates out of settings.
     if (!_baseDomainCache) {
-      const defaultDomain = await effectiveDb
-        .prepare('SELECT domain FROM domains WHERE is_default = 1 LIMIT 1')
-        .first<{ domain: string }>();
+      const defaultDomain = await scope(effectiveDb).domains.getDefault();
       if (defaultDomain) _baseDomainCache = defaultDomain.domain;
     }
 
@@ -182,7 +180,7 @@ export async function enrichEnv(env: Env, db?: D1Database): Promise<void> {
       account_id: _accountIdCache,
     };
     if (_workersSubdomainCache) topersist.workers_subdomain = _workersSubdomainCache;
-    persistConfig(effectiveDb, topersist).catch(() => {});
+    scope(effectiveDb).settings.setMany(topersist).catch(() => {});
   }
 }
 

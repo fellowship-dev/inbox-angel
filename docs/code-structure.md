@@ -49,7 +49,7 @@ Keyed on `event.cron` (the expression string from `wrangler.jsonc`):
 | `0 10 * * *` | 10am UTC daily | SPF flatten refresh — re-flattens all enabled domains via CF DNS |
 | `0 8 * * *` | 8am UTC daily (default) | Monitor check + SPF lookup count refresh + rollback regression check + MTA-STS MX refresh |
 
-All handlers run `ensureMigrated(env.DB)` before business logic to guarantee the D1 schema is up to date.
+All handlers run `assertSchemaReady(env.DB)` (from `@inbox-angel/db`) before business logic: the Worker no longer changes the schema, it only checks that `npm run migrate` has been run. Schema, migrations and queries live in `packages/db`.
 
 ---
 

@@ -6,7 +6,8 @@
 // Recipients must be verified destination addresses in CF Email Routing.
 // Falls back to console.log if binding is absent (wrangler dev has no local send_email support).
 
-import { getWeeklyDomainStats, getTopFailingSources, DomainWeeklyStat, FailingSource } from '../db/queries';
+import { scope } from '../db/scope';
+import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
 import { reportsDomain, fromEmail } from '../env-utils';
 import { buildWeeklyDigestHtml } from '../email/html-templates';
 import { version } from '../../package.json';
@@ -159,14 +160,15 @@ export async function sendWeeklyDigests(env: DigestEnv, now = Date.now()): Promi
   }
 
   // Single-tenant: get admin user email for digest delivery
-  const admin = await env.DB.prepare(`SELECT email, name FROM users WHERE role = 'admin' LIMIT 1`).first<{ email: string; name: string }>();
+  const q = scope(env.DB);
+  const admin = await q.team.firstAdmin();
   if (!admin) {
     console.log('[digest] no admin user found — skipping weekly digest');
     return;
   }
 
   try {
-    const { results: stats } = await getWeeklyDomainStats(env.DB, since);
+    const stats = await q.reports.weeklyDomainStats(since);
     if (stats.length === 0) {
       console.log('[digest] no domains — skipping weekly digest');
       return;
@@ -176,7 +178,7 @@ export async function sendWeeklyDigests(env: DigestEnv, now = Date.now()): Promi
     const sourcesByDomain = new Map<number, FailingSource[]>();
     for (const stat of stats) {
       if (stat.fail_messages > 0) {
-        const { results: sources } = await getTopFailingSources(env.DB, stat.domain_id, since);
+        const sources = await q.reports.topFailingSources(stat.domain_id, since);
         sourcesByDomain.set(stat.domain_id, sources);
       }
     }

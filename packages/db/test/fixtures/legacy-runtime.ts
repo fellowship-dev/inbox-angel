@@ -1,15 +1,9 @@
 /**
- * Auto-migration — runs on first request per Worker instance.
- *
- * Tracks applied versions in `_migrations`. Safe to call on every request;
- * after the first successful run the module-level flag short-circuits it.
- *
- * Migration errors are caught and logged (not re-thrown). Failures here are
- * almost always "column already exists" from users who previously ran
- * `npm run migrate` manually — the DDL is additive, so swallowing is safe.
+ * Verbatim copy of the runtime migration list from the retired src/db/migrate.ts
+ * (ensureMigrated, v1-v16). Kept only to build historical database states for
+ * upgrade tests. Do not edit.
  */
-
-const MIGRATIONS: { version: number; sql: string }[] = [
+export const LEGACY_RUNTIME_MIGRATIONS: { version: number; sql: string }[] = [
 	{
 		version: 1,
 		sql: `
@@ -284,84 +278,3 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     `,
 	},
 ];
-
-let migrated = false;
-
-export async function ensureMigrated(db: D1Database): Promise<void> {
-	if (migrated) return;
-
-	await db.prepare(
-		`CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`
-	).run();
-
-	const row = await db
-		.prepare(`SELECT MAX(version) as v FROM _migrations`)
-		.first<{ v: number | null }>();
-	const current = row?.v ?? 0;
-
-	for (const m of MIGRATIONS) {
-		if (m.version > current) {
-			// D1 prepare().run() handles single statements only — split on semicolons
-			const statements = m.sql
-				.split(';')
-				.map(s => s.trim())
-				.filter(s => s.length > 0);
-
-			let failed = false;
-			for (const stmt of statements) {
-				try {
-					await db.prepare(stmt).run();
-				} catch (e) {
-					// ALTER TABLE "column already exists" from prior manual migrate — non-fatal
-					console.warn(`[migrate] migration ${m.version} statement error:`, e);
-					if (!stmt.toUpperCase().startsWith('ALTER')) {
-						failed = true;
-						break;
-					}
-				}
-			}
-
-			if (!failed) {
-				await db
-					.prepare(`INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)`)
-					.bind(m.version, new Date().toISOString())
-					.run();
-				console.log(`[migrate] applied migration ${m.version}`);
-			} else {
-				console.warn(`[migrate] migration ${m.version} failed — will retry on next request`);
-			}
-		}
-	}
-
-	// Remove the legacy auto-generated API key. It is no longer accepted as a
-	// credential; deleting the stored value keeps it from lingering in D1.
-	try {
-		await db.prepare(`DELETE FROM settings WHERE key = 'auto_api_key'`).run();
-	} catch {
-		// settings table may not exist yet if a migration failed — safe to skip
-	}
-
-	// Migrate settings-based auth (v0.9.x) → users table
-	try {
-		const existingAdmin = await db.prepare(`SELECT id FROM users WHERE role = 'admin' LIMIT 1`).first();
-		if (!existingAdmin) {
-			const [pwHash, email, name, sessionToken] = await Promise.all([
-				db.prepare(`SELECT value FROM settings WHERE key = 'password_hash'`).first<{ value: string }>(),
-				db.prepare(`SELECT value FROM settings WHERE key = 'user_email'`).first<{ value: string }>(),
-				db.prepare(`SELECT value FROM settings WHERE key = 'user_name'`).first<{ value: string }>(),
-				db.prepare(`SELECT value FROM settings WHERE key = 'session_token'`).first<{ value: string }>(),
-			]);
-			if (pwHash?.value && email?.value) {
-				await db.prepare(`
-					INSERT OR IGNORE INTO users (id, email, name, password_hash, role, session_token)
-					VALUES (?, ?, ?, ?, 'admin', ?)
-				`).bind(crypto.randomUUID(), email.value, name?.value || email.value, pwHash.value, sessionToken?.value ?? null).run();
-				console.log('[migrate] migrated settings auth → users table');
-			}
-		}
-	} catch {
-		// users or settings table may not exist yet if a migration failed — safe to skip
-	}
-
-	migrated = true;
-}

@@ -1,0 +1,26 @@
+{
+  "name": "@inbox-angel/db",
+  "version": "0.1.0",
+  "description": "Drizzle ORM schema, migrations and account-scoped typed queries for InboxAngel on Cloudflare D1.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./queries": "./src/queries/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "files": ["src", "README.md", "SCHEMA.md", "UPGRADING.md"],
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11"
+  }
+}

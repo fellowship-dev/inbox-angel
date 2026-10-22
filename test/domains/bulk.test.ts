@@ -16,6 +16,7 @@ vi.mock('../../src/audit/log', () => ({
   logAudit: vi.fn(),
 }));
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { parseDomainList, validateDomain, bulkInsertDomains } from '../../src/domains/bulk';
 
 // ── parseDomainList ───────────────────────────────────────────
@@ -84,73 +85,73 @@ describe('validateDomain', () => {
 
 // ── bulkInsertDomains ─────────────────────────────────────────
 
-function makeDb(firstResult: unknown = null): D1Database {
-  return {
-    prepare: vi.fn().mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 42 } }),
-        first: vi.fn().mockResolvedValue(firstResult),
-      }),
-      first: vi.fn().mockResolvedValue(firstResult),
-    }),
-  } as unknown as D1Database;
+function makeDb() {
+  const db = createMigratedD1();
+  const domainRows = () => db.sqlite.prepare('SELECT * FROM domains ORDER BY id').all() as Record<string, any>[];
+  return Object.assign(db as unknown as D1Database, { domainRows });
+}
+
+function seedDomain(db: D1Database, domain: string) {
+  (db as any).sqlite
+    .prepare("INSERT INTO domains (domain, rua_address) VALUES (?, 'rua@reports.inboxangel.io')")
+    .run(domain);
 }
 
 describe('bulkInsertDomains', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns imported status for a new valid domain', async () => {
-    const db = makeDb(null); // getDomainByName returns null = not duplicate
+    const db = makeDb(); // empty = not duplicate
     const results = await bulkInsertDomains({ DB: db, CLOUDFLARE_API_TOKEN: 'tok' }, ['acme.com']);
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('imported');
     expect(results[0].domain).toBe('acme.com');
+    const rows = db.domainRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io', dns_record_id: 'dns-rec-1' });
   });
 
   it('returns duplicate status when domain already exists', async () => {
-    const db = makeDb({ id: 1, domain: 'acme.com' }); // getDomainByName returns existing row
+    const db = makeDb();
+    seedDomain(db, 'acme.com'); // existing row
     const results = await bulkInsertDomains({ DB: db }, ['acme.com']);
     expect(results[0].status).toBe('duplicate');
+    expect(db.domainRows()).toHaveLength(1);
   });
 
   it('returns invalid status for a malformed domain', async () => {
-    const db = makeDb(null);
+    const db = makeDb();
     const results = await bulkInsertDomains({ DB: db }, ['not a domain']);
     expect(results[0].status).toBe('invalid');
+    expect(db.domainRows()).toHaveLength(0);
   });
 
   it('processes a mixed list and returns per-row status', async () => {
-    // First call (acme.com) = null (new), second call (dupe.com) = existing row
-    const bindMock = vi.fn()
-      .mockReturnValueOnce({ run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }), first: vi.fn().mockResolvedValue(null) })   // getDomainByName acme.com
-      .mockReturnValueOnce({ run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }), first: vi.fn().mockResolvedValue(null) })   // insertDomain acme.com
-      .mockReturnValueOnce({ run: vi.fn().mockResolvedValue({ success: true }), first: vi.fn().mockResolvedValue(null) })                              // UPDATE dns_record_id
-      .mockReturnValueOnce({ run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 2 } }), first: vi.fn().mockResolvedValue({ id: 2, domain: 'dupe.com' }) }) // getDomainByName dupe.com
-      .mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true }), first: vi.fn().mockResolvedValue(null) });
-
-    const db = {
-      prepare: vi.fn().mockReturnValue({ bind: bindMock }),
-    } as unknown as D1Database;
+    const db = makeDb();
+    seedDomain(db, 'dupe.com');
 
     const results = await bulkInsertDomains({ DB: db, CLOUDFLARE_API_TOKEN: 'tok' }, ['acme.com', 'not-valid!', 'dupe.com']);
     expect(results.find(r => r.domain === 'acme.com')?.status).toBe('imported');
     expect(results.find(r => r.domain === 'not-valid!')?.status).toBe('invalid');
     expect(results.find(r => r.domain === 'dupe.com')?.status).toBe('duplicate');
+    expect(db.domainRows().map(r => r.domain).sort()).toEqual(['acme.com', 'dupe.com']);
   });
 
   it('caps batch at 50 entries', async () => {
-    const db = makeDb(null);
+    const db = makeDb();
     const domains = Array.from({ length: 60 }, (_, i) => `domain${i}.com`);
     const results = await bulkInsertDomains({ DB: db }, domains);
     expect(results).toHaveLength(50);
+    expect(db.domainRows()).toHaveLength(50);
   });
 
   it('returns imported with manual_dns=true when provisioning falls back to manual mode', async () => {
     const { provisionDomain } = await import('../../src/dns/provision');
     vi.mocked(provisionDomain).mockResolvedValueOnce({ recordId: null, recordName: 'acme.com._report._dmarc.reports.inboxangel.io', manual: true });
-    const db = makeDb(null);
+    const db = makeDb();
     const results = await bulkInsertDomains({ DB: db }, ['acme.com']);
     expect(results[0].status).toBe('imported');
     expect(results[0].manual_dns).toBe(true);
+    expect(db.domainRows()[0].dns_record_id).toBeNull();
   });
 });

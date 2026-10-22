@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "postinstall": "npm install --prefix dashboard",
-    "deploy": "npm run build:dashboard && wrangler deploy",
-    "migrate": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run build:dashboard && npm run migrate && wrangler deploy",
+    "migrate": "node packages/db/scripts/migrate.mjs --remote",
     "dev": "wrangler dev",
     "dev:dashboard": "npm --prefix dashboard run dev",
     "build:dashboard": "npm --prefix dashboard run build",
@@ -18,7 +18,9 @@
     "seed:remote": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --remote --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
     "unseed:local": "wrangler d1 execute inbox-angel --local  --file=scripts/unseed-demo.sql",
     "unseed:remote": "wrangler d1 execute inbox-angel --remote --file=scripts/unseed-demo.sql",
-    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks"
+    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks && tsc -p packages/db",
+    "migrate:local": "node packages/db/scripts/migrate.mjs --local",
+    "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.15.0",
@@ -48,5 +50,8 @@
   "workspaces": [
     "packages/*",
     "tools/*"
-  ]
+  ],
+  "engines": {
+    "node": ">=20"
+  }
 }

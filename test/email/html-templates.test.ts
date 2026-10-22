@@ -15,7 +15,7 @@ import {
   buildFreeCheckHtml,
   buildDnsAlertHtml,
 } from '../../src/email/html-templates';
-import type { DomainWeeklyStat, FailingSource } from '../../src/db/queries';
+import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
 import type { CheckSummary } from '../../src/email/report-formatter';
 import type { DomainChange } from '../../src/monitor/check';
 import type { DnsCheckResult } from '../../src/email/dns-check';

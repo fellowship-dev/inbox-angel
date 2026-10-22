@@ -3,7 +3,7 @@
 // report_id are silently skipped (returns { stored: false }).
 
 import { AggregateReport, ReportRecord as ParserRecord } from './types';
-import { insertAggregateReport, insertReportRecords } from '../db/queries';
+import { scope } from '../db/scope';
 import { ReportRecord as DbRecord } from '../db/types';
 import { sendFirstReportNotification, FirstReportEnv } from '../notifications/first-report';
 
@@ -82,7 +82,8 @@ export async function storeReport(
   const { total, pass, fail } = computeCounts(report.records);
   const meta = report.report_metadata;
 
-  const insertResult = await insertAggregateReport(db, {
+  const q = scope(db);
+  const insertResult = await q.reports.insertAggregate({
     domain_id:   domainId,
     org_name:    meta.org_name,
     report_id:   meta.report_id,
@@ -94,28 +95,23 @@ export async function storeReport(
     raw_xml:     rawXml,
   });
 
-  // INSERT OR IGNORE — if last_row_id is falsy the row was a duplicate
-  const reportId = insertResult.meta?.last_row_id;
+  // ON CONFLICT DO NOTHING — no row written means this report was already delivered
+  const reportId = insertResult.meta?.changes ? insertResult.meta.last_row_id : 0;
   if (!reportId) return { stored: false };
 
   // Batch-insert all per-IP records
   if (report.records.length > 0) {
-    await insertReportRecords(
-      db,
+    await q.reports.insertRecords(
       report.records.map(r => mapRecord(r, reportId)),
     );
   }
 
   // Fire first-report notification if this is the very first report for this domain
   if (env) {
-    const countRow = await db.prepare(
-      `SELECT COUNT(*) as cnt FROM aggregate_reports WHERE domain_id = ?`
-    ).bind(domainId).first<{ cnt: number }>();
+    const reportCount = await q.reports.countForDomain(domainId);
 
-    if (countRow && countRow.cnt === 1) {
-      const domainRow = await db.prepare(
-        `SELECT domain FROM domains WHERE id = ?`
-      ).bind(domainId).first<{ domain: string }>();
+    if (reportCount === 1) {
+      const domainRow = await q.domains.getById(domainId);
 
       if (domainRow) {
         const uniqueSources = new Set(report.records.map(r => r.source.ip));

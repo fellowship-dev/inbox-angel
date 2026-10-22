@@ -4,7 +4,7 @@
 // Falls back to console.log if binding is absent.
 
 import { fromEmail, getWorkersSubdomain } from '../env-utils';
-import { getSetting } from '../db/queries';
+import { scope } from '../db/scope';
 
 export interface FirstReportEnv {
   DB: D1Database;
@@ -61,7 +61,7 @@ export async function sendFirstReportNotification(
   reportStats: ReportStats,
 ): Promise<void> {
   // Resolve dashboard URL: custom domain > {worker}.{subdomain}.workers.dev
-  const customDomain = await getSetting(env.DB, 'custom_domain');
+  const customDomain = await scope(env.DB).settings.get('custom_domain');
   let dashboardUrl: string;
   if (customDomain?.value) {
     dashboardUrl = `https://${customDomain.value}`;
@@ -74,8 +74,7 @@ export async function sendFirstReportNotification(
   }
 
   // Get admin user email
-  const admin = await env.DB.prepare(`SELECT email, name FROM users WHERE role = 'admin' LIMIT 1`)
-    .first<{ email: string; name: string }>();
+  const admin = await scope(env.DB).team.firstAdmin();
   if (!admin) {
     console.log('[first-report] no admin user found — skipping notification');
     return;

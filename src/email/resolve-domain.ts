@@ -6,7 +6,7 @@
 //
 // Returns null if the domain is unknown (not provisioned in D1).
 
-import { getDomainByName } from '../db/queries';
+import { scope } from '../db/scope';
 import { Domain } from '../db/types';
 
 /**
@@ -17,5 +17,5 @@ export async function resolveDomain(
   db: D1Database,
   policyDomain: string,
 ): Promise<Domain | null> {
-  return getDomainByName(db, policyDomain.toLowerCase());
+  return (await scope(db).domains.getByName(policyDomain.toLowerCase())) as Domain | null;
 }

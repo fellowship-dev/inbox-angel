@@ -107,6 +107,16 @@ Reports from receiving mail servers worldwide will start arriving within 24 hour
 
 ---
 
+## Upgrading
+
+The schema is managed by `packages/db` migrations; the Worker no longer changes it at runtime.
+
+1. Back up D1: `wrangler d1 export inbox-angel --remote --output backup.sql`
+2. Run `npm run migrate` (then deploy). It first records migrations your database already contains, then runs `wrangler d1 migrations apply`.
+3. **Never run a bare `wrangler d1 migrations apply` on an existing install** — on databases from older releases it fails by design (duplicate columns / renamed `0005_*` migration).
+
+Until migrated, the Worker answers 503 and inbound email is refused for retry. Details, rollback and edge cases: [packages/db/UPGRADING.md](packages/db/UPGRADING.md).
+
 ## Stack
 
 | Layer | Choice | Notes |

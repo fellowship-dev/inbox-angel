@@ -4,7 +4,7 @@
 // Results are cached in the ip_info D1 table; TTL = 30 days.
 
 import type { IpInfo } from './types';
-import type { IpInfoRow } from '../db/types';
+import { globals } from '../db/scope';
 
 const DOH_URL = 'https://cloudflare-dns.com/dns-query';
 const CACHE_TTL_DAYS = 30;
@@ -137,7 +137,7 @@ export async function getIpInfo(ip: string): Promise<IpInfo> {
 // ── D1 cache helpers ──────────────────────────────────────────
 
 export async function getCachedIpInfo(db: D1Database, ip: string): Promise<IpInfo | null> {
-  const row = await db.prepare(`SELECT * FROM ip_info WHERE ip = ?`).bind(ip).first<IpInfoRow>();
+  const row = await globals(db).ipInfo.get(ip);
   if (!row) return null;
   const ageSeconds = Math.floor(Date.now() / 1000) - row.fetched_at;
   if (ageSeconds > CACHE_TTL_DAYS * 86400) return null; // expired
@@ -155,15 +155,12 @@ export async function getCachedIpInfo(db: D1Database, ip: string): Promise<IpInf
 }
 
 export async function cacheIpInfo(db: D1Database, info: IpInfo & { asn?: string | null }): Promise<void> {
-  await db.prepare(`
-    INSERT INTO ip_info (ip, reverse_dns, base_domain, country_code, org, asn, fetched_at)
-    VALUES (?, ?, ?, ?, ?, ?, unixepoch())
-    ON CONFLICT(ip) DO UPDATE SET
-      reverse_dns = excluded.reverse_dns,
-      base_domain = excluded.base_domain,
-      country_code = excluded.country_code,
-      org = excluded.org,
-      asn = excluded.asn,
-      fetched_at = unixepoch()
-  `).bind(info.ip, info.reverse_dns, info.base_domain, info.country_code, info.org ?? null, info.asn ?? null).run();
+  await globals(db).ipInfo.upsert({
+    ip: info.ip,
+    reverse_dns: info.reverse_dns,
+    base_domain: info.base_domain,
+    country_code: info.country_code,
+    org: info.org ?? null,
+    asn: info.asn ?? null,
+  });
 }
