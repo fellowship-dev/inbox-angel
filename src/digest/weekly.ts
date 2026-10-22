@@ -11,8 +11,8 @@ import { reportsDomain, fromEmail } from '../env-utils';
 import { buildWeeklyDigestHtml } from '../email/html-templates';
 import { version } from '../../package.json';
 
-const GH_RAW = 'https://raw.githubusercontent.com/Fellowship-dev/inbox-angel-worker/main/package.json';
-const RELEASE_URL = 'https://github.com/Fellowship-dev/inbox-angel-worker/releases/latest';
+const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
+const RELEASE_URL = 'https://github.com/fellowship-dev/inbox-angel/releases/latest';
 
 async function fetchLatestVersion(): Promise<string | null> {
   try {

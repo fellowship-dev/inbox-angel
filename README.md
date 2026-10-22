@@ -1,4 +1,4 @@
-# inbox-angel-worker
+# Inbox Angel
 
 Cloudflare Workers backend for [InboxAngel](https://github.com/Fellowship-dev/inbox-angel).
 Self-hostable email authentication platform — DMARC monitoring, SPF management, MTA-STS provisioning, and TLS-RPT reporting, all running on your own Cloudflare account.
@@ -71,7 +71,7 @@ The Worker needs a token at runtime to manage Email Routing rules and DNS record
 
 **Option A — one click (recommended):**
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Fellowship-dev/inbox-angel-worker)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/fellowship-dev/inbox-angel)
 
 The button forks the repo, creates a D1 database, and prompts for your API token. That's it — one secret, zero env vars.
 

@@ -254,7 +254,7 @@ function setupPage(): Response {
     <li>Deploy:<br><pre>npm run deploy</pre>Then visit your dashboard, create an account, and enter your domain in the setup wizard.</li>
   </ol>
   <div class="note">
-    Full setup guide: <a href="https://github.com/Fellowship-dev/inbox-angel-worker#self-hosting" target="_blank">github.com/Fellowship-dev/inbox-angel-worker</a>
+    Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>
   </div>
 </body>
 </html>`;

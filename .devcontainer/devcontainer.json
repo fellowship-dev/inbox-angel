@@ -1,7 +1,7 @@
 {
-  "name": "inbox-angel-worker",
+  "name": "inbox-angel",
   "build": { "context": ".", "dockerfile": "Dockerfile" },
-  "workspaceFolder": "/workspaces/inbox-angel-worker",
+  "workspaceFolder": "/workspaces/inbox-angel",
   "remoteUser": "vscode",
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "20" },
