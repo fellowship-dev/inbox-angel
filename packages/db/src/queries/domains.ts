@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
-import type { Db } from '../client';
+import { unwrapDriverError, type Db } from '../client';
 import { domains } from '../schema';
 
 export function domainQueries(db: Db, accountId: string) {
@@ -40,7 +40,11 @@ export function domainQueries(db: Db, accountId: string) {
 					.get();
 				if (parent) parentId = parent.id;
 			}
-			return db.insert(domains).values({ account_id: accountId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId }).run();
+			try {
+				return await db.insert(domains).values({ account_id: accountId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId }).run();
+			} catch (e) {
+				throw unwrapDriverError(e); // callers match on 'UNIQUE'
+			}
 		},
 
 		delete(id: number) {

@@ -1,6 +1,6 @@
 import { and, eq, notExists, sql } from 'drizzle-orm';
 import type { Db } from '../client';
-import { invites, memberships, users } from '../schema';
+import { invites, memberships, users, type MembershipRole } from '../schema';
 
 export interface TeamMember {
 	id: string;
@@ -48,13 +48,13 @@ export function teamQueries(db: Db, accountId: string) {
 
 		/** Create a user and make them a member of this account, atomically. */
 		async addUser(u: { id: string; email: string; name: string; password_hash: string | null; role: 'admin' | 'member' }) {
-			const hasOwner = db.select({ x: sql`1` }).from(memberships).where(and(eq(memberships.account_id, accountId), eq(memberships.role, 'owner')));
 			// The first admin of an account becomes its owner.
-			const role = u.role === 'admin' ? sql`CASE WHEN EXISTS (${hasOwner}) THEN 'admin' ELSE 'owner' END` : sql`'member'`;
-			await db.batch([
-				db.insert(users).values(u),
-				db.run(sql`INSERT INTO memberships (account_id, user_id, role) VALUES (${accountId}, ${u.id}, ${role})`),
-			]);
+			let role: MembershipRole = 'member';
+			if (u.role === 'admin') {
+				const owner = await db.select({ x: memberships.user_id }).from(memberships).where(and(eq(memberships.account_id, accountId), eq(memberships.role, 'owner'))).limit(1).get();
+				role = owner ? 'admin' : 'owner';
+			}
+			await db.batch([db.insert(users).values(u), db.insert(memberships).values({ account_id: accountId, user_id: u.id, role })]);
 		},
 
 		/** Remove a member; the user row goes too once they belong to no account. */
