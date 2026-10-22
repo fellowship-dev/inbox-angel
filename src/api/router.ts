@@ -1018,15 +1018,13 @@ async function _handleApi(
           } else {
             try {
               const destinations = await cf.request<{ email: string; verified?: string | null }[]>('GET', `/accounts/${accountId}/email/routing/addresses`);
-              {
-                const match = destinations?.find(d => d.email === admin.email);
-                if (!match) {
-                  destination_debug = `email ${admin.email} not found in routing destinations`;
-                } else if (!match.verified) {
-                  destination_debug = 'email found but not yet verified';
-                } else {
-                  destination_verified = true;
-                }
+              const match = destinations?.find(d => d.email === admin.email);
+              if (!match) {
+                destination_debug = `email ${admin.email} not found in routing destinations`;
+              } else if (!match.verified) {
+                destination_debug = 'email found but not yet verified';
+              } else {
+                destination_verified = true;
               }
             } catch (e) {
               destination_debug = e instanceof CfApiError || e instanceof CfAuthError
