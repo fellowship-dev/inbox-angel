@@ -229,3 +229,6 @@ specs/
 
 # Codespaces bootstrap (local-only, syncs gitignored AI tooling)
 .devcontainer/bootstrap-remote.sh
+
+# Domain audit fleet: seed lists + results contain third-party domains. NEVER commit.
+tools/audit-fleet/out/
