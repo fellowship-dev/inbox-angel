@@ -201,6 +201,8 @@ export interface OnboardingStatus {
     null_sender_spf?: boolean;
     null_sender_dmarc?: boolean;
   };
+  /** Checks whose DNS lookup failed ("spf: …", "dmarc: …", "mx: …", "dkim <selector>: …"). Their values are unknown, not absent. */
+  dns_errors?: string[];
 }
 
 export interface DomainCheckSummary {

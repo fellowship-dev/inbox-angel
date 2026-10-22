@@ -15,18 +15,7 @@ export function normalizeDomain(input: string): string {
 	return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
-/**
- * A recommended DMARC record that keeps existing tags (other rua= addresses, sp=, fo= …),
- * sets p= and appends our rua address if it is not there yet.
- */
-export function buildRecommendedRecord(currentRecord: string | null, targetPolicy: string, ruaAddress: string): string {
-	if (!currentRecord) return `v=DMARC1; p=${targetPolicy}; rua=mailto:${ruaAddress}`;
-	let record = /p=[a-z]+/.test(currentRecord) ? currentRecord.replace(/p=[a-z]+/, `p=${targetPolicy}`) : `${currentRecord}; p=${targetPolicy}`;
-	if (!record.includes(ruaAddress)) {
-		record = /rua=/.test(record) ? record.replace(/rua=([^;]+)/, `rua=$1,mailto:${ruaAddress}`) : `${record}; rua=mailto:${ruaAddress}`;
-	}
-	return record;
-}
+export { buildRecommendedRecord } from './dmarc-record';
 
 /** `sp=` tag of a live record, if any. */
 export function spTag(record: string | null): string | null {
