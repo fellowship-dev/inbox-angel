@@ -333,13 +333,10 @@ export async function ensureMigrated(db: D1Database): Promise<void> {
 		}
 	}
 
-	// Auto-generate a legacy API key (fallback for non-password auth paths)
+	// Remove the legacy auto-generated API key. It is no longer accepted as a
+	// credential; deleting the stored value keeps it from lingering in D1.
 	try {
-		const existingAutoKey = await db.prepare(`SELECT value FROM settings WHERE key = 'auto_api_key'`).first<{ value: string }>();
-		if (!existingAutoKey) {
-			const autoKey = crypto.randomUUID();
-			await db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_api_key', ?)`).bind(autoKey).run();
-		}
+		await db.prepare(`DELETE FROM settings WHERE key = 'auto_api_key'`).run();
 	} catch {
 		// settings table may not exist yet if a migration failed — safe to skip
 	}
