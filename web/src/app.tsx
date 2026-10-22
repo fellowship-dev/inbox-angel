@@ -66,6 +66,8 @@ function WizardFor({ render }: { render: (domainId: number) => ReactNode }) {
 }
 
 // Every page is its own chunk: the sign-in screen and shell load first, pages load on navigation.
+const AnalyticsPage = lazy(() => import('./pages/analytics/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
+const DomainAnalyticsPage = lazy(() => import('./pages/analytics/AnalyticsPage').then((m) => ({ default: m.DomainAnalyticsPage })));
 const AnomaliesPage = lazy(() => import('./pages/reports/AnomaliesPage').then((m) => ({ default: m.AnomaliesPage })));
 const AuditLogPage = lazy(() => import('./pages/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })));
 const ApiKeysPage = lazy(() => import('./pages/keys/ApiKeysPage').then((m) => ({ default: m.ApiKeysPage })));
@@ -108,6 +110,7 @@ function AppRoutes() {
 				<Route path="add" element={<AddDomainPage />} />
 				<Route path="bulk-import" element={<BulkImportPage />} />
 				<Route path="ct-discover" element={<CtDiscoverPage />} />
+				<Route path="analytics" element={<AnalyticsPage />} />
 				<Route path="check" element={<EmailCheckPage />} />
 				<Route path="team" element={<TeamPage />} />
 				<Route path="keys" element={<ApiKeysPage />} />
@@ -115,6 +118,7 @@ function AppRoutes() {
 				<Route path="settings" element={<SettingsPage />} />
 				<Route path="domains/:id" element={<DomainDetailPage />} />
 				<Route path="domains/:id/settings" element={<DomainSettingsPage />} />
+				<Route path="domains/:id/analytics" element={<DomainAnalyticsPage />} />
 				<Route path="domains/:id/explore" element={<ExplorePage />} />
 				<Route path="domains/:id/anomalies" element={<AnomaliesPage />} />
 				<Route path="domains/:id/reports" element={<ReportBrowserPage />} />

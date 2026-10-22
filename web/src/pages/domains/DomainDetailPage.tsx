@@ -1,5 +1,5 @@
 import { Alert, Badge, Button, EmptyState, PageHeader, Stat, StatGroup, Tabs, TabsList, TabsTrigger } from '@inbox-angel/ui';
-import { ArrowLeft, Settings } from 'lucide-react';
+import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useDomainId } from '../../app';
@@ -8,6 +8,7 @@ import { CopyField } from '../../components/domain/CopyField';
 import { DnsRecords } from '../../components/domain/DnsRecords';
 import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
+import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
@@ -140,12 +141,20 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				title={domain.domain}
 				description={<LivePolicyBadge domain={domain} />}
 				actions={
-					<Button asChild variant="secondary">
-						<Link to={`/domains/${domain.id}/settings`}>
-							<Settings aria-hidden />
-							Settings
-						</Link>
-					</Button>
+					<div className="flex flex-wrap gap-2">
+						<Button asChild variant="secondary">
+							<Link to={`/domains/${domain.id}/analytics`}>
+								<BarChart3 aria-hidden />
+								Analytics
+							</Link>
+						</Button>
+						<Button asChild variant="secondary">
+							<Link to={`/domains/${domain.id}/settings`}>
+								<Settings aria-hidden />
+								Settings
+							</Link>
+						</Button>
+					</div>
 				}
 			/>
 			<ReadOnlyNotice />
@@ -200,6 +209,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				)}
 			</Section>
 
+			<HostedPanel key={domain.id} domainId={domain.id} />
 			<DnsRecords domain={domain} />
 			<Rollout domain={domain} />
 
