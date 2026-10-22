@@ -60,7 +60,14 @@ export function teamQueries(db: Db, accountId: string) {
 		/** Remove a member; the user row goes too once they belong to no account. */
 		async removeUser(userId: string) {
 			await db.delete(memberships).where(and(eq(memberships.account_id, accountId), eq(memberships.user_id, userId)));
-			await db.delete(users).where(and(eq(users.id, userId), notExists(db.select({ x: sql`1` }).from(memberships).where(eq(memberships.user_id, users.id)))));
+			await db.delete(users).where(
+				and(
+					eq(users.id, userId),
+					notExists(
+						db.select({ x: sql`1` }).from(memberships /* account-scope-exempt: "belongs to no account at all" is deliberately cross-account */).where(eq(memberships.user_id, users.id)),
+					),
+				),
+			);
 		},
 
 		// ── Invites ───────────────────────────────────────────────

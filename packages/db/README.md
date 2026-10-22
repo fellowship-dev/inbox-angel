@@ -6,7 +6,7 @@ Drizzle ORM schema, migrations and account-scoped typed queries for InboxAngel o
 * `/migrations/*.sql` — what `wrangler d1 migrations apply` runs; see `UPGRADING.md`.
 * `src/queries/*` — `forAccount(db, accountId)` returns every tenant-data query bound to one account;
   `globalQueries(db)` covers the few global tables (credentials lookup, free checks, IP cache).
-* `src/adopt.ts` — brings pre-existing installs into the migration history (`npm run migrate`).
+* `src/adopt.js` — brings pre-existing installs into the migration history (`npm run migrate`).
 * `src/testing` — `createMigratedD1()`: a `node:sqlite`-backed D1 with all migrations applied, for tests.
 
 ```ts

@@ -40,7 +40,7 @@ Nothing is deleted. Row counts are verified by the upgrade tests.
 * **Installs that never ran `npm run migrate`** have no `d1_migrations` history at all, although `0001`–`0004`'s effects exist.
 
 Before applying, `npm run migrate` inspects the database and records in `d1_migrations` every migration whose
-effect is already present (`ADOPTION_RULES` in `src/adopt.ts`), so `wrangler` skips exactly those. It prints what it
+effect is already present (`ADOPTION_RULES` in `src/adopt.js`), so `wrangler` skips exactly those. It prints what it
 records. On a fresh database it records nothing. It is safe to run repeatedly.
 
 If you run bare `wrangler d1 migrations apply` on an install that needs adopting you get one of the "duplicate
@@ -55,10 +55,10 @@ so roll back by restoring the backup together with the previous Worker version.
 
 ## Requirements
 
-* Node ≥ 22.18 for `npm run migrate` (it loads the TypeScript source directly). CI uses Node 22.
+* Node ≥ 20 for `npm run migrate` (plain ESM, no build step); `engines` pins this. Any default Workers Builds / Deploy-button Node works.
 * `wrangler` ≥ 4.
 
 ## Unusual databases
 
-* Databases created before March 2026 may have leftover `customer_id` columns or a `customers` table. They are ignored.
+* **Databases created before March 2026 (the multi-tenant prototype) are not supported and are already broken on main.** Their `customer_id` columns are `NOT NULL` with no default, so inserts from the current app fail. Manual path: `wrangler d1 export` a backup, then recreate the database with `npm run migrate` on an empty one and re-import your rows into the current columns (`domains`, `aggregate_reports`, `report_records`), dropping `customer_id`/`customers`/`dkim_configured`.
 * A database with a half-applied `0011` (only some of the four columns) is repaired by the adoption step.

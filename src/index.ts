@@ -71,7 +71,10 @@ export default {
       await assertSchemaReady(env.DB);
     } catch (e) {
       console.error('[email]', e instanceof Error ? e.message : e);
-      return;
+      // Throw (don't return): returning would accept the message and silently drop the report.
+      // An uncaught Worker error is a delivery failure, so the sending MTA retries. (setReject()
+      // is a permanent 5xx and senders would give up.)
+      throw e;
     }
     await handleEmail(message, env as BoundEnv, ctx);
   },

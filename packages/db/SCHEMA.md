@@ -42,13 +42,13 @@ Git history shows **three** files have been numbered `0005_*`:
 `wrangler` identifies migrations by name, so an install that applied the old name has a row for a file that
 no longer exists and would re-run `0006` ("duplicate column name: is_default"). Both remaining `0005_*`
 files must keep their names (renaming them would re-run them on every install that has them).
-`src/adopt.ts` resolves all of this by looking at the database's actual columns — see `UPGRADING.md`.
+`src/adopt.js` resolves all of this by looking at the database's actual columns — see `UPGRADING.md`.
 
 ### Legacy leftovers (not in `schema.ts`)
 
 `0001_initial.sql` was edited in place twice (single-tenant clean-up, March 2026). Installs created before
 that may still carry a `domains.dkim_configured` column (harmless: `NOT NULL DEFAULT 0`) and `customer_id`
-columns/`customers` table from the original multi-tenant prototype. They are ignored, not dropped.
+columns/`customers` table from the original multi-tenant prototype. `customer_id` is `NOT NULL` without a default, so such databases already fail on main and are unsupported (manual path in `UPGRADING.md`); `dkim_configured` is harmless and left alone.
 
 ### Bugs found while inventorying (fixed)
 

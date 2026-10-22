@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "postinstall": "npm install --prefix dashboard",
-    "deploy": "npm run migrate && npm run build:dashboard && wrangler deploy",
+    "deploy": "npm run build:dashboard && npm run migrate && wrangler deploy",
     "migrate": "node packages/db/scripts/migrate.mjs --remote",
     "dev": "wrangler dev",
     "dev:dashboard": "npm --prefix dashboard run dev",
@@ -50,5 +50,8 @@
   "workspaces": [
     "packages/*",
     "tools/*"
-  ]
+  ],
+  "engines": {
+    "node": ">=20"
+  }
 }

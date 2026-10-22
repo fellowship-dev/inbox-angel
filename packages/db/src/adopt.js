@@ -18,15 +18,13 @@
  * already present. Name-independent, idempotent, and a no-op on fresh installs.
  */
 
-interface ColumnRule {
-	/** Migration file whose only effect is to add these columns. */
-	file: string;
-	table: string;
-	/** Column name → DDL that adds it (used to repair a half-applied migration). */
-	columns: Record<string, string>;
-}
+/**
+ * @typedef {{ file: string, table: string, columns: Record<string, string> }} ColumnRule
+ * `columns`: name -> DDL that adds it (used to repair a half-applied migration).
+ */
 
-export const ADOPTION_RULES: readonly ColumnRule[] = [
+/** @type {readonly ColumnRule[]} */
+export const ADOPTION_RULES = [
 	{ file: '0002_add_dns_record_id.sql', table: 'domains', columns: { dns_record_id: 'TEXT' } },
 	{ file: '0003_check_session_token.sql', table: 'check_results', columns: { session_token: 'TEXT' } },
 	{
@@ -71,21 +69,19 @@ export const D1_MIGRATIONS_DDL =
 	'CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
 	'name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)';
 
-export interface AdoptionPlan {
-	/** Statements to run (repairs, then bookkeeping). Empty when nothing to adopt. */
-	statements: string[];
-	/** Migration files recorded as already applied. */
-	adopted: string[];
-}
+/** @typedef {{ statements: string[], adopted: string[] }} AdoptionPlan */
 
 /**
- * @param columns  table name → column names currently present
- * @param applied  names already in `d1_migrations`
+ * @param {Record<string, string[]>} columns  table name -> column names currently present
+ * @param {Iterable<string>} applied  names already in `d1_migrations`
+ * @returns {AdoptionPlan}
  */
-export function planAdoption(columns: Record<string, string[]>, applied: Iterable<string>): AdoptionPlan {
+export function planAdoption(columns, applied) {
 	const done = new Set(applied);
-	const repairs: string[] = [];
-	const adopted: string[] = [];
+	/** @type {string[]} */
+	const repairs = [];
+	/** @type {string[]} */
+	const adopted = [];
 
 	for (const rule of ADOPTION_RULES) {
 		if (done.has(rule.file)) continue;
@@ -107,8 +103,10 @@ export function planAdoption(columns: Record<string, string[]>, applied: Iterabl
 	};
 }
 
-export function groupColumns(rows: Array<{ tbl: string; col: string }>): Record<string, string[]> {
-	const out: Record<string, string[]> = {};
+/** @param {Array<{ tbl: string, col: string }>} rows @returns {Record<string, string[]>} */
+export function groupColumns(rows) {
+	/** @type {Record<string, string[]>} */
+	const out = {};
 	for (const { tbl, col } of rows) (out[tbl] ??= []).push(col);
 	return out;
 }

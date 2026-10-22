@@ -1,11 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { is } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
+import type { SQL } from 'drizzle-orm';
 import * as schema from '../src/schema';
 import { ACCOUNT_OWNED_TABLES, GLOBAL_TABLES } from '../src/schema';
 import { freshDb } from './helpers';
 
 const tables = Object.values(schema).filter((v) => is(v as any, SQLiteTable)) as unknown as SQLiteTable[];
+
+const dialect = new SQLiteSyncDialect();
+const norm = (x: string) => x.replace(/["`]/g, '').replace(/\b\w+\./g, '').replace(/\s+/g, '').toLowerCase().replace(/^\((.*)\)$/, '$1');
+const renderSql = (q: SQL) => {
+	const { sql, params } = dialect.sqlToQuery(q);
+	let i = 0;
+	return sql.replace(/\?/g, () => JSON.stringify(params[i++]).replace(/^"(.*)"$/, "'$1'"));
+};
+const renderDefault = (d: unknown) => (d !== null && typeof d === 'object' ? renderSql(d as SQL) : typeof d === 'string' ? `'${d}'` : String(d));
 
 const db = freshDb().sqlite;
 const dbTables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('_migrations','d1_migrations')").all() as any[]).map((r) => r.name).sort();
@@ -28,14 +39,14 @@ describe('schema.ts matches what migrations/*.sql produce', () => {
 						type: c.getSQLType().toUpperCase(),
 						// SQLite reports notnull=0 for INTEGER PRIMARY KEY / single-column PKs without NOT NULL
 						notNull: c.notNull || c.primary || pkCols.includes(c.name),
-						hasDefault: c.hasDefault && !c.primary,
+						default: c.hasDefault && !c.primary ? norm(renderDefault(c.default)) : null,
 					};
 				});
 				const actual = info.map((c) => ({
 					name: c.name,
 					type: c.type.toUpperCase(),
 					notNull: !!c.nn || !!c.pk,
-					hasDefault: c.d !== null,
+					default: c.d !== null ? norm(String(c.d)) : null,
 				}));
 				const by = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 				expect(declared.sort(by)).toEqual(actual.sort(by));
@@ -55,6 +66,16 @@ describe('schema.ts matches what migrations/*.sql produce', () => {
 					.map((r) => (db.prepare(`SELECT name FROM pragma_index_info('${r.name}') ORDER BY seqno`).all() as any[]).map((c) => c.name).join(','))
 					.sort();
 				expect(uniqueDecl).toEqual(uniqueActual);
+			});
+
+			it('index uniqueness and partial-index WHERE clauses', () => {
+				for (const i of cfg.indexes) {
+					const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?").get(i.config.name) as { sql: string };
+					expect(/^\s*CREATE\s+UNIQUE/i.test(row.sql), `${i.config.name} uniqueness`).toBe(!!i.config.unique);
+					const actualWhere = row.sql.match(/\bWHERE\b([\s\S]*)$/i)?.[1] ?? null;
+					const declaredWhere = i.config.where ? renderSql(i.config.where) : null;
+					expect(declaredWhere && norm(declaredWhere), `${i.config.name} WHERE`).toEqual(actualWhere && norm(actualWhere));
+				}
 			});
 
 			it('foreign keys', () => {

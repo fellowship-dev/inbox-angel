@@ -21,7 +21,7 @@ export function appliedMigrations(db: DatabaseSync): string[] {
 	return (db.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as { name: string }[]).map((r) => r.name);
 }
 
-/** Record migrations whose effects already exist (see src/adopt.ts). */
+/** Record migrations whose effects already exist (see src/adopt.js). */
 export function adopt(db: DatabaseSync) {
 	const columns = groupColumns(db.prepare(INTROSPECT_COLUMNS_SQL).all() as { tbl: string; col: string }[]);
 	const plan = planAdoption(columns, appliedMigrations(db));

@@ -6,11 +6,10 @@
  *
  * 1. Looks at the database and records, in wrangler's `d1_migrations` table, every
  *    migration whose effect is already present (installs that predate the single
- *    migration path, or that ran a since-renamed 0005_* file). See src/adopt.ts.
+ *    migration path, or that ran a since-renamed 0005_* file). See src/adopt.js.
  * 2. Runs `wrangler d1 migrations apply`.
  *
- * On a fresh database step 1 does nothing. Requires Node >= 22.18 (it imports the
- * TypeScript source directly).
+ * On a fresh database step 1 does nothing. Requires Node >= 20 (plain ESM)
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -28,9 +27,9 @@ const persist = persistIdx >= 0 ? ['--persist-to', args[persistIdx + 1]] : [];
 
 let adopt;
 try {
-	adopt = await import('../src/adopt.ts');
+	adopt = await import('../src/adopt.js');
 } catch (e) {
-	console.error(`Cannot load packages/db/src/adopt.ts (needs Node >= 22.18): ${e.message}`);
+	console.error(`Cannot load packages/db/src/adopt.js (Node >= 20 required): ${e.message}`);
 	process.exit(1);
 }
 

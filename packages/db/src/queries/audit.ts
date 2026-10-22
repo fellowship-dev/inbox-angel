@@ -52,7 +52,7 @@ export function auditQueries(db: Db, accountId: string) {
 			const safeLimit = Math.min(limit, 200);
 			const offset = (page - 1) * safeLimit;
 
-			const where: (SQL | undefined)[] = [eq(auditLog.account_id, accountId)];
+			const where: (SQL | undefined)[] = [];
 			if (action) where.push(like(auditLog.action, action.replace(/%/g, '') + '%'));
 			if (domain_id) where.push(and(eq(auditLog.resource_id, domain_id), eq(auditLog.resource_type, 'domain')));
 			if (actor_id) where.push(eq(auditLog.actor_id, actor_id));
@@ -62,7 +62,7 @@ export function auditQueries(db: Db, accountId: string) {
 			return db
 				.select()
 				.from(auditLog)
-				.where(and(...where))
+				.where(and(eq(auditLog.account_id, accountId), ...where))
 				.orderBy(desc(auditLog.created_at))
 				.limit(safeLimit)
 				.offset(offset)
