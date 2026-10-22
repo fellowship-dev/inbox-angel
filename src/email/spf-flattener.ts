@@ -18,7 +18,7 @@ import {
   createResolver,
   buildFlatRecord,
   type CollectResult,
-} from '../../packages/dns-checks/src';
+} from '@inbox-angel/dns-checks';
 
 export { buildFlatRecord };
 export type { CollectResult };

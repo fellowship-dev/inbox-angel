@@ -121,13 +121,26 @@ Reports from receiving mail servers worldwide will start arriving within 24 hour
 
 ---
 
+## Repository layout
+
+The deployable Worker stays at the repo root so the Deploy to Cloudflare button (which clones the whole repo and builds from its root) keeps working with the plain root URL. Shared code lives in npm workspaces:
+
+| Path | What |
+|---|---|
+| `src/`, `dashboard/`, `migrations/`, `test/`, `e2e/`, `scripts/`, `wrangler.jsonc`, `deploy.json` | The Worker app (root `package.json`) |
+| `packages/*` | Workspace packages. `@inbox-angel/dns-checks` (pure SPF/DKIM/DMARC/MTA-STS/BIMI checks) is imported by name from the app and bundled by wrangler |
+| `tools/*` | Offline tooling (`tools/audit-fleet`) |
+
+**Why npm workspaces, not pnpm:** the Deploy button and most self-hosters already run `npm install` against a `package-lock.json`. npm needs no extra tool or corepack step, so it carries the least risk. pnpm can be revisited later.
+
 ## Local Development
 
 ```bash
-npm install
-npm install --prefix dashboard
+npm install             # installs the root app, all workspaces and dashboard/
 npm run dev:dashboard   # Vite dev server on :5173
-wrangler dev            # Worker on :8787
+npm run dev             # Worker on :8787 (wrangler dev)
+npm test                # unit tests: test/ and packages/*/test
+npm run typecheck       # tsc -p packages/dns-checks
 ```
 
 ---

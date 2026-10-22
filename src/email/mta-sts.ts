@@ -21,7 +21,7 @@ import {
   detectExistingMtaStsMode as detectExistingMtaStsModePure,
   generatePolicyId,
   lookupMx,
-} from '../../packages/dns-checks/src';
+} from '@inbox-angel/dns-checks';
 
 export { buildPolicyFile, generatePolicyId };
 

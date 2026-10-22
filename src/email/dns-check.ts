@@ -18,9 +18,9 @@ import {
   type DmarcRecord as PkgDmarcRecord,
   type SpfAnalysis,
   type SpfRecord as PkgSpfRecord,
-} from '../../packages/dns-checks/src';
+} from '@inbox-angel/dns-checks';
 
-export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '../../packages/dns-checks/src';
+export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '@inbox-angel/dns-checks';
 export type { DkimRecord };
 
 /** Returned lookups may carry `permerror`: the record(s) exist but receivers will treat them as an error. */
