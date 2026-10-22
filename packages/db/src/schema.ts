@@ -362,7 +362,6 @@ export const passwordResetTokens = sqliteTable(
  */
 export const GLOBAL_TABLES = {
 	accounts: 'the tenant registry itself',
-	memberships: 'join table; scoped by its own account_id column',
 	users: 'a user can belong to several accounts; membership carries the role',
 	check_results: 'anonymous public free-check results, not tenant data',
 	ip_info: 'shared public IP-metadata cache',
@@ -371,6 +370,7 @@ export const GLOBAL_TABLES = {
 
 /** Tables that must carry an `account_id` column. */
 export const ACCOUNT_OWNED_TABLES = [
+	'memberships',
 	'domains',
 	'aggregate_reports',
 	'report_records',

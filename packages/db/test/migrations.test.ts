@@ -13,8 +13,8 @@ function seed(db: DatabaseSync) {
 	ins("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count) VALUES (1, 'g', 'r1', 100, 200, 5), (1, 'g', 'r2', 300, 400, 7)");
 	ins("INSERT INTO report_records (report_id, source_ip, count, disposition) VALUES (1, '1.1.1.1', 5, 'none'), (2, '2.2.2.2', 7, 'none')");
 	ins("INSERT INTO check_results (from_email, from_domain, overall_status) VALUES ('x@y.z', 'y.z', 'exposed')");
-	ins("INSERT INTO monitor_subscriptions (email, domain) VALUES ('m@x.test', 'acme.com')");
 	const has = (t: string) => tableExists(db, t);
+	if (has('monitor_subscriptions')) ins("INSERT INTO monitor_subscriptions (email, domain) VALUES ('m@x.test', 'acme.com')");
 	if (has('users')) {
 		ins("INSERT INTO users (id, email, name, role, created_at) VALUES ('u2', 'second@x.test', 'Second', 'admin', 20), ('u1', 'first@x.test', 'First', 'admin', 10), ('u3', 'm@x.test', 'Mem', 'member', 30)");
 	}
@@ -40,7 +40,7 @@ function expectUpgraded(db: DatabaseSync, before: Record<string, number>) {
 	// 2. No data lost (a cascade on a rebuilt parent table would show up here).
 	for (const [t, n] of Object.entries(before)) expect(counts(db)[t], t).toBe(n);
 	// 3. Everything landed in the implicit account.
-	for (const t of ACCOUNT_OWNED_TABLES.filter((t) => t !== 'memberships' as string)) {
+	for (const t of ACCOUNT_OWNED_TABLES.filter((t) => t !== 'memberships')) {
 		const bad = db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE account_id IS NOT ?`).get(IMPLICIT_ACCOUNT_ID) as any;
 		expect(bad.n, `${t} rows outside implicit account`).toBe(0);
 	}

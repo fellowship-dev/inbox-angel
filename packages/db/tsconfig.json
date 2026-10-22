@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": ["es2022"],
+		"types": ["@cloudflare/workers-types", "node"],
+		"module": "es2022",
+		"moduleResolution": "Bundler",
+		"noEmit": true,
+		"strict": true,
+		"isolatedModules": true,
+		"skipLibCheck": true
+	},
+	"include": ["src", "test"]
+}
