@@ -45,8 +45,9 @@ function wrangler(extra, { allowFail = false } = {}) {
 function query(sql, opts) {
 	const r = wrangler(['d1', 'execute', DB, flag, ...persist, '--json', '--command', sql], opts);
 	if (r.status !== 0) return null;
-	// wrangler prints progress lines before the JSON on some versions
-	const start = r.stdout.indexOf('[');
+	// wrangler prints progress lines and config warnings (which contain "[WARNING]") before the JSON,
+	// which starts on a line of its own.
+	const start = r.stdout.search(/^\[\s*$/m);
 	return JSON.parse(r.stdout.slice(start))[0]?.results ?? [];
 }
 
