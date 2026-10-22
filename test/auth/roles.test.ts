@@ -103,3 +103,22 @@ describe('roles: owner / admin / member', () => {
     expect((await call(env, 'GET', '/api/domains', { headers: { authorization: 'Bearer garbage' } })).status).toBe(401);
   });
 });
+
+describe('GET /api/me', () => {
+  it('reports the caller and their role, for every role', async () => {
+    const { env, owner, admin, member } = await world();
+    for (const [key, role, email] of [[owner, 'owner', 'owner@example.com'], [admin, 'admin', 'admin@example.com'], [member, 'member', 'member@example.com']] as const) {
+      const res = await call(env, 'GET', '/api/me', { key });
+      expect(res.status).toBe(200);
+      const body = await res.json() as any;
+      expect(body.role).toBe(role);
+      expect(body.user.email).toBe(email);
+      expect(body.account_id).toBeTruthy();
+    }
+  });
+
+  it('is 401 without credentials', async () => {
+    const { env } = await world();
+    expect((await call(env, 'GET', '/api/me')).status).toBe(401);
+  });
+});

@@ -561,6 +561,16 @@ async function _handleApi(
     return err('admin required', 403);
   }
 
+  // GET /api/me — who the caller is in this account (the dashboard gates controls on `role`)
+  if (path === '/api/me' && method === 'GET') {
+    return json({
+      user: userBySession,
+      role: account.role ?? 'member',
+      account_id: tenant.accountId,
+      kind: (account as AuthedAccount).kind ?? 'session',
+    });
+  }
+
   try {
     // POST /api/settings/base-domain — wizard step 0: set the base domain
     if (path === '/api/settings/base-domain' && method === 'POST') {
