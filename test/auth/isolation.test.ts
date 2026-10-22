@@ -45,6 +45,10 @@ async function world() {
   db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id, is_default) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1)").run(b);
   db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, account_id) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?)").run(b);
   db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, account_id) VALUES (100, 10, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
+  // A recent report too: the analytics endpoints only look back 180 days, and these must be able to leak if they ever scope wrongly.
+  const recent = Math.floor(Date.now() / 1000) - 2 * 86400;
+  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, account_id) VALUES (11, 2, 'B-Org-Secret', 'r-b-recent', ?, ?, 5, 0, 5, ?)").run(recent, recent + 86399, b);
+  db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, account_id) VALUES (101, 11, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
   db.sqlite.prepare("INSERT INTO tls_reports (id, domain_id, org_name, date_begin, date_end, account_id) VALUES (20, 2, 'B-Org-Secret', 1700000000, 1700086400, ?)").run(b);
   db.sqlite.prepare("INSERT INTO spf_flatten_config (domain_id, canonical_record, flattened_record, account_id) VALUES (2, 'v=spf1 include:B-Spf-Secret ~all', 'v=spf1 ip4:198.51.100.77 ~all', ?)").run(b);
   db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, account_id) VALUES (2, 'b-policy-id', ?)").run(b);
@@ -116,6 +120,12 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/domains/2/hosted/rotate-token', body: {}, kind: 'denied' },
   { method: 'POST', path: '/api/domains/2/hosted/verify', body: {}, kind: 'denied' },
   { method: 'GET', path: '/api/domains/1/hosted', kind: 'scoped' },
+  // analytics (src/analytics/routes.ts): read-only rollups of the caller's own reports
+  { method: 'GET', path: '/api/analytics?days=90', kind: 'scoped' },
+  { method: 'GET', path: '/api/domains/1/analytics', kind: 'scoped' },
+  { method: 'GET', path: '/api/domains/2/analytics?days=90', kind: 'denied' },
+  { method: 'POST', path: '/api/domains/2/analytics', body: {}, kind: 'denied', note: 'no write verb exists; must not reach B either' },
+  { method: 'GET', path: '/api/hosted/config', kind: 'scoped' },
   { method: 'POST', path: '/api/domains/bulk-import', body: { domains: 'fresh-a.example.net' }, kind: 'scoped' },
   { method: 'GET', path: '/api/domains/ct-discover?domain=example.net', kind: 'scoped' },
   // reports & monitoring
@@ -234,6 +244,25 @@ describe('two hosted accounts: A cannot reach B', () => {
     expect(documented.length).toBe(5);
     const covered = ROUTES.filter(r => r.kind === 'denied').map(r => `${r.method} ${r.path}`);
     expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+  });
+
+  it('table covers every route of the analytics module (add new routes here)', () => {
+    const src = readFileSync(join(__dirname, '../../src/analytics/routes.ts'), 'utf8');
+    const documented = [...src.matchAll(/^\/\/\s+GET\s+(\/api\/[^?\s]+)/gm)].map(m => `GET ${m[1].replace(':id', '2')}`);
+    expect(documented).toEqual(['GET /api/analytics', 'GET /api/domains/2/analytics']);
+    const covered = ROUTES.map(r => `${r.method} ${r.path.split('?')[0]}`);
+    expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+    expect(ROUTES.some(r => r.kind === 'denied' && r.path.startsWith('/api/domains/2/analytics'))).toBe(true);
+  });
+
+  it('analytics shows each account only its own senders (B sees its own, A sees none of them)', async () => {
+    const w = await world();
+    const own = await (await call(w.env, 'GET', '/api/analytics', { key: w.B.token })).text();
+    expect(own).toContain('198.51.100.77'); // control: the secret really is in B's rollup, so its absence for A means something
+    for (const key of [w.A.token, w.keyA]) {
+      const mine = await (await call(w.env, 'GET', '/api/analytics?days=90', { key })).text();
+      for (const s of SECRETS) expect(mine).not.toContain(s);
+    }
   });
 
   it('hosted intake: A’s token cannot file or reveal anything in B (see test/hosted/intake.test.ts for the report-level checks)', async () => {
