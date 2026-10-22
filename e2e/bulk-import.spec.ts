@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Bulk domain import', () => {
   test('navigates to /bulk-import and shows the form', async ({ page }) => {
     await page.goto(`/#/bulk-import`);
-    await expect(page.getByRole('heading', { name: 'Bulk domain import' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Import domains', level: 1 })).toBeVisible();
     await expect(page.locator('textarea')).toBeVisible();
     await expect(page.getByRole('button', { name: /Import domains/ })).toBeVisible();
   });

@@ -78,7 +78,7 @@ The button forks the repo, creates a D1 database, and prompts for your API token
 **Option B — CLI:**
 
 ```bash
-npm install && npm install --prefix dashboard
+npm install
 wrangler secret put CLOUDFLARE_API_TOKEN  # the token you created above
 npm run deploy
 ```
@@ -143,7 +143,7 @@ Until migrated, the Worker answers 503 and inbound email is refused for retry. D
 | Storage | Cloudflare D1 | SQLite at the edge |
 | DNS provisioning | Cloudflare DNS API | Per-domain auth records + SPF + MTA-STS |
 | Auth | Better Auth on D1 | Email + password; optional GitHub/Google; roles; per-user API keys |
-| Frontend | Embedded SPA | Built from `dashboard/`, served as static assets |
+| Frontend | Embedded SPA | React app in `web/` (on `packages/ui`), served as static assets |
 
 ---
 
@@ -153,7 +153,7 @@ The deployable Worker stays at the repo root so the Deploy to Cloudflare button 
 
 | Path | What |
 |---|---|
-| `src/`, `dashboard/`, `migrations/`, `test/`, `e2e/`, `scripts/`, `wrangler.jsonc`, `deploy.json` | The Worker app (root `package.json`) |
+| `src/`, `web/`, `migrations/`, `test/`, `e2e/`, `scripts/`, `wrangler.jsonc`, `deploy.json` | The Worker app (root `package.json`) |
 | `packages/*` | Workspace packages. `@inbox-angel/dns-checks` (pure SPF/DKIM/DMARC/MTA-STS/BIMI checks) is imported by name from the app and bundled by wrangler |
 | `tools/*` | Offline tooling (`tools/audit-fleet`) |
 
@@ -162,8 +162,9 @@ The deployable Worker stays at the repo root so the Deploy to Cloudflare button 
 ## Local Development
 
 ```bash
-npm install             # installs the root app, all workspaces and dashboard/
-npm run dev:dashboard   # Vite dev server on :5173
+npm install             # installs the root app and all workspaces (including web/)
+npm run dev:dashboard   # web/ Vite dev server on :5173 (proxies /api to :8787)
+npm run test:web        # dashboard component + route tests
 npm run dev             # Worker on :8787 (wrangler dev)
 npm test                # unit tests: test/ and packages/*/test
 npm run typecheck       # tsc --noEmit (app) + tsc -p packages/dns-checks

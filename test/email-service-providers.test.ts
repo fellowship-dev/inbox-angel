@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { SPF_PROVIDERS, DKIM_ONLY_PROVIDERS, detectProviders, extractIncludes, extractOtherMechanisms, buildSpfRecord, matchDkimProvider, findUnsignedSpfProviders, getAllDkimSelectors } from '../dashboard/src/email-service-providers';
+import { SPF_PROVIDERS, DKIM_ONLY_PROVIDERS, detectProviders, matchDkimProvider, findUnsignedSpfProviders, getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
+import { extractIncludes, extractOtherMechanisms, buildSpfRecord } from '@inbox-angel/dns-checks/spf-record';
 
 describe('SPF_PROVIDERS', () => {
   it('has at least 15 known providers', () => {
@@ -28,6 +29,11 @@ describe('SPF_PROVIDERS', () => {
 });
 
 describe('detectProviders', () => {
+  it('does not match an include that merely starts with a known provider domain', () => {
+    expect(detectProviders('v=spf1 include:_spf.google.com.evil.net ~all')).toEqual([]);
+    expect(detectProviders('v=spf1 include:evil-sendgrid.net ~all')).toEqual([]);
+  });
+
   it('detects Google Workspace from SPF record', () => {
     const record = 'v=spf1 include:_spf.google.com ~all';
     const detected = detectProviders(record);

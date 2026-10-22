@@ -73,7 +73,7 @@ Shards are round-robin over the sorted, deduped domain list, so every box derive
 
 ### Checker seam
 
-`lib/checker.ts` defines `type Checker = (domain: string) => Promise<DomainReport>`. `createLegacyChecker` is a **temporary adapter** over the current `src/email/dns-check.ts` parsers and `dashboard/src/email-service-providers.ts`, with a rate-limited DoH client of its own (the `src/` lookups swallow errors, which would hide the error rate). When `packages/dns-checks` lands, change the single `const checker = ...` line in `run.ts` to use its `checkDomain`, mapped to `DomainReport`.
+`lib/checker.ts` defines `type Checker = (domain: string) => Promise<DomainReport>`. `createLegacyChecker` is a **temporary adapter** over the current `src/email/dns-check.ts` parsers and `packages/dns-checks/src/email-service-providers.ts`, with a rate-limited DoH client of its own (the `src/` lookups swallow errors, which would hide the error rate). When `packages/dns-checks` lands, change the single `const checker = ...` line in `run.ts` to use its `checkDomain`, mapped to `DomainReport`.
 
 ## 3. Launch on N devboxes
 

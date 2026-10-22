@@ -5,7 +5,7 @@
   "success_url": "https://github.com/fellowship-dev/inbox-angel#post-deploy",
   "workers_dev": true,
   "build": {
-    "command": "npm install && npm install --prefix dashboard && npm run build:dashboard"
+    "command": "npm install && npm run build:dashboard"
   },
   "env": {
     "CLOUDFLARE_API_TOKEN": {
