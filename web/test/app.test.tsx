@@ -69,3 +69,23 @@ describe('app', () => {
 		expect(await screen.findByText('Waiting for the server', {}, { timeout: 20000 })).toBeInTheDocument();
 	}, 25000);
 });
+
+describe('setup redirect', () => {
+	it('stops sending an owner to the wizard once a write has created the first domain', async () => {
+		tokenStore.set('t');
+		let hasDomain = false;
+		const api = boot('/add', {
+			'GET /api/auth/status': () => ({ ...STATUS, has_domain: hasDomain }),
+			'GET /api/me': me('owner'),
+			'GET /api/zones': fail(400),
+			'POST /api/domains': () => ((hasDomain = true), { domain: { id: 1, domain: 'acme.com', rua_address: 'rua@reports.acme.com', dmarc_policy: 'none', parent_id: null, created_at: 1, alerts_enabled: 1, is_default: 0 }, rua_hint: '' }),
+		});
+		const input = await screen.findByPlaceholderText('yourcompany.com');
+		const user = userEvent.setup();
+		await user.type(input, 'acme.com');
+		await user.click(screen.getByRole('button', { name: /Continue/ }));
+		await screen.findByText(/Domain added/i);
+		// The write refreshed the cached status, so the redirect check sees the new domain.
+		await waitFor(() => expect(api.calls.filter((c) => c.path === '/api/auth/status').length).toBeGreaterThanOrEqual(2));
+	});
+});

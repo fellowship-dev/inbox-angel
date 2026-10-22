@@ -232,3 +232,4 @@ specs/
 
 # Domain audit fleet: seed lists + results contain third-party domains. NEVER commit.
 tools/audit-fleet/out/
+test-results/
