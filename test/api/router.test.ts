@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../../src/index';
-import type { Domain } from '../../src/db/types';
+import { createMigratedD1, type TestD1 } from '@inbox-angel/db/testing';
+import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
@@ -41,29 +42,34 @@ import * as dnsMod from '../../src/dns/provision';
 
 const BASE = 'https://api.inboxangel.com';
 
-function makeEnv(dbOverrides: Partial<{ prepare: any; batch: any }> = {}): Env {
+type TestEnv = Env & { DB: TestD1 };
+
+function makeEnv(): TestEnv {
   return {
-    DB: {
-      prepare: vi.fn().mockReturnValue({
-        bind: vi.fn().mockReturnValue({
-          run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-          first: vi.fn().mockResolvedValue(null),
-          all:   vi.fn().mockResolvedValue({ results: [] }),
-        }),
-        // For direct prepare().first() or prepare().all() calls (no bind)
-        first: vi.fn().mockResolvedValue(null),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-      batch: vi.fn().mockResolvedValue([]),
-      ...dbOverrides,
-    } as unknown as D1Database,
+    DB: createMigratedD1(),
     API_KEY: 'test-key',
     CLOUDFLARE_ACCOUNT_ID: '',
     CLOUDFLARE_ZONE_ID: '',
     CLOUDFLARE_API_TOKEN: '',
     REPORTS_DOMAIN: 'reports.inboxangel.io',
     FROM_EMAIL: 'check@reports.inboxangel.io',
-  };
+  } as unknown as TestEnv;
+}
+
+function seedDomain(env: TestEnv, d: { id: number; domain: string; dns_record_id?: string | null; parent_id?: number | null }) {
+  env.DB.sqlite
+    .prepare('INSERT INTO domains (id, account_id, domain, rua_address, dns_record_id, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(d.id, IMPLICIT_ACCOUNT_ID, d.domain, 'rua@reports.inboxangel.io', d.dns_record_id ?? null, d.parent_id ?? null);
+}
+
+function seedCheckResult(env: TestEnv, token: string, fromDomain = 'acme.com') {
+  env.DB.sqlite
+    .prepare("INSERT INTO check_results (from_email, from_domain, spf_record, dmarc_policy, dmarc_record, session_token, overall_status) VALUES (?, ?, 'v=spf1 -all', 'none', 'v=DMARC1; p=none', ?, 'protected')")
+    .run(`a@${fromDomain}`, fromDomain, token);
+}
+
+function rows(env: TestEnv, sql: string, ...params: any[]): any[] {
+  return env.DB.sqlite.prepare(sql).all(...params) as any[];
 }
 
 function req(method: string, path: string, body?: unknown): Request {
@@ -152,10 +158,7 @@ describe('GET /api/check-sessions/:token', () => {
 
   it('returns 200 done when result exists', async () => {
     const env = makeEnv();
-    const result = { id: 1, session_token: 'abc123', overall_status: 'protected' };
-    (env.DB.prepare as any).mockReturnValueOnce({
-      bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(result) }),
-    });
+    seedCheckResult(env, 'abc123');
     const res = await handleApi(req('GET', '/api/check-sessions/abc123'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
@@ -201,13 +204,10 @@ describe('GET /api/domains', () => {
     expect(body.domains).toEqual([]);
   });
 
+
   it('returns domain list from DB', async () => {
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'x@reports.inboxangel.com' };
     const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      all: vi.fn().mockResolvedValue({ results: [domain] }),
-      bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [domain] }) }),
-    });
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('GET', '/api/domains'), env, ctx);
     const body = await res.json() as any;
     expect(body.domains).toHaveLength(1);
@@ -221,38 +221,21 @@ describe('GET /api/domains', () => {
 
 describe('POST /api/domains', () => {
   it('returns 201 with domain row and rua_hint', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io'};
     const env = makeEnv();
-    // getAllDomains → empty at first
-    // insertDomain, logAudit all use default mock
-    // getDomainById needs to return the domain row
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
     const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.domain.domain).toBe('acme.com');
     expect(body.rua_hint).toContain('rua=mailto:rua@reports.inboxangel.io');
+    expect(rows(env, 'SELECT domain, account_id FROM domains')).toEqual([{ domain: 'acme.com', account_id: IMPLICIT_ACCOUNT_ID }]);
   });
 
   it('lowercases and trims the domain', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io'};
     const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
     const res = await handleApi(req('POST', '/api/domains', { domain: '  ACME.COM  ' }), env, ctx);
     const body = await res.json() as any;
     expect(body.domain.domain).toBe('acme.com');
+    expect(rows(env, 'SELECT domain FROM domains')).toEqual([{ domain: 'acme.com' }]);
   });
 
   it('returns 400 when domain is missing', async () => {
@@ -277,70 +260,32 @@ describe('POST /api/domains', () => {
 
   it('returns 409 on duplicate domain', async () => {
     const env = makeEnv();
-    // insertDomain throws UNIQUE (no DNS provisioning on domain add anymore)
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({
-        run: vi.fn().mockRejectedValue(new Error('UNIQUE constraint failed')),
-      }) });
+    // insertDomain hits the UNIQUE constraint (no DNS provisioning on domain add anymore)
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
     expect(res.status).toBe(409);
+    expect(rows(env, 'SELECT id FROM domains')).toHaveLength(1);
   });
 
   it('uses fixed rua address rua@REPORTS_DOMAIN', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'my-company.io', rua_address: 'rua@reports.inboxangel.io'};
-    const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
-    const res = await handleApi(req('POST', '/api/domains', { domain: 'my-company.io' }), env, ctx);
+    const res = await handleApi(req('POST', '/api/domains', { domain: 'my-company.io' }), makeEnv(), ctx);
     const body = await res.json() as any;
     expect(body.rua_hint).toContain('rua=mailto:rua@reports.inboxangel.io');
   });
 
   it('does not call provisionDomain on domain add (DNS deferred to wizard)', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io'};
-    const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
-    await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
+    await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), makeEnv(), ctx);
     expect(dnsMod.provisionDomain).not.toHaveBeenCalled();
   });
 
   it('includes auth_record in the 201 response', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io'};
-    const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
-    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
+    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), makeEnv(), ctx);
     const body = await res.json() as any;
     expect(body.auth_record).toContain('_report._dmarc.');
   });
 
   it('always returns dns_instructions for manual setup (no auto-provisioning)', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io'};
-    const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run:   vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all:   vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
-    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
+    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), makeEnv(), ctx);
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.dns_instructions).toContain('v=DMARC1;');
@@ -352,17 +297,7 @@ describe('POST /api/domains', () => {
 
 describe('BASE_DOMAIN lazy init', () => {
   it('creates domain DB row on first authenticated request (no DNS writes)', async () => {
-    const env = { ...makeEnv(), BASE_DOMAIN: 'myco.com' };
-    // ensureInitialized flow (no DNS provisioning):
-    // 1. getAllDomains → empty
-    // 2. insertDomain
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue({ results: [] }) }) // getAllDomains (no bind)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }) }) }); // insertDomain
-    // Actual handler: GET /api/domains → getAllDomains again
-    (env.DB.prepare as any).mockReturnValue({
-      all: vi.fn().mockResolvedValue({ results: [] }),
-    });
+    const env = { ...makeEnv(), BASE_DOMAIN: 'myco.com' } as TestEnv;
     const res = await handleApi(req('GET', '/api/domains'), env, ctx);
     expect(res.status).toBe(200);
     expect(dnsMod.provisionDomain).not.toHaveBeenCalled();
@@ -372,6 +307,7 @@ describe('BASE_DOMAIN lazy init', () => {
     const env = makeEnv(); // no BASE_DOMAIN
     await handleApi(req('GET', '/api/domains'), env, ctx);
     expect(dnsMod.provisionDomain).not.toHaveBeenCalled();
+    expect(rows(env, 'SELECT id FROM domains')).toEqual([]);
   });
 });
 
@@ -380,28 +316,21 @@ describe('BASE_DOMAIN lazy init', () => {
 describe('DELETE /api/domains/:id', () => {
   it('returns 204 when domain exists', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 5, domain: 'acme.com',  dns_record_id: null };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ // getDomainById
-        bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }),
-      });
-    // DELETE + logAudit use the default mock (which handles bind().run())
+    seedDomain(env, { id: 5, domain: 'acme.com', dns_record_id: null });
     const res = await handleApi(req('DELETE', '/api/domains/5'), env, ctx);
     expect(res.status).toBe(204);
+    expect(rows(env, 'SELECT id FROM domains')).toEqual([]);
   });
 
   it('calls deprovisionDomain when dns_record_id is set', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 5, domain: 'acme.com',  dns_record_id: 'cf-rec-abc' };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) });
-    // DELETE + logAudit (x2) use the default mock
+    seedDomain(env, { id: 5, domain: 'acme.com', dns_record_id: 'cf-rec-abc' });
     await handleApi(req('DELETE', '/api/domains/5'), env, ctx);
     expect(dnsMod.deprovisionDomain).toHaveBeenCalledWith(expect.anything(), 'cf-rec-abc');
   });
 
   it('returns 404 when domain not found', async () => {
-    const env = makeEnv(); // first() returns null by default
+    const env = makeEnv();
     const res = await handleApi(req('DELETE', '/api/domains/99'), env, ctx);
     expect(res.status).toBe(404);
   });
@@ -417,16 +346,23 @@ describe('DELETE /api/domains/:id', () => {
 describe('GET /api/domains/:id/stats', () => {
   it('returns stats for owned domain', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com' };
-    const stats = [{ day: '2026-03-01', total: 100, passed: 95, failed: 5 }];
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) })
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: stats }) }) });
-    const res = await handleApi(req('GET', '/api/domains/1/stats'), env, ctx);
+    seedDomain(env, { id: 1, domain: 'acme.com' });
+    const day = Math.floor(Date.parse('2026-03-01T12:00:00Z') / 1000);
+    env.DB.sqlite
+      .prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count) VALUES (1, 'g', 'r1', ?, ?, 100, 95, 5)")
+      .run(day, day + 3600);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-05T00:00:00Z'));
+    let res: Response;
+    try {
+      res = await handleApi(req('GET', '/api/domains/1/stats'), env, ctx);
+    } finally {
+      vi.useRealTimers();
+    }
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.domain).toBe('acme.com');
-    expect(body.stats).toEqual(stats);
+    expect(body.stats).toEqual([{ day: '2026-03-01', total: 100, passed: 95, failed: 5 }]);
     expect(body.days).toBe(30);
   });
 
@@ -437,10 +373,7 @@ describe('GET /api/domains/:id/stats', () => {
 
   it('defaults to 30 days and caps at 90', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com' };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) })
-      .mockReturnValue({ bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }) });
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('GET', '/api/domains/1/stats?days=999'), env, ctx);
     const body = await res.json() as any;
     expect(body.days).toBe(90);
@@ -459,12 +392,12 @@ describe('GET /api/reports', () => {
 
   it('caps limit at 100', async () => {
     const env = makeEnv();
-    const bindMock = vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) });
-    (env.DB.prepare as any).mockReturnValue({ bind: bindMock });
-    await handleApi(req('GET', '/api/reports?limit=999'), env, ctx);
-    // First (only) bind arg is the capped limit
-    const limitArg = bindMock.mock.calls[0][0];
-    expect(limitArg).toBe(100);
+    seedDomain(env, { id: 1, domain: 'acme.com' });
+    const ins = env.DB.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'g', ?, 1, 2)");
+    for (let i = 0; i < 150; i++) ins.run(`r${i}`);
+    const res = await handleApi(req('GET', '/api/reports?limit=999'), env, ctx);
+    const body = await res.json() as any;
+    expect(body.reports).toHaveLength(100);
   });
 });
 
@@ -483,14 +416,8 @@ describe('GET /api/reports/:id', () => {
 
   it('returns report + records when found', async () => {
     const env = makeEnv();
-    const report = { id: 1,  domain: 'acme.com' };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ // aggregate_reports query
-        bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(report) }),
-      })
-      .mockReturnValueOnce({ // report_records query
-        bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }),
-      });
+    seedDomain(env, { id: 1, domain: 'acme.com' });
+    env.DB.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 1, 'g', 'r1', 1, 2)").run();
     const res = await handleApi(req('GET', '/api/reports/1'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
@@ -502,18 +429,15 @@ describe('GET /api/reports/:id', () => {
 // ── POST /api/monitor ─────────────────────────────────────────
 
 describe('POST /api/monitor', () => {
-  const checkResult = { id: 1, from_domain: 'acme.com', spf_record: 'v=spf1 -all', dmarc_policy: 'none', dmarc_record: 'v=DMARC1; p=none', session_token: 'tok123' };
-
   it('returns 201 with domain and email when session exists', async () => {
     const env = makeEnv();
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(checkResult) }) }) // getCheckResultByToken
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true }) }) }); // insertMonitorSubscription
+    seedCheckResult(env, 'tok123');
     const res = await handleApi(req('POST', '/api/monitor', { email: 'user@example.com', session_token: 'tok123' }), env, ctx);
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.domain).toBe('acme.com');
     expect(body.email).toBe('user@example.com');
+    expect(rows(env, 'SELECT email, domain FROM monitor_subscriptions')).toEqual([{ email: 'user@example.com', domain: 'acme.com' }]);
   });
 
   it('returns 400 when email is missing', async () => {
@@ -538,9 +462,7 @@ describe('POST /api/monitor', () => {
 
   it('does not require auth', async () => {
     const env = makeEnv();
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(checkResult) }) })
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ success: true }) }) });
+    seedCheckResult(env, 'tok123');
     await handleApi(req('POST', '/api/monitor', { email: 'u@x.com', session_token: 'tok123' }), env, ctx);
     expect(authMod.requireAuth).not.toHaveBeenCalled();
   });
@@ -562,10 +484,7 @@ describe('GET /api/check-results', () => {
 describe('GET /api/domains/:id/wizard-state', () => {
   it('returns default state when no wizard state saved', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com'};
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) }) // getDomainById
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }); // getSetting (no saved state)
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('GET', '/api/domains/1/wizard-state'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
@@ -577,11 +496,9 @@ describe('GET /api/domains/:id/wizard-state', () => {
 
   it('returns saved wizard state', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com' };
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const savedState = { spf: 'complete', dkim: 'skipped', dmarc: 'not_started', routing: 'not_started' };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) })
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue({ value: JSON.stringify(savedState) }) }) });
+    env.DB.sqlite.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(IMPLICIT_ACCOUNT_ID, 'wizard_state_1', JSON.stringify(savedState));
     const res = await handleApi(req('GET', '/api/domains/1/wizard-state'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
@@ -598,16 +515,15 @@ describe('GET /api/domains/:id/wizard-state', () => {
 describe('PUT /api/domains/:id/wizard-state', () => {
   it('saves wizard state updates', async () => {
     const env = makeEnv();
-    const domain: Partial<Domain> = { id: 1, domain: 'acme.com' };
-    (env.DB.prepare as any)
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(domain) }) }) // getDomainById
-      .mockReturnValueOnce({ bind: vi.fn().mockReturnValue({ first: vi.fn().mockResolvedValue(null) }) }); // getSetting (current state)
-    // setSetting uses default mock
+    seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('PUT', '/api/domains/1/wizard-state', { spf: 'complete' }), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.spf).toBe('complete');
     expect(body.dkim).toBe('not_started');
+    const saved = rows(env, 'SELECT key, value FROM settings WHERE key LIKE ?', 'wizard_state_%');
+    expect(saved).toHaveLength(1);
+    expect(JSON.parse(saved[0].value).spf).toBe('complete');
   });
 
 });
@@ -628,26 +544,8 @@ describe('POST /api/domains — subdomain parent_context (T018)', () => {
   });
 
   it('returns parent_context when subdomain is added and parent exists in DB', async () => {
-    const parentRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io', parent_id: null };
-    const subdomainRow: Partial<Domain> = { id: 2, domain: 'marketing.acme.com', rua_address: 'rua@reports.inboxangel.io', parent_id: 1 };
     const env = makeEnv();
-
-    let callCount = 0;
-    (env.DB.prepare as any).mockImplementation(() => ({
-      bind: vi.fn().mockReturnValue({
-        run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 2 } }),
-        first: vi.fn().mockImplementation(() => {
-          callCount++;
-          // 1st first() = parent lookup in insertDomain (SELECT id FROM domains WHERE domain = 'acme.com')
-          // 2nd first() = getDomainById for subdomainRow
-          // 3rd first() = getDomainById for parentRow (parent_context fetch)
-          if (callCount === 1) return Promise.resolve(parentRow);
-          if (callCount === 2) return Promise.resolve(subdomainRow);
-          return Promise.resolve(parentRow);
-        }),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    }));
+    seedDomain(env, { id: 1, domain: 'acme.com' });
 
     const res = await handleApi(req('POST', '/api/domains', { domain: 'marketing.acme.com' }), env, ctx);
     expect(res.status).toBe(201);
@@ -656,20 +554,11 @@ describe('POST /api/domains — subdomain parent_context (T018)', () => {
     expect(body.parent_context).toBeDefined();
     expect(body.parent_context.domain).toBe('acme.com');
     expect(body.parent_context.has_dmarc).toBe(true);
+    expect(rows(env, 'SELECT parent_id FROM domains WHERE domain = ?', 'marketing.acme.com')).toEqual([{ parent_id: 1 }]);
   });
 
   it('returns no parent_context when apex domain is added', async () => {
-    const domainRow: Partial<Domain> = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io', parent_id: null };
-    const env = makeEnv();
-    (env.DB.prepare as any).mockReturnValue({
-      bind: vi.fn().mockReturnValue({
-        run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockResolvedValue(domainRow),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      }),
-    });
-
-    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
+    const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), makeEnv(), ctx);
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.parent_context).toBeUndefined();

@@ -18,55 +18,20 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
+import { createMigratedD1, createTestD1, applyMigrations, migrationFiles } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
-import { ensureMigrated } from '../../src/db/migrate';
 
 const LEGACY_KEY = 'legacy-auto-key-0000';
 const BASE = 'https://ia.example.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
-// Minimal SQL-aware D1 mock: a fresh instance with no admin, a legacy
-// auto_api_key row in settings, and sessions created by /api/auth/setup.
+// Real in-memory SQLite D1 with every migration applied, a fresh instance with
+// no admin, and a legacy auto_api_key row in settings. Sessions and users are
+// created by /api/auth/setup against the real schema.
 function makeDb() {
-  const state = {
-    sessions: new Map<string, { id: string; email: string; role: string }>(),
-    users: [] as { id: string; email: string; role: string }[],
-    sql: [] as string[],
-  };
-  const resolveFirst = (sql: string, params: unknown[]) => {
-    if (sql.includes("key = 'auto_api_key'") || (sql.includes('FROM settings') && params[0] === 'auto_api_key')) {
-      return { key: 'auto_api_key', value: LEGACY_KEY };
-    }
-    if (sql.includes('FROM users') && sql.includes('session_token')) {
-      const u = state.sessions.get(String(params[0]));
-      return u ? { ...u, name: u.email, session_token: params[0] } : null;
-    }
-    if (sql.includes('FROM users') && sql.includes("role = 'admin'")) {
-      return state.users.find(u => u.role === 'admin') ?? null;
-    }
-    return null;
-  };
-  const stmt = (sql: string, params: unknown[] = []) => ({
-    bind: (...args: unknown[]) => stmt(sql, args),
-    first: vi.fn(async () => resolveFirst(sql, params)),
-    all: vi.fn(async () => ({ results: [] })),
-    run: vi.fn(async () => {
-      if (/INSERT INTO users/i.test(sql)) {
-        state.users.push({ id: String(params[0]), email: String(params[1]), role: String(params.find(p => p === 'admin' || p === 'member') ?? 'member') });
-      }
-      if (/UPDATE users SET session_token/i.test(sql)) {
-        const [token, id] = params as string[];
-        const u = state.users.find(x => x.id === id);
-        if (u) state.sessions.set(token, u);
-      }
-      return { success: true, meta: { last_row_id: 1 } };
-    }),
-  });
-  const db = {
-    prepare: vi.fn((sql: string) => { state.sql.push(sql); return stmt(sql); }),
-    batch: vi.fn(async () => []),
-  };
-  return { db: db as unknown as D1Database, state };
+  const db = createMigratedD1();
+  db.sqlite.prepare("INSERT INTO settings (key, value) VALUES ('auto_api_key', ?)").run(LEGACY_KEY);
+  return { db: db as unknown as D1Database };
 }
 
 function makeEnv(db: D1Database): Env {
@@ -133,10 +98,17 @@ describe('first-run setup auth', () => {
     expect(again.status).toBe(409);
   });
 
-  it('migration no longer creates an auto key and removes a legacy one', async () => {
-    const { db, state } = makeDb();
-    await ensureMigrated(db);
-    expect(state.sql.some(q => /INSERT[^;]*auto_api_key/i.test(q))).toBe(false);
-    expect(state.sql.some(q => /DELETE FROM settings WHERE key = 'auto_api_key'/.test(q))).toBe(true);
+  it('migration no longer creates an auto key and removes a legacy one', () => {
+    // Apply everything before the accounts migration, plant a legacy key, then apply the rest.
+    const files = migrationFiles();
+    const accounts = files.find(f => f.startsWith('0012'))!;
+    const before = files[files.indexOf(accounts) - 1];
+    const db = createTestD1();
+    applyMigrations(db.sqlite, { through: before });
+    db.sqlite.prepare("INSERT INTO settings (key, value) VALUES ('auto_api_key', ?)").run(LEGACY_KEY);
+    applyMigrations(db.sqlite);
+    expect(db.sqlite.prepare("SELECT 1 FROM settings WHERE key = 'auto_api_key'").get()).toBeUndefined();
+    // A fresh install doesn't create one either.
+    expect(createMigratedD1().sqlite.prepare("SELECT 1 FROM settings WHERE key = 'auto_api_key'").get()).toBeUndefined();
   });
 });

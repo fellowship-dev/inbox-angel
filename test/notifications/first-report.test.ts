@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { buildFirstReportBody, sendFirstReportNotification, ReportStats } from '../../src/notifications/first-report';
 
 // ── Module mocks (only affects storeReport's import) ─────────
@@ -23,33 +24,41 @@ const STATS: ReportStats = {
 
 function makeEnv(overrides: { admin?: typeof ADMIN | null; sendEmail?: boolean; customDomain?: string | null } = {}) {
   const admin = overrides.admin === undefined ? ADMIN : overrides.admin;
-  const customDomainValue = overrides.customDomain !== undefined
-    ? (overrides.customDomain ? { value: overrides.customDomain } : null)
-    : { value: 'inbox.acme.com' };
-  const settingsMap: Record<string, { value: string } | null> = {
-    custom_domain: customDomainValue,
-    workers_subdomain: null, // not cached — triggers API fallback
-  };
+  const customDomain = overrides.customDomain !== undefined ? overrides.customDomain : 'inbox.acme.com';
+  const db = createMigratedD1();
+  if (admin) {
+    // users.name is NOT NULL in the real schema; a null name is simulated by the caller via nullAdminName().
+    db.sqlite
+      .prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', ?, ?, 'admin')")
+      .run(admin.email, admin.name ?? '');
+    db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES ('acct_default', 'u1', 'owner')").run();
+  }
+  if (customDomain) {
+    db.sqlite
+      .prepare("INSERT INTO settings (account_id, key, value) VALUES ('acct_default', 'custom_domain', ?)")
+      .run(customDomain);
+  }
+  // workers_subdomain is not cached in settings — triggers the env-utils fallback
   return {
-    DB: {
-      prepare: vi.fn((sql: string) => {
-        let boundKey: string | undefined;
-        const self = {
-          bind: vi.fn((...args: any[]) => { boundKey = args[0]; return self; }),
-          run: vi.fn().mockResolvedValue({ success: true }),
-          first: vi.fn().mockImplementation(() => {
-            if (sql.includes('settings') && boundKey) return Promise.resolve(settingsMap[boundKey] ?? null);
-            if (sql.includes('users')) return Promise.resolve(admin);
-            return Promise.resolve(null);
-          }),
-        };
-        return self;
-      }),
-    } as unknown as D1Database,
+    DB: db as unknown as D1Database,
     ...(overrides.sendEmail !== false
       ? { SEND_EMAIL: { send: vi.fn().mockResolvedValue(undefined) } as any }
       : {}),
   };
+}
+
+/** The real schema forbids a NULL users.name; make the admin lookup return one anyway. */
+function nullAdminName(env: { DB: D1Database }) {
+  const db = env.DB as any;
+  const realPrepare = db.prepare.bind(db);
+  vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+    const stmt = realPrepare(sql);
+    if (/from "users"/i.test(sql)) {
+      // Drizzle reads rows with .raw(): [id, email, name]
+      return { ...stmt, bind: () => ({ raw: async () => [['u1', 'admin@acme.com', null]] }) };
+    }
+    return stmt;
+  });
 }
 
 // ── buildFirstReportBody ──────────────────────────────────────
@@ -156,7 +165,8 @@ describe('sendFirstReportNotification', () => {
   });
 
   it('uses fallback name "there" when admin has no name', async () => {
-    const env = makeEnv({ admin: { email: 'admin@acme.com', name: null as any } });
+    const env = makeEnv();
+    nullAdminName(env);
     await sendFirstReportNotification(env, 'acme.com', STATS);
 
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
@@ -206,32 +216,25 @@ describe('storeReport first-report trigger', () => {
     };
   }
 
-  function makeMockDb(opts: { lastRowId?: number; reportCount?: number } = {}) {
-    const { lastRowId = 42, reportCount = 1 } = opts;
-    return {
-      prepare: vi.fn((sql: string) => {
-        let boundKey: string | undefined;
-        const self = {
-          bind: vi.fn((...args: any[]) => { boundKey = args[0]; return self; }),
-          run: vi.fn().mockResolvedValue({ meta: { last_row_id: lastRowId }, success: true }),
-          first: vi.fn().mockImplementation(() => {
-            if (sql.includes('COUNT(*)')) return Promise.resolve({ cnt: reportCount });
-            if (sql.includes('SELECT domain')) return Promise.resolve({ domain: 'acme.com' });
-            if (sql.includes('users')) return Promise.resolve({ email: 'admin@acme.com', name: 'Admin' });
-            if (sql.includes('settings')) return Promise.resolve(null); // no custom_domain or cached subdomain
-            return Promise.resolve(null);
-          }),
-        };
-        return self;
-      }),
-      batch: vi.fn((stmts: any[]) => Promise.resolve(stmts.map(() => ({ success: true, meta: {} })))),
-    } as unknown as D1Database;
+  /** Real DB with acme.com (id 1), an admin, and `existingReports` earlier reports for the domain. */
+  function makeMockDb(opts: { existingReports?: number; duplicate?: boolean } = {}) {
+    const { existingReports = 0, duplicate = false } = opts;
+    const db = createMigratedD1();
+    db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'rua@reports.acme.com')").run();
+    db.sqlite.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'admin@acme.com', 'Admin', 'admin')").run();
+    db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES ('acct_default', 'u1', 'owner')").run();
+    for (let i = 0; i < existingReports; i++) {
+      db.sqlite
+        .prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'x', ?, 0, 1)")
+        .run(i === 0 && duplicate ? 'report-001' : `old-${i}`);
+    }
+    return db as unknown as D1Database;
   }
 
   it('fires notification on first report (count=1)', async () => {
     const { storeReport } = await import('../../src/dmarc/store-report');
 
-    const db = makeMockDb({ reportCount: 1 });
+    const db = makeMockDb();
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -247,7 +250,7 @@ describe('storeReport first-report trigger', () => {
   it('does NOT fire notification on subsequent reports (count>1)', async () => {
     const { storeReport } = await import('../../src/dmarc/store-report');
 
-    const db = makeMockDb({ reportCount: 5 });
+    const db = makeMockDb({ existingReports: 4 });
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -262,7 +265,7 @@ describe('storeReport first-report trigger', () => {
   it('does NOT fire notification on duplicate reports (stored=false)', async () => {
     const { storeReport } = await import('../../src/dmarc/store-report');
 
-    const db = makeMockDb({ lastRowId: 0 }); // 0 = duplicate
+    const db = makeMockDb({ existingReports: 1, duplicate: true }); // report-001 already stored = duplicate
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
 
     await storeReport(db, 1, makeReport(), null, { DB: db, SEND_EMAIL: sendEmail });
@@ -275,7 +278,7 @@ describe('storeReport first-report trigger', () => {
   it('does NOT fire notification when env is not provided', async () => {
     const { storeReport } = await import('../../src/dmarc/store-report');
 
-    const db = makeMockDb({ reportCount: 1 });
+    const db = makeMockDb();
     const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
 
     await storeReport(db, 1, makeReport());

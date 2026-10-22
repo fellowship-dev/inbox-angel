@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { resolveDomain } from '../../src/email/resolve-domain';
 import type { Domain } from '../../src/db/types';
 
@@ -18,15 +19,21 @@ const DOMAIN: Domain = {
   updated_at: 1700000000,
 };
 
-// Build a mock D1Database that returns given domain row
+// Build a real in-memory D1 database containing the given domain row (if any)
 function makeDb(domain: Domain | null): D1Database {
-  return {
-    prepare: vi.fn().mockImplementation((sql: string) => ({
-      bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue(domain),
-      }),
-    })),
-  } as unknown as D1Database;
+  const db = createMigratedD1();
+  if (domain) {
+    db.sqlite
+      .prepare(
+        `INSERT INTO domains (id, domain, rua_address, dmarc_policy, dmarc_pct, spf_record, auth_record_provisioned, dns_record_id, spf_lookup_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        domain.id, domain.domain, domain.rua_address, domain.dmarc_policy, domain.dmarc_pct, domain.spf_record,
+        domain.auth_record_provisioned, domain.dns_record_id, domain.spf_lookup_count, domain.created_at, domain.updated_at,
+      );
+  }
+  return db as unknown as D1Database;
 }
 
 // ── Tests ─────────────────────────────────────────────────────
@@ -48,25 +55,18 @@ describe('resolveDomain', () => {
   });
 
   it('normalises the policy domain to lowercase before lookup', async () => {
-    const db = makeDb(DOMAIN);
+    const db = makeDb(DOMAIN); // stored lowercase
     const result = await resolveDomain(db, 'ACME.COM');
 
     expect(result).not.toBeNull();
-    const prepareMock = db.prepare as ReturnType<typeof vi.fn>;
-    const domainQuery = prepareMock.mock.calls.find(([sql]: [string]) =>
-      sql.includes('domains')
-    );
-    expect(domainQuery).toBeDefined();
-    const bindArg = prepareMock.mock.results[
-      prepareMock.mock.calls.indexOf(domainQuery)
-    ].value.bind.mock.calls[0][0];
-    expect(bindArg).toBe('acme.com');
+    expect(result!.domain).toBe('acme.com');
   });
 
   it('preserves all domain fields in the result', async () => {
     const db = makeDb(DOMAIN);
     const result = await resolveDomain(db, 'acme.com');
-    expect(result).toEqual(DOMAIN);
+    // The real row carries additional columns (rollout, parent, etc.); every fixture field must match.
+    expect(result).toMatchObject(DOMAIN);
   });
 
   it('returns different domains for different lookups', async () => {

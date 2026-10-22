@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Env } from '../../src/index';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
@@ -19,56 +21,35 @@ vi.mock('../../src/dns/provision', () => ({
 }));
 
 import { logAudit, AuditEntry } from '../../src/audit/log';
+import { scope } from '../../src/db/scope';
 import { handleApi } from '../../src/api/router';
-import * as authMod from '../../src/api/auth';
 
 // ── Helpers ───────────────────────────────────────────────────
 
 const BASE = 'https://api.inboxangel.com';
 
-/** Build a mock D1Database that records all prepared SQL + bound params. */
-function makeMockDb() {
-  const calls: { sql: string; params: unknown[] }[] = [];
-  let runResult: unknown = { success: true, meta: { last_row_id: 1 } };
-  let firstResult: unknown = null;
-  let allResult: unknown = { results: [] };
-  let shouldReject = false;
+type TestDb = ReturnType<typeof createMigratedD1>;
+type AuditRow = Record<string, any>;
 
-  const db = {
-    prepare: vi.fn().mockImplementation((sql: string) => {
-      const call = { sql, params: [] as unknown[] };
-      calls.push(call);
-      return {
-        bind: vi.fn().mockImplementation((...args: unknown[]) => {
-          call.params = args;
-          return {
-            run: shouldReject
-              ? vi.fn().mockRejectedValue(new Error('DB write failed'))
-              : vi.fn().mockResolvedValue(runResult),
-            first: vi.fn().mockResolvedValue(firstResult),
-            all: vi.fn().mockResolvedValue(allResult),
-          };
-        }),
-        run: shouldReject
-          ? vi.fn().mockRejectedValue(new Error('DB write failed'))
-          : vi.fn().mockResolvedValue(runResult),
-        first: vi.fn().mockResolvedValue(firstResult),
-        all: vi.fn().mockResolvedValue(allResult),
-      };
-    }),
-    batch: vi.fn().mockResolvedValue([]),
-    _calls: calls,
-    _setRunResult: (v: unknown) => { runResult = v; },
-    _setFirstResult: (v: unknown) => { firstResult = v; },
-    _setAllResult: (v: unknown) => { allResult = v; },
-    _setShouldReject: (v: boolean) => { shouldReject = v; },
-  };
-  return db;
+function auditRows(db: TestDb): AuditRow[] {
+  return db.sqlite.prepare('SELECT * FROM audit_log ORDER BY id').all() as AuditRow[];
 }
 
-function makeEnv(dbOverride?: unknown): Env {
+function seedAudit(db: TestDb, id: number, action: string, createdAt: number) {
+  db.sqlite
+    .prepare('INSERT INTO audit_log (id, account_id, action, created_at) VALUES (?, ?, ?, ?)')
+    .run(id, IMPLICIT_ACCOUNT_ID, action, createdAt);
+}
+
+function seedUser(db: TestDb, id: string, role: string) {
+  db.sqlite
+    .prepare("INSERT INTO users (id, email, name, role, session_token) VALUES (?, ?, ?, ?, 'test-key')")
+    .run(id, `${id}@test.com`, id, role);
+}
+
+function makeEnv(db: TestDb): Env {
   return {
-    DB: (dbOverride ?? makeMockDb()) as unknown as D1Database,
+    DB: db as unknown as D1Database,
     ASSETS: { fetch: vi.fn() } as unknown as Fetcher,
     API_KEY: 'test-key',
     REPORTS_DOMAIN: 'reports.inboxangel.io',
@@ -96,8 +77,15 @@ describe('logAudit()', () => {
     vi.clearAllMocks();
   });
 
+  /** Run logAudit with a ctx and await the promise handed to waitUntil. */
+  async function logAndFlush(db: TestDb, entry: AuditEntry) {
+    const waitUntil = vi.fn();
+    logAudit(db, entry, { waitUntil } as unknown as ExecutionContext);
+    await waitUntil.mock.calls[0][0];
+  }
+
   it('writes an entry to the DB with correct fields', async () => {
-    const db = makeMockDb();
+    const db = createMigratedD1();
     const entry: AuditEntry = {
       actor_id: 'user-1',
       actor_email: 'user@test.com',
@@ -109,51 +97,45 @@ describe('logAudit()', () => {
       after_value: { domain: 'example.com' },
     };
 
-    logAudit(db as unknown as D1Database, entry);
+    await logAndFlush(db, entry);
 
-    // Wait for the async run to complete
-    await new Promise(r => setTimeout(r, 10));
-
-    expect(db.prepare).toHaveBeenCalledTimes(1);
-    const sql = db._calls[0].sql;
-    expect(sql).toContain('INSERT INTO audit_log');
-    const params = db._calls[0].params;
-    expect(params[0]).toBe('user-1');        // actor_id
-    expect(params[1]).toBe('user@test.com'); // actor_email
-    expect(params[2]).toBe('user');          // actor_type
-    expect(params[3]).toBe('domain.add');    // action
-    expect(params[4]).toBe('domain');        // resource_type
-    expect(params[5]).toBe('42');            // resource_id
-    expect(params[6]).toBe('example.com');   // resource_name
+    const rows = auditRows(db);
+    expect(rows).toHaveLength(1);
+    const r = rows[0];
+    expect(r.account_id).toBe(IMPLICIT_ACCOUNT_ID);
+    expect(r.actor_id).toBe('user-1');
+    expect(r.actor_email).toBe('user@test.com');
+    expect(r.actor_type).toBe('user');
+    expect(r.action).toBe('domain.add');
+    expect(r.resource_type).toBe('domain');
+    expect(r.resource_id).toBe('42');
+    expect(r.resource_name).toBe('example.com');
   });
 
   it('serializes before_value/after_value as JSON strings', async () => {
-    const db = makeMockDb();
-    const entry: AuditEntry = {
+    const db = createMigratedD1();
+    await logAndFlush(db, {
       action: 'test.action',
       before_value: { old: true },
       after_value: { new: true, count: 5 },
-    };
+    });
 
-    logAudit(db as unknown as D1Database, entry);
-    await new Promise(r => setTimeout(r, 10));
-
-    const params = db._calls[0].params;
-    expect(params[7]).toBe(JSON.stringify({ old: true }));     // before_value
-    expect(params[8]).toBe(JSON.stringify({ new: true, count: 5 })); // after_value
+    const r = auditRows(db)[0];
+    expect(r.before_value).toBe(JSON.stringify({ old: true }));
+    expect(r.after_value).toBe(JSON.stringify({ new: true, count: 5 }));
   });
 
   it('does not throw on DB error (fire-and-forget)', async () => {
-    const db = makeMockDb();
-    db._setShouldReject(true);
+    const db = createMigratedD1();
+    vi.spyOn(db, 'prepare').mockImplementation(() => {
+      throw new Error('DB write failed');
+    });
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Should not throw
     expect(() => {
-      logAudit(db as unknown as D1Database, {
-        action: 'test.action',
-      });
+      logAudit(db, { action: 'test.action' });
     }).not.toThrow();
 
     // Wait for rejection to be caught
@@ -167,22 +149,20 @@ describe('logAudit()', () => {
   });
 
   it('sets actor_type default to user', async () => {
-    const db = makeMockDb();
-    logAudit(db as unknown as D1Database, {
+    const db = createMigratedD1();
+    await logAndFlush(db, {
       action: 'test.action',
       // actor_type NOT provided — should default to 'user'
     });
-    await new Promise(r => setTimeout(r, 10));
 
-    const params = db._calls[0].params;
-    expect(params[2]).toBe('user'); // actor_type defaults to 'user'
+    expect(auditRows(db)[0].actor_type).toBe('user');
   });
 
   it('uses ctx.waitUntil when ctx is provided', () => {
-    const db = makeMockDb();
+    const db = createMigratedD1();
     const mockCtx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
-    logAudit(db as unknown as D1Database, {
+    logAudit(db, {
       action: 'test.action',
     }, mockCtx);
 
@@ -190,58 +170,45 @@ describe('logAudit()', () => {
   });
 });
 
-// ── getAuditLog() tests (via DB queries) ─────────────────────
+// ── audit.list() tests (via DB queries) ──────────────────────
 
 describe('getAuditLog()', () => {
   it('returns entries paginated', async () => {
-    const mockEntries = [
-      { id: 1, action: 'domain.add', created_at: 1000 },
-      { id: 2, action: 'domain.remove', created_at: 2000 },
-    ];
-    const db = makeMockDb();
-    db._setAllResult({ results: mockEntries });
+    const db = createMigratedD1();
+    seedAudit(db, 1, 'domain.add', 1000);
+    seedAudit(db, 2, 'domain.remove', 2000);
 
-    // Import getAuditLog separately
-    const { getAuditLog } = await import('../../src/db/queries');
-    const result = await getAuditLog(db as unknown as D1Database, { page: 1, limit: 50 });
+    const result = await scope(db).audit.list({ page: 1, limit: 50 });
 
-    expect(result.results).toEqual(mockEntries);
-    expect(db.prepare).toHaveBeenCalledTimes(1);
-    const sql = db._calls[0].sql;
-    expect(sql).toContain('LIMIT ? OFFSET ?');
-    // params: limit, offset
-    const params = db._calls[0].params;
-    expect(params[0]).toBe(50);  // limit
-    expect(params[1]).toBe(0);   // offset for page 1
+    // newest first
+    expect(result.map(r => r.id)).toEqual([2, 1]);
+    expect(result.map(r => r.action)).toEqual(['domain.remove', 'domain.add']);
+
+    // limit/offset applied
+    const page2 = await scope(db).audit.list({ page: 2, limit: 1 });
+    expect(page2.map(r => r.id)).toEqual([1]);
   });
 
   it('filters by action prefix', async () => {
-    const db = makeMockDb();
-    db._setAllResult({ results: [] });
+    const db = createMigratedD1();
+    seedAudit(db, 1, 'dns.provision', 1000);
+    seedAudit(db, 2, 'dns.remove', 2000);
+    seedAudit(db, 3, 'domain.add', 3000);
 
-    const { getAuditLog } = await import('../../src/db/queries');
-    await getAuditLog(db as unknown as D1Database, { action: 'dns' });
-
-    const sql = db._calls[0].sql;
-    expect(sql).toContain('action LIKE ?');
-    const params = db._calls[0].params;
-    // Should be 'dns%' (prefix match)
-    expect(params).toContain('dns%');
+    const result = await scope(db).audit.list({ action: 'dns' });
+    expect(result.map(r => r.action).sort()).toEqual(['dns.provision', 'dns.remove']);
   });
 
   it('filters by date range (since/until)', async () => {
-    const db = makeMockDb();
-    db._setAllResult({ results: [] });
+    const db = createMigratedD1();
+    seedAudit(db, 1, 'a', 500);
+    seedAudit(db, 2, 'b', 1000);
+    seedAudit(db, 3, 'c', 1500);
+    seedAudit(db, 4, 'd', 2000);
+    seedAudit(db, 5, 'e', 2500);
 
-    const { getAuditLog } = await import('../../src/db/queries');
-    await getAuditLog(db as unknown as D1Database, { since: 1000, until: 2000 });
-
-    const sql = db._calls[0].sql;
-    expect(sql).toContain('created_at >= ?');
-    expect(sql).toContain('created_at <= ?');
-    const params = db._calls[0].params;
-    expect(params).toContain(1000);
-    expect(params).toContain(2000);
+    const result = await scope(db).audit.list({ since: 1000, until: 2000 });
+    expect(result.map(r => r.id).sort()).toEqual([2, 3, 4]);
   });
 });
 
@@ -253,38 +220,8 @@ describe('GET /api/audit-log', () => {
   });
 
   it('returns 401 for non-admin user', async () => {
-    const db = makeMockDb();
-    // getUserBySession → non-admin user, getUserByEmail → null, getSetting → auto_api_key
-    // The first prepare().bind().first() returns a user (for session lookup)
-    // We need to mock a user with role !== 'admin'
-    let callIdx = 0;
-    db.prepare.mockImplementation((sql: string) => {
-      const call = { sql, params: [] as unknown[] };
-      db._calls.push(call);
-      return {
-        bind: vi.fn().mockImplementation((...args: unknown[]) => {
-          call.params = args;
-          callIdx++;
-          // Call patterns: getUserBySession → getSetting → requireAuth logic → getUserBySession (for audit-log)
-          // The audit-log endpoint checks actor.role === 'admin'
-          // We need getUserBySession to return a non-admin user
-          let firstVal: unknown = null;
-          if (sql.includes('FROM users') && sql.includes('session_token')) {
-            firstVal = { id: 'user-1', email: 'user@test.com', role: 'member', session_token: 'test-key' };
-          } else if (sql.includes('FROM settings')) {
-            firstVal = { key: 'auto_api_key', value: 'test-key' };
-          }
-          return {
-            run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-            first: vi.fn().mockResolvedValue(firstVal),
-            all: vi.fn().mockResolvedValue({ results: [] }),
-          };
-        }),
-        first: vi.fn().mockResolvedValue(null),
-        run: vi.fn().mockResolvedValue({ success: true }),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      };
-    });
+    const db = createMigratedD1();
+    seedUser(db, 'user-1', 'member');
 
     const env = makeEnv(db);
     // Remove API_KEY so it falls through to session-based auth
@@ -300,37 +237,9 @@ describe('GET /api/audit-log', () => {
   });
 
   it('returns entries for admin user', async () => {
-    const mockEntries = [
-      { id: 1, action: 'domain.add', created_at: 1000 },
-    ];
-    const db = makeMockDb();
-    let callIdx = 0;
-    db.prepare.mockImplementation((sql: string) => {
-      const call = { sql, params: [] as unknown[] };
-      db._calls.push(call);
-      return {
-        bind: vi.fn().mockImplementation((...args: unknown[]) => {
-          call.params = args;
-          callIdx++;
-          let firstVal: unknown = null;
-          if (sql.includes('FROM users') && sql.includes('session_token')) {
-            firstVal = { id: 'admin-1', email: 'admin@test.com', role: 'admin', session_token: 'test-key' };
-          } else if (sql.includes('FROM settings')) {
-            firstVal = { key: 'auto_api_key', value: 'test-key' };
-          }
-          return {
-            run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-            first: vi.fn().mockResolvedValue(firstVal),
-            all: sql.includes('audit_log')
-              ? vi.fn().mockResolvedValue({ results: mockEntries })
-              : vi.fn().mockResolvedValue({ results: [] }),
-          };
-        }),
-        first: vi.fn().mockResolvedValue(null),
-        run: vi.fn().mockResolvedValue({ success: true }),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      };
-    });
+    const db = createMigratedD1();
+    seedUser(db, 'admin-1', 'admin');
+    seedAudit(db, 1, 'domain.add', 1000);
 
     const env = makeEnv(db);
     delete (env as any).API_KEY;
@@ -341,7 +250,8 @@ describe('GET /api/audit-log', () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json() as any;
-    expect(body.entries).toEqual(mockEntries);
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0]).toMatchObject({ id: 1, action: 'domain.add', created_at: 1000 });
     expect(body.page).toBe(1);
     expect(body.limit).toBe(50);
   });

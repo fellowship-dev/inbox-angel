@@ -32,6 +32,7 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
   };
 });
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 import { getZoneId } from '../../src/env-utils';
 
@@ -49,36 +50,15 @@ const DOMAIN: Partial<Domain> = {
 function makeEnv(overrides: { cfToken?: string; flattenEnabled?: boolean } = {}): Env {
   const { cfToken = 'cf-token-abc', flattenEnabled = false } = overrides;
 
-  // Track SQL queries to route mocks
-  const prepareMock = vi.fn((sql: string) => {
-    const stmt = {
-      bind: vi.fn().mockReturnValue({
-        run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
-        first: vi.fn().mockImplementation(() => {
-          // getDomainById
-          if (sql.includes('domains') && sql.includes('WHERE') && sql.includes('id')) {
-            return Promise.resolve(DOMAIN);
-          }
-          // getSpfFlattenConfig
-          if (sql.includes('spf_flatten_config')) {
-            return Promise.resolve(flattenEnabled ? { enabled: 1, domain_id: 1 } : null);
-          }
-          // getUserBySession / settings
-          if (sql.includes('users') || sql.includes('sessions')) {
-            return Promise.resolve({ id: 1, email: 'admin@acme.com' });
-          }
-          return Promise.resolve(null);
-        }),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      }),
-      first: vi.fn().mockResolvedValue(null),
-      all: vi.fn().mockResolvedValue({ results: [] }),
-    };
-    return stmt;
-  });
+  const db = createMigratedD1();
+  db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, spf_record, spf_lookup_count) VALUES (?, ?, ?, ?, ?)')
+    .run(DOMAIN.id!, DOMAIN.domain!, DOMAIN.rua_address!, DOMAIN.spf_record!, DOMAIN.spf_lookup_count!);
+  if (flattenEnabled) {
+    db.sqlite.prepare('INSERT INTO spf_flatten_config (domain_id, enabled, canonical_record) VALUES (?, 1, ?)').run(DOMAIN.id!, DOMAIN.spf_record!);
+  }
 
   return {
-    DB: { prepare: prepareMock, batch: vi.fn().mockResolvedValue([]) } as unknown as D1Database,
+    DB: db as unknown as D1Database,
     API_KEY: 'test-key',
     CLOUDFLARE_ACCOUNT_ID: 'acct-test',
     CLOUDFLARE_ZONE_ID: 'zone-test-123',

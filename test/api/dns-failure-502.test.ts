@@ -12,26 +12,17 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
   return { ...actual, getZoneId: vi.fn().mockReturnValue('zone-1'), getAccountId: vi.fn().mockReturnValue('acct'), reportsDomain: vi.fn().mockReturnValue('reports.test.com') };
 });
 
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const DOMAIN = { id: 1, domain: 'acme.com', rua_address: 'rua@reports.test.com' };
 
 function makeEnv(): Env {
-  const first = (sql: string) =>
-    sql.includes('mta_sts') ? { enabled: 1, mta_sts_record_id: 'rec', mx_hosts: 'a.acme.com', policy_id: '1', mode: 'testing' }
-    : sql.includes('FROM domains') ? DOMAIN : null;
-  return {
-    DB: {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn().mockReturnValue({ first: async () => first(sql), run: vi.fn().mockResolvedValue({ success: true }), all: vi.fn().mockResolvedValue({ results: [] }) }),
-        first: async () => first(sql),
-        all: vi.fn().mockResolvedValue({ results: [] }),
-      })),
-      batch: vi.fn().mockResolvedValue([]),
-    } as unknown as D1Database,
-    API_KEY: 'k', CLOUDFLARE_API_TOKEN: 'tok',
-  } as unknown as Env;
+  const db = createMigratedD1();
+  db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (?, ?, ?)').run(DOMAIN.id, DOMAIN.domain, DOMAIN.rua_address);
+  db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, enabled, mode, mx_hosts, policy_id, mta_sts_record_id) VALUES (?, 1, 'testing', ?, '1', 'rec')").run(DOMAIN.id, JSON.stringify(['a.acme.com']));
+  return { DB: db as unknown as D1Database, API_KEY: 'k', CLOUDFLARE_API_TOKEN: 'tok' } as unknown as Env;
 }
 
 const send = (method: string, path: string, body?: unknown) =>
