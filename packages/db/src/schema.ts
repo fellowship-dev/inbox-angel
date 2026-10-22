@@ -575,6 +575,8 @@ export const cloudflareConnectionZones = sqliteTable(
 		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
 		zone_id: text('zone_id').notNull(),
 		zone_name: text('zone_name').notNull(),
+		/** The Cloudflare account that owns the zone (from Cloudflare when the zone was allowed): what `/accounts/*` calls are checked against. */
+		cf_account_id: text('cf_account_id'),
 		created_at: integer('created_at').notNull().default(now),
 	},
 	(t) => [

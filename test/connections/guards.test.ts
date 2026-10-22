@@ -28,11 +28,13 @@ describe('connection secrets stay in their lane', () => {
     expect(using(/new CfClient\(/)).toEqual(['connections/service.ts', 'hosted/records.ts', 'tenancy/context.ts']);
   });
 
-  it('no logging call in src/connections interpolates a value that could be a token or code', () => {
+  it('no logging call in src/connections can mention a token, code, state, secret or envelope', () => {
     const offenders = files
       .filter(f => f.path.startsWith('connections/'))
       .flatMap(f => f.text.split('\n').map((l, i) => ({ f: f.path, l, i })))
-      .filter(({ l }) => /console\.(log|warn|error|info|debug)\(/.test(l));
+      .filter(({ l }) => /console\.(log|warn|error|info|debug)\(/.test(l))
+      // the one allowed line: the operator-error log in service.ts (ids and error class names only)
+      .filter(({ f, l }) => !(f === 'connections/service.ts' && l.includes('[connections]') && !/token|code|state|secret|material|envelope|access|refresh/i.test(l.replace(/\$\{this\.#host\.accountId\}/, ''))));
     expect(offenders.map(o => `${o.f}:${o.i + 1}`)).toEqual([]);
   });
 });

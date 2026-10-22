@@ -88,7 +88,7 @@ export class FakeCloudflare {
         const z = this.zones[name];
         return ok(z ? [{ id: z.id, name, account: z.accountId ? { id: z.accountId } : undefined }] : []);
       }
-      return ok(Object.entries(this.zones).map(([n, z]) => ({ id: z.id, name: n, status: 'active' })));
+      return ok(Object.entries(this.zones).map(([n, z]) => ({ id: z.id, name: n, status: 'active', account: z.accountId ? { id: z.accountId } : undefined })));
     }
 
     if (m) {

@@ -7,7 +7,8 @@
 //
 // * The key id says which key sealed it, so keys rotate: put the new key first in TOKEN_ENCRYPTION_KEY
 //   (`k2:<base64>,k1:<base64>`); every listed key still opens, new envelopes use the first, and an envelope
-//   sealed under an older key is re-sealed the next time it is used (isCurrent / reseal).
+//   sealed under an older key is re-sealed the next time it is used (isCurrent / reseal). With more than one key
+//   every key must carry its id: a lone bare key means "k1", and ids are never taken from position.
 // * The additional authenticated data binds an envelope to its row (`<account>|<connection>`), so a
 //   ciphertext copied onto another connection or account does not open.
 // * Opened tokens live in a TokenMaterial, which refuses to serialize or inspect: the plaintext never
@@ -83,9 +84,14 @@ function parseKeys(env: CryptoEnv): ParsedKey[] {
   const spec = env.TOKEN_ENCRYPTION_KEY?.trim();
   if (!spec) throw new TokenKeyError('TOKEN_ENCRYPTION_KEY is not set: Cloudflare connections cannot be stored (generate one with `openssl rand -base64 32`)');
   const keys: ParsedKey[] = [];
-  for (const [i, entry] of spec.split(',').map(e => e.trim()).filter(Boolean).entries()) {
+  const entries = spec.split(',').map(e => e.trim()).filter(Boolean);
+  // A position is not an identity: reordering keys on rotation would silently re-label them and make every envelope unreadable.
+  if (entries.length > 1 && entries.some(e => e.indexOf(':') <= 0)) {
+    throw new TokenKeyError('TOKEN_ENCRYPTION_KEY: with more than one key every key needs an explicit id, e.g. "k2:<base64>,k1:<base64>" (a key without an id is only accepted when it is the only one, and then means "k1")');
+  }
+  for (const entry of entries) {
     const colon = entry.indexOf(':');
-    const kid = colon > 0 ? entry.slice(0, colon) : i === 0 ? DEFAULT_KID : `k${i + 1}`;
+    const kid = colon > 0 ? entry.slice(0, colon) : DEFAULT_KID;
     const b64 = colon > 0 ? entry.slice(colon + 1) : entry;
     if (!KID.test(kid)) throw new TokenKeyError('TOKEN_ENCRYPTION_KEY: invalid key id');
     let raw: Uint8Array;

@@ -97,3 +97,25 @@ describe('token envelope', () => {
     expect(new TokenMaterial({ access: 'a', expiresAt: 100 }).expired(50)).toBe(true);
   });
 });
+
+describe('TOKEN_ENCRYPTION_KEY configuration', () => {
+  it('requires explicit ids as soon as there is more than one key (position is never an identity)', () => {
+    expect(() => TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: `${key(2)},${key(1)}` })).toThrow(/every key needs an explicit id/);
+    expect(() => TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: `k2:${key(2)},${key(1)}` })).toThrow(/every key needs an explicit id/);
+    expect(() => TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: `${key(2)},k1:${key(1)}` })).toThrow(TokenKeyError);
+    expect(TokenCrypto.isConfigured({ TOKEN_ENCRYPTION_KEY: `${key(2)},${key(1)}` })).toBe(false);
+    expect(TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: `k2:${key(2)},k1:${key(1)}` }).currentKeyId).toBe('k2');
+  });
+
+  it('rotating by prepending a new key keeps old envelopes openable, including those sealed under a lone bare key', async () => {
+    const bare = TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: key(1) }); // a single key without an id means k1
+    expect(bare.currentKeyId).toBe('k1');
+    const sealed = await bare.seal({ access: SECRET, refresh: REFRESH }, AAD);
+    expect(sealed.startsWith('ia1.k1.')).toBe(true);
+
+    const rotated = TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: `k2:${key(2)},k1:${key(1)}` });
+    expect((await rotated.open(sealed, AAD)).access()).toBe(SECRET);
+    expect(rotated.isCurrent(sealed)).toBe(false);
+    expect((await rotated.open(await rotated.seal({ access: SECRET }, AAD), AAD)).access()).toBe(SECRET);
+  });
+});

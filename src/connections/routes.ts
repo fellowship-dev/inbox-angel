@@ -28,6 +28,7 @@ import {
   OAuthConfigError,
   OAuthError,
   OAuthStateError,
+  STATE_TTL_SECONDS,
   buildAuthorizeUrl,
   challengeFor,
   exchangeCode,
@@ -45,6 +46,7 @@ import { ConnectionInputError, IMPLICIT_CONNECTION_ID, type PublicConnection } f
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
 
+const USED_PREFIX = 'cf_oauth_used:';
 const COOKIE = 'ia_cf_oauth';
 const COOKIE_PATH = '/api/cloudflare/oauth';
 const CONNECTION = /^\/api\/cloudflare\/connections\/([^/]+)(?:\/(token|zones))?$/;
@@ -215,7 +217,7 @@ export async function handleConnectionRoutes(
 
       if (sub === 'zones' && method === 'GET') {
         if (!(await svc.get(id))) return err('connection not found', 404);
-        return json({ zones: await svc.availableZones(id) });
+        return json({ zones: (await svc.availableZones(id)).map(({ id: zid, name, allowed }) => ({ id: zid, name, allowed })) });
       }
 
       if (sub === 'zones' && method === 'PUT') {
@@ -270,6 +272,14 @@ async function oauthCallback(
     throw e;
   }
 
+  // Single use: the state is spent the moment it verifies, whatever happens next (a replayed callback, a second
+  // tab, a code that fails to exchange all need a fresh start). The marker lives until the state would have expired.
+  const q = tenant.scope.settings;
+  await q.deleteExpired(USED_PREFIX, nowSeconds);
+  if (!(await q.claim(`${USED_PREFIX}${stateNonce}`, String(nowSeconds + STATE_TTL_SECONDS + 60)))) {
+    return clearCookie(err('this connection attempt was already used: start again', 400, 'oauth_state_used'), request);
+  }
+
   const back = (params: Record<string, string>) => clearCookie(redirectBack(request, verified.returnTo, params), request);
 
   const denied = url.searchParams.get('error');
@@ -292,6 +302,7 @@ async function oauthCallback(
     return back({ cf_connection: connection.id });
   } catch (e) {
     if (e instanceof OAuthError) return back({ cf_error: sanitizeCode(e.code ?? 'token_exchange_failed') });
+    if (e instanceof ConnectionInputError) return back({ cf_error: sanitizeCode(e.code ?? 'invalid_request') });
     if (e instanceof CfConnectionError) return back({ cf_error: 'connection_not_found' });
     throw e;
   }
@@ -372,9 +383,9 @@ function redirectBack(request: Request, returnTo: string | undefined, params: Re
 
 /** Typed failures → HTTP. Nothing here echoes a token: none of these errors holds one. */
 function connectionFailure(e: unknown): Response {
-  if (e instanceof ConnectionInputError) return err(e.message, e.status);
+  if (e instanceof ConnectionInputError) return err(e.message, e.status, e.code);
   if (e instanceof TokenKeyError) return err(e.message, 503, 'encryption_not_configured');
-  if (e instanceof TokenEnvelopeError) return err('a stored token cannot be opened', 500, 'token_unreadable');
+  if (e instanceof TokenEnvelopeError) return err('Cloudflare connections are unavailable: the server\'s encryption key does not match the stored credentials. This is for the server operator to fix.', 503, 'token_encryption_unavailable');
   if (e instanceof OAuthConfigError) return err(e.message, 503, 'oauth_misconfigured');
   if (e instanceof OAuthError) return err(e.message, 502, 'oauth_failed');
   if (e instanceof CfConnectionError) {

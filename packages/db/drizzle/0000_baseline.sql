@@ -123,6 +123,7 @@ CREATE TABLE `cloudflare_connection_zones` (
 	`account_id` text NOT NULL,
 	`zone_id` text NOT NULL,
 	`zone_name` text NOT NULL,
+	`cf_account_id` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	PRIMARY KEY(`connection_id`, `zone_id`),
 	FOREIGN KEY (`connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE cascade,

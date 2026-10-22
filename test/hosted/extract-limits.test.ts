@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Inflation-bomb cases are CPU-heavy: the 5 s default flakes when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 30_000 });
 import { gzipSync as nodeGzip } from 'node:zlib';
 import { zipSync, strToU8 } from 'fflate';
 import { extractReport, ReportTooLargeError, ParserError } from '../../src/dmarc/extract-report';

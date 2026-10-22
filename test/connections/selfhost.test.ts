@@ -17,7 +17,7 @@ async function selfhost(extra: Record<string, unknown> = {}) {
   const insert = db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (?, 'acct_default', ?, 'rua@x')");
   insert.run(1, 'home.com');
   insert.run(2, 'other.org');
-  const cf = new FakeCloudflare({ 'home.com': { id: 'zone-home', accountId: 'cf-1' }, 'other.org': { id: 'zone-other', accountId: 'cf-1' } });
+  const cf = new FakeCloudflare({ 'home.com': { id: 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1', accountId: 'cf-1' }, 'other.org': { id: 'e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2', accountId: 'cf-1' } });
   cf.accounts = [{ id: 'cf-1', name: 'Home' }];
   vi.stubGlobal('fetch', cf.fetch);
   const api = (method: string, path: string, body?: unknown) => call(env, method, path, { key: owner, body });
@@ -29,7 +29,7 @@ describe('self-host: the env token keeps working', () => {
     const s = await selfhost();
     const res = await s.api('POST', '/api/domains/1/apply-dmarc', { record: 'v=DMARC1; p=none' });
     expect(res.status).toBe(200);
-    expect(new Set(s.cf.forZone('zone-home').map(c => c.auth))).toEqual(new Set(['Bearer env-tok-0123456789']));
+    expect(new Set(s.cf.forZone('e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1').map(c => c.auth))).toEqual(new Set(['Bearer env-tok-0123456789']));
   });
 
   it('shows it as an implicit token connection that cannot be edited', async () => {
@@ -56,14 +56,14 @@ describe('self-host: the env token keeps working', () => {
     s.cf.validTokens = new Set(['env-tok-0123456789', 'tok-pasted-1234567890abcdef']);
     const added = await (await s.api('POST', '/api/cloudflare/connections', { token: 'tok-pasted-1234567890abcdef', label: 'Other' })).json() as any;
     const id = added.connection.id;
-    expect((await s.api('PUT', `/api/cloudflare/connections/${id}/zones`, { zone_ids: ['zone-other'] })).status).toBe(200);
+    expect((await s.api('PUT', `/api/cloudflare/connections/${id}/zones`, { zone_ids: ['e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2'] })).status).toBe(200);
     expect((await s.api('PUT', '/api/domains/2/connection', { connection_id: id })).status).toBe(200);
 
     s.cf.calls.length = 0;
     expect((await s.api('POST', '/api/domains/1/apply-dmarc', { record: 'v=DMARC1; p=none' })).status).toBe(200);
     expect((await s.api('POST', '/api/domains/2/apply-dmarc', { record: 'v=DMARC1; p=none' })).status).toBe(200);
-    expect(new Set(s.cf.forZone('zone-home').map(c => c.auth))).toEqual(new Set(['Bearer env-tok-0123456789']));
-    expect(new Set(s.cf.forZone('zone-other').map(c => c.auth))).toEqual(new Set(['Bearer tok-pasted-1234567890abcdef']));
+    expect(new Set(s.cf.forZone('e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1').map(c => c.auth))).toEqual(new Set(['Bearer env-tok-0123456789']));
+    expect(new Set(s.cf.forZone('e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2').map(c => c.auth))).toEqual(new Set(['Bearer tok-pasted-1234567890abcdef']));
     // the list shows the implicit connection first, then the stored one
     const list = (await (await s.api('GET', '/api/cloudflare/connections')).json() as any).connections;
     expect(list.map((c: any) => c.id)).toEqual(['env', id]);

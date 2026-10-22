@@ -29,6 +29,7 @@ CREATE TABLE cloudflare_connection_zones (
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   zone_id TEXT NOT NULL,
   zone_name TEXT NOT NULL,
+  cf_account_id TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   PRIMARY KEY (connection_id, zone_id)
 );

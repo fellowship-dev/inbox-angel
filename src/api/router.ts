@@ -65,6 +65,7 @@ import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
 import { handleConnectionRoutes } from '../connections/routes';
+import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
@@ -126,6 +127,7 @@ function err(message: string, status: number): Response {
 /** HTTP status for a Cloudflare failure: config problems are the caller's, the rest is reported as given. */
 function cfFailure(e: unknown, fallbackStatus = 500): Response {
   if (e instanceof CfNotConfiguredError || e instanceof CfZoneNotFoundError) return err(e.message, 400);
+  if (e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return err('Cloudflare connections are unavailable: the server\'s encryption key is missing or does not match the stored credentials. This is for the server operator to fix.', 503);
   // A connection that needs the owner (reconnect), or a zone the owner did not allow: not the caller's mistake to retry.
   if (e instanceof CfConnectionError) return json({ error: e.message, code: `cf_connection_${e.code}`, connection_id: e.connectionId }, 409);
   if (e instanceof CfZoneNotAllowedError) return json({ error: e.message, code: 'cf_zone_not_allowed', connection_id: e.connectionId }, 403);
@@ -1785,7 +1787,7 @@ async function _handleApi(
 
     return err('not found', 404);
   } catch (e: any) {
-    if (e instanceof CfConnectionError || e instanceof CfZoneNotAllowedError) return cfFailure(e);
+    if (e instanceof CfConnectionError || e instanceof CfZoneNotAllowedError || e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return cfFailure(e);
     if (e?.status && e?.message) return err(e.message, e.status);
     console.error('API error', e);
     return err('internal server error', 500);

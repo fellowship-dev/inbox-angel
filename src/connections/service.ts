@@ -42,7 +42,7 @@ export interface ConnectionHost {
 
 /** A request the caller got wrong (bad token, unknown zone…): maps to a 4xx. */
 export class ConnectionInputError extends Error {
-  constructor(message: string, readonly status = 400) {
+  constructor(message: string, readonly status = 400, readonly code?: string) {
     super(message);
     this.name = 'ConnectionInputError';
   }
@@ -177,6 +177,18 @@ export class ConnectionService {
     if (p.replace) {
       const existing = await q.getSecret(p.replace);
       if (!existing || existing.auth_type !== 'oauth') throw new CfConnectionError('missing', p.replace);
+      try {
+        await this.#assertSameAccount(p.replace, existing.cf_account_id, cf);
+      } catch (e) {
+        // A grant for the wrong Cloudflare account is of no use to anyone: give it back.
+        const cfg = safeOauthConfig(this.#host.env);
+        if (cfg) {
+          const m = p.tokens.material;
+          if (m.refresh()) await revokeToken(cfg, m.refresh()!, 'refresh_token', this.#fetch);
+          await revokeToken(cfg, m.access(), 'access_token', this.#fetch);
+        }
+        throw e;
+      }
       await q.reactivate(p.replace, await crypt.seal(p.tokens.material, envelopeAad(this.#host.accountId, p.replace)), scopes);
       this.invalidate();
       return (await this.get(p.replace))!;
@@ -211,9 +223,30 @@ export class ConnectionService {
       if (e instanceof CfAuthError) throw new ConnectionInputError('Cloudflare did not accept this API token');
       throw e;
     }
+    await this.#assertSameAccount(id, existing.cf_account_id, cf);
     await q.reactivate(id, await crypt.seal({ access: token }, envelopeAad(this.#host.accountId, id)), null);
     this.invalidate();
     return (await this.get(id))!;
+  }
+
+  /**
+   * A reconnect must reach the Cloudflare account the connection was made for: its allow-list and linked domains
+   * belong to that account. Known accounts = the recorded one plus the accounts of the allow-listed zones; the new
+   * grant has to see all of them. If nothing is known (never recorded, no zones) there is nothing to compare.
+   */
+  async #assertSameAccount(id: string, recorded: string | null, cf: CfClient): Promise<void> {
+    const known = new Set<string>(recorded ? [recorded] : []);
+    for (const z of await this.#host.scope.connections.zones(id)) if (z.cf_account_id) known.add(z.cf_account_id);
+    if (known.size === 0) return;
+    let visible: Set<string>;
+    try {
+      visible = new Set((await cf.listAccounts()).map(a => a.id));
+    } catch {
+      throw new ConnectionInputError('could not confirm that this is the same Cloudflare account; reconnect again in a moment', 409, 'cf_account_unverified');
+    }
+    if (![...known].every(a => visible.has(a))) {
+      throw new ConnectionInputError('this authorization is for a different Cloudflare account than the one this connection was made for; add it as a new connection instead', 409, 'cf_account_mismatch');
+    }
   }
 
   async #soleAccount(cf: CfClient): Promise<{ id: string; name: string } | null> {
@@ -258,21 +291,23 @@ export class ConnectionService {
   // ── Zones ──────────────────────────────────────────────────
 
   /** Every active zone the connection's token can see, with whether Inbox Angel may manage it. */
-  async availableZones(id: string): Promise<{ id: string; name: string; allowed: boolean }[]> {
+  async availableZones(id: string): Promise<{ id: string; name: string; allowed: boolean; accountId?: string }[]> {
     const cf = await this.#setupClient(id);
     const allowed = new Set((await this.#host.scope.connections.zones(id)).map(z => z.zone_id));
-    return (await cf.listZones()).map(z => ({ id: z.id, name: z.name.toLowerCase(), allowed: allowed.has(z.id) }));
+    return (await cf.listZones()).map(z => ({ id: z.id, name: z.name.toLowerCase(), allowed: allowed.has(z.id), accountId: z.account?.id }));
   }
 
   /** Replace the allow-list. Every id must be a zone the token can actually see (names come from Cloudflare, not the caller). */
   async setAllowedZones(id: string, zoneIds: string[]): Promise<{ id: string; name: string }[]> {
-    const visible = new Map((await this.availableZones(id)).map(z => [z.id, z.name]));
+    const bad = zoneIds.filter(z => !ZONE_ID.test(z));
+    if (bad.length) throw new ConnectionInputError('zone_ids must be Cloudflare zone ids (32 hex characters)');
+    const visible = new Map((await this.availableZones(id)).map(z => [z.id, z]));
     const unknown = zoneIds.filter(z => !visible.has(z));
     if (unknown.length) throw new ConnectionInputError(`not a zone this Cloudflare connection can see: ${unknown.join(', ')}`);
     const unique = [...new Set(zoneIds)];
-    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)! }))))) throw new CfConnectionError('missing', id);
+    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)!.name, cf_account_id: visible.get(z)!.accountId }))))) throw new CfConnectionError('missing', id);
     this.invalidate();
-    return unique.map(z => ({ id: z, name: visible.get(z)! }));
+    return unique.map(z => ({ id: z, name: visible.get(z)!.name }));
   }
 
   // ── Using ──────────────────────────────────────────────────
@@ -303,9 +338,7 @@ export class ConnectionService {
     if (row.status !== 'active') throw new CfConnectionError(row.status, id, row.label);
     this.crypt; // surface a missing key now, not mid-request
 
-    const policy: CfPolicy | undefined = restricted
-      ? policyFor(id, new Set((await q.zones(id)).map(z => z.zone_id)), row.cf_account_id)
-      : undefined;
+    const policy: CfPolicy | undefined = restricted ? policyFor(id, await q.zones(id), row.cf_account_id) : undefined;
 
     const now = this.#now;
     if (!row.last_used_at || now - row.last_used_at > LAST_USED_THROTTLE_SECONDS) await q.markUsed(id, now).catch(() => {});
@@ -340,8 +373,10 @@ export class ConnectionService {
     try {
       material = await this.crypt.open(row.token_envelope, aad);
     } catch (e) {
-      await this.#break(id, row.label, 'the stored token cannot be opened (was TOKEN_ENCRYPTION_KEY changed?)');
-      throw new CfConnectionError('broken', id, row.label);
+      // This is the operator's problem (the key was changed or dropped), not the customer's: the connection is
+      // not marked broken and nobody is alerted. Every call through it fails with a 503 until the key is restored.
+      console.error(`[connections] ${this.#host.accountId}: stored credentials of connection ${id} cannot be opened with the configured key (${e instanceof Error ? e.name : 'error'}); check the server key setting`);
+      throw e;
     }
     let envelope = row.token_envelope;
     // Sealed under a retired key: move it to the current one while we hold the plaintext.
@@ -444,14 +479,33 @@ function safeOauthConfig(env: OAuthEnv) {
   try { return oauthConfig(env); } catch { return null; }
 }
 
-/** The allow-list as a CfClient policy: nothing under a zone, or another Cloudflare account, that was not chosen. */
-function policyFor(connectionId: string, allowed: ReadonlySet<string>, cfAccountId: string | null): CfPolicy {
+const ZONE_ID = /^[0-9a-f]{32}$/;
+
+/**
+ * The allow-list as a CfClient policy. Refuses, without sending anything:
+ *  - any `/zones/<id>/…` whose id is not a well-formed, allowed zone id (reads too);
+ *  - `GET /zones` (discovery) and name lookups of zones that are not allowed: discovery is the setup-only path;
+ *  - `/accounts/<id>/…` of any Cloudflare account not derived from the connection: its recorded account and the
+ *    accounts of its allowed zones. When none is known, every `/accounts/*` call is refused.
+ */
+function policyFor(connectionId: string, zones: CfConnectionZone[], cfAccountId: string | null): CfPolicy {
+  const allowed = new Set(zones.map(z => z.zone_id).filter(z => ZONE_ID.test(z)));
+  const names = new Set(zones.map(z => z.zone_name.toLowerCase()));
+  const accounts = new Set<string>([...(cfAccountId ? [cfAccountId] : []), ...zones.flatMap(z => (z.cf_account_id ? [z.cf_account_id] : []))]);
   return {
-    request(_method, path) {
+    request(_method, path, query) {
+      if (path === '/zones') {
+        const name = typeof query?.name === 'string' ? query.name.toLowerCase() : undefined;
+        if (!name || !names.has(name)) throw new CfZoneNotAllowedError(name ?? '(zone list)', connectionId);
+        return;
+      }
       const zone = path.match(/^\/zones\/([^/?]+)/)?.[1];
-      if (zone && !allowed.has(zone)) throw new CfZoneNotAllowedError(zone, connectionId);
-      const account = path.match(/^\/accounts\/([^/?]+)/)?.[1];
-      if (account && cfAccountId && account !== cfAccountId) throw new CfZoneNotAllowedError(account, connectionId, 'account');
+      if (zone !== undefined && !(ZONE_ID.test(zone) && allowed.has(zone))) throw new CfZoneNotAllowedError(zone, connectionId);
+      const account = path.match(/^\/accounts(?:\/([^/?]+))?/)?.[1];
+      if (path.startsWith('/accounts') && (account === undefined || !accounts.has(account))) throw new CfZoneNotAllowedError(account ?? '(account list)', connectionId, 'account');
+    },
+    lookup(name) {
+      return names.has(name.toLowerCase());
     },
     zone(z) {
       if (!allowed.has(z.id)) throw new CfZoneNotAllowedError(z.name, connectionId);

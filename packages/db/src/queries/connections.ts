@@ -36,7 +36,7 @@ export type CfConnectionInfo = {
 	last_used_at: number | null;
 };
 
-export interface CfConnectionZone { zone_id: string; zone_name: string }
+export interface CfConnectionZone { zone_id: string; zone_name: string; cf_account_id?: string | null }
 
 export function connectionQueries(db: Db, accountId: string) {
 	const mine = eq(cloudflareConnections.account_id, accountId);
@@ -139,7 +139,7 @@ export function connectionQueries(db: Db, accountId: string) {
 
 		zones(connectionId: string): Promise<CfConnectionZone[]> {
 			return db
-				.select({ zone_id: cloudflareConnectionZones.zone_id, zone_name: cloudflareConnectionZones.zone_name })
+				.select({ zone_id: cloudflareConnectionZones.zone_id, zone_name: cloudflareConnectionZones.zone_name, cf_account_id: cloudflareConnectionZones.cf_account_id })
 				.from(cloudflareConnectionZones)
 				.where(and(myZones, eq(cloudflareConnectionZones.connection_id, connectionId)))
 				.orderBy(asc(cloudflareConnectionZones.zone_name))
@@ -155,7 +155,7 @@ export function connectionQueries(db: Db, accountId: string) {
 			else {
 				await db.batch([
 					clear,
-					db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() }))),
+					db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase(), cf_account_id: z.cf_account_id ?? null }))),
 				]);
 			}
 			return true;

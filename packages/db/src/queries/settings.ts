@@ -34,6 +34,17 @@ export function settingsQueries(db: Db, accountId: string) {
 			return row!.value;
 		},
 
+		/** Store `value` only if the key is unset. True when this call stored it (a one-time claim, safe under concurrent callers). */
+		async claim(key: string, value: string): Promise<boolean> {
+			const r = await db.insert(settings).values({ account_id: accountId, key, value }).onConflictDoNothing().run();
+			return (r.meta.changes ?? 0) > 0;
+		},
+
+		/** Delete this account's settings whose key starts with `prefix` and whose value (a unix time) is not after `nowSeconds`. */
+		async deleteExpired(prefix: string, nowSeconds: number): Promise<void> {
+			await db.delete(settings).where(and(eq(settings.account_id, accountId), sql`${settings.key} LIKE ${prefix + '%'} AND CAST(${settings.value} AS INTEGER) <= ${nowSeconds}`)).run();
+		},
+
 		set(key: string, value: string) {
 			return upsert(key, value).run();
 		},

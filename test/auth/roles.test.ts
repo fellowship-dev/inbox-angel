@@ -39,6 +39,21 @@ const WRITES: Array<[string, string, unknown?]> = [
   ['POST', '/api/setup/custom-domain', {}],
   ['POST', '/api/domains/bulk-import', { domains: 'a.example.com' }],
   ['POST', '/api/team/invite', { email: 'x@example.com' }],
+  // Cloudflare connections
+  ['POST', '/api/cloudflare/connections', { token: 'x'.repeat(40) }],
+  ['DELETE', '/api/cloudflare/connections/cfc_x'],
+  ['PUT', '/api/cloudflare/connections/cfc_x/zones', { zone_ids: [] }],
+  ['PUT', '/api/cloudflare/connections/cfc_x/token', { token: 'x'.repeat(40) }],
+  ['POST', '/api/cloudflare/oauth/start', {}],
+  ['PUT', '/api/domains/1/connection', { connection_id: null }],
+];
+
+// Connections are owner/admin only, reads included (the list shows Cloudflare account names and scopes).
+const ADMIN_ONLY_READS: Array<[string, string]> = [
+  ['GET', '/api/cloudflare/connections'],
+  ['GET', '/api/cloudflare/connections/cfc_x'],
+  ['GET', '/api/cloudflare/connections/cfc_x/zones'],
+  ['GET', '/api/cloudflare/oauth/callback?code=x&state=y'],
 ];
 
 async function world() {
@@ -55,6 +70,18 @@ describe('roles: owner / admin / member', () => {
     for (const [method, path, body] of WRITES) {
       const res = await call(env, method, path, { key: member, body });
       expect(res.status, `${method} ${path}`).toBe(403);
+    }
+  });
+
+  it('a member cannot read Cloudflare connections either; admins and owners can', async () => {
+    const { env, owner, admin, member } = await world();
+    for (const [method, path] of ADMIN_ONLY_READS) {
+      expect((await call(env, method, path, { key: member })).status, `member ${method} ${path}`).toBe(403);
+      for (const key of [owner, admin]) {
+        const res = await call(env, method, path, { key });
+        expect(res.status, `${method} ${path}`).not.toBe(403);
+        expect(res.status, `${method} ${path}`).not.toBe(401);
+      }
     }
   });
 

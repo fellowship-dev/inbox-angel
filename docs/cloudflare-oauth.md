@@ -25,7 +25,9 @@ Connections store their tokens encrypted. Without the key nothing can be stored 
 openssl rand -base64 32 | sed 's/^/k1:/' | npx wrangler secret put TOKEN_ENCRYPTION_KEY
 ```
 
-The `k1:` prefix is the key id (see [rotation](#rotating-token_encryption_key)). A bare base64 key is read as `k1`.
+The `k1:` prefix is the key id (see [rotation](#rotating-token_encryption_key)). A lone key without an id is read as `k1`; as soon as
+there is more than one key, **every key needs an explicit id** (`k2:…,k1:…`): the id is never taken from the position, and a
+secret like `<key>,<key>` is rejected.
 **Back this key up**: lose it and every stored connection must be reconnected.
 
 ### 2. Register the OAuth client with Cloudflare (Max only: publishing is irreversible)
@@ -49,7 +51,7 @@ Worker vars (`wrangler.jsonc` `vars`) unless marked secret.
 
 | Variable | | |
 |----------|-|-|
-| `TOKEN_ENCRYPTION_KEY` | **secret** | `kid:base64(32 bytes)[,kid2:base64…]`; the first key seals, all listed keys open |
+| `TOKEN_ENCRYPTION_KEY` | **secret** | `kid:base64(32 bytes)[,kid2:base64…]`; the first key seals, all listed keys open; explicit ids required with more than one key |
 | `CF_OAUTH_CLIENT_ID` | var | the public client's id |
 | `CF_OAUTH_AUTHORIZE_URL` | var | Cloudflare's authorization endpoint (https) |
 | `CF_OAUTH_TOKEN_URL` | var | token endpoint (https) |
@@ -59,6 +61,7 @@ Worker vars (`wrangler.jsonc` `vars`) unless marked secret.
 | `CF_OAUTH_RELAY_URL` | var, optional | self-host: send the OAuth redirect through the relay, e.g. `https://connect.inboxangel.io` |
 | `CF_OAUTH_RELAY_SECRET` | **secret**, relay deployment only | signs the relay's state; setting it turns that Worker into the relay |
 | `CF_OAUTH_RELAY_CALLBACK_PATH` | var, optional, relay only | only forward to this callback path |
+| `CF_OAUTH_RELAY_ALLOWED_HOSTS` | var, optional, relay only | comma-separated hostnames instances may forward to (registered instances); any other host is refused |
 
 OAuth is offered when the client id, authorize URL and token URL are set **and** `TOKEN_ENCRYPTION_KEY` is configured.
 Migration `0015` (`npm run migrate`) adds the tables.
@@ -76,6 +79,9 @@ Migration `0015` (`npm run migrate`) adds the tables.
 * **Refresh.** An expired access token is refreshed before use, once per request (concurrent calls share it); a `401`
   from Cloudflare triggers one forced refresh and one retry. Refresh tokens are single-use, so an isolate that loses the
   race re-reads what the winner stored instead of failing.
+* **Key problems are not customer problems.** If a stored envelope cannot be opened (the key was changed or dropped) the API
+  answers `503` ("for the server operator to fix") and logs one line; the connection is **not** marked broken and nobody is
+  alerted. Restore the key and everything works again.
 * **Broken.** If Cloudflare refuses the refresh (or a pasted token is rejected) the connection becomes `broken`. Calls
   through it fail with `409 {code: "cf_connection_broken", connection_id}` without calling Cloudflare. The account's owners
   and admins get an email (same `SEND_EMAIL` path as the change alerts) and an audit entry `cf_connection.broken`, once.
@@ -83,7 +89,16 @@ Migration `0015` (`npm run migrate`) adds the tables.
 * **Zone enforcement.** Every client for a stored connection carries its allow-list and refuses, before any request leaves
   the Worker, everything under `/zones/<id>` that is not allowed (reads too), `zoneFor()` of a zone that is not allowed, and
   `/accounts/<id>` of a Cloudflare account other than the connection's. Error: `403 {code: "cf_zone_not_allowed"}`.
-  A new connection has an empty list: it may touch nothing until the owner picks zones.
+  A new connection has an empty list: it may touch nothing until the owner picks zones. Zone ids must be 32 hex characters;
+  dot segments, encoded separators and look-alike ids are refused before sending. A restricted client also cannot *discover*:
+  `GET /zones` and name lookups of zones that were not allowed are refused (discovery happens only through the setup path,
+  `GET …/zones`), and `/accounts/*` is limited to the accounts of the connection itself and of its allowed zones (none known →
+  all `/accounts/*` refused). Allow nested zones too: a more specific zone that is not on the list is never consulted, so a
+  name inside it would resolve to the parent zone.
+* **Reconnecting** (`oauth/start` with `connection_id`, or `PUT …/token`) must reach the same Cloudflare account: the new grant
+  has to see the recorded account and the accounts of the allowed zones, else `409 cf_account_mismatch` (OAuth: redirect with
+  `?cf_error=cf_account_mismatch`, and the new grant is revoked). Add a different account as a new connection.
+* **State is single use.** The first callback with a valid state spends it (even a refusal); a replay is `400 oauth_state_used`.
 * **Routing.** `tenant.cfFor(domain)` finds the domain (or its nearest parent in the account), then its connection, then that
   connection's client. A domain without a connection uses the self-host `CLOUDFLARE_API_TOKEN` **in self-host mode only**;
   in `MODE=saas` it gets `400 "… is not linked to a Cloudflare connection"`. Existing call sites (DNS apply, SPF flatten,
@@ -158,8 +173,8 @@ answers `302` to `return_to` (default `/`) with a query parameter appended:
 * `?cf_connection=<id>`: connected; continue to *pick zones*;
 * `?cf_error=<code>`: Cloudflare refused (`access_denied`) or the exchange failed (`invalid_grant`…).
 
-If the state itself is invalid (tampered, expired, other user/account/browser) there is no redirect: `400
-{ "code": "oauth_state_signature" | "oauth_state_expired" | "oauth_state_mismatch" | … }`, so the UI should offer *Try again*.
+If the state itself is invalid (tampered, expired, other user/account/browser, already used) there is no redirect: `400
+{ "code": "oauth_state_signature" | "oauth_state_expired" | "oauth_state_mismatch" | "oauth_state_used" | … }`, so the UI should offer *Try again*.
 
 ### `PUT /api/domains/:id/connection`
 
@@ -173,6 +188,8 @@ connection that manages its zone. The connection must be `active` (`409` otherwi
 | Status | `code` | Meaning |
 |--------|--------|---------|
 | 409 | `cf_connection_broken` / `cf_connection_revoked` (+ `connection_id`) | show *Reconnect* for that connection |
+| 409 | `cf_account_mismatch` / `cf_account_unverified` | a reconnect reached a different Cloudflare account |
+| 503 | `token_encryption_unavailable` / `encryption_not_configured` | server key problem: tell the user to contact the operator (not a reconnect case) |
 | 403 | `cf_zone_not_allowed` | the zone is not on the connection's allow-list |
 | 400 | | the domain is not linked to a connection (saas), or has no zone in it |
 
@@ -194,14 +211,27 @@ A public OAuth client has fixed redirect URIs, but a self-hosted instance lives 
 ```
 instance ──► relay /relay/start?cb=<instance callback>&state=<instance state>&challenge=<PKCE challenge>
 relay    ──► Cloudflare authorize   (redirect_uri = <relay>/relay/callback, state = relay-signed {cb, state, exp})
-Cloudflare ─► relay /relay/callback?code&state
+Cloudflare ─► relay /relay/callback?code&state     → shows "Continue to <host>"
+user clicks ─► relay POST /relay/confirm
 relay    ──► <cb>?code=…&state=<instance state>      (nothing else is forwarded)
 instance  ─► Cloudflare token endpoint: code + PKCE verifier (the verifier never left the instance)
 ```
 
+* **The confirmation page is mandatory.** The relay does not forward the code when Cloudflare returns the browser to it. It shows
+  a page that names the destination host ("Continue to ia.example.com") and forwards only after the user's explicit click
+  (`POST /relay/confirm`, bound to the page by an HttpOnly cookie and an HMAC over the nonce, state and code). Without it the
+  relay is a token-theft tool: `cb` is chosen by whoever builds the `/relay/start` link, so an attacker could send a victim
+  `relay/start?cb=https://evil.example/x&challenge=<attacker's PKCE challenge>`, the victim would consent to "Inbox Angel" at
+  Cloudflare, the code would land on the attacker's host, and the attacker could redeem it with their own verifier and get DNS
+  write on the victim's Cloudflare account. **Never deploy the relay without the confirmation page** (this code cannot be
+  configured without it), and keep the page's wording about the destination intact.
+* **Registered hosts.** Set `CF_OAUTH_RELAY_ALLOWED_HOSTS=host1,host2` on the relay to accept only those instance hosts
+  (checked at start, at the page and at the confirm). Recommended whenever the set of instances is known; unset means any
+  https host, with the confirmation page as the only protection.
 * The relay verifies its HMAC and 10-minute expiry (`400` if tampered or expired), requires `cb` to be https with no
   credentials (and optionally a fixed path), and refuses plain-http access. It never logs a URL, code or state; responses
-  are `no-store` / `no-referrer`. It can neither redeem a code nor see a token.
+  are `no-store` / `no-referrer`, the page is not frameable. It can neither redeem a code nor see a token. A refusal from
+  Cloudflare (`error=access_denied`) carries no authorization and is forwarded without the page.
 * **Instance config:** `CF_OAUTH_RELAY_URL=https://connect.inboxangel.io` plus the same `CF_OAUTH_CLIENT_ID`, endpoint
   URLs, scopes and `TOKEN_ENCRYPTION_KEY`. `BETTER_AUTH_URL` is used for `cb` when set.
 * **Relay deployment:** the same Worker code with `CF_OAUTH_RELAY_SECRET` set (and the client id, authorize URL, scopes).
@@ -212,7 +242,7 @@ instance  ─► Cloudflare token endpoint: code + PKCE verifier (the verifier n
 ## Rotating TOKEN_ENCRYPTION_KEY
 
 1. Generate `k2`: `openssl rand -base64 32`.
-2. Set the secret to `k2:<new>,k1:<old>`. New envelopes use `k2`; `k1` still opens the old ones. An envelope on `k1` is
+2. Set the secret to `k2:<new>,k1:<old>` (explicit ids on both). New envelopes use `k2`; `k1` still opens the old ones. An envelope on `k1` is
    re-sealed under `k2` the next time its connection is used.
 3. When no envelope uses `k1` any more (`SELECT count(*) FROM cloudflare_connections WHERE token_envelope LIKE 'ia1.k1.%'` is 0),
    drop `k1`. An envelope whose key was dropped can't be opened: its connection turns `broken` and has to be reconnected.

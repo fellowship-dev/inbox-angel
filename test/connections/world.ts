@@ -33,9 +33,9 @@ export async function world(extraEnv: Record<string, unknown> = {}) {
   seedSettings(db, { from_email: 'noreply@reports.a-corp.com' }, A.acct);
 
   const cf = new FakeCloudflare({
-    'a-corp.com': { id: 'zone-a1', accountId: 'cf-1' },
-    'a-two.org': { id: 'zone-a2', accountId: 'cf-1' },
-    'b-corp.org': { id: 'zone-b', accountId: 'cf-1' },
+    'a-corp.com': { id: Z.a1, accountId: 'cf-1' },
+    'a-two.org': { id: Z.a2, accountId: 'cf-1' },
+    'b-corp.org': { id: Z.b, accountId: 'cf-1' },
   });
   cf.accounts = [{ id: 'cf-1', name: 'Fellowship' }];
   cf.validTokens = new Set();
@@ -76,3 +76,10 @@ export async function world(extraEnv: Record<string, unknown> = {}) {
 }
 
 export type World = Awaited<ReturnType<typeof world>>;
+
+/** Zone ids as Cloudflare issues them: 32 hex characters. */
+export const Z = {
+  a1: 'a1'.repeat(16),
+  a2: 'a2'.repeat(16),
+  b: 'b0'.repeat(16),
+} as const;

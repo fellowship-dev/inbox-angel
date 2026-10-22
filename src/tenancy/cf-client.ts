@@ -100,8 +100,10 @@ export type CfDnsRecordInput = {
  * whatever the token itself could do.
  */
 export interface CfPolicy {
-  /** Throws to refuse `method path` (the path as passed to request(), without the API prefix). */
-  request(method: string, path: string): void;
+  /** Throws to refuse `method path` (the path as passed to request(), without the API prefix, and its query). */
+  request(method: string, path: string, query?: CfRequestOptions['query']): void;
+  /** May zoneFor() ask Cloudflare whether this zone name exists? (False: it is skipped, nothing is sent.) */
+  lookup(zoneName: string): boolean;
   /** Throws to refuse a zone that zoneFor() found. */
   zone(zone: CfZone): void;
 }
@@ -137,6 +139,14 @@ export function zoneCandidates(domain: string): string[] {
   return out;
 }
 
+/** Dot segments, encoded separators and backslashes never belong in an API path built from ids. */
+function assertSafePath(path: string): void {
+  const p = path.split('?')[0];
+  if (p.split('/').some(seg => seg === '.' || seg === '..') || /%|\\|\/\//.test(p)) {
+    throw new CfApiError('Cloudflare request refused: unsafe path', 'REQUEST', '[invalid]');
+  }
+}
+
 export class CfClient {
   #token: string | (() => Promise<string>);
   readonly #fetch: typeof fetch;
@@ -165,7 +175,8 @@ export class CfClient {
    * counts as success when the HTTP status is ok.
    */
   async request<T = unknown>(method: string, path: string, opts: CfRequestOptions = {}): Promise<T> {
-    this.#policy?.request(method.toUpperCase(), path);
+    assertSafePath(path);
+    this.#policy?.request(method.toUpperCase(), path, opts.query);
     return this.#send<T>(method, path, opts, false);
   }
 
@@ -225,13 +236,18 @@ export class CfClient {
 
   /** The zone a domain lives in. Throws CfZoneNotFoundError when the account has none. */
   async zoneFor(domain: string): Promise<CfZone> {
+    let skipped = false;
     for (const name of zoneCandidates(domain)) {
+      // A restricted client never asks about zones the owner did not allow.
+      if (this.#policy && !this.#policy.lookup(name)) { skipped = true; continue; }
       const zone = await this.#lookupZone(name);
       if (zone) {
         this.#policy?.zone(zone);
         return zone;
       }
     }
+    // Nothing allowed matched, and names were skipped: say "not allowed", not "does not exist".
+    if (skipped) throw new CfZoneNotAllowedError(domain);
     throw new CfZoneNotFoundError(domain);
   }
 
@@ -255,11 +271,11 @@ export class CfClient {
   }
 
   /** Every active zone the token can see (paged: Cloudflare caps a page at 50). */
-  async listZones(): Promise<{ id: string; name: string; status: string }[]> {
+  async listZones(): Promise<{ id: string; name: string; status: string; account?: { id: string } }[]> {
     const PER_PAGE = 50;
-    const out: { id: string; name: string; status: string }[] = [];
+    const out: { id: string; name: string; status: string; account?: { id: string } }[] = [];
     for (let page = 1; page <= 40; page++) {
-      const batch = (await this.request<{ id: string; name: string; status: string }[]>('GET', '/zones', { query: { per_page: PER_PAGE, page, status: 'active' } })) ?? [];
+      const batch = (await this.request<{ id: string; name: string; status: string; account?: { id: string } }[]>('GET', '/zones', { query: { per_page: PER_PAGE, page, status: 'active' } })) ?? [];
       out.push(...batch);
       if (batch.length < PER_PAGE) break;
     }
