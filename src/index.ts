@@ -2,7 +2,11 @@ import { handleEmail } from './email/handler';
 import { handleApi } from './api/router';
 import { scope } from './db/scope';
 import { loadTenant } from './tenancy/load';
-import { resolveDomainOwner, resolveInboundAccount } from './tenancy/resolver';
+import { resolveInboundAccount } from './tenancy/resolver';
+import { getMode } from './tenancy/mode';
+import { handleHostedEmail } from './hosted/intake';
+import { resolvePolicyHost } from './hosted/policy-host';
+import { runHostedCron } from './hosted/cron';
 import { runCronForAccounts } from './cron';
 import { buildPolicyFile } from './email/mta-sts';
 import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
@@ -26,6 +30,12 @@ export interface Env {
   // Worker config (vars in wrangler.jsonc)
   WORKER_NAME?: string;          // defaults to "inbox-angel-worker"
   MODE?: string;                 // "selfhost" (default) | "saas"
+  // Hosted service (MODE=saas + SAAS_ENABLED=1), see docs/hosted.md
+  INTAKE_DOMAIN?: string;        // central report address domain, e.g. rua.inboxangel.io
+  CANARY_DOMAIN?: string;        // anonymous free-check address domain, e.g. canary.inboxangel.io
+  HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. inboxangel.io
+  HOSTED_RECORDS_LABEL?: string; // single label every hosted record lives under (default "h")
+  HOSTED_RECORDS_TOKEN?: string; // secret: least-privilege DNS:Edit token for that one zone
   // Bindings
   SEND_EMAIL?: SendEmail;        // CF Email Workers outbound binding
   AUTH_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // auth rate limiting (10/min)
@@ -51,9 +61,8 @@ export default {
     // MTA-STS policy file — served on mta-sts.* hostnames per RFC 8461
     // mta-sts.domain.com CNAME → this Worker; CF Universal SSL covers HTTPS
     if (hostname.startsWith('mta-sts.') && pathname === '/.well-known/mta-sts.txt') {
-      const domain = hostname.slice('mta-sts.'.length);
-      const owner = await resolveDomainOwner(env, domain);
-      const config = await scope(env.DB, owner).mtaSts.getEnabledByDomain(domain);
+      const policyHost = await resolvePolicyHost(env, hostname);
+      const config = policyHost && await scope(env.DB, policyHost.accountId).mtaSts.getEnabledByDomain(policyHost.domain);
       if (!config) return new Response('MTA-STS not configured for this domain', { status: 404 });
       const mxHosts = config.mx_hosts ? config.mx_hosts.split(',').filter(Boolean) : [];
       const policy = buildPolicyFile(config.mode, mxHosts, 86400);
@@ -84,6 +93,8 @@ export default {
       throw e;
     }
     const bound = env as BoundEnv;
+    // Hosted: the token in the recipient picks the account (or the anonymous check); there is no default account.
+    if (getMode(bound) === 'saas') return handleHostedEmail(message, bound);
     const tenant = await loadTenant(bound, { accountId: await resolveInboundAccount(bound, message.to) });
     await handleEmail(message, tenant, ctx);
   },
@@ -98,6 +109,7 @@ export default {
       return;
     }
     await runCronForAccounts(event, env as BoundEnv, ctx);
+    await runHostedCron(event, env as BoundEnv, ctx);
   },
 } satisfies ExportedHandler<Env>;
 

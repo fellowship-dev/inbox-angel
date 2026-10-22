@@ -487,9 +487,13 @@ export const hostedDomains = sqliteTable(
 		spf_record_id: text('spf_record_id'),
 		mta_sts_txt_record_id: text('mta_sts_txt_record_id'),
 		mta_sts_host_record_id: text('mta_sts_host_record_id'),
+		tls_rpt_record_id: text('tls_rpt_record_id'),
+		/** The customer's own SPF record at enable time: what the hosted (flattened) record is built from. */
+		spf_source: text('spf_source'),
 		dmarc_pointer: text('dmarc_pointer'),
 		spf_pointer: text('spf_pointer'),
 		mta_sts_pointer: text('mta_sts_pointer'),
+		tls_rpt_pointer: text('tls_rpt_pointer'),
 		pointers_checked_at: integer('pointers_checked_at'),
 		created_at: integer('created_at').notNull().default(now),
 	},

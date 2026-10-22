@@ -1,4 +1,4 @@
-import { gunzipSync, unzipSync } from 'fflate';
+import { Gunzip, unzipSync } from 'fflate';
 
 // Magic bytes — ported from parsedmarc constants
 const MAGIC_ZIP  = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
@@ -31,7 +31,33 @@ const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: false });
  *   - Uint8Array / ArrayBuffer — raw bytes
  *   - string — either raw XML/JSON or a base64-encoded archive
  */
-export function extractReport(content: Uint8Array | ArrayBuffer | string): string {
+export interface ExtractOptions {
+  /** Refuse archives that decompress to more than this many bytes (decompression bombs). Default: no limit. */
+  maxBytes?: number;
+}
+
+export class ReportTooLargeError extends ParserError {}
+
+function tooLarge(max: number): ParserError {
+  return new ReportTooLargeError(`Report is larger than ${max} bytes once decompressed`);
+}
+
+function gunzip(bytes: Uint8Array, maxBytes?: number): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const gz = new Gunzip(chunk => {
+    total += chunk.length;
+    if (maxBytes !== undefined && total > maxBytes) throw tooLarge(maxBytes);
+    chunks.push(chunk);
+  });
+  gz.push(bytes, true);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
+
+export function extractReport(content: Uint8Array | ArrayBuffer | string, opts: ExtractOptions = {}): string {
   let bytes: Uint8Array;
 
   if (typeof content === 'string') {
@@ -54,14 +80,21 @@ export function extractReport(content: Uint8Array | ArrayBuffer | string): strin
   try {
     if (startsWith(bytes, MAGIC_ZIP)) {
       // ZIP: extract first file
-      const files = unzipSync(bytes);
+      const max = opts.maxBytes;
+      const files = unzipSync(bytes, max === undefined ? {} : {
+        filter: f => {
+          if (f.originalSize > max) throw tooLarge(max);
+          return true;
+        },
+      });
       const names = Object.keys(files);
       if (names.length === 0) throw new ParserError('Empty zip archive');
+      if (max !== undefined && files[names[0]].length > max) throw tooLarge(max);
       return decoder.decode(files[names[0]]);
     }
 
     if (startsWith(bytes, MAGIC_GZIP)) {
-      return decoder.decode(gunzipSync(bytes));
+      return decoder.decode(gunzip(bytes, opts.maxBytes));
     }
 
     if (startsWith(bytes, MAGIC_XML) || startsWith(bytes, MAGIC_JSON)) {

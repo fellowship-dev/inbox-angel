@@ -65,15 +65,15 @@ export function hostedQueries(db: Db, accountId: string) {
 			return db.select().from(hostedDomains).where(mine).all();
 		},
 
-		insert(h: { domain_id: number; hosted_id: string; zone_key: string }) {
+		insert(h: { domain_id: number; hosted_id: string; zone_key: string; spf_source?: string | null }) {
 			return db.insert(hostedDomains).values({ ...h, account_id: accountId }).run();
 		},
 
-		setRecords(domainId: number, ids: { dmarc_record_id?: string | null; spf_record_id?: string | null; mta_sts_txt_record_id?: string | null; mta_sts_host_record_id?: string | null }) {
+		setRecords(domainId: number, ids: { dmarc_record_id?: string | null; spf_record_id?: string | null; mta_sts_txt_record_id?: string | null; mta_sts_host_record_id?: string | null; tls_rpt_record_id?: string | null; spf_source?: string | null }) {
 			return db.update(hostedDomains).set(ids).where(forDomain(domainId)).run();
 		},
 
-		setPointers(domainId: number, p: { dmarc_pointer: PointerStatus; spf_pointer: PointerStatus; mta_sts_pointer: PointerStatus }, nowSeconds: number) {
+		setPointers(domainId: number, p: { dmarc_pointer: PointerStatus; spf_pointer: PointerStatus; mta_sts_pointer: PointerStatus; tls_rpt_pointer: PointerStatus }, nowSeconds: number) {
 			return db.update(hostedDomains).set({ ...p, pointers_checked_at: nowSeconds }).where(forDomain(domainId)).run();
 		},
 

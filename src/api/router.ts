@@ -6,7 +6,7 @@
 // Unauthenticated:
 //   GET  /health                              — liveness probe
 //   GET  /api/version                         — running vs latest version
-//   POST /api/check-sessions                  — create a free-check session
+//   POST /api/check-sessions                  — create a free-check session (hosted: expiring check+<token>@canary address)
 //   GET  /api/check-sessions/:token           — poll for free-check result
 //   POST /api/monitor                         — subscribe to change alerts (unauthenticated)
 //   GET  /api/auth/status                     — owner configured? OAuth providers, mode
@@ -31,6 +31,7 @@
 //   GET    /api/domains/:id/anomalies         — failing sources with Active/Older split
 //   GET    /api/domains/:id/export            — CSV export
 //   GET    /api/domains/:id/dns-check         — check _dmarc TXT record in DNS
+//   GET/POST/DELETE /api/domains/:id/hosted, POST …/hosted/rotate-token, …/hosted/verify — hosted records (MODE=saas; src/hosted/routes.ts)
 //   GET    /api/domains/:id/rollout-next      — current rollout step, next step, DNS preview, safety
 //   POST   /api/domains/:id/rollout-advance   — persist recommended rollout step
 //   PUT    /api/domains/:id/set-default       — designate domain as default (infrastructure hub)
@@ -59,6 +60,9 @@ import { version } from '../../package.json';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
+import { handleHostedRoutes } from '../hosted/routes';
+import { hostedConfig, hostedEnabled } from '../hosted/config';
+import { issueCanary } from '../hosted/canary';
 import type { AuthedAccount } from '../auth/resolver';
 import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
 import { getMode } from '../tenancy/mode';
@@ -471,6 +475,11 @@ async function _handleApi(
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
+    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no account.
+    if (hostedEnabled(env) && hostedConfig(env).canaryDomain) {
+      const canary = await issueCanary(env);
+      return json(canary, 201);
+    }
     const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
@@ -1691,6 +1700,10 @@ async function _handleApi(
         return err(e.message ?? 'CT log lookup failed', 502);
       }
     }
+
+    // /api/domains/:id/hosted — hosted records (MODE=saas only)
+    const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
+    if (hostedResponse) return hostedResponse;
 
     // /api/keys — per-user API keys
     const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: account.role, kind: (account as AuthedAccount).kind, user: userBySession });

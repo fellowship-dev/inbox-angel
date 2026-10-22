@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "49311290-362f-46e5-8264-cdb7f1d645b2",
+  "id": "bc9664ff-1a6b-426b-8efc-af5fd478cc5c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -1055,6 +1055,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "tls_rpt_record_id": {
+          "name": "tls_rpt_record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "spf_source": {
+          "name": "spf_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "dmarc_pointer": {
           "name": "dmarc_pointer",
           "type": "text",
@@ -1071,6 +1085,13 @@
         },
         "mta_sts_pointer": {
           "name": "mta_sts_pointer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tls_rpt_pointer": {
+          "name": "tls_rpt_pointer",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

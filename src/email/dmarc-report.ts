@@ -11,9 +11,15 @@ import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
 import { storeReport } from '../dmarc/store-report';
 
+export interface ReportOptions {
+  /** Hosted intake: cap on the decompressed report. Self-host passes nothing and keeps its unlimited behaviour. */
+  maxBytes?: number;
+}
+
 export async function handleDmarcReport(
   message: ForwardableEmailMessage,
   tenant: TenantContext,
+  opts: ReportOptions = {},
 ): Promise<{ failure_count: number }> {
   // 1. Extract attachment bytes from raw MIME stream
   let bytes: Uint8Array;
@@ -32,7 +38,9 @@ export async function handleDmarcReport(
   let report;
   let rawXml: string | null = null;
   try {
-    report = await parseDmarcEmail(bytes, false, tenant.db);
+    report = opts.maxBytes === undefined
+      ? await parseDmarcEmail(bytes, false, tenant.db)
+      : await parseDmarcEmail(bytes, false, tenant.db, { maxBytes: opts.maxBytes });
 
     // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
     try {

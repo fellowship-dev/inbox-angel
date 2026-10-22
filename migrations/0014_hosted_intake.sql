@@ -26,9 +26,12 @@ CREATE TABLE hosted_domains (
   spf_record_id TEXT,
   mta_sts_txt_record_id TEXT,
   mta_sts_host_record_id TEXT,
+  tls_rpt_record_id TEXT,
+  spf_source TEXT,
   dmarc_pointer TEXT,
   spf_pointer TEXT,
   mta_sts_pointer TEXT,
+  tls_rpt_pointer TEXT,
   pointers_checked_at INTEGER,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );

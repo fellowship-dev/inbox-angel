@@ -11,7 +11,8 @@
 //                  failure-details: [{ result-type, ... }] }] }
 
 import type { TenantContext } from '../tenancy/context';
-import { extractTextBody } from './mime-extract';
+import { extractAttachmentBytes, extractTextBody, readStream } from './mime-extract';
+import { extractReport, ReportTooLargeError } from '../dmarc/extract-report';
 
 // RFC 8460 § 4.3 — subset of fields we care about
 interface TlsRptFailureDetail {
@@ -51,18 +52,41 @@ function parseIsoDate(s: string): number {
   return isNaN(d.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(d.getTime() / 1000);
 }
 
+export interface TlsRptOptions {
+  /**
+   * Hosted intake. Reports may be gzip/zip attachments (as RFC 8460 senders usually send them), capped at
+   * `maxBytes` once decompressed, and every policy must be for a domain this account owns or the whole
+   * report is rejected. Unset (self-host): plain JSON bodies, unknown domains skipped.
+   */
+  hosted?: { maxBytes: number };
+}
+
+/** The report text: the JSON body, or (hosted) a gzip/zip/JSON attachment. */
+async function readReport(message: ForwardableEmailMessage, opts: TlsRptOptions): Promise<string> {
+  if (!opts.hosted) return extractTextBody(message.raw);
+  const all = await readStream(message.raw);
+  try {
+    return extractReport(await extractAttachmentBytes(new Response(all).body!), { maxBytes: opts.hosted.maxBytes });
+  } catch (e) {
+    if (e instanceof ReportTooLargeError) throw e;
+    // No usable attachment: the report is the message body.
+    return new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(all);
+  }
+}
+
 export async function handleTlsRptReport(
   message: ForwardableEmailMessage,
   tenant: TenantContext,
+  opts: TlsRptOptions = {},
 ): Promise<{ failure_count: number }> {
 
-  // Extract JSON from email body (TLS-RPT reports are plain JSON, not attachments)
+  // Extract the JSON (a plain body; hosted intake also accepts compressed attachments)
   let raw: string;
   try {
-    raw = await extractTextBody(message.raw);
+    raw = await readReport(message, opts);
   } catch (e) {
     console.error('[tls-rpt] failed to extract email body:', e);
-    message.setReject('Could not read TLS-RPT report email body');
+    message.setReject(e instanceof ReportTooLargeError ? 'TLS-RPT report is too large' : 'Could not read TLS-RPT report email body');
     return { failure_count: 0 };
   }
 
@@ -84,13 +108,29 @@ export async function handleTlsRptReport(
   const dateBegin = parseIsoDate(report['date-range']?.['start-datetime']);
   const dateEnd   = parseIsoDate(report['date-range']?.['end-datetime']);
 
+  // Hosted: a report naming a domain this account doesn't own is spoofed or misrouted. Reject it whole, store nothing.
+  if (opts.hosted) {
+    if (!Array.isArray(report.policies) || report.policies.length === 0) {
+      message.setReject('Invalid TLS-RPT report: no policies');
+      return { failure_count: 0 };
+    }
+    for (const policy of report.policies ?? []) {
+      const policyDomain = policy.policy?.['policy-domain'];
+      if (policyDomain && !(await tenant.scope.domains.getByName(policyDomain.toLowerCase()))) {
+        console.warn(`[tls-rpt] policy-domain ${policyDomain} is not owned by this account`);
+        message.setReject(`Unknown domain ${policyDomain} — not a registered InboxAngel inbox`);
+        return { failure_count: 0 };
+      }
+    }
+  }
+
   let stored = 0;
   let totalFailureCount = 0;
   for (const policy of report.policies ?? []) {
     const policyDomain = policy.policy?.['policy-domain'];
     if (!policyDomain) continue;
 
-    const domain = await tenant.scope.domains.getByName(policyDomain);
+    const domain = await tenant.scope.domains.getByName(opts.hosted ? policyDomain.toLowerCase() : policyDomain);
     if (!domain) {
       console.warn(`[tls-rpt] unknown domain ${policyDomain} — skipping policy`);
       continue;
