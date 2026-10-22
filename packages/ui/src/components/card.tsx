@@ -13,7 +13,7 @@ export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<
 );
 CardHeader.displayName = "CardHeader";
 
-export const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement> & { as?: "h2" | "h3" | "h4" }>(
+export const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement> & { as?: "h1" | "h2" | "h3" | "h4" }>(
 	({ className, as: Tag = "h3", ...props }, ref) => (
 		<Tag ref={ref} className={cn("text-base font-semibold leading-tight tracking-tight", className)} {...props} />
 	),

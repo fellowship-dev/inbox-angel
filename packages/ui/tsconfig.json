@@ -10,6 +10,7 @@
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"isolatedModules": true,
+		"paths": { "@inbox-angel/ui": ["./src/index.ts"] },
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true
 	},

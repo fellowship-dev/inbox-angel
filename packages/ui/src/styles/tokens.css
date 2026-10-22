@@ -7,9 +7,10 @@
 
    Theme selection:
    - default: light; follows prefers-color-scheme: dark
-   - <html data-theme="light|dark"> forces a theme
+   - data-theme="light" or "dark" on <html> (or any wrapper element) forces a theme for that subtree
    ───────────────────────────────────────────────────────── */
-:root {
+:root,
+[data-theme="light"] {
   color-scheme: light;
 
   /* Surfaces */
@@ -113,7 +114,7 @@
   }
 }
 
-:root[data-theme="dark"] {
+[data-theme="dark"] {
   color-scheme: dark;
 
   --surface-0: #0a1220;

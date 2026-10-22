@@ -35,9 +35,9 @@ const site = read("../../../docs/design/site-globals.css");
 const tokensCss = read("../src/styles/tokens.css");
 const siteLight = declarations(site, /^:root\s*{/m);
 const siteDark = declarations(site, /@media \(prefers-color-scheme: dark\)\s*{\s*:root\s*{/m);
-const ourLight = declarations(tokensCss, /^:root\s*{/m);
+const ourLight = declarations(tokensCss, /^:root,\s*\[data-theme="light"\]\s*{/m);
 const ourDarkMedia = declarations(tokensCss, /:root:not\(\[data-theme="light"\]\)\s*{/);
-const ourDarkForced = declarations(tokensCss, /:root\[data-theme="dark"\]\s*{/);
+const ourDarkForced = declarations(tokensCss, /^\[data-theme="dark"\]\s*{/m);
 
 describe("tokens.css vs website site-globals.css", () => {
 	it("light tokens are identical to the website", () => {
