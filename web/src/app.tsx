@@ -49,13 +49,20 @@ function Gate({ children }: { children: ReactNode }) {
 	return <>{children}</>;
 }
 
-/** Fresh instances have no domain: send owners and admins to the setup wizard once. */
+/**
+ * Fresh instances have no domain: send owners and admins to the setup wizard once per tab.
+ * Once, because "Skip setup" is a choice: bouncing people back every time they open Domains is not help.
+ */
 function SetupRedirect({ children }: { children: ReactNode }) {
 	const { status, canWrite } = useSession();
 	const { pathname } = useLocation();
-	if (status && status.has_domain === false && canWrite && pathname === '/') return <Navigate to="/setup" replace />;
+	if (status && status.has_domain === false && canWrite && pathname === '/' && !sessionStorage.getItem(SETUP_SEEN)) {
+		sessionStorage.setItem(SETUP_SEEN, '1');
+		return <Navigate to="/setup" replace />;
+	}
 	return <>{children}</>;
 }
+const SETUP_SEEN = 'ia_setup_redirected';
 
 function NotFound() {
 	return <EmptyState title="Page not found" description="That page does not exist." action={<Button asChild><a href="#/">Back to domains</a></Button>} />;

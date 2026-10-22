@@ -16,7 +16,10 @@ function boot(route: string, routes: Record<string, unknown>) {
 	return api;
 }
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+	localStorage.clear();
+	sessionStorage.clear();
+});
 
 describe('app', () => {
 	it('shows the sign-in screen at a deep link when signed out, without changing the URL', async () => {
