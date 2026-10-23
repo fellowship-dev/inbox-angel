@@ -173,11 +173,14 @@ describe('mailers by purpose', () => {
     expect(await codes('E_SOMETHING')).toMatchObject({ ok: false, kind: 'transient' });
 
     const resend = (status: number, message: string) => funnelMailer({ RESEND_API_KEY: 'k' }, (async () => new Response(JSON.stringify({ message }), { status })) as any)!.send({ from: { email: 'f@x.io' }, to: 'a@b.co', subject: 's', text: 't' });
-    expect(await resend(429, 'slow')).toMatchObject({ kind: 'transient' });
     expect(await resend(503, 'down')).toMatchObject({ kind: 'transient' });
-    expect(await resend(422, 'Invalid `to` field')).toMatchObject({ kind: 'recipient' });
-    expect(await resend(422, 'Invalid `from` field')).toMatchObject({ kind: 'config' });
+    // Resend names no recipient-specific error (https://resend.com/docs/api-reference/errors): nothing from it bounces a lead.
+    expect(await resend(422, 'Invalid `to` field')).toMatchObject({ kind: 'config' });
+    expect(await resend(403, 'The inboxangel.io domain is not verified.')).toMatchObject({ kind: 'config' });
     expect(await resend(401, 'API key is invalid')).toMatchObject({ kind: 'config' });
+    expect(await resend(429, 'Too many requests')).toMatchObject({ kind: 'config' });
+    expect(await resend(400, 'something we have never seen')).toMatchObject({ kind: 'config' });
+    expect(await resend(500, 'oops')).toMatchObject({ kind: 'transient' });
   });
 });
 

@@ -20,7 +20,12 @@ export interface MailMessage {
   idempotencyKey?: string;
 }
 
-/** recipient: the address was refused (bounce, suppressed, invalid); transient: try again later; config: our setup is wrong. */
+/**
+ * recipient: the provider explicitly refused this address (the only kind that bounces a lead).
+ * transient: possibly sent, outcome unknown (network error, 5xx).
+ * config: not sent and not provably the recipient's fault (bad key, unverified or malformed `from`, quota, rate limit, any
+ * unrecognised error): a human has to look, so callers put the step back and stop.
+ */
 export type SendResult = { ok: true; id?: string } | { ok: false; kind: 'recipient' | 'transient' | 'config'; error: string };
 
 export interface Mailer {
@@ -98,12 +103,12 @@ function resendMailer(apiKey: string, fetchFn: typeof fetch = fetch): Mailer {
         return { ok: true, id: body.id };
       }
       const body = (await res.json().catch(() => ({}))) as { message?: string; name?: string };
-      const error = `resend ${res.status}: ${body.message ?? body.name ?? 'error'}`;
-      if (res.status === 429 || res.status >= 500) return { ok: false, kind: 'transient', error };
-      if (res.status === 400 || res.status === 422) {
-        // A validation error about the address is the recipient's problem; any other is ours.
-        return { ok: false, kind: /\bto\b|recipient|email address/i.test(body.message ?? '') ? 'recipient' : 'config', error };
-      }
+      const error = `resend ${res.status} ${body.name ?? ''}: ${body.message ?? 'error'}`.replace('  ', ' ');
+      // Resend's errors (https://resend.com/docs/api-reference/errors) name no recipient-specific error: an invalid `to`, a bad
+      // `from` or an unverified domain all come back as `validation_error`, told apart only by the message. So nothing from
+      // Resend is classified as a recipient error (a bad MAIL_FROM must never bounce and suppress leads). The only
+      // ambiguous outcome is a server fault, where the mail may or may not have been accepted; everything else was refused.
+      if (res.status >= 500) return { ok: false, kind: 'transient', error };
       return { ok: false, kind: 'config', error };
     },
   };

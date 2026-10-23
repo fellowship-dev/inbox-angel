@@ -25,7 +25,7 @@ export const EXPORT_COLUMNS = {
 	report_records: ['id', 'report_id', 'source_ip', 'count', 'disposition', 'dkim_result', 'dkim_domain', 'spf_result', 'spf_domain', 'header_from', 'created_at', 'reverse_dns', 'base_domain', 'country_code', 'org'],
 	tls_reports: ['id', 'domain_id', 'org_name', 'date_begin', 'date_end', 'total_success', 'total_failure', 'failure_details', 'created_at'],
 	audit_log: ['id', 'actor_id', 'actor_email', 'actor_type', 'action', 'resource_type', 'resource_id', 'resource_name', 'before_value', 'after_value', 'meta', 'created_at'],
-	monitor_subscriptions: ['id', 'email', 'domain', 'spf_record', 'dmarc_policy', 'dmarc_pct', 'dmarc_record', 'active', 'last_checked_at', 'created_at'],
+	monitor_subscriptions: ['id', 'email', 'domain', 'spf_record', 'dmarc_policy', 'dmarc_pct', 'dmarc_record', 'active', 'last_checked_at', 'created_at', 'confirmed_at'],
 	spf_flatten_config: ['domain_id', 'enabled', 'cf_record_id', 'canonical_record', 'flattened_record', 'ip_count', 'lookup_count', 'last_flattened_at', 'last_error', 'created_at', 'updated_at'],
 	mta_sts_config: ['domain_id', 'enabled', 'mode', 'mx_hosts', 'max_age', 'policy_id', 'mta_sts_record_id', 'tls_rpt_record_id', 'cname_record_id', 'last_error', 'created_at', 'updated_at'],
 	hosted_domains: ['domain_id', 'hosted_id', 'zone_key', 'dmarc_record_id', 'spf_record_id', 'mta_sts_txt_record_id', 'mta_sts_host_record_id', 'tls_rpt_record_id', 'spf_source', 'dmarc_pointer', 'spf_pointer', 'mta_sts_pointer', 'tls_rpt_pointer', 'pointers_checked_at', 'created_at'],

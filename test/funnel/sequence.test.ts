@@ -147,6 +147,64 @@ describe('stop conditions', () => {
   });
 });
 
+describe('errors are not bounces', () => {
+  it('a bad MAIL_FROM (Resend: validation_error about `from`) is a configuration error: nobody is bounced or suppressed, the step is restored, the run stops', async () => {
+    const w = funnelWorld({ MAIL_FROM: 'not-an-address' });
+    for (const e of ['a@a.com', 'b@b.com', 'c@c.com']) await w.enroll(e, {}, T0, e.split('@')[1]);
+    const f = vi.fn(async () => new Response(JSON.stringify({ statusCode: 422, name: 'validation_error', message: 'Invalid `from` field. The email address needs to follow the `email@example.com` or `Name <email@example.com>` format.' }), { status: 422 }));
+    vi.stubGlobal('fetch', f);
+    expect(await runOnboardingSequence(w.env, T0 + DAY)).toMatchObject({ sent: 0, stopped: 0, failed: 1 });
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(w.rows('SELECT status, step FROM leads')).toEqual(Array(3).fill({ status: 'active', step: 0 }));
+    expect(w.rows('SELECT * FROM suppression')).toEqual([]);
+    vi.unstubAllGlobals();
+  });
+
+  it('an unverified domain, a bad key, a quota and an unrecognised error body all count as configuration errors too', async () => {
+    for (const [status, body] of [[403, { name: 'validation_error', message: 'The inboxangel.io domain is not verified.' }], [401, { name: 'missing_api_key', message: 'Missing API key' }], [429, { name: 'daily_quota_exceeded', message: 'quota' }], [400, { message: 'new kind of error' }], [422, 'not json']] as const) {
+      const w = funnelWorld();
+      await w.enroll('a@acme.com');
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })));
+      expect(await runOnboardingSequence(w.env, T0 + DAY), String(status)).toMatchObject({ sent: 0, stopped: 0, failed: 1 });
+      expect(w.rows('SELECT status, step FROM leads')).toEqual([{ status: 'active', step: 0 }]);
+      expect(w.rows('SELECT * FROM suppression')).toEqual([]);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('only an explicit recipient refusal bounces', async () => {
+    const w = funnelWorld();
+    await w.enroll('a@acme.com');
+    w.mailer.next.push({ ok: false, kind: 'recipient', error: 'E_RECIPIENT_SUPPRESSED' });
+    expect(await run(w, T0 + DAY)).toMatchObject({ stopped: 1 });
+    expect(w.rows('SELECT status FROM leads')).toEqual([{ status: 'bounced' }]);
+  });
+
+  it('an internal error before the send (not a transient failure) restores the step and stops the run', async () => {
+    const w = funnelWorld();
+    for (const e of ['a@a.com', 'b@b.com']) await w.enroll(e, {}, T0, e.split('@')[1]);
+    const spy = vi.spyOn(crypto.subtle, 'encrypt').mockRejectedValue(new Error('crypto broke'));
+    expect(await run(w, T0 + DAY)).toMatchObject({ sent: 0, failed: 1 });
+    spy.mockRestore();
+    expect(w.mailer.sent).toEqual([]);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('not sent (config)'));
+    expect(w.rows('SELECT step, status FROM leads')).toEqual(Array(2).fill({ step: 0, status: 'active' }));
+    expect((await run(w, T0 + DAY + 1)).sent).toBe(2);
+  });
+
+  it('an exception in the loop after the step was marked (and before the provider answered) restores it and stops the run', async () => {
+    const w = funnelWorld();
+    for (const e of ['a@a.com', 'b@b.com']) await w.enroll(e, {}, T0, e.split('@')[1]);
+    let reads = 0;
+    // MAIL_REPLY_TO is read once for readiness, then while composing the first email: that read throws.
+    Object.defineProperty(w.env, 'MAIL_REPLY_TO', { get() { if (++reads >= 2) throw new Error('boom'); return 'max@inboxangel.io'; }, configurable: true });
+    expect(await run(w, T0 + DAY)).toMatchObject({ sent: 0, failed: 1 });
+    expect(w.mailer.sent).toEqual([]);
+    expect(w.rows('SELECT step, status FROM leads')).toEqual(Array(2).fill({ step: 0, status: 'active' }));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('internal error'), 'boom');
+  });
+});
+
 describe('held steps', () => {
   it('leads waiting for BOOKING_URL do not starve the rest of the batch', async () => {
     const w = funnelWorld({ BOOKING_URL: undefined });

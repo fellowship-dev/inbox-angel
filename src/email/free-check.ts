@@ -11,7 +11,7 @@ import { checkDomain } from './dns-check';
 import { buildSummary, formatCheckReport } from './report-formatter';
 import { buildFreeCheckHtml } from './html-templates';
 import { globals } from '../db/scope';
-import { provesDomain, topAuthResults } from './sender-proof';
+import { proveSender, readAuthHeaders } from './sender-proof';
 import { enrollLead } from '../funnel/enroll';
 import { DISCLOSURE } from '../funnel/copy';
 import { unsubscribeUrl } from '../mail/compliance';
@@ -50,8 +50,8 @@ export function buildReplyRaw(
  * not enrolled (sequence off, address suppressed, no unsubscribe link possible, or the sender is not who it claims).
  *
  * The envelope sender of an email is easy to forge, and the sequence is mail to that address, so only a sender whose
- * own domain authenticated is enrolled, judged on the receiver's own (topmost) Authentication-Results header only
- * (see sender-proof.ts).
+ * own domain authenticated is enrolled, judged on the receiver's own results only, and only when AUTHSERV_ID is
+ * configured (it fails closed: see sender-proof.ts). Everyone still gets the report.
  */
 async function enrollAndDisclose(
   message: ForwardableEmailMessage,
@@ -61,7 +61,11 @@ async function enrollAndDisclose(
   summary: ReturnType<typeof buildSummary>,
 ): Promise<{ text: string; unsubscribeUrl: string } | null> {
   try {
-    if (!provesDomain(await topAuthResults(message.raw), domain, tenant.env.AUTHSERV_ID)) return null;
+    const proof = proveSender(await readAuthHeaders(message.raw), domain, tenant.env.AUTHSERV_ID, tenant.env.AUTHSERV_HEADER);
+    if (!proof.ok) {
+      console.warn(`[free-check] sender not enrolled in the sequence: ${proof.reason}`);
+      return null;
+    }
     const link = await unsubscribeUrl(tenant.env, fromEmail);
     if (!link) return null;
     const outcome = await enrollLead(tenant.env, { email: fromEmail, domain, summary });

@@ -51,12 +51,14 @@ export async function sendNonTransactional(
   opts: { requireLink?: boolean } = {},
 ): Promise<NonTransactionalResult> {
   const to = m.to.trim().toLowerCase();
+  let message: MailMessage;
+  // Everything before the provider call: a failure here means nothing was sent (an internal error, not a transient one).
   try {
     if (await isSuppressed(env, to)) return { ok: false, kind: 'suppressed', error: 'recipient is on the suppression list' };
     const link = await unsubscribeUrl(env, to);
     if (!link && (opts.requireLink ?? hostedEnabled(env))) return { ok: false, kind: 'blocked', error: 'no unsubscribe link: PUBLIC_BASE_URL is not set' };
     const address = postalAddress(env);
-    return await mailer.send({
+    message = {
       ...m,
       to,
       text: m.text + footerText(link, address),
@@ -65,7 +67,13 @@ export async function sendNonTransactional(
         ...m.headers,
         ...(link ? { 'List-Unsubscribe': `<${link}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {}),
       },
-    });
+    };
+  } catch (e) {
+    return { ok: false, kind: 'config', error: `internal error before sending: ${e instanceof Error ? e.message : 'unknown'}` };
+  }
+  // The provider call: an exception here leaves the outcome unknown.
+  try {
+    return await mailer.send(message);
   } catch (e) {
     return { ok: false, kind: 'transient', error: e instanceof Error ? e.message : 'send failed' };
   }

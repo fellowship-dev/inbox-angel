@@ -57,7 +57,9 @@ export async function requestMonitorSubscription(
     return { status: 429, body: { error: 'this email check has used up its confirmation emails' } };
   }
   if ((await limits.hit(`monitor-confirm:${await keyedHash(env, 'email', email)}`, ms, DAY_MS)).count > CONFIRMATIONS_PER_ADDRESS_PER_DAY) {
-    return { status: 429, body: { error: 'too many confirmation emails for this address, try again tomorrow' } };
+    // Same answer as any other request, no email: the person typing their own address must not be told they are blocked.
+    console.warn('[monitor] confirmation not sent: per-address daily cap reached');
+    return accepted;
   }
 
   if (!existing) await tenant.scope.monitor.insert({ ...input.baseline, email, domain: input.domain, session_token: input.sessionToken, confirmed_at: null });

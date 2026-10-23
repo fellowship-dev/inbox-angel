@@ -129,13 +129,14 @@ describe('POST /api/monitor double opt-in', () => {
     expect(w.rows('SELECT * FROM monitor_subscriptions')).toEqual([]);
   });
 
-  it('limits confirmation emails per address per day, so it cannot be used to spam one inbox', async () => {
+  it('limits confirmation emails per address per day (silently: a real user is not told they are blocked), so it cannot spam one inbox', async () => {
     const w = world();
     for (let i = 0; i < 4; i++) w.seedCheck(`tok${i}`, `d${i}.com`);
     const statuses: number[] = [];
     for (let i = 0; i < 4; i++) statuses.push((await w.subscribe('victim@example.com', `tok${i}`)).status);
-    expect(statuses).toEqual([202, 202, 202, 429]);
+    expect(statuses).toEqual([202, 202, 202, 202]); // the fourth looks the same to the person, but nothing is sent
     expect(w.send).toHaveBeenCalledTimes(3);
+    expect(console.warn).toHaveBeenCalledWith('[monitor] confirmation not sent: per-address daily cap reached');
   });
 
   it('one check session cannot be used to mail a list: 3 confirmations in total, then 429', async () => {

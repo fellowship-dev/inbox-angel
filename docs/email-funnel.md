@@ -10,11 +10,18 @@ Copy for the sequence is in **one file**, `src/funnel/copy.ts` (a draft for revi
 3. The daily cron (`0 8 * * *`) sends **one step per due lead**: day 1, 3, 6, 10 and 14 after enrolment (`SEQUENCE_DAYS`).
 4. The sequence stops on unsubscribe, a bounce, an account with the same email (they bought), or when the instance owner records *replied*, *booked* or *converted* (`POST /api/leads/:id/stop`, or the Leads page).
 
-**Eligibility.** A lead is created only when the sender proved control of the domain of their address, judged on the receiver's own (**topmost**) `Authentication-Results` header read from the raw message (`src/email/sender-proof.ts`): a DKIM pass aligned with the address's domain, or a DMARC pass for that domain. A header the sender adds sits below the receiver's, so it is ignored; SPF alone is not accepted (a shared sending service passes it for anyone). Optionally set `AUTHSERV_ID` to also require the header to come from your receiving server. This assumes the receiver prepends its header, as is conventional; confirm it against a real Cloudflare Email Routing message before relying on it. An unproven sender gets the report but is not enrolled. Also required: the address is not suppressed and `PUBLIC_BASE_URL` (HTTPS) is set.
+**Eligibility (fails closed).** A lead is created only when the sender proved control of the domain of their address, from the receiving server's own results, and only when **`AUTHSERV_ID` is set**. Nothing guarantees that Cloudflare prepends a plain `Authentication-Results` header (it may add only `ARC-Authentication-Results`), so until an operator has set it, everyone still gets the report but nobody is enrolled, and the log says `sender not enrolled in the sequence: AUTHSERV_ID is not set` (the Leads page warns too). With it set (`src/email/sender-proof.ts`):
+
+- the **topmost** `Authentication-Results`, read from the raw message (`Headers.get` joins duplicates), must name `AUTHSERV_ID` as its authserv-id; a header the sender adds, or one naming another server, is ignored;
+- otherwise the topmost `ARC-Authentication-Results` with `i=1` and that authserv-id is accepted;
+- the results must show a DKIM pass aligned with the address's domain, or a DMARC pass for it. SPF alone is not accepted;
+- `AUTHSERV_HEADER=ar|arc` restricts trust to one kind. If the receiver adds only one kind, the other can be forged by the sender, so **set it once you know which one Cloudflare adds**.
+
+**Ops step (Max): find the real authserv-id.** Send one email from a domain with working DKIM to a routed address (a `check+<token>@` address, or any Email Routing address that forwards to your own inbox) and open the delivered message's raw source. Find the header that the receiving side added at the very top of the header block: either `Authentication-Results: <authserv-id>; dkim=pass …` or `ARC-Authentication-Results: i=1; <authserv-id>; …`. The text before the first `;` (after `i=1;` for ARC) is the authserv-id. Put it in `AUTHSERV_ID`, and set `AUTHSERV_HEADER` to `ar` or `arc` according to which header you saw. Check that a message you craft with your own extra `Authentication-Results` line still shows Cloudflare's line above it. Until this is done, the sequence enrols nobody.
 
 **Switch.** Hosted: on unless `ONBOARDING_SEQUENCE_ENABLED=0`. Self-host: off unless `ONBOARDING_SEQUENCE_ENABLED=1`.
 
-**Never twice.** A run marks the step as sent (compare-and-set on `step` and the due time) **before** it sends, so overlapping runs, retries and a crash right after the provider took the mail cannot send a step twice. The cost is deliberate: a crash or an ambiguous failure (a timeout) can lose that one email. A definite configuration failure (bad key, rejected header) puts the step back and stops the run, so one fault cannot burn a whole batch; a transient failure stops the run after that one lead. A lead that is behind gets one email per run, about a day apart (23 hours, so a cron tick that fires a few seconds early still finds it due). Leads waiting for `BOOKING_URL` are pushed a day out so they cannot fill the batch.
+**Never twice.** A run marks the step as sent (compare-and-set on `step` and the due time) **before** it sends, so overlapping runs, retries and a crash right after the provider took the mail cannot send a step twice. The cost is deliberate: a crash or an ambiguous failure (a timeout) can lose that one email. Anything that is not provably the recipient's fault (bad key or `from`, unverified domain, quota, an unrecognised error, an internal error) puts the step back and stops the run, so one fault cannot burn a whole batch; only an outcome that may have been delivered (network error, 5xx) keeps the step marked and stops the run after that one lead. A lead that is behind gets one email per run, about a day apart (23 hours, so a cron tick that fires a few seconds early still finds it due). Leads waiting for `BOOKING_URL` are pushed a day out so they cannot fill the batch.
 
 **With no provider** (`RESEND_API_KEY` unset) the sequence queues and sends nothing. The Leads page (and `GET /api/leads` → `delivery.blockers`) says why, or that `PUBLIC_BASE_URL` / `POSTAL_ADDRESS` / `MAIL_FROM` is missing. A missing `BOOKING_URL` holds only the day-14 note; missing `SERVICE_PRICES` sends day 10 without prices.
 
@@ -42,7 +49,7 @@ Cloudflare Email Service facts (checked 2026-10-23), relevant to the transaction
 
 Resend: `POST https://api.resend.com/emails`, `Authorization: Bearer`, fields `from`, `to`, `subject`, `text`, `html`, `headers`, `reply_to`; optional `Idempotency-Key` (kept 24 hours, so it is a second line of defence, not the guarantee). <https://resend.com/docs/api-reference/emails/send-email>, <https://resend.com/docs/dashboard/emails/idempotency-keys>
 
-Not built: hard bounces and complaints after Resend accepts a message need a Resend webhook; today a lead stops on a synchronous recipient refusal.
+**Errors are not bounces.** Resend's API errors (<https://resend.com/docs/api-reference/errors>) name no recipient-specific error: an invalid `to`, a bad `from` and an unverified domain all arrive as `validation_error`, told apart only by message text. So nothing from Resend is classified as a recipient error, and a bad `MAIL_FROM` cannot bounce and suppress leads. Only an explicit refusal (the Cloudflare binding's `E_RECIPIENT_*` codes, used for confirmations and owner mail) bounces a lead. Not built: hard bounces and complaints after Resend accepts a message need a Resend webhook.
 
 ## Compliance (all non-transactional mail)
 
@@ -59,7 +66,7 @@ Transactional mail (password reset, invites, the monitor confirmation, "first re
 
 ## `POST /api/monitor` double opt-in
 
-The request stores an **unconfirmed** subscription (`confirmed_at` null) and emails a link (`/api/monitor/confirm?t=`). Only confirmed subscriptions are checked and alerted. Unconfirmed rows are deleted after 7 days by the daily cron. **Opening the link shows a "Confirm alerts" button; only the POST confirms**, so a mail security scanner that follows links cannot confirm for the owner. Caps on how many confirmation emails a requester can cause: 20 per client IP per hour, 3 per free-check session in total (per week), 3 per target address per day (all keyed hashes). A suppressed or already confirmed address gets the same `202` and no email; if the bare binding refuses an unverified address the request answers `502` instead of promising an email.
+The request stores an **unconfirmed** subscription (`confirmed_at` null) and emails a link (`/api/monitor/confirm?t=`). Only confirmed subscriptions are checked and alerted. Unconfirmed rows are deleted after 7 days by the daily cron. **Opening the link shows a "Confirm alerts" button; only the POST confirms**, so a mail security scanner that follows links cannot confirm for the owner. Caps on how many confirmation emails a requester can cause: 20 per client IP per hour, 3 per free-check session in total (per week), 3 per target address per day (all keyed hashes). Hitting the per-address cap, a suppressed address and an already confirmed address all get the same `202` and no email (the cap is logged), so a real user is never told they are blocked; if the bare binding refuses an unverified address the request answers `502` instead of promising an email.
 
 ## Other changes
 
@@ -75,7 +82,8 @@ The request stores an **unconfirmed** subscription (`confirmed_at` null) and ema
 |---|---|
 | `ONBOARDING_SEQUENCE_ENABLED` | `1` to turn on (self-host); hosted is on unless `0` |
 | `RESEND_API_KEY` | Resend, for the sequence (and the confirmation when there is no binding) |
-| `AUTHSERV_ID` | optional: required authserv-id of the receiver's `Authentication-Results` header for sender proof |
+| `AUTHSERV_ID` | **required for enrolment**: the receiver's authserv-id, see the ops step above |
+| `AUTHSERV_HEADER` | `ar` or `arc`: trust only that header kind |
 | `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`), and where replies go |
 | `PUBLIC_BASE_URL` | public HTTPS origin for unsubscribe and confirmation links (falls back to `BETTER_AUTH_URL`) |
 | `POSTAL_ADDRESS` | footer address |
