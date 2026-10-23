@@ -55,6 +55,18 @@ export interface Env {
   HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. inboxangel.io
   HOSTED_RECORDS_LABEL?: string; // single label every hosted record lives under (default "h")
   HOSTED_RECORDS_TOKEN?: string; // secret: least-privilege DNS:Edit token for that one zone
+  // Email funnel and compliance (docs/email-funnel.md)
+  RESEND_API_KEY?: string;       // secret: Resend API key; the onboarding sequence is sent with Resend (Cloudflare Email Service is transactional-only)
+  MAIL_FROM?: string;            // sender address of funnel mail, e.g. max@inboxangel.io (default noreply@<CANARY_DOMAIN>)
+  MAIL_FROM_NAME?: string;       // display name of funnel mail (default "Inbox Angel")
+  MAIL_REPLY_TO?: string;        // where replies to funnel mail go (a mailbox someone reads)
+  PUBLIC_BASE_URL?: string;      // public origin of this Worker, for unsubscribe and confirmation links (falls back to BETTER_AUTH_URL)
+  AUTHSERV_ID?: string;          // optional: the authserv-id of the receiving server's Authentication-Results header; sender proof for enrolment requires it
+  POSTAL_ADDRESS?: string;       // postal address shown in the footer of non-transactional mail
+  BOOKING_URL?: string;          // booking link in the day-14 note; that step is held until it is set
+  SERVICE_PRICES?: string;       // JSON {"assessment":"$…","enforcement":"$…","bimi":"$…","retainer":"$…/mo"}: the "from" prices in the day-10 email
+  ONBOARDING_SEQUENCE_ENABLED?: string; // "1" turns the onboarding sequence on for self-host; hosted: on unless "0"
+  SITE_ORIGINS?: string;         // comma-separated origins allowed to call the free-check endpoints from a browser (CORS)
   // Bindings
   SEND_EMAIL?: SendEmail;        // CF Email Workers outbound binding
   AUTH_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // auth rate limiting (10/min)

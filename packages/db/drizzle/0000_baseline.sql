@@ -286,6 +286,7 @@ CREATE TABLE `monitor_subscriptions` (
 	`last_checked_at` integer,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
+	`confirmed_at` integer,
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
@@ -447,5 +448,31 @@ CREATE INDEX `idx_verifications_identifier` ON `verifications` (`identifier`);--
 CREATE TABLE `workspaces` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE `leads` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`email` text NOT NULL,
+	`domain` text NOT NULL,
+	`source` text DEFAULT 'free_check' NOT NULL,
+	`check_level` text,
+	`check_summary` text,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`last_activity_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`step` integer DEFAULT 0 NOT NULL,
+	`next_send_at` integer,
+	`status` text DEFAULT 'active' NOT NULL,
+	`unsubscribed_at` integer,
+	`last_sent_at` integer
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `leads_email_unique` ON `leads` (`email`);--> statement-breakpoint
+CREATE INDEX `idx_leads_due` ON `leads` (`status`,`next_send_at`);--> statement-breakpoint
+CREATE INDEX `idx_leads_activity` ON `leads` (`last_activity_at`);--> statement-breakpoint
+CREATE TABLE `suppression` (
+	`email_hash` text PRIMARY KEY NOT NULL,
+	`reason` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL
 );

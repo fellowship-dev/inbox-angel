@@ -75,6 +75,9 @@
 		"crons": ["0 8 * * *", "0 9 * * 1", "0 10 * * *", "0 11 * * *", "0 4 * * *"]
 	},
 
+	// Email funnel (docs/email-funnel.md), all optional: RESEND_API_KEY (secret), AUTHSERV_ID, MAIL_FROM, MAIL_REPLY_TO,
+	// PUBLIC_BASE_URL, POSTAL_ADDRESS, BOOKING_URL, SERVICE_PRICES, SITE_ORIGINS, ONBOARDING_SEQUENCE_ENABLED.
+
 	// Hosted service only (MODE=saas + SAAS_ENABLED=1, see docs/hosted.md): INTAKE_DOMAIN, CANARY_DOMAIN,
 	// HOSTED_RECORDS_ZONE, HOSTED_RECORDS_LABEL, and the secret HOSTED_RECORDS_TOKEN. Self-hosters ignore these.
 

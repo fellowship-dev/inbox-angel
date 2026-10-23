@@ -207,6 +207,20 @@ describe('sendWeeklyDigests', () => {
     consoleSpy.mockRestore();
   });
 
+  it('digests stay on the binding when a Resend key is set (workspace sender domains are not verified at Resend), with unsubscribe headers', async () => {
+    const sendEmail = { send: vi.fn().mockResolvedValue(undefined) };
+    const resendFetch = vi.fn();
+    vi.stubGlobal('fetch', resendFetch);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail, RESEND_API_KEY: 're_x', PUBLIC_BASE_URL: 'https://app.example.io', BETTER_AUTH_SECRET: 's', POSTAL_ADDRESS: '1 Main St' }), NOW_MS);
+    expect(sendEmail.send).toHaveBeenCalledOnce();
+    const arg = sendEmail.send.mock.calls[0][0];
+    expect(arg.from.email).toBe('noreply@reports.inboxangel.io');
+    expect(arg.headers['List-Unsubscribe']).toMatch(/^<https:\/\/app\.example\.io\/api\/unsubscribe\?t=/);
+    expect(arg.text).toContain('1 Main St');
+    expect(resendFetch.mock.calls.filter(c => String(c[0]).includes('resend.com'))).toEqual([]);
+  });
+
   it('logs instead of sending when SEND_EMAIL binding is absent', async () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await sendWeeklyDigests(makeEnv(db), NOW_MS); // no SEND_EMAIL

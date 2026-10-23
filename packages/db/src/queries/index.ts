@@ -29,6 +29,7 @@ export type { MtaStsMode } from './domain-config';
 export { globalQueries } from './global';
 export { lifecycleQueries, sweepLimits, DEFAULT_STATEMENT_BUDGET, type SweepLimits, type SweepResult, type Tombstone } from './global-lifecycle';
 export { exportQueries, EXPORT_COLUMNS, EXPORT_EXCLUDED, EXPORT_SETTING_KEYS } from './export';
+export { funnelQueries, hashEmail, type LeadRow } from './funnel';
 
 /**
  * Every tenant-data query, bound to one workspace. There is deliberately no way

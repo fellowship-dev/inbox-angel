@@ -69,14 +69,14 @@ describe('self-host is unchanged', () => {
     expect(extractReport(gzipSync(strToU8(big))).length).toBe(big.length);
   });
 
-  it('the free check keeps its 8-character token on the reports domain, even with CANARY_DOMAIN set', async () => {
+  it('the free check address is check+<token>@ on the reports domain (expiring, single use), even with CANARY_DOMAIN set', async () => {
     const s = selfHost();
     const res = await call(s.env, 'POST', '/api/check-sessions');
     expect(res.status).toBe(201);
     const body = await res.json() as any;
-    expect(body.token).toMatch(/^[a-z0-9]{8}$/);
-    expect(body.email).toBe(`${body.token}@reports.acme.com`);
-    expect(s.rows('SELECT * FROM canary_tokens')).toEqual([]);
+    expect(body.token).toMatch(/^[a-z2-7]{32}$/);
+    expect(body.email).toBe(`check+${body.token}@reports.acme.com`);
+    expect(s.rows('SELECT * FROM canary_tokens')).toHaveLength(1);
   });
 
   it('MTA-STS policy is served from the implicit workspace by hostname', async () => {

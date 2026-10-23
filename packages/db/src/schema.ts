@@ -260,6 +260,8 @@ export const monitorSubscriptions = sqliteTable(
 		last_checked_at: integer('last_checked_at'),
 		created_at: integer('created_at').notNull().default(now),
 		workspace_id: text('workspace_id').notNull().default(IMPLICIT_WORKSPACE_ID).references(() => workspaces.id, { onDelete: 'cascade' }),
+		/** Double opt-in: null until the address owner clicked the confirmation link. */
+		confirmed_at: integer('confirmed_at'),
 	},
 	(t) => [
 		unique().on(t.workspace_id, t.email, t.domain),
@@ -557,6 +559,39 @@ export const revocationTombstones = sqliteTable(
 	(t) => [index('idx_revocation_tombstones_created').on(t.created_at)],
 );
 
+// ── Email funnel ────────────────────────────────────────────
+
+export const LEAD_STATUSES = ['active', 'completed', 'unsubscribed', 'bounced', 'replied', 'booked', 'converted'] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+
+/** Someone who sent a free check and is in the onboarding sequence (src/funnel). `step` = emails already sent. */
+export const leads = sqliteTable(
+	'leads',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		email: text('email').notNull().unique(),
+		domain: text('domain').notNull(),
+		source: text('source').notNull().default('free_check'),
+		check_level: text('check_level'),
+		check_summary: text('check_summary'),
+		created_at: integer('created_at').notNull().default(now),
+		last_activity_at: integer('last_activity_at').notNull().default(now),
+		step: integer('step').notNull().default(0),
+		next_send_at: integer('next_send_at'),
+		status: text('status').$type<LeadStatus>().notNull().default('active'),
+		unsubscribed_at: integer('unsubscribed_at'),
+		last_sent_at: integer('last_sent_at'),
+	},
+	(t) => [index('idx_leads_due').on(t.status, t.next_send_at), index('idx_leads_activity').on(t.last_activity_at)],
+);
+
+/** Addresses that must not receive non-transactional mail: a SHA-256 of the normalised address, never the address. */
+export const suppression = sqliteTable('suppression', {
+	email_hash: text('email_hash').primaryKey(),
+	reason: text('reason').notNull(),
+	created_at: integer('created_at').notNull().default(now),
+});
+
 // ── Cloudflare connections ──────────────────────────────────
 
 export const CF_AUTH_TYPES = ['oauth', 'token'] as const;
@@ -652,6 +687,8 @@ export const GLOBAL_TABLES = {
 	hosted_zones: 'operator-owned: record counts of the hosted-records zone(s), not tenant data',
 	revocation_tombstones: 'failed Cloudflare revocations of deleted workspaces; the workspace row is gone by design',
 	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any workspace',
+	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
+	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */

@@ -9,6 +9,8 @@
 import type { TenantContext } from '../tenancy/context';
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
 import { buildWeeklyDigestHtml } from '../email/html-templates';
+import { sendNonTransactional } from '../mail/compliance';
+import { ownerMailer } from '../mail/mailer';
 import { version } from '../../package.json';
 
 const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
@@ -120,22 +122,21 @@ async function sendDigest(
   html: string,
   tenant: TenantContext,
 ): Promise<void> {
-  if (!tenant.env.SEND_EMAIL) {
-    console.log(`[digest] SEND_EMAIL binding not configured — would send to ${email}: ${subject}\n${body}`);
+  const mailer = ownerMailer(tenant.env);
+  if (!mailer) {
+    console.log(`[digest] no mail provider configured — would send to ${email}: ${subject}\n${body}`);
     return;
   }
 
-  try {
-    await tenant.env.SEND_EMAIL.send({
-      from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
-      to: [email],
-      subject,
-      text: body,
-      html,
-    });
-  } catch (e) {
-    console.error(`[digest] send failed for ${email}:`, e);
-  }
+  // Digests are non-transactional: suppression check, unsubscribe link and headers, postal footer.
+  const out = await sendNonTransactional(tenant.env, mailer, {
+    from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
+    to: email,
+    subject,
+    text: body,
+    html,
+  });
+  if (!out.ok) console.error(`[digest] digest not sent (${out.kind}): ${out.error}`);
 }
 
 // ── Main ──────────────────────────────────────────────────────

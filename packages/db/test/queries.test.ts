@@ -209,10 +209,11 @@ describe('behaviour carried over from the old queries.ts', () => {
 		await a.domains.insert({ domain: 'on.com', rua_address: 'x' });
 		const off = Number((await a.domains.insert({ domain: 'off.com', rua_address: 'x' })).meta.last_row_id);
 		await a.domains.setAlertsEnabled(off, false);
-		await a.monitor.insert({ email: 'e@x.test', domain: 'on.com' });
-		await a.monitor.insert({ email: 'e2@x.test', domain: 'on.com' });
-		await a.monitor.insert({ email: 'e@x.test', domain: 'off.com' });
-		await a.monitor.insert({ email: 'e@x.test', domain: 'on.com' }); // duplicate: ignored
+		await a.monitor.insert({ email: 'e@x.test', domain: 'on.com', confirmed_at: 1 });
+		await a.monitor.insert({ email: 'e2@x.test', domain: 'on.com', confirmed_at: 1 });
+		await a.monitor.insert({ email: 'e@x.test', domain: 'off.com', confirmed_at: 1 });
+		await a.monitor.insert({ email: 'u@x.test', domain: 'on.com' }); // unconfirmed: never alerted
+		await a.monitor.insert({ email: 'e@x.test', domain: 'on.com', confirmed_at: 1 }); // duplicate: ignored
 		const rows = await a.monitor.active();
 		expect(rows.map((r) => [r.email, r.domain])).toEqual([['e@x.test', 'on.com'], ['e2@x.test', 'on.com']]);
 		await a.monitor.updateBaseline(rows[0].id, { spf_record: 's', dmarc_policy: 'none', dmarc_pct: 100, dmarc_record: 'r' });
