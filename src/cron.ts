@@ -15,6 +15,8 @@ import { logAudit } from './audit/log';
 import { track } from './telemetry';
 import { flattenSpf } from './email/spf-flattener';
 import { lookupSpf } from './email/dns-check';
+import { runRetention } from './lifecycle/retention';
+import { retryRevocations } from './lifecycle/revoke';
 import { discoverMxHosts, generatePolicyId, updateMtaStsTxtRecord } from './email/mta-sts';
 
 const SPF_REFRESH_CONCURRENCY = 5;
@@ -39,6 +41,7 @@ export async function runCronForWorkspaces(
   ctx: ExecutionContext,
   opts: CronOptions = {},
 ): Promise<void> {
+  await runDataLifecycle(event, env);
   const load = opts.load ?? loadTenant;
   const workspaces = opts.workspaces ?? await listCronWorkspaces(env);
   for (const workspaceId of workspaces) {
@@ -49,6 +52,13 @@ export async function runCronForWorkspaces(
       console.error(`[cron ${event.cron}] workspace ${workspaceId} failed:`, e instanceof Error ? `${e.name}: ${e.message}` : 'unknown error');
     }
   }
+}
+
+/** Daily, once for the whole database (not per workspace): retention sweeps, then retry failed Cloudflare revocations. */
+export async function runDataLifecycle(event: ScheduledController, env: BoundEnv): Promise<void> {
+  if (event.cron !== '0 8 * * *') return;
+  try { await runRetention(env); } catch (e) { console.error('[retention] failed:', e); }
+  try { await retryRevocations(env); } catch (e) { console.error('[lifecycle] revocation retry failed:', e); }
 }
 
 /** One cron tick for one workspace. */

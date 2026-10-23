@@ -14,6 +14,10 @@ import type { TenantContext } from '../tenancy/context';
 import { extractAttachmentBytes, extractTextBody, readStream } from './mime-extract';
 import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { extractReport, ReportTooLargeError } from '../dmarc/extract-report';
+import { rawXmlRetentionDays } from '../lifecycle/config';
+
+/** The raw report JSON to keep, or null when RAW_XML_RETENTION_DAYS=0 (raw payloads are not stored). */
+const rawJson = (tenant: TenantContext, raw: string): string | null => (rawXmlRetentionDays(tenant.env) > 0 ? raw.slice(0, 65536) : null);
 
 // RFC 8460 § 4.3 — subset of fields we care about
 interface TlsRptFailureDetail {
@@ -94,7 +98,7 @@ async function storeHostedTlsRpt(
       domain_id: domain.id, org_name: orgName, date_begin: dateBegin, date_end: dateEnd,
       total_success: success, total_failure: failure,
       failure_details: details.length ? JSON.stringify(details) : null,
-      raw_json: raw.slice(0, 65536),
+      raw_json: rawJson(tenant, raw),
     });
   } catch (e) {
     console.error(`[tls-rpt] insert failed for ${domain.domain}:`, e);
@@ -182,7 +186,7 @@ export async function handleTlsRptReport(
         total_success: totalSuccess,
         total_failure: totalFailure,
         failure_details: failureDetails,
-        raw_json: stored === 0 ? raw.slice(0, 65536) : null, // store raw on first policy only
+        raw_json: stored === 0 ? rawJson(tenant, raw) : null, // store raw on first policy only
       });
       stored++;
     } catch (e) {

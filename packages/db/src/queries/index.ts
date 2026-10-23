@@ -27,6 +27,8 @@ export { intakeLookups, TOKEN_ROTATION_GRACE_SECONDS, type IntakeTarget, type Ho
 export * from './heartbeat';
 export type { MtaStsMode } from './domain-config';
 export { globalQueries } from './global';
+export { lifecycleQueries, DEFAULT_SWEEP, type SweepLimits, type SweepResult, type Tombstone } from './global-lifecycle';
+export { exportQueries } from './export';
 
 /**
  * Every tenant-data query, bound to one workspace. There is deliberately no way

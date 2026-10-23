@@ -70,6 +70,19 @@ export function workspaceLifecycle(dbLike: DbLike) {
 			return ((res as any).meta?.changes ?? (res as any).changes ?? 0) > 0;
 		},
 
+		/**
+		 * Make `toId` an owner and `fromId` an admin, in one batch. Only when `fromId` is an owner now and `toId` a member,
+		 * so a stale request changes nothing. Returns whether it applied.
+		 */
+		async transferOwnership(workspaceId: string, fromId: string, toId: string): Promise<boolean> {
+			const res = await db.run(sql`UPDATE memberships SET role = 'owner'
+				WHERE workspace_id = ${workspaceId} AND user_id = ${toId}
+				AND EXISTS (SELECT 1 FROM memberships o WHERE o.workspace_id = ${workspaceId} AND o.user_id = ${fromId} AND o.role = 'owner')`);
+			if (((res as any).meta?.changes ?? (res as any).changes ?? 0) === 0) return false;
+			await db.run(sql`UPDATE memberships SET role = 'admin' WHERE workspace_id = ${workspaceId} AND user_id = ${fromId} AND role = 'owner'`);
+			return true;
+		},
+
 		/** Delete a workspace and everything it owns (domains cascade to their reports and per-domain config). */
 		purge: (workspaceId: string) =>
 			db.batch([

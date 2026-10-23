@@ -142,6 +142,8 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_domain').on(t.domain_id),
 		index('idx_agg_reports_date').on(t.date_begin),
 		index('idx_agg_reports_workspace').on(t.workspace_id, t.date_begin),
+		index('idx_agg_reports_date_end').on(t.date_end),
+		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
 	],
 );
 
@@ -193,6 +195,8 @@ export const tlsReports = sqliteTable(
 		unique().on(t.domain_id, t.org_name, t.date_begin),
 		index('idx_tls_reports_domain').on(t.domain_id, t.date_begin),
 		index('idx_tls_reports_workspace').on(t.workspace_id),
+		index('idx_tls_reports_date_end').on(t.date_end),
+		index('idx_tls_reports_raw_json').on(t.created_at).where(sql`${t.raw_json} IS NOT NULL`),
 	],
 );
 
@@ -291,7 +295,7 @@ export const invites = sqliteTable(
 		used_at: integer('used_at'),
 		workspace_id: workspaceId(),
 	},
-	(t) => [index('idx_invites_workspace').on(t.workspace_id)],
+	(t) => [index('idx_invites_workspace').on(t.workspace_id), index('idx_invites_expires').on(t.expires_at)],
 );
 
 export const auditLog = sqliteTable(
@@ -342,7 +346,7 @@ export const checkResults = sqliteTable(
 		session_token: text('session_token'),
 		spf_lookup_count: integer('spf_lookup_count'),
 	},
-	(t) => [index('idx_check_results_domain').on(t.from_domain), index('idx_check_results_token').on(t.session_token)],
+	(t) => [index('idx_check_results_domain').on(t.from_domain), index('idx_check_results_token').on(t.session_token), index('idx_check_results_created').on(t.created_at)],
 );
 
 /** Public IP metadata cache shared by everyone. */
@@ -354,7 +358,7 @@ export const ipInfo = sqliteTable('ip_info', {
 	org: text('org'),
 	asn: text('asn'),
 	fetched_at: integer('fetched_at').notNull().default(now),
-});
+}, (t) => [index('idx_ip_info_fetched').on(t.fetched_at)]);
 
 /** Keyed by user, which is itself global. */
 export const passwordResetTokens = sqliteTable(
@@ -392,7 +396,7 @@ export const sessions = sqliteTable(
 		userAgent: text('user_agent'),
 		...authTimestamps(),
 	},
-	(t) => [index('idx_sessions_user').on(t.userId)],
+	(t) => [index('idx_sessions_user').on(t.userId), index('idx_sessions_expires').on(t.expiresAt)],
 );
 
 /** One row per login method: the `credential` password, or an OAuth provider link. (Not the tenant `workspaces` table.) */
@@ -531,6 +535,26 @@ export const canaryTokens = sqliteTable(
 	(t) => [index('idx_canary_tokens_expires').on(t.expires_at)],
 );
 
+/**
+ * A remote Cloudflare revoke that failed while its workspace was deleted. Global (the workspace is gone);
+ * the cron retries until the grant is revoked or it gives up. See src/lifecycle/revoke.ts.
+ */
+export const revocationTombstones = sqliteTable(
+	'revocation_tombstones',
+	{
+		id: text('id').primaryKey(),
+		deleted_workspace_id: text('deleted_workspace_id').notNull(),
+		connection_id: text('connection_id').notNull(),
+		cf_account_id: text('cf_account_id'),
+		token_envelope: text('token_envelope').notNull(),
+		attempts: integer('attempts').notNull().default(0),
+		last_error: text('last_error'),
+		last_attempt_at: integer('last_attempt_at'),
+		created_at: integer('created_at').notNull().default(now),
+	},
+	(t) => [index('idx_revocation_tombstones_created').on(t.created_at)],
+);
+
 // ── Cloudflare connections ──────────────────────────────────
 
 export const CF_AUTH_TYPES = ['oauth', 'token'] as const;
@@ -624,6 +648,7 @@ export const GLOBAL_TABLES = {
 	verifications: 'one-time auth tokens (password reset), keyed by identifier',
 	auth_rate_limits: 'auth endpoint rate-limit counters, keyed by IP and path',
 	hosted_zones: 'operator-owned: record counts of the hosted-records zone(s), not tenant data',
+	revocation_tombstones: 'failed Cloudflare revocations of deleted workspaces; the workspace row is gone by design',
 	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any workspace',
 } as const;
 

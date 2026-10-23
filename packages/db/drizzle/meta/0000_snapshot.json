@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dea104f9-5e10-4640-968f-969e37955aef",
+  "id": "2a6e2655-d6e7-4e36-bc50-6a82035e50b2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aggregate_reports": {
@@ -119,6 +119,21 @@
             "date_begin"
           ],
           "isUnique": false
+        },
+        "idx_agg_reports_date_end": {
+          "name": "idx_agg_reports_date_end",
+          "columns": [
+            "date_end"
+          ],
+          "isUnique": false
+        },
+        "idx_agg_reports_raw_xml": {
+          "name": "idx_agg_reports_raw_xml",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false,
+          "where": "\"aggregate_reports\".\"raw_xml\" IS NOT NULL"
         },
         "aggregate_reports_domain_id_report_id_unique": {
           "name": "aggregate_reports_domain_id_report_id_unique",
@@ -769,6 +784,13 @@
           "name": "idx_check_results_token",
           "columns": [
             "session_token"
+          ],
+          "isUnique": false
+        },
+        "idx_check_results_created": {
+          "name": "idx_check_results_created",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         }
@@ -1707,6 +1729,13 @@
             "workspace_id"
           ],
           "isUnique": false
+        },
+        "idx_invites_expires": {
+          "name": "idx_invites_expires",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -1768,7 +1797,15 @@
           "default": "(unixepoch())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_ip_info_fetched": {
+          "name": "idx_ip_info_fetched",
+          "columns": [
+            "fetched_at"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -2335,6 +2372,89 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "revocation_tombstones": {
+      "name": "revocation_tombstones",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_workspace_id": {
+          "name": "deleted_workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cf_account_id": {
+          "name": "cf_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "token_envelope": {
+          "name": "token_envelope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_revocation_tombstones_created": {
+          "name": "idx_revocation_tombstones_created",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "sessions": {
       "name": "sessions",
       "columns": {
@@ -2409,6 +2529,13 @@
           "name": "idx_sessions_user",
           "columns": [
             "user_id"
+          ],
+          "isUnique": false
+        },
+        "idx_sessions_expires": {
+          "name": "idx_sessions_expires",
+          "columns": [
+            "expires_at"
           ],
           "isUnique": false
         }
@@ -2723,6 +2850,21 @@
             "workspace_id"
           ],
           "isUnique": false
+        },
+        "idx_tls_reports_date_end": {
+          "name": "idx_tls_reports_date_end",
+          "columns": [
+            "date_end"
+          ],
+          "isUnique": false
+        },
+        "idx_tls_reports_raw_json": {
+          "name": "idx_tls_reports_raw_json",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false,
+          "where": "\"tls_reports\".\"raw_json\" IS NOT NULL"
         },
         "tls_reports_domain_id_org_name_date_begin_unique": {
           "name": "tls_reports_domain_id_org_name_date_begin_unique",
