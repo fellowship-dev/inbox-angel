@@ -75,7 +75,7 @@ re-reads a record before changing or deleting it to be sure it sits at the expec
 
 ### 4. The records zone
 
-* `inboxangel.io` on **Cloudflare Pro** (3,500 records; see [limits](#limits-and-quotas)). Free is 1,000 and would fill after ~200 domains.
+* `inboxangel.io` on **Cloudflare Pro** (3,500 records; see [limits](#limits-and-quotas)). A free zone created since September 2024 holds only **200** records, which is about 40 domains with MTA-STS (5 records each) or 66 without (3 each) before the zone's existing records are counted, so it is not an option. (Free zones created earlier may still have the old 1,000-record limit; do not rely on it.)
 * One-time authorisation record so receivers will send reports for *any* customer domain to `rua.inboxangel.io` (RFC 7489 §7.1, external destination verification).
   A wildcard covers every customer:
 
@@ -185,12 +185,16 @@ Enabling is all-or-nothing: if Cloudflare fails part-way, the records already wr
 
 `POST /api/check-sessions` (public) returns `{ token, email, expires_at }` in `saas` (`email` is the `check+…@canary…` address).
 
+## Data retention
+
+The hosted service stores no raw report XML (`RAW_XML_RETENTION_DAYS=0` is the hosted default) and deletes aggregate data after 13 months. The full table, the environment variables and what a deleted workspace or account takes with it are in [data-retention.md](data-retention.md).
+
 ## Limits and quotas
 
 | | |
 |-|-|
 | Records per hosted domain | 3 (DMARC, SPF, TLS-RPT), 5 with MTA-STS |
-| Zone limit | 3,500 on Pro (counts **every** record in the zone); warning logged from 3,200; enabling is refused (`507`) if the records would not fit |
+| Zone limit | 3,500 on Pro, about 700 domains at 5 records each or 1,160 at 3 (counts **every** record in the zone, including the ones that are not hosted); warning logged from 3,200; enabling is refused (`507`) if the records would not fit |
 | Report size | 25 MiB raw and 25 MiB decompressed |
 | Token rotation grace | 72 h |
 | Canary | 1 hour, one email; 5 per authenticated sender domain, 20 unauthenticated, 500 overall, per hour |
