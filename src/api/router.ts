@@ -53,7 +53,10 @@
 //   POST   /api/workspaces                    — create a workspace (caller becomes owner)
 //   PATCH  /api/workspaces/:id                — rename (owner)
 //   POST   /api/workspaces/:id/leave          — leave (never the last owner / only workspace)
-//   DELETE /api/workspaces/:id                — delete (owner; ?confirm=<name> when it has domains)
+//   DELETE /api/workspaces/:id                — delete (owner; ?confirm=<name> when it has domains); revokes Cloudflare OAuth grants
+//   GET    /api/workspaces/:id/export         — JSON export of everything the workspace holds (owner)
+//   POST   /api/workspaces/:id/transfer-ownership — hand ownership to another member (owner)
+//   DELETE /api/account                       — delete your own account ({confirm: <your email>})
 //   GET    /api/team                          — list users (admin only)
 //   POST   /api/team/invite                   — send invite link (admin only)
 //   DELETE /api/team/:id                      — remove team member (admin only)
@@ -72,6 +75,7 @@ import { handleAnalyticsRoutes } from '../analytics/routes';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
+import { handleAccountRoutes, isAccountRoute } from '../account/routes';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { openHostedZone } from '../hosted/records';
@@ -590,7 +594,7 @@ async function _handleApi(
   let workspace: Awaited<ReturnType<WorkspaceResolver>>;
   try {
     // /api/workspaces* act on the user, so a stale X-Workspace-Id (a workspace they have left) must not lock them out of listing their own.
-    workspace = await resolver(isWorkspaceRoute(path) ? withoutWorkspaceHeader(request) : request, env);
+    workspace = await resolver(isWorkspaceRoute(path) || isAccountRoute(path) ? withoutWorkspaceHeader(request) : request, env);
   } catch (e) {
     if (e instanceof AuthError) return err(e.message, e.status);
     return err('authentication error', 401);
@@ -601,14 +605,16 @@ async function _handleApi(
   const actorRow = workspace.userId ? await globals(env.DB).users.byId(workspace.userId) : null;
   const userBySession = actorRow ? { id: actorRow.id, email: actorRow.email, name: actorRow.name } : null;
   const isAdmin = workspace.role === 'owner' || workspace.role === 'admin';
-  if (isWorkspaceRoute(path)) {
-    const res = await handleWorkspaceRoutes(request, ctx, { kind: (workspace as AuthedWorkspace).kind, user: userBySession }, {
+  if (isWorkspaceRoute(path) || isAccountRoute(path)) {
+    const deps = {
       db: env.DB as D1Database,
       mode: getMode(env),
       preflight: cloudflarePreflight,
-      tenantFor: (workspaceId) => loadTenant(env, { workspaceId }),
+      tenantFor: (workspaceId: string) => loadTenant(env, { workspaceId }),
       deleteDomain,
-    });
+    };
+    const caller = { kind: (workspace as AuthedWorkspace).kind, user: userBySession };
+    const res = isAccountRoute(path) ? await handleAccountRoutes(request, ctx, caller, deps) : await handleWorkspaceRoutes(request, ctx, caller, deps);
     if (res) return res;
   }
   // Members are read-only. POST /api/spf-lookup-count only computes; managing your own API keys is self-service.

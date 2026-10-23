@@ -8,6 +8,8 @@ import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle, type Membersh
 import type { AuthContext } from '../api/auth';
 import { logAudit } from '../audit/log';
 import type { TenantContext } from '../tenancy/context';
+import { revokeWorkspaceConnections, type RevokeSummary } from '../lifecycle/revoke';
+import { streamWorkspaceExport } from '../lifecycle/export';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
@@ -29,6 +31,45 @@ export interface WorkspaceDeps {
   /** Before anything is deleted: can Cloudflare (and the hosted-records zone) be reached for every domain? A message when not. */
   preflight: (tenant: TenantContext, domains: Array<{ id: number; domain: string }>) => Promise<string | null>;
   deleteDomain: (tenant: TenantContext, domainId: string, actor: { id?: string; email?: string }, ctx?: ExecutionContext) => Promise<Response>;
+}
+
+type Actor = { id?: string; email?: string };
+
+/** Can Cloudflare be reached for every domain? A message (to show the user) when not. Nothing is deleted yet. */
+export async function preflightWorkspace(deps: WorkspaceDeps, tenant: TenantContext): Promise<{ domains: Array<{ id: number; domain: string }>; blocked: string | null }> {
+  const domains = (await tenant.scope.domains.list()).map(d => ({ id: d.id, domain: d.domain }));
+  return { domains, blocked: await deps.preflight(tenant, domains) };
+}
+
+/**
+ * Delete a workspace and everything in it: its domains one at a time through the normal delete (DNS and hosted
+ * records first; each is final), then the Cloudflare access (OAuth grants are revoked remotely; a failed revoke is
+ * tombstoned and retried by the cron, never blocking the delete), then the data. People who belonged only to this
+ * workspace are deleted with it. The caller has checked who may do this, and run preflightWorkspace.
+ */
+export async function eraseWorkspace(
+  deps: WorkspaceDeps, ctx: ExecutionContext, tenant: TenantContext, domains: Array<{ id: number; domain: string }>, actor: Actor,
+): Promise<{ ok: true; cloudflare: RevokeSummary } | { ok: false; response: Response }> {
+  let deleted = 0;
+  for (const d of domains) {
+    const res = await deps.deleteDomain(tenant, String(d.id), actor, ctx);
+    if (!res.ok) {
+      return {
+        ok: false,
+        response: err(
+          `could not delete domain ${d.domain}. ${deleted} of ${domains.length} domain${domains.length === 1 ? ' was' : 's were'} already deleted (with their DNS records) and cannot be restored; the workspace and its remaining data are still there. Try again once it is fixed.`,
+          502, 'domain_cleanup_failed',
+        ),
+      };
+    }
+    deleted++;
+  }
+  const cloudflare = await revokeWorkspaceConnections(tenant);
+  const members = (await tenant.scope.team.list()).map((u) => u.id);
+  await workspaceLifecycle(deps.db).purge(tenant.workspaceId);
+  // People who belonged only to this workspace have nowhere to sign in to any more.
+  for (const uid of members) await globalQueries(deps.db).users.deleteIfOrphan(uid);
+  return { ok: true, cloudflare };
 }
 
 async function readName(request: Request): Promise<string | Response> {
@@ -76,7 +117,7 @@ export async function handleWorkspaceRoutes(
     return json({ id, name, role: 'owner', member_count: 1 }, 201);
   }
 
-  const m = path.match(/^\/api\/workspaces\/([^/]+)(\/leave)?$/);
+  const m = path.match(/^\/api\/workspaces\/([^/]+)(?:\/(leave|export|transfer-ownership))?$/);
   if (!m) return err('not found', 404);
   const id = decodeURIComponent(m[1]);
   const role: MembershipRole | null = await lifecycle.roleOf(user.id, id);
@@ -94,7 +135,7 @@ export async function handleWorkspaceRoutes(
   }
 
   // POST /api/workspaces/:id/leave — remove your own membership. Never your last workspace, never the last owner.
-  if (m[2] && method === 'POST') {
+  if (m[2] === 'leave' && method === 'POST') {
     if ((await lifecycle.listForUser(user.id)).length <= 1) return err('you cannot leave your only workspace — create another first, or delete this one', 409, 'only_workspace');
     if (!(await lifecycle.leave(user.id, id))) return err('you are the only owner — make someone else an owner or delete the workspace', 409, 'last_owner');
     audit(id, { action: 'workspace.left', resource_type: 'user', resource_id: user.id, resource_name: user.email, before_value: { role } });
@@ -108,29 +149,39 @@ export async function handleWorkspaceRoutes(
     if ((await lifecycle.listForUser(user.id)).length <= 1) return err('you cannot delete your only workspace — create another first', 409, 'only_workspace');
 
     const tenant = await deps.tenantFor(id);
-    const domains = await tenant.scope.domains.list();
+    const domains = (await tenant.scope.domains.list()).map(d => ({ id: d.id, domain: d.domain }));
     if (domains.length > 0 && url.searchParams.get('confirm') !== workspace.name) {
       return err(`this workspace has ${domains.length} domain${domains.length === 1 ? '' : 's'}; repeat the request with confirm=<workspace name> to delete it and all of its data`, 409, 'confirm_required');
     }
-    // Domains are deleted one at a time through the normal delete (DNS records and hosted records first), and each
-    // delete is final. So find out first whether Cloudflare can be reached for all of them; refuse before deleting any if not.
-    const blocked = await deps.preflight(tenant, domains.map(d => ({ id: d.id, domain: d.domain })));
+    // Domains are deleted one at a time, and each delete is final. So find out first whether Cloudflare can be reached
+    // for all of them; refuse before deleting any if not.
+    const blocked = await deps.preflight(tenant, domains);
     if (blocked) return err(`Cloudflare cannot be reached for ${blocked}; nothing was deleted. Fix that (or reconnect Cloudflare) and try again.`, 502, 'cloudflare_preflight_failed');
-    let deleted = 0;
-    for (const d of domains) {
-      const res = await deps.deleteDomain(tenant, String(d.id), { id: user.id, email: user.email }, ctx);
-      if (!res.ok) {
-        return err(
-          `could not delete domain ${d.domain}. ${deleted} of ${domains.length} domain${domains.length === 1 ? ' was' : 's were'} already deleted (with their DNS records) and cannot be restored; the workspace and its remaining data are still there. Try again once it is fixed.`,
-          502, 'domain_cleanup_failed',
-        );
-      }
-      deleted++;
-    }
-    const members = (await tenant.scope.team.list()).map((u) => u.id);
-    await lifecycle.purge(id);
-    // People who belonged only to this workspace have nowhere to sign in to any more.
-    for (const uid of members) await globalQueries(deps.db).users.deleteIfOrphan(uid);
+    const erased = await eraseWorkspace(deps, ctx, tenant, domains, { id: user.id, email: user.email });
+    if (!erased.ok) return erased.response;
+    // pasted_tokens: API tokens cannot be revoked from here; the owner revokes them in the Cloudflare dashboard.
+    return json({ ok: true, cloudflare: erased.cloudflare });
+  }
+
+  // GET /api/workspaces/:id/export — everything the workspace holds, as JSON (owner only; subject-access requests).
+  if (m[2] === 'export' && method === 'GET') {
+    if (role !== 'owner') return err('only an owner can export a workspace', 403);
+    audit(id, { action: 'workspace.exported', resource_type: 'workspace', resource_id: id, resource_name: workspace.name });
+    return streamWorkspaceExport(deps.db, id, user.email);
+  }
+
+  // POST /api/workspaces/:id/transfer-ownership { user_id } — hand ownership to another member; the caller becomes an admin.
+  if (m[2] === 'transfer-ownership' && method === 'POST') {
+    if (role !== 'owner') return err('only an owner can transfer ownership', 403);
+    let body: { user_id?: unknown };
+    try { body = await request.json(); } catch { return err('Invalid JSON body', 400); }
+    const to = typeof body.user_id === 'string' ? body.user_id : '';
+    if (!to || to === user.id) return err('user_id must be another member of this workspace', 400);
+    const target = await (await deps.tenantFor(id)).scope.team.getMember(to);
+    if (!target) return err('that person is not a member of this workspace', 404);
+    if (!(await lifecycle.transferOwnership(id, user.id, to))) return err('could not transfer ownership; reload and try again', 409);
+    await globalQueries(deps.db).users.setLegacyRole(to, 'admin');
+    audit(id, { action: 'workspace.ownership_transferred', resource_type: 'user', resource_id: to, resource_name: target.email, before_value: { owner: user.email }, after_value: { owner: target.email } });
     return json({ ok: true });
   }
 

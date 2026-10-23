@@ -178,7 +178,7 @@ describe('delete', () => {
     const solo = grant(db, 'a@example.com', 'Solo');
     expect((await call(env, 'DELETE', `/api/workspaces/${solo}`, { key: admin })).status).toBe(200); // admin still has ws_default
     const only = await json(await call(env, 'DELETE', `/api/workspaces/${lexgo}`, { key: owner }));
-    expect(only).toEqual({ ok: true }); // owner has ws_default too
+    expect(only).toMatchObject({ ok: true }); // owner has ws_default too
   });
 
   it('an empty workspace goes at once; one with domains needs the name repeated, then takes its data with it', async () => {
