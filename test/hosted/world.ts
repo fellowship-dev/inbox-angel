@@ -13,6 +13,8 @@ export const HOSTED_ENV = {
   HOSTED_RECORDS_ZONE: 'inboxangel.io',
   HOSTED_RECORDS_LABEL: 'h',
   HOSTED_RECORDS_TOKEN: 'hosted-token',
+  AUTHSERV_ID: 'mx.cloudflare.net',
+  AUTHSERV_HEADER: 'ar',
 } as const;
 
 export const NOW = 1_800_000_000;

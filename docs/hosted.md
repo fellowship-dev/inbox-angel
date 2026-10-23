@@ -41,8 +41,10 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 | `INTAKE_MAX_REPORTS_PER_DAY` | `50` | optional: reports accepted per intake token **per authenticated reporter domain** per UTC day (over-cap mail is rejected, nothing ingested). A message is attributed to a reporter by an aligned-looking `dkim`/`spf`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
 | `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | optional: raw message bytes per token per authenticated reporter domain per UTC day (50 MiB) |
 | `INTAKE_MAX_REPORTERS_PER_DAY` | `20` | optional: distinct authenticated reporter domains accepted per token per UTC day |
-| `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `10` | optional: messages without an authentication pass, per token per UTC day, in one shared bucket that never uses authenticated allowance (so junk sent to a public token cannot block Google/Microsoft reports) |
-| `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `10485760` | optional: raw bytes of that unauthenticated bucket (10 MiB) |
+| `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `200` | optional: messages the receiver did not prove, per claimed sender domain (SMTP envelope sender) per token per UTC day. Unproven mail never uses a proven reporter's allowance |
+| `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `1073741824` | optional: raw bytes of one such bucket (1 GiB) |
+| `INTAKE_MAX_UNAUTH_SENDERS_PER_DAY` | `50` | optional: claimed sender domains with their own bucket per token per day; the rest share one overflow bucket (never refused outright) |
+| `AUTHSERV_ID`, `AUTHSERV_HEADER` | unset | the receiver's authserv-id and header kind (`ar`/`arc`), see docs/email-funnel.md. **Until both are set nothing is proven**: reports are still accepted, flagged `none` and charged to the unproven buckets above. The defaults are deliberately generous (genuine reporters send 1–2 reports a day) so a spoofed envelope sender needs ~200 messages a day to starve one reporter; setting the two variables removes that weakness |
 | `INTAKE_MAX_RECORDS_PER_REPORT` | `20000` | optional: records in one aggregate report; checked before any per-record IP lookup |
 | `INTAKE_MAX_NEW_IPS_PER_REPORT` | `50` | optional: uncached source IPs enriched (DNS/geo lookups) per report; further records are stored without enrichment |
 | `HOSTED_MAX_DOMAINS_PER_WORKSPACE` | `10` | optional: domains per workspace that may use hosted records (enabling more answers 429) |

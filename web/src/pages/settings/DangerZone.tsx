@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 import { Section } from '../../components/states';
-import { api, ApiError, errorMessage, tokenStore } from '../../lib/api';
+import { api, ApiError, errorMessage } from '../../lib/api';
 import { downloadFile } from '../../lib/download';
 import { useSession } from '../../lib/session';
 import { Field } from '../auth/AuthLayout';
@@ -71,7 +71,6 @@ function DeleteAccount({ email }: { email: string }) {
 		mutationFn: () => api('/api/account', { method: 'DELETE', body: { confirm: typed } }),
 		onSuccess: () => {
 			toast({ variant: 'success', title: 'Your account was deleted' });
-			tokenStore.clear();
 			window.location.hash = '#/';
 			window.location.reload();
 		},

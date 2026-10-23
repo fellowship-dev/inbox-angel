@@ -14,6 +14,7 @@ import { MAX_REPORT_BYTES } from '../hosted/config';
 import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
 import { reporterAuth } from '../dmarc/reporter-auth';
+import { readAuthHeaders, type AuthHeaders } from './sender-proof';
 
 export interface ReportOptions {
   /** Cap on the decompressed report (default MAX_REPORT_BYTES, which also bounds zip/gzip bombs in self-host). */
@@ -28,6 +29,8 @@ export interface ReportOptions {
    * workspace has it as a verified domain. Anything else is rejected.
    */
   token?: TokenDomain;
+  /** The topmost results headers, when the caller has already read them (hosted intake does, to pick the allowance). */
+  authHeaders?: AuthHeaders;
 }
 
 export async function handleDmarcReport(
@@ -35,10 +38,17 @@ export async function handleDmarcReport(
   tenant: TenantContext,
   opts: ReportOptions = {},
 ): Promise<{ failure_count: number }> {
-  // 1. Extract attachment bytes from raw MIME stream
+  // 1. Extract attachment bytes from raw MIME stream (the headers are read from a second branch of it)
   let bytes: Uint8Array;
+  let authHeaders = opts.authHeaders;
   try {
-    bytes = await extractAttachmentBytes(message.raw);
+    let raw = message.raw;
+    if (!authHeaders) {
+      const [forHeaders, rest] = message.raw.tee();
+      raw = rest;
+      authHeaders = await readAuthHeaders(forHeaders);
+    }
+    bytes = await extractAttachmentBytes(raw);
   } catch (err) {
     const reason = err instanceof MimeExtractError
       ? `Could not extract attachment: ${err.message}`
@@ -99,7 +109,7 @@ export async function handleDmarcReport(
 
   // 4. Store in D1 (dedup handled by INSERT OR IGNORE inside storeReport)
   try {
-    const result = await storeReport(tenant, domain.id, report, rawXml, true, reporterAuth(message.headers, report.report_metadata));
+    const result = await storeReport(tenant, domain.id, report, rawXml, true, reporterAuth(authHeaders, report.report_metadata, tenant.env));
     if (result.stored) {
       console.log(
         `dmarc-report: stored report ${report.report_metadata.report_id} ` +

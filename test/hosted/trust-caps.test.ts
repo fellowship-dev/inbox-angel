@@ -28,7 +28,7 @@ const RUA = 'rua.inboxangel.io';
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-const GOOGLE = { headers: { 'authentication-results': 'mx.example; dkim=pass header.d=google.com header.s=s1' } };
+const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
 const send = async (w: Awaited<ReturnType<typeof twoWorkspaces>>, xml: string, o: Parameters<typeof fakeMessage>[2] = {}) => {
   const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(xml), o);
   await handleHostedEmail(m, w.env);
@@ -117,48 +117,105 @@ describe('per-token caps', () => {
   });
 });
 
-describe('unauthenticated junk cannot exhaust genuine reports', () => {
-  const MS = { headers: { 'authentication-results': 'mx.example; spf=pass smtp.mailfrom=dmarcreport@microsoft.com' } };
+describe('the intake allowance: junk cannot exhaust genuine reports', () => {
+  const MS = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=microsoft.com header.s=s1' } };
   const GRPT = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, o: Parameters<typeof fakeMessage>[2] = GOOGLE) => send(w, dmarcXml('a-corp.com', id), o);
+  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter');
 
-  it('junk fills the shared unauthenticated bucket (reports), then a google.com report is still stored', async () => {
+  it('junk fills its own bucket (reports), then a proven google.com report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' });
-    for (let i = 0; i < 3; i++) expect((await send(w, dmarcXml('a-corp.com', 'junk' + i))).setReject).not.toHaveBeenCalled();
-    const over = await send(w, dmarcXml('a-corp.com', 'junk-over'));
+    for (let i = 0; i < 3; i++) expect((await send(w, dmarcXml('a-corp.com', 'junk' + i), { from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
+    const over = await send(w, dmarcXml('a-corp.com', 'junk-over'), { from: 'x@spam.example' });
     expect(over.setReject).toHaveBeenCalledOnce();
     expect(over.setReject.mock.calls[0][0]).toMatch(/Daily intake limit/);
-    // forged auth for a different domain than the report claims still only gets a bucket of its own domain, never the '' bucket
     const g = await GRPT(w, 'genuine');
     expect(g.setReject).not.toHaveBeenCalled();
     expect(w.rows("SELECT report_id, reporter_auth, reporter_auth_domain FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ report_id: 'genuine', reporter_auth: 'pass', reporter_auth_domain: 'google.com' }]);
-    expect(w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter')).toEqual([{ reporter: '', reports: 3 }, { reporter: 'google.com', reports: 1 }]);
+    expect(usage(w)).toEqual([{ reporter: 'google.com', reports: 1 }, { reporter: '~spam.example', reports: 3 }]);
   });
 
-  it('junk fills the shared bucket by bytes, then a google.com report is still stored', async () => {
+  it('junk fills its bucket by bytes, then a proven google.com report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_BYTES_PER_DAY: '1000' });
-    expect((await send(w, dmarcXml('a-corp.com', 'j1'), { rawSize: 900 })).setReject).not.toHaveBeenCalled();
-    expect((await send(w, dmarcXml('a-corp.com', 'j2'), { rawSize: 200 })).setReject).toHaveBeenCalledOnce();
+    expect((await send(w, dmarcXml('a-corp.com', 'j1'), { rawSize: 900, from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('a-corp.com', 'j2'), { rawSize: 200, from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
     expect((await GRPT(w, 'genuine', { ...GOOGLE, rawSize: 5_000_000 })).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['j1', 'genuine']);
   });
 
-  it('a reporter at its own cap does not block another authenticated reporter', async () => {
+  it('a reporter at its own cap does not block another proven reporter', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTS_PER_DAY: '2' });
     for (const id of ['g1', 'g2']) expect((await GRPT(w, id)).setReject).not.toHaveBeenCalled();
     expect((await GRPT(w, 'g3')).setReject).toHaveBeenCalledOnce();
     expect((await GRPT(w, 'm1', MS)).setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter')).toEqual([{ reporter: 'google.com', reports: 2 }, { reporter: 'microsoft.com', reports: 1 }]);
+    expect(usage(w)).toEqual([{ reporter: 'google.com', reports: 2 }, { reporter: 'microsoft.com', reports: 1 }]);
   });
 
-  it('bounds the distinct authenticated reporters per token per day', async () => {
+  it('bounds the distinct proven reporters per token per day', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '1' });
     expect((await GRPT(w, 'g1')).setReject).not.toHaveBeenCalled();
     expect((await GRPT(w, 'm1', MS)).setReject).toHaveBeenCalledOnce();
     expect((await GRPT(w, 'g2')).setReject).not.toHaveBeenCalled(); // an already-known reporter keeps going
   });
 
-  it('defaults', () => {
-    expect(intakeLimits({})).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 20, unauthReportsPerDay: 10, unauthBytesPerDay: 10 * 1024 * 1024 });
+  it('unproven senders past the slot limit share one overflow bucket instead of being refused', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_SENDERS_PER_DAY: '1' });
+    for (const [i, from] of ['a@one.example', 'b@two.example', 'c@three.example'].entries()) expect((await send(w, dmarcXml('a-corp.com', 'o' + i), { from })).setReject).not.toHaveBeenCalled();
+    expect(usage(w)).toEqual([{ reporter: '~', reports: 2 }, { reporter: '~one.example', reports: 1 }]);
+  });
+
+  it('defaults are generous for unproven senders (per claimed sender domain), tight for nobody who is proven', () => {
+    expect(intakeLimits({})).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 20, unauthReportsPerDay: 200, unauthBytesPerDay: 1024 * 1024 * 1024, unauthSendersPerDay: 50 });
+  });
+});
+
+describe('AUTHSERV_* not set yet: nothing is proven, nothing is starved', () => {
+  it('every report is accepted, flagged "none" and charged to its claimed sender; one spoofed sender cannot take another’s bucket on its first messages', async () => {
+    const w = await twoWorkspaces({ AUTHSERV_ID: undefined, AUTHSERV_HEADER: undefined } as any);
+    expect((await send(w, dmarcXml('a-corp.com', 'u1'), GOOGLE)).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('a-corp.com', 'u2'), { from: 'noreply@microsoft.com' })).setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT reporter_auth FROM aggregate_reports ORDER BY id')).toEqual([{ reporter_auth: 'none' }, { reporter_auth: 'none' }]);
+    expect(w.rows('SELECT reporter FROM intake_usage ORDER BY reporter')).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
+  });
+
+  it('junk claiming to be one sender (200 messages needed at the default) leaves other senders’ genuine reports alone', async () => {
+    const w = await twoWorkspaces({ AUTHSERV_ID: undefined, AUTHSERV_HEADER: undefined, INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' } as any);
+    for (let i = 0; i < 3; i++) await send(w, dmarcXml('a-corp.com', 'junk' + i), { from: 'x@spam.example' });
+    expect((await send(w, dmarcXml('a-corp.com', 'junk-over'), { from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
+    const g = await send(w, dmarcXml('a-corp.com', 'genuine'), GOOGLE);
+    expect(g.setReject).not.toHaveBeenCalled();
+    expect(w.rows("SELECT reporter_auth FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ reporter_auth: 'none' }]);
+  });
+});
+
+describe('forged Authentication-Results cannot make a report look authenticated', () => {
+  const FORGED = 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1';
+  const own = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, rawHeaderLines: string[]) => send(w, dmarcXml('a-corp.com', id), { rawHeaderLines });
+  const stored = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string) => w.rows('SELECT reporter_auth FROM aggregate_reports WHERE report_id = ?', id);
+
+  it('the receiver’s topmost header decides: a forged "pass" injected BELOW the receiver’s "fail" is ignored', async () => {
+    const w = await twoWorkspaces();
+    await own(w, 'inj', ['Authentication-Results: mx.cloudflare.net; dkim=fail header.d=google.com', 'Authentication-Results: ' + FORGED]);
+    expect(stored(w, 'inj')).toEqual([{ reporter_auth: 'fail' }]);
+    expect(w.rows('SELECT reporter FROM intake_usage')).toEqual([{ reporter: '~google.com' }]);
+  });
+
+  it('a header naming another authserv-id (the sender wrote it, the receiver did not) proves nothing, wherever it sits', async () => {
+    const w = await twoWorkspaces();
+    await own(w, 'other', ['Authentication-Results: attacker.example; dkim=pass header.d=google.com']);
+    expect(stored(w, 'other')).toEqual([{ reporter_auth: 'fail' }]);
+  });
+
+  it('a forged header with the right authserv-id and a pass for an unrelated domain does not prove the claimed organisation', async () => {
+    const w = await twoWorkspaces();
+    await own(w, 'wrongdom', ['Authentication-Results: mx.cloudflare.net; dkim=pass header.d=evil.example']);
+    expect(stored(w, 'wrongdom')).toEqual([{ reporter_auth: 'fail' }]);
+  });
+
+  it('junk with forged results cannot use up google.com’s proven allowance: the forged header is not on top', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_REPORTS_PER_DAY: '2' });
+    for (let i = 0; i < 5; i++) await send(w, dmarcXml('a-corp.com', 'forged' + i), { rawHeaderLines: ['Authentication-Results: mx.cloudflare.net; dkim=none', 'Authentication-Results: ' + FORGED] });
+    expect((await send(w, dmarcXml('a-corp.com', 'genuine'), GOOGLE)).setReject).not.toHaveBeenCalled();
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = 'google.com'")).toEqual([{ reports: 1 }]);
   });
 });
 
@@ -197,17 +254,17 @@ describe('reporter_auth', () => {
   const AR = (s: string) => ({ headers: { 'authentication-results': s } });
   const stored = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows('SELECT reporter_auth, reporter_auth_domain FROM aggregate_reports ORDER BY id');
 
-  it('pass on an aligned DKIM, SPF or DMARC pass; fail when nothing aligned passes; none without the header', async () => {
+  it('pass on an aligned DKIM or DMARC pass from the receiver; fail otherwise (SPF alone proves nothing); none without a header', async () => {
     const w = await twoWorkspaces();
-    await send(w, dmarcXml('a-corp.com', 'k'), AR('mx.example; dkim=pass header.d=mail.google.com header.s=s1'));
-    await send(w, dmarcXml('a-corp.com', 's'), AR('mx.example; dkim=fail header.d=google.com; spf=pass smtp.mailfrom=bounce@google.com'));
-    await send(w, dmarcXml('a-corp.com', 'f1'), AR('mx.example; dkim=pass header.d=evil.com; spf=pass smtp.mailfrom=x@evil.com; dmarc=fail header.from=google.com'));
-    await send(w, dmarcXml('a-corp.com', 'f2'), AR('mx.example; dkim=fail header.d=google.com; spf=softfail smtp.mailfrom=x@google.com'));
-    await send(w, dmarcXml('a-corp.com', 'd'), AR('mx.example; dmarc=pass header.from=google.com'));
+    await send(w, dmarcXml('a-corp.com', 'k'), AR('mx.cloudflare.net; dkim=pass header.d=mail.google.com header.s=s1'));
+    await send(w, dmarcXml('a-corp.com', 's'), AR('mx.cloudflare.net; dkim=fail header.d=google.com; spf=pass smtp.mailfrom=bounce@google.com'));
+    await send(w, dmarcXml('a-corp.com', 'f1'), AR('mx.cloudflare.net; dkim=pass header.d=evil.com; spf=pass smtp.mailfrom=x@evil.com; dmarc=fail header.from=google.com'));
+    await send(w, dmarcXml('a-corp.com', 'f2'), AR('mx.cloudflare.net; dkim=fail header.d=google.com; spf=softfail smtp.mailfrom=x@google.com'));
+    await send(w, dmarcXml('a-corp.com', 'd'), AR('mx.cloudflare.net; dmarc=pass header.from=google.com'));
     await send(w, dmarcXml('a-corp.com', 'n'));
     expect(stored(w)).toEqual([
       { reporter_auth: 'pass', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'pass', reporter_auth_domain: 'google.com' },
+      { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
       { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
       { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
       { reporter_auth: 'pass', reporter_auth_domain: 'google.com' },
@@ -217,16 +274,23 @@ describe('reporter_auth', () => {
 
   it('is exposed by the reports queries (so the list/detail API carries it)', async () => {
     const w = await twoWorkspaces();
-    await send(w, dmarcXml('a-corp.com', 'q'), AR('mx.example; spf=pass smtp.mailfrom=a@google.com'));
+    await send(w, dmarcXml('a-corp.com', 'q'), AR('mx.cloudflare.net; dkim=pass header.d=google.com'));
     const { forWorkspace } = await import('@inbox-angel/db');
     expect((await forWorkspace(w.env.DB, 'ws_a').reports.recent())[0]).toMatchObject({ reporter_auth: 'pass', reporter_auth_domain: 'google.com' });
     expect(await forWorkspace(w.env.DB, 'ws_a').reports.getWithDomain(1)).toMatchObject({ reporter_auth: 'pass' });
   });
 
   it('uses the org name when the email is absent, and fails when the org is unknowable', () => {
-    const h = new Headers({ 'authentication-results': 'x; dkim=pass header.d=yahoo.com' });
-    expect(reporterAuth(h, { org_email: '', org_name: 'Yahoo.com' })).toEqual({ result: 'pass', domain: 'yahoo.com' });
-    expect(reporterAuth(h, { org_email: '', org_name: 'Some Org Inc' })).toEqual({ result: 'fail', domain: null });
+    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null };
+    const env = { AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' };
+    expect(reporterAuth(h, { org_email: '', org_name: 'Yahoo.com' }, env)).toEqual({ result: 'pass', domain: 'yahoo.com' });
+    expect(reporterAuth(h, { org_email: '', org_name: 'Some Org Inc' }, env)).toEqual({ result: 'fail', domain: null });
+  });
+
+  it('fails closed without AUTHSERV_ID / AUTHSERV_HEADER: always "none"', () => {
+    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null };
+    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, {})).toEqual({ result: 'none', domain: 'yahoo.com' });
+    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, { AUTHSERV_ID: 'mx.cloudflare.net' })).toEqual({ result: 'none', domain: 'yahoo.com' });
   });
 });
 

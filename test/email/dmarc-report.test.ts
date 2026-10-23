@@ -111,12 +111,13 @@ afterEach(() => vi.clearAllMocks());
 // ── Happy path ────────────────────────────────────────────────
 
 describe('handleDmarcReport — happy path', () => {
-  it('calls extractAttachmentBytes with message.raw', async () => {
+  it('reads the attachment from (a branch of) message.raw', async () => {
     const raw = makeStream();
     const message = makeMessage({ raw });
     await handleDmarcReport(message, makeEnv());
 
-    expect(mimeExtract.extractAttachmentBytes).toHaveBeenCalledWith(raw);
+    expect(mimeExtract.extractAttachmentBytes).toHaveBeenCalledOnce();
+    expect((mimeExtract.extractAttachmentBytes as any).mock.calls[0][0]).toBeInstanceOf(ReadableStream);
   });
 
   it('calls resolveDomain with the tenant and the policy_domain from the report', async () => {

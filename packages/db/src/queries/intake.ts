@@ -46,18 +46,23 @@ export function intakeQueries(db: Db, workspaceId: string) {
 
 		/**
 		 * Atomically count one report of `bytes` against the allowance of (domain, `day` (YYYY-MM-DD, UTC), `reporter`).
-		 * `reporter` '' is the shared unauthenticated bucket. Returns false, and counts nothing, when it would exceed
-		 * `maxReports` or `maxBytes`, or when a new authenticated reporter would be more than `maxReporters` distinct
-		 * ones for the domain that day (best-effort bound: the check and the insert are separate statements).
+		 * `reporter` is a proven reporter's organisational domain, or `~<claimed sender domain>` for an unproven message ('~' alone: the overflow bucket). Returns false, and counts nothing, when it would exceed
+		 * `maxReports` or `maxBytes`, or when a new proven reporter would be more than `maxDistinct` distinct
+		 * ones for the domain that day (an unproven sender past `maxDistinct` falls into the overflow bucket instead) (best-effort bound: the check and the insert are separate statements).
 		 */
-		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxReporters = 20): Promise<boolean> {
+		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 20): Promise<boolean> {
 			if (maxReports < 1 || bytes > maxBytes) return false;
-			if (reporter !== '') {
-				const dayRows = and(mine_usage(), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day));
-				const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
-				if (!seen?.n) {
-					const distinct = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, sql`${intakeUsage.reporter} <> ''`)).get();
-					if ((distinct?.n ?? 0) >= maxReporters) return false;
+			// '~…' keys are unproven senders (by the sender domain they claim), everything else is a proven reporter domain:
+			// the two kinds are counted and bounded separately, and never share an allowance.
+			const unproven = reporter.startsWith('~');
+			const dayRows = and(mine_usage(), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day));
+			const kind = unproven ? sql`${intakeUsage.reporter} LIKE '~%'` : sql`${intakeUsage.reporter} NOT LIKE '~%'`;
+			const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
+			if (!seen?.n) {
+				const distinct = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, kind)).get();
+				if ((distinct?.n ?? 0) >= maxDistinct) {
+					if (!unproven) return false;
+					reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
 				}
 			}
 			const res = await db

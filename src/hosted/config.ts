@@ -18,6 +18,9 @@ export interface HostedEnv {
   INTAKE_MAX_REPORTERS_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string;
+  INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string;
+  AUTHSERV_ID?: string;
+  AUTHSERV_HEADER?: string;
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string;
 }
 
@@ -64,8 +67,9 @@ export const DEFAULT_MAX_NEW_IPS_PER_REPORT = 50;
 /** Distinct authenticated reporter domains accepted per token per day. */
 export const DEFAULT_MAX_REPORTERS_PER_DAY = 20;
 /** The one shared bucket for messages without an aligned authentication pass; never touches authenticated allowance. */
-export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 10;
-export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 10 * 1024 * 1024;
+export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 200;
+export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 1024 * 1024 * 1024;
+export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 50;
 export const DEFAULT_MAX_HOSTED_DOMAINS_PER_WORKSPACE = 10;
 
 const positive = (v: string | undefined, dflt: number): number => {
@@ -82,6 +86,7 @@ export interface IntakeLimits {
   reportersPerDay: number;
   unauthReportsPerDay: number;
   unauthBytesPerDay: number;
+  unauthSendersPerDay: number;
 }
 
 export function intakeLimits(env: HostedEnv): IntakeLimits {
@@ -93,6 +98,7 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     reportersPerDay: positive(env.INTAKE_MAX_REPORTERS_PER_DAY, DEFAULT_MAX_REPORTERS_PER_DAY),
     unauthReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY),
     unauthBytesPerDay: positive(env.INTAKE_MAX_UNAUTH_BYTES_PER_DAY, DEFAULT_MAX_UNAUTH_BYTES_PER_DAY),
+    unauthSendersPerDay: positive(env.INTAKE_MAX_UNAUTH_SENDERS_PER_DAY, DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY),
   };
 }
 
