@@ -1,7 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { api, ApiError, onUnauthorized, tokenStore } from './api';
 import type { AuthStatus, Me, Role } from './types';
+import { workspaceStore } from './workspace';
+
+/** The workspace the dashboard is looking at (URL first, else the last one used). */
+export function useWorkspaceId(): string | null {
+	return useSyncExternalStore(workspaceStore.subscribe, workspaceStore.get, () => null);
+}
 
 export interface Session {
 	/** `loading` until we know; `unreachable` when the Worker did not answer (first start runs migrations). */
@@ -22,16 +28,17 @@ export const READ_ONLY_REASON = 'Your role is member, which is read-only. Ask an
 
 export function SessionProvider({ children }: { children: ReactNode }) {
 	const qc = useQueryClient();
+	const workspaceId = useWorkspaceId();
 
 	const statusQ = useQuery({
-		queryKey: ['auth-status'],
+		queryKey: ['auth-status', workspaceId],
 		queryFn: () => api<AuthStatus>('/api/auth/status'),
 		retry: 4,
 		retryDelay: (n) => Math.min(1000 * 2 ** n, 5000),
 		staleTime: 60_000,
 	});
 	const meQ = useQuery({
-		queryKey: ['me'],
+		queryKey: ['me', workspaceId],
 		queryFn: async () => {
 			try {
 				return await api<Me>('/api/me', { quiet401: true });
@@ -39,6 +46,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 				if (e instanceof ApiError && e.status === 401) {
 					tokenStore.clear();
 					return null;
+				}
+				// A workspace the person no longer belongs to (left, removed, deleted, or a link from someone else):
+				// forget it and let the server pick their oldest. The router then rewrites the URL to match.
+				if (e instanceof ApiError && e.status === 403 && workspaceId) {
+					workspaceStore.forget();
+					return await api<Me>('/api/me', { quiet401: true, workspace: null });
 				}
 				throw e;
 			}
@@ -53,6 +66,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 			if (token) tokenStore.set(token);
 			await qc.invalidateQueries({ queryKey: ['auth-status'] });
 			await qc.invalidateQueries({ queryKey: ['me'] });
+			await qc.invalidateQueries({ queryKey: ['workspaces'] });
 		},
 		[qc],
 	);
@@ -61,8 +75,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 		tokenStore.clear();
 		// Forget everything a signed-in user could see, but keep the session queries mounted: they now answer "nobody".
 		qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' && q.queryKey[0] !== 'auth-status' });
-		qc.setQueryData(['me'], null);
-	}, [qc]);
+		qc.setQueryData(['me', workspaceId], null);
+	}, [qc, workspaceId]);
 
 	const signOut = useCallback(async () => {
 		await api('/api/auth/logout', { method: 'POST' }).catch(() => {});

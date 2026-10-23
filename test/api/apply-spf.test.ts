@@ -196,7 +196,7 @@ describe('POST /api/domains/:id/apply-spf', () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json() as any;
-    expect(body.error).toContain('Cloudflare credentials');
+    expect(body.code).toBe('cloudflare_not_connected');
   });
 
   it('returns 400 for invalid domain id', async () => {

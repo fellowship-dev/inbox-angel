@@ -1,11 +1,13 @@
 import { Button, EmptyState, Toaster } from '@inbox-angel/ui';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
-import { HashRouter, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router';
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router';
 import { FocusLayout } from './components/FocusLayout';
 import { Shell } from './components/Shell';
+import { WorkspaceRouter } from './components/WorkspaceRouter';
 import { PageSkeleton } from './components/states';
 import { SessionProvider, useSession } from './lib/session';
+import { setupSeenKey } from './lib/workspace';
 import { AuthPage } from './pages/auth/AuthPage';
 import { ForgotPage } from './pages/auth/ForgotPage';
 import { InvitePage } from './pages/auth/InvitePage';
@@ -35,18 +37,18 @@ function Gate({ children }: { children: ReactNode }) {
  * Once, because "Skip setup" is a choice: bouncing people back every time they open Domains is not help.
  */
 function SetupRedirect({ children }: { children: ReactNode }) {
-	const { status, canWrite } = useSession();
+	const { status, canWrite, me } = useSession();
 	const { pathname } = useLocation();
-	if (status && status.has_domain === false && canWrite && pathname === '/' && !sessionStorage.getItem(SETUP_SEEN)) {
-		sessionStorage.setItem(SETUP_SEEN, '1');
+	const key = setupSeenKey(me?.workspace_id ?? '');
+	if (status && status.has_domain === false && canWrite && pathname === '/' && !sessionStorage.getItem(key)) {
+		sessionStorage.setItem(key, '1');
 		return <Navigate to="/setup" replace />;
 	}
 	return <>{children}</>;
 }
-const SETUP_SEEN = 'ia_setup_redirected';
 
 function NotFound() {
-	return <EmptyState title="Page not found" description="That page does not exist." action={<Button asChild><a href="#/">Back to domains</a></Button>} />;
+	return <EmptyState title="Page not found" description="That page does not exist." action={<Button asChild><Link to="/">Back to domains</Link></Button>} />;
 }
 
 /** Validates `:id` once so pages can take a number. */
@@ -140,7 +142,7 @@ function AppRoutes() {
 	);
 }
 
-export function App({ queryClient, Router = HashRouter }: { queryClient: QueryClient; Router?: ComponentType<{ children: ReactNode }> }) {
+export function App({ queryClient, Router = WorkspaceRouter }: { queryClient: QueryClient; Router?: ComponentType<{ children: ReactNode }> }) {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<SessionProvider>

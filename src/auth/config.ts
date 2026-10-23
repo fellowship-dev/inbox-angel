@@ -9,7 +9,7 @@ export type AuthEnv = Pick<
   | 'SEND_EMAIL'
 >;
 
-/** `MODE=saas`: every signup gets its own workspace. Anything else is self-host: one implicit workspace. */
+/** `MODE=saas`: every signup gets its own workspace. Anything else is self-host: it starts with one implicit workspace. */
 export function isSaas(env: Pick<Env, 'MODE'>): boolean {
   return getMode(env) === 'saas';
 }

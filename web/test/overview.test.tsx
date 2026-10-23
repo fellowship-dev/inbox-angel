@@ -56,10 +56,19 @@ describe('OverviewPage', () => {
 		expect(calls.some((c) => c.path.includes('/domains/2/check-summary'))).toBe(true);
 	});
 
-	it('empty state points to setup; list failure offers a retry', async () => {
+	it('empty workspace: owners get "Add your first domain" and "Connect Cloudflare"', async () => {
 		renderApp(<OverviewPage />, { routes: { 'GET /api/domains': { domains: [] } } });
 		expect(await screen.findByText('No domains yet')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'Get started' })).toHaveAttribute('href', '/setup');
+		expect(screen.getByRole('link', { name: 'Add your first domain' })).toHaveAttribute('href', '/setup');
+		expect(screen.getByRole('link', { name: 'Connect Cloudflare' })).toHaveAttribute('href', expect.stringContaining('cloudflare-oauth'));
+	});
+
+	it('empty workspace: a member is told an owner or admin can add the first domain, with no actions', async () => {
+		renderApp(<OverviewPage />, { role: 'member', routes: { 'GET /api/domains': { domains: [] } } });
+		expect(await screen.findByText('No domains yet')).toBeInTheDocument();
+		expect(screen.getByText(/An owner or admin can add the first domain/)).toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Add your first domain' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Connect Cloudflare' })).not.toBeInTheDocument();
 	});
 
 	it('list failure offers a retry', async () => {

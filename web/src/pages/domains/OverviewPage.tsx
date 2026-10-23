@@ -37,8 +37,11 @@ function AddDomainButton() {
 	);
 }
 
+const CONNECT_CLOUDFLARE_DOCS = 'https://github.com/fellowship-dev/inbox-angel/blob/main/docs/cloudflare-oauth.md';
+
 export function OverviewPage() {
 	const qc = useQueryClient();
+	const { canWrite } = useSession();
 	const list = useDomains();
 	const domains = list.data ?? [];
 	const [exporting, setExporting] = useState(false);
@@ -103,11 +106,24 @@ export function OverviewPage() {
 				<EmptyState
 					icon={<Globe />}
 					title="No domains yet"
-					description="Add your first domain to start receiving DMARC reports and see where it stands."
+					description={
+						canWrite
+							? 'Add your first domain to start receiving DMARC reports and see where it stands. Domains are managed through Cloudflare, so connect it too.'
+							: 'Nothing has been added to this workspace yet. An owner or admin can add the first domain.'
+					}
 					action={
-						<Button asChild>
-							<Link to="/setup">Get started</Link>
-						</Button>
+						canWrite ? (
+							<div className="flex flex-wrap justify-center gap-2">
+								<Button asChild>
+									<Link to="/setup">Add your first domain</Link>
+								</Button>
+								<Button asChild variant="secondary">
+									<a href={CONNECT_CLOUDFLARE_DOCS} target="_blank" rel="noreferrer">
+										Connect Cloudflare
+									</a>
+								</Button>
+							</div>
+						) : undefined
 					}
 				/>
 			) : (

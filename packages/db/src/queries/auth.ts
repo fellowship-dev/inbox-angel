@@ -17,7 +17,7 @@ export function authLookups(dbLike: DbLike) {
 				.select({ workspace_id: memberships.workspace_id, role: memberships.role })
 				.from(memberships)
 				.where(/* workspace-scope-exempt: resolving a user's workspaces is the point of this lookup */ eq(memberships.user_id, userId))
-				.orderBy(memberships.created_at, memberships.workspace_id)
+				.orderBy(memberships.created_at, sql`${memberships}.rowid`)
 				.all(),
 
 		/** An API key by the SHA-256 of its secret. */

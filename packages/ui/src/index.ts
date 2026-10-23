@@ -28,3 +28,4 @@ export * from "./components/table.js";
 export * from "./components/tabs.js";
 export * from "./components/toast.js";
 export * from "./components/tooltip.js";
+export * from "./components/workspace-switcher.js";

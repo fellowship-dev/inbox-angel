@@ -74,6 +74,7 @@ function snapshotOf(db: any, workspaceId: string) {
   const tables = [...WORKSPACE_OWNED_TABLES].filter(t => t !== 'memberships' || true);
   const out: Record<string, unknown> = {};
   for (const t of tables) out[t] = rows(db, `SELECT * FROM ${t} WHERE workspace_id = ? ORDER BY 1, 2`, workspaceId);
+  out.workspace = rows(db, 'SELECT * FROM workspaces WHERE id = ?', workspaceId);
   out.users = rows(db, 'SELECT id, email FROM users WHERE id IN (SELECT user_id FROM memberships WHERE workspace_id = ?) ORDER BY id', workspaceId);
   return JSON.stringify(out);
 }
@@ -159,6 +160,12 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/setup/custom-domain', body: { domain: 'x.example.net' }, kind: 'scoped' },
   { method: 'GET', path: '/api/zones', kind: 'scoped' },
   { method: 'POST', path: '/api/spf-lookup-count', body: { record: 'v=spf1 -all' }, kind: 'scoped' },
+  // workspaces (src/workspaces/routes.ts): the caller's own memberships only; B's id is a 404, never a 403
+  { method: 'GET', path: '/api/workspaces', kind: 'scoped' },
+  { method: 'POST', path: '/api/workspaces', body: { name: 'A second workspace' }, kind: 'scoped' },
+  { method: 'PATCH', path: '/api/workspaces/__B_WS__', body: { name: 'pwned' }, kind: 'denied' },
+  { method: 'POST', path: '/api/workspaces/__B_WS__/leave', body: {}, kind: 'denied' },
+  { method: 'DELETE', path: '/api/workspaces/__B_WS__?confirm=pwned', kind: 'denied' },
   // team, audit, keys
   { method: 'GET', path: '/api/team', kind: 'scoped' },
   { method: 'POST', path: '/api/team/invite', body: { email: 'new-for-a@example.com' }, kind: 'scoped' },
@@ -185,7 +192,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
         const failures: string[] = [];
 
         for (const r of ROUTES) {
-          const path = r.path.replace('__B_KEY__', w.keyB.id);
+          const path = r.path.replace('__B_KEY__', w.keyB.id).replace('__B_WS__', w.B.workspaceId);
           const res = await call(w.env, r.method, path, { key, body: r.body });
           const text = await res.text();
           const leaked = SECRETS.filter(s => text.includes(s));
@@ -311,7 +318,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
       const label = m[1].replace(/\\\//g, '/');
       return { method: '*', label, pattern: new RegExp('^' + label.replace(/\(\[\^\/\]\+\)|\(\\d\+\)/g, '[^/]+') + '$') };
     });
-    const concrete = ROUTES.map(r => ({ method: r.method, path: r.path.split('?')[0].replace('__B_KEY__', 'k') }));
+    const concrete = ROUTES.map(r => ({ method: r.method, path: r.path.split('?')[0].replace('__B_KEY__', 'k').replace('__B_WS__', 'w') }));
     expect(literal.length + regex.length).toBeGreaterThan(40); // the scan itself works
     const uncovered: string[] = [];
     for (const r of [...literal, ...regex]) {
@@ -320,5 +327,77 @@ describe('two hosted workspaces: A cannot reach B', () => {
       if (!hit) uncovered.push(`${r.method} ${r.label}`);
     }
     expect(uncovered).toEqual([]);
+  });
+});
+
+// Self-host: the server's CLOUDFLARE_API_TOKEN can reach every zone of the operator's account. It belongs to the
+// instance's own workspace (ws_default) only: no other workspace — however it came to exist — may borrow it.
+describe('self-host: the shared Cloudflare token stays with the instance owner', () => {
+  async function shared() {
+    const db = createMigratedD1();
+    const env = makeEnv(db, { CLOUDFLARE_API_TOKEN: 'operator-token' });
+    const setup = await call(env, 'POST', '/api/auth/setup', { body: { email: 'owner@example.com', password: 'password-123' } });
+    const owner = (await setup.json() as any).token as string;
+    const inv = await call(env, 'POST', '/api/team/invite', { key: owner, body: { email: 'member@example.com', role: 'member' } });
+    const acc = await call(env, 'POST', `/api/invites/${(await inv.json() as any).token}`, { body: { name: 'm', password: 'password-123' } });
+    const member = (await acc.json() as any).token as string;
+    const cf = new FakeCloudflare({ 'operator-zone.example': { id: 'zone-op', cfAccountId: 'cf-op' } });
+    stubCloudflare(cf);
+    return { db, env, owner, member, cf };
+  }
+
+  it('a member cannot create a workspace to get a token of their own: 403, nothing created', async () => {
+    const { db, env, member, cf } = await shared();
+    const res = await call(env, 'POST', '/api/workspaces', { key: member, body: { name: 'Mine' } });
+    expect(res.status).toBe(403);
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 1 }]);
+    expect(cf.calls).toEqual([]);
+  });
+
+  it('a workspace the owner creates never reaches Cloudflare through the server token', async () => {
+    const { db, env, owner, member, cf } = await shared();
+    const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
+    // the owner makes a member of B (so the member could act in B), as an invite would
+    db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, (SELECT id FROM users WHERE email = 'member@example.com'), 'admin')").run(b);
+    db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (50, ?, 'operator-zone.example', 'rua@x')").run(b);
+    const h = { 'x-workspace-id': b };
+    for (const key of [owner, member]) {
+      const zones = await call(env, 'GET', '/api/zones', { key, headers: h });
+      expect(zones.status).toBe(400);
+      expect((await zones.json() as any).code).toBe('cloudflare_not_connected');
+      for (const [method, path, body] of [
+        ['POST', '/api/domains/50/apply-dmarc', { record: 'v=DMARC1; p=none' }],
+        ['POST', '/api/domains/50/apply-spf', { record: 'v=spf1 -all' }],
+        ['POST', '/api/domains/50/mta-sts', { mode: 'enforce' }],
+        ['POST', '/api/domains/50/spf-flatten', {}],
+        ['POST', '/api/setup/email-routing', {}],
+        ['POST', '/api/settings/register-destination', { email: 'a@example.com' }],
+      ] as const) {
+        const res = await call(env, method, path, { key, headers: h, body });
+        expect(res.status, `${method} ${path}`).toBeGreaterThanOrEqual(400);
+        expect(res.status, `${method} ${path}`).toBeLessThan(500);
+      }
+      // the connections page does not present the server token as B's connection
+      const conns = await (await call(env, 'GET', '/api/cloudflare/connections', { key, headers: h })).json() as any;
+      expect(conns.connections.filter((c: any) => c.implicit)).toEqual([]);
+    }
+    expect(cf.calls).toEqual([]);
+    expect(cf.records.size).toBe(0);
+  });
+
+  it('adding the base domain in such a workspace asks Cloudflare nothing', async () => {
+    const { env, owner, cf } = await shared();
+    const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
+    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example' } });
+    expect(res.status).toBe(201);
+    expect((await res.json() as any).zone_id).toBeNull();
+    expect(cf.calls).toEqual([]);
+  });
+
+  it('the instance’s own workspace keeps working through the server token', async () => {
+    const { env, owner } = await shared();
+    const zones = await call(env, 'GET', '/api/zones', { key: owner });
+    expect(zones.status).toBe(200);
+    expect((await zones.json() as any).zones.map((z: any) => z.name)).toEqual(['operator-zone.example']);
   });
 });

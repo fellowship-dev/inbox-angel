@@ -272,7 +272,11 @@ export const settings = sqliteTable(
 		value: text('value').notNull(),
 		updated_at: integer('updated_at').notNull().default(now),
 	},
-	(t) => [primaryKey({ columns: [t.workspace_id, t.key] })],
+	(t) => [
+		primaryKey({ columns: [t.workspace_id, t.key] }),
+		// A reports domain belongs to one workspace: inbound mail is routed by it (cleared values are empty strings and may repeat).
+		uniqueIndex('idx_settings_reports_domain').on(t.value).where(sql`${t.key} = 'reports_domain' AND ${t.value} <> ''`),
+	],
 );
 
 export const invites = sqliteTable(

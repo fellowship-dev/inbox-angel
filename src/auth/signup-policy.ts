@@ -74,8 +74,8 @@ export async function provisionUser(
   if (invite) {
     const role: MembershipRole = invite.role === 'admin' ? 'admin' : 'member';
     const team = forWorkspace(db, invite.workspace_id).team;
+    if (!(await team.claimInvite(invite.token))) return fail('invite not found or expired');
     await team.addMember(user.id, role);
-    await team.markInviteUsed(invite.token);
     placed = { workspaceId: invite.workspace_id, role };
   } else if (intent.kind === 'invite') {
     return fail('invite not found or expired');

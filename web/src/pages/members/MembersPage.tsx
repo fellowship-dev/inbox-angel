@@ -25,6 +25,7 @@ import { ListSkeleton, LoadError, ReadOnlyNotice, Section, WriteButton } from '.
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { formatDate } from '../../lib/format';
 import { useSession } from '../../lib/session';
+import { useWorkspaces } from '../../lib/workspaces';
 import type { Role } from '../../lib/types';
 import { Field } from '../auth/AuthLayout';
 
@@ -48,7 +49,8 @@ export function inviteLink(token: string): string {
 }
 
 export function MembersPage() {
-	const { role: myRole, canWrite } = useSession();
+	const { role: myRole, canWrite, me } = useSession();
+	const workspace = useWorkspaces(!!me?.user).data?.find((w) => w.id === me?.workspace_id);
 	const team = useQuery({
 		queryKey: teamKey,
 		queryFn: () => api<TeamResponse>('/api/team'),
@@ -59,7 +61,10 @@ export function MembersPage() {
 
 	return (
 		<div className="space-y-8">
-			<PageHeader title="Members" description="Everyone here can see all domains and reports. Owners and admins can change things." />
+			<PageHeader
+				title="Members"
+				description={`${workspace ? `${workspace.name}: everyone` : 'Everyone'} here can see all of its domains and reports. Owners and admins can change things; members are read-only.`}
+			/>
 			<ReadOnlyNotice />
 			{!canWrite ? (
 				<EmptyState icon={<Users />} title="Only owners and admins can see the members" description="Ask an owner if you need to know who has access, or want someone invited." />
@@ -178,7 +183,7 @@ function InviteSection() {
 					Create invite link
 				</WriteButton>
 			</form>
-			{invite.isError ? <FieldError>{invite.error instanceof ApiError && invite.error.status === 409 ? 'Someone with this email already has an account.' : errorMessage(invite.error)}</FieldError> : null}
+			{invite.isError ? <FieldError>{invite.error instanceof ApiError && invite.error.status === 409 ? 'This person is already a member of this workspace.' : errorMessage(invite.error)}</FieldError> : null}
 			{link ? (
 				<div className="space-y-2 rounded-lg border border-line bg-surface-2 p-4" role="status">
 					<p className="text-sm font-medium">Send this link to the person you are inviting. It works once.</p>

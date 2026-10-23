@@ -27,6 +27,8 @@ export interface AppShellProps {
 	/** Product mark + name, shown at the top of the sidebar. */
 	brand: React.ReactNode;
 	nav: NavSection[];
+	/** Under the brand, above the nav (workspace switcher). A function receives whether the sidebar is collapsed. */
+	sidebarTop?: React.ReactNode | ((collapsed: boolean) => React.ReactNode);
 	/** Left side of the top bar (breadcrumb, domain switcher). */
 	topbarStart?: React.ReactNode;
 	/** Right side of the top bar (theme toggle, account menu). */
@@ -109,6 +111,7 @@ function NavList({
 export function AppShell({
 	brand,
 	nav,
+	sidebarTop,
 	topbarStart,
 	topbarEnd,
 	sidebarFooter,
@@ -155,6 +158,7 @@ export function AppShell({
 					<div className={cn("flex h-16 shrink-0 items-center border-b border-line px-4", collapsed && "justify-center px-0")}>
 						<div className={cn("flex min-w-0 items-center gap-2", collapsed && "[&>*:not(:first-child)]:sr-only")}>{brand}</div>
 					</div>
+					{sidebarTop ? <div className={cn("border-b border-line p-3", collapsed && "flex justify-center px-2")}>{typeof sidebarTop === "function" ? sidebarTop(collapsed) : sidebarTop}</div> : null}
 					<NavList nav={nav} collapsed={collapsed} renderLink={renderLink} />
 					<div className={cn("flex items-center gap-2 border-t border-line p-3", collapsed ? "flex-col" : "justify-between")}>
 						{!collapsed ? <div className="min-w-0 flex-1 text-sm text-ink-2">{sidebarFooter}</div> : null}
@@ -185,6 +189,7 @@ export function AppShell({
 									</IconButton>
 								</DialogPrimitive.Close>
 							</div>
+							{sidebarTop ? <div className="border-b border-line p-3">{typeof sidebarTop === "function" ? sidebarTop(false) : sidebarTop}</div> : null}
 							<NavList nav={nav} collapsed={false} renderLink={renderLink} onNavigate={() => setMobileOpen(false)} />
 							{sidebarFooter ? <div className="border-t border-line p-4 text-sm text-ink-2">{sidebarFooter}</div> : null}
 						</DialogPrimitive.Content>

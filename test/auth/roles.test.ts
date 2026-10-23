@@ -149,3 +149,28 @@ describe('GET /api/me', () => {
     expect((await call(env, 'GET', '/api/me')).status).toBe(401);
   });
 });
+
+// Workspace management (src/workspaces/routes.ts): everybody may list; owners rename and delete; on self-host only the instance owner creates.
+describe('roles: workspace management', () => {
+  const MANAGE: Array<[string, string, unknown?]> = [
+    ['PATCH', '/api/workspaces/ws_default', { name: 'Renamed' }],
+    ['DELETE', '/api/workspaces/ws_default'],
+  ];
+
+  it('members and admins cannot rename or delete the workspace; the owner can rename it', async () => {
+    const { env, owner, admin, member } = await world();
+    for (const key of [member, admin]) {
+      for (const [method, path, body] of MANAGE) expect((await call(env, method, path, { key, body })).status, `${method} ${path}`).toBe(403);
+    }
+    expect((await call(env, 'PATCH', '/api/workspaces/ws_default', { key: owner, body: { name: 'Renamed' } })).status).toBe(200);
+  });
+
+  it('every role can list its workspaces; on self-host only the instance owner can create one', async () => {
+    const { env, owner, admin, member } = await world();
+    for (const key of [owner, admin, member]) expect((await call(env, 'GET', '/api/workspaces', { key })).status).toBe(200);
+    for (const key of [admin, member]) expect((await call(env, 'POST', '/api/workspaces', { key, body: { name: 'Side project' } })).status).toBe(403);
+    const created = await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Side project' } });
+    expect(created.status).toBe(201);
+    expect((await created.json() as any).role).toBe('owner');
+  });
+});

@@ -25,6 +25,9 @@ export function globalQueries(dbLike: DbLike) {
 			/** Keep the legacy users.role column in step with the membership role (admin = owner or admin). */
 			setLegacyRole: (userId: string, role: 'admin' | 'member') => db.update(users).set({ role }).where(eq(users.id, userId)).run(),
 			delete: (userId: string) => db.delete(users).where(eq(users.id, userId)).run(),
+			/** Delete a user who belongs to no workspace any more (their sessions and keys go with them). */
+			deleteIfOrphan: (userId: string) =>
+				db.run(sql`DELETE FROM users WHERE id = ${userId} AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = ${userId})`),
 		},
 
 		/** Who a password-reset token (as emailed) belongs to, if it is still valid. */

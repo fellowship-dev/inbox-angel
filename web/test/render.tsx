@@ -23,23 +23,24 @@ export const STATUS: AuthStatus = {
 
 export const me = (role: Me['role'] = 'owner'): Me => ({ user: { id: 'u1', email: `${role}@example.com`, name: role }, role, workspace_id: 'ws_default', kind: 'session' });
 
-export type Handler = (req: { method: string; path: string; body: any }) => unknown | Response | undefined;
+export type Handler = (req: { method: string; path: string; body: any; headers: Record<string, string> }) => unknown | Response | undefined;
 
 /**
  * Stubs `fetch` with a router: `routes` maps "METHOD /path" to a JSON body, a status/body pair, or a function.
  * Unmatched requests fail the test loudly (a missing mock is a bug, not a 404).
  */
 export function mockApi(routes: Record<string, unknown | Handler>) {
-	const calls: Array<{ method: string; path: string; body: any }> = [];
+	const calls: Array<{ method: string; path: string; body: any; headers: Record<string, string> }> = [];
 	const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = new URL(String(input), 'http://localhost');
 		const method = (init?.method ?? 'GET').toUpperCase();
 		const body = init?.body ? JSON.parse(String(init.body)) : undefined;
 		const path = url.pathname + url.search;
-		calls.push({ method, path, body });
+		const headers = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), v]));
+		calls.push({ method, path, body, headers });
 		const hit = routes[`${method} ${path}`] ?? routes[`${method} ${url.pathname}`];
 		if (hit === undefined) throw new Error(`unmocked request: ${method} ${path}`);
-		const out = typeof hit === 'function' ? (hit as Handler)({ method, path, body }) : hit;
+		const out = typeof hit === 'function' ? (hit as Handler)({ method, path, body, headers }) : hit;
 		if (out instanceof Response) return out;
 		if (out && typeof out === 'object' && '__status' in out) {
 			const { __status, ...rest } = out as { __status: number; body?: unknown };

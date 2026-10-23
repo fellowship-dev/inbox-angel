@@ -9,10 +9,14 @@ import {
 	DropdownMenuTrigger,
 	IconButton,
 	LogoMark,
+	WorkspaceSwitcher,
 	type RenderNavLink,
 } from '@inbox-angel/ui';
 import { BarChart3, Globe, History, KeyRound, LogOut, Mail, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
+import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
+import { switchToWorkspace, useWorkspaces } from '../lib/workspaces';
+import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { useTheme } from '../lib/theme';
 import { useSession } from '../lib/session';
 import { Banners } from './Banners';
@@ -26,8 +30,15 @@ function isCurrent(path: string, item: string): boolean {
 
 export function Shell() {
 	const { pathname } = useLocation();
-	const { me, role, signOut } = useSession();
+	const { me, role, signOut, status } = useSession();
 	const { theme, toggle } = useTheme();
+	const [creating, setCreating] = useState(false);
+	// The instance API key belongs to no user and so to no list of workspaces.
+	const workspaces = useWorkspaces(!!me?.user);
+	const list = workspaces.data ?? [];
+	const current = list.find((w) => w.id === me?.workspace_id) ?? null;
+	// Hosted: anyone may start a workspace. Self-host: only the instance owner (owner of the default workspace).
+	const canCreate = status?.mode === 'saas' || list.some((w) => w.id === 'ws_default' && w.role === 'owner');
 	const items = [
 		{ label: 'Domains', href: '/', icon: <Globe /> },
 		{ label: 'Analytics', href: '/analytics', icon: <BarChart3 /> },
@@ -45,6 +56,17 @@ export function Shell() {
 					<LogoMark className="size-8 shrink-0" aria-hidden />
 					<span>Inbox Angel</span>
 				</Link>
+			}
+			sidebarTop={(collapsed) =>
+				me?.user ? (
+					<WorkspaceSwitcher
+						compact={collapsed}
+						current={current}
+						workspaces={list}
+						onSelect={(id) => switchToWorkspace(id)}
+						onCreate={canCreate ? () => setCreating(true) : undefined}
+					/>
+				) : null
 			}
 			nav={[{ items }]}
 			renderLink={renderLink}
@@ -76,6 +98,7 @@ export function Shell() {
 		>
 			<Banners />
 			<Outlet />
+			<CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
 		</AppShell>
 	);
 }

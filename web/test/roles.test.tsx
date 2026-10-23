@@ -77,12 +77,12 @@ describe('Members page', () => {
 		expect(calls.find((c) => c.path === '/api/team/invite')?.body).toEqual({ email: 'new@example.com', role: 'member' });
 	});
 
-	it('names the conflict when the person already has an account', async () => {
-		renderApp(<MembersPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': fail(409, 'a user with this email already exists') } });
+	it('names the conflict when the person is already a member', async () => {
+		renderApp(<MembersPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': fail(409, 'this person is already a member of the workspace') } });
 		const user = userEvent.setup();
 		await screen.findByText('Adam');
 		await user.type(screen.getByLabelText('Email'), 'adam@example.com');
 		await user.click(screen.getByRole('button', { name: 'Create invite link' }));
-		expect(await screen.findByText('Someone with this email already has an account.')).toBeInTheDocument();
+		expect(await screen.findByText('This person is already a member of this workspace.')).toBeInTheDocument();
 	});
 });

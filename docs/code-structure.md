@@ -70,7 +70,7 @@ Everything one request (or one cron workspace) needs is built per request and th
 
 **Crons** (`src/cron.ts`) fan out over the workspaces, each in its own `try`, so one workspace's Cloudflare 403 doesn't stop the others.
 
-**Credentials:** self-host uses the `CLOUDFLARE_API_TOKEN` secret. In `saas` mode no token is used until per-workspace credentials exist (`loadTenant`'s `cfToken` option is the seam); the operator's token is never shared across tenants.
+**Credentials:** self-host uses the `CLOUDFLARE_API_TOKEN` secret, for the default workspace only (other workspaces link their own connection). In `saas` mode no token is used until per-workspace credentials exist (`loadTenant`'s `cfToken` option is the seam); the operator's token is never shared across tenants.
 
 | Env | Purpose |
 |-----|---------|
