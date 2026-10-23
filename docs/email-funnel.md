@@ -10,14 +10,19 @@ Copy for the sequence is in **one file**, `src/funnel/copy.ts` (a draft for revi
 3. The daily cron (`0 8 * * *`) sends **one step per due lead**: day 1, 3, 6, 10 and 14 after enrolment (`SEQUENCE_DAYS`).
 4. The sequence stops on unsubscribe, a bounce, an account with the same email (they bought), or when the instance owner records *replied*, *booked* or *converted* (`POST /api/leads/:id/stop`, or the Leads page).
 
-**Eligibility (fails closed).** A lead is created only when the sender proved control of the domain of their address, from the receiving server's own results, and only when **`AUTHSERV_ID` is set**. Nothing guarantees that Cloudflare prepends a plain `Authentication-Results` header (it may add only `ARC-Authentication-Results`), so until an operator has set it, everyone still gets the report but nobody is enrolled, and the log says `sender not enrolled in the sequence: AUTHSERV_ID is not set` (the Leads page warns too). With it set (`src/email/sender-proof.ts`):
+**Eligibility (fails closed).** A lead is created only when the sender proved control of the domain of their address, from the receiving server's own results, and only when **both `AUTHSERV_ID` and `AUTHSERV_HEADER` are set**. Nothing guarantees which header Cloudflare adds (a plain `Authentication-Results`, or only `ARC-Authentication-Results`), and if both kinds were trusted the sender could forge whichever kind the receiver does not add, using our guessable authserv-id. So until an operator has set both, everyone still gets the report but nobody is enrolled, and the log says `sender not enrolled in the sequence: AUTHSERV_ID is not set` (or `AUTHSERV_HEADER is not set`; the Leads page warns too). With both set (`src/email/sender-proof.ts`):
 
-- the **topmost** `Authentication-Results`, read from the raw message (`Headers.get` joins duplicates), must name `AUTHSERV_ID` as its authserv-id; a header the sender adds, or one naming another server, is ignored;
-- otherwise the topmost `ARC-Authentication-Results` with `i=1` and that authserv-id is accepted;
-- the results must show a DKIM pass aligned with the address's domain, or a DMARC pass for it. SPF alone is not accepted;
-- `AUTHSERV_HEADER=ar|arc` restricts trust to one kind. If the receiver adds only one kind, the other can be forged by the sender, so **set it once you know which one Cloudflare adds**.
+- `AUTHSERV_HEADER=ar`: the **topmost** `Authentication-Results`, read from the raw message (`Headers.get` joins duplicates), must name `AUTHSERV_ID` as its authserv-id. `ARC-Authentication-Results` is not consulted.
+- `AUTHSERV_HEADER=arc`: the topmost `ARC-Authentication-Results` must have `i=1` and that authserv-id. A plain `Authentication-Results` is not consulted.
+- A header the sender adds, or one naming another server, is ignored.
+- The results must show a DKIM pass aligned with the address's domain, or a DMARC pass for it. SPF alone is not accepted.
 
-**Ops step (Max): find the real authserv-id.** Send one email from a domain with working DKIM to a routed address (a `check+<token>@` address, or any Email Routing address that forwards to your own inbox) and open the delivered message's raw source. Find the header that the receiving side added at the very top of the header block: either `Authentication-Results: <authserv-id>; dkim=pass …` or `ARC-Authentication-Results: i=1; <authserv-id>; …`. The text before the first `;` (after `i=1;` for ARC) is the authserv-id. Put it in `AUTHSERV_ID`, and set `AUTHSERV_HEADER` to `ar` or `arc` according to which header you saw. Check that a message you craft with your own extra `Authentication-Results` line still shows Cloudflare's line above it. Until this is done, the sequence enrols nobody.
+**Ops step (Max): set both values from one routed message.** Send one email from a domain with working DKIM to a routed address (a `check+<token>@` address, or any Email Routing address that forwards to your own inbox) and open the delivered message's raw source. Look at the header block's very top and find what the receiving side added:
+
+- `Authentication-Results: <authserv-id>; dkim=pass …` → set `AUTHSERV_HEADER=ar`;
+- or `ARC-Authentication-Results: i=1; <authserv-id>; …` (and no plain one from the same server) → set `AUTHSERV_HEADER=arc`.
+
+`AUTHSERV_ID` is the text before the first `;` (after `i=1;` for ARC). Then craft a message with your own extra `Authentication-Results` and `ARC-Authentication-Results` lines and check that Cloudflare's line sits above them. Until both are set, the sequence enrols nobody.
 
 **Switch.** Hosted: on unless `ONBOARDING_SEQUENCE_ENABLED=0`. Self-host: off unless `ONBOARDING_SEQUENCE_ENABLED=1`.
 
@@ -83,7 +88,7 @@ The request stores an **unconfirmed** subscription (`confirmed_at` null) and ema
 | `ONBOARDING_SEQUENCE_ENABLED` | `1` to turn on (self-host); hosted is on unless `0` |
 | `RESEND_API_KEY` | Resend, for the sequence (and the confirmation when there is no binding) |
 | `AUTHSERV_ID` | **required for enrolment**: the receiver's authserv-id, see the ops step above |
-| `AUTHSERV_HEADER` | `ar` or `arc`: trust only that header kind |
+| `AUTHSERV_HEADER` | **required for enrolment**: `ar` or `arc`, the one header kind the receiver adds |
 | `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`), and where replies go |
 | `PUBLIC_BASE_URL` | public HTTPS origin for unsubscribe and confirmation links (falls back to `BETTER_AUTH_URL`) |
 | `POSTAL_ADDRESS` | footer address |

@@ -38,7 +38,7 @@ export function readiness(env: BoundEnv): Readiness {
   if (!funnelSender(env)) blockers.push('No sender address: set MAIL_FROM');
   if (!publicBaseUrl(env)) blockers.push('PUBLIC_BASE_URL is not set, so mail cannot carry an unsubscribe link');
   if (!postalAddress(env)) blockers.push('POSTAL_ADDRESS is not set (required in the footer of marketing email)');
-  if (!env.AUTHSERV_ID?.trim()) warnings.push('AUTHSERV_ID is not set: no sender is enrolled until it is (see docs/email-funnel.md)');
+  if (!env.AUTHSERV_ID?.trim() || !['ar', 'arc'].includes(env.AUTHSERV_HEADER?.trim().toLowerCase() ?? '')) warnings.push('AUTHSERV_ID and AUTHSERV_HEADER are not both set: no sender is enrolled until they are (see docs/email-funnel.md)');
   if (!bookingUrl(env)) warnings.push('BOOKING_URL is not set: the day-14 email is held until it is');
   if (Object.keys(servicePrices(env)).length === 0) warnings.push('SERVICE_PRICES is not set: the day-10 email goes out without "from" prices');
   if (!env.MAIL_REPLY_TO) warnings.push('MAIL_REPLY_TO is not set: replies go to the sender address');

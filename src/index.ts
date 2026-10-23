@@ -61,8 +61,8 @@ export interface Env {
   MAIL_FROM_NAME?: string;       // display name of funnel mail (default "Inbox Angel")
   MAIL_REPLY_TO?: string;        // where replies to funnel mail go (a mailbox someone reads)
   PUBLIC_BASE_URL?: string;      // public origin of this Worker, for unsubscribe and confirmation links (falls back to BETTER_AUTH_URL)
-  AUTHSERV_ID?: string;          // authserv-id of the receiving server's Authentication-Results (see docs/email-funnel.md); REQUIRED for the sequence to enrol anyone
-  AUTHSERV_HEADER?: string;      // optional: "ar" or "arc", to trust only that header kind (the other can be forged if the receiver does not add it)
+  AUTHSERV_ID?: string;          // authserv-id of the receiving server's results (see docs/email-funnel.md); with AUTHSERV_HEADER, REQUIRED for the sequence to enrol anyone
+  AUTHSERV_HEADER?: string;      // "ar" (Authentication-Results) or "arc" (ARC-Authentication-Results): the one header kind the receiver adds; REQUIRED for enrolment
   POSTAL_ADDRESS?: string;       // postal address shown in the footer of non-transactional mail
   BOOKING_URL?: string;          // booking link in the day-14 note; that step is held until it is set
   SERVICE_PRICES?: string;       // JSON {"assessment":"$…","enforcement":"$…","bimi":"$…","retainer":"$…/mo"}: the "from" prices in the day-10 email

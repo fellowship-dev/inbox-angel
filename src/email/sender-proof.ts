@@ -7,9 +7,9 @@
 //     sent but the sender is not enrolled.
 //   - Only the TOPMOST header of the kind is read (a header the sender adds sits below the receiver's), from the raw
 //     message: `Headers.get` joins duplicates. Its authserv-id must equal AUTHSERV_ID.
-//   - The plain header is used if it is ours; otherwise the topmost ARC-Authentication-Results with i=1 and our authserv-id.
-//     AUTHSERV_HEADER (`ar` | `arc`) restricts it to one of them: if the receiver adds only one kind, the other can be
-//     forged by the sender, so set it once you know which.
+//   - AUTHSERV_HEADER (`ar` | `arc`) must be configured too, and names the ONE kind of header trusted: the plain
+//     Authentication-Results, or the topmost ARC-Authentication-Results with i=1. If both kinds were trusted, the sender
+//     could forge whichever kind the receiver does not add, using our (guessable) authserv-id.
 //   - The results must show a DKIM pass aligned with the address's domain, or a DMARC pass for it. SPF alone proves little
 //     (a shared sending service passes it for anyone), and a DMARC pass for the From header says nothing about the
 //     envelope sender.
@@ -75,15 +75,16 @@ export function provesDomain(results: string | null, addressDomain: string): boo
 export type SenderProof = { ok: true; via: 'ar' | 'arc' } | { ok: false; reason: string };
 
 /** Decide whether the sender proved `addressDomain`. Fails closed, with the reason (for the log; it never names the sender). */
-export function proveSender(headers: AuthHeaders, addressDomain: string, authservId: string | undefined, only?: string): SenderProof {
+export function proveSender(headers: AuthHeaders, addressDomain: string, authservId: string | undefined, only: string | undefined): SenderProof {
   if (!authservId?.trim()) return { ok: false, reason: 'AUTHSERV_ID is not set' };
-  const want = norm(authservId);
   const mode = only?.trim().toLowerCase();
+  if (mode !== 'ar' && mode !== 'arc') return { ok: false, reason: 'AUTHSERV_HEADER is not set' };
+  const want = norm(authservId);
 
-  if (mode !== 'arc' && headers.ar && norm(headers.ar.split(';')[0]) === want) {
+  if (mode === 'ar' && headers.ar && norm(headers.ar.split(';')[0]) === want) {
     return provesDomain(headers.ar, addressDomain) ? { ok: true, via: 'ar' } : { ok: false, reason: 'the receiver\'s results do not show an aligned DKIM pass or a DMARC pass' };
   }
-  if (mode !== 'ar' && headers.arc) {
+  if (mode === 'arc' && headers.arc) {
     const [hop, id, ...rest] = headers.arc.split(';');
     if (/^\s*i\s*=\s*1\s*$/i.test(hop) && norm(id ?? '') === want) {
       return provesDomain([id, ...rest].join(';'), addressDomain) ? { ok: true, via: 'arc' } : { ok: false, reason: 'the receiver\'s ARC results do not show an aligned DKIM pass or a DMARC pass' };

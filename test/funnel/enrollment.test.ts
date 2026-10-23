@@ -121,8 +121,16 @@ describe('enrolment on a hosted free check', () => {
     expect(console.warn).toHaveBeenCalledWith('[free-check] sender not enrolled in the sequence: AUTHSERV_ID is not set');
   });
 
-  it('enrols on the ARC fallback when only ARC-Authentication-Results carries our authserv-id', async () => {
-    const t = hosted();
+  it('without AUTHSERV_HEADER nobody is enrolled either, and the log says why', async () => {
+    const t = hosted({ AUTHSERV_HEADER: undefined });
+    const m = await t.check();
+    expect(m.reply).toHaveBeenCalledOnce();
+    expect(t.rows('SELECT * FROM leads')).toEqual([]);
+    expect(console.warn).toHaveBeenCalledWith('[free-check] sender not enrolled in the sequence: AUTHSERV_HEADER is not set');
+  });
+
+  it('enrols with AUTHSERV_HEADER=arc when only ARC-Authentication-Results carries our authserv-id', async () => {
+    const t = hosted({ AUTHSERV_HEADER: 'arc' });
     const s = await (await call(t.env, 'POST', '/api/check-sessions')).json() as { email: string };
     const raw = 'ARC-Authentication-Results: i=1; mx.cloudflare.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com\r\nSubject: hi\r\n\r\nhi';
     const m = fakeMessage(s.email, raw, { from: 'user@example.com', headers: { 'message-id': '<m1@example.com>' } });
@@ -164,6 +172,7 @@ describe('enrolment on a hosted free check', () => {
 describe('sender proof (unit)', () => {
   const stream = (s: string) => new Response(new TextEncoder().encode(s)).body!;
   const GOOD = 'mx.cloudflare.net; dkim=pass header.d=acme.com; dmarc=pass header.from=acme.com';
+  const ID = 'mx.cloudflare.net';
 
   it('reads the topmost Authentication-Results and ARC-Authentication-Results from the raw header block, unfolding, ignoring the body', async () => {
     const h = await readAuthHeaders(stream('Authentication-Results: mx.a;\r\n dkim=pass header.d=a.com\r\nARC-Authentication-Results: i=1; mx.a; dkim=pass\r\nARC-Authentication-Results: i=2; evil; dkim=pass\r\nAuthentication-Results: x; dkim=pass header.d=b.com\r\n\r\nAuthentication-Results: y; in-body'));
@@ -182,30 +191,33 @@ describe('sender proof (unit)', () => {
   });
 
   it('fails closed without AUTHSERV_ID, whatever the headers say', () => {
-    for (const id of [undefined, '', '  ']) expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', id)).toEqual({ ok: false, reason: 'AUTHSERV_ID is not set' });
+    for (const id of [undefined, '', '  ']) expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', id, 'ar')).toEqual({ ok: false, reason: 'AUTHSERV_ID is not set' });
   });
 
-  it('the topmost header must name AUTHSERV_ID: a forged one above (different authserv-id) is refused', () => {
-    expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', 'mx.cloudflare.net')).toEqual({ ok: true, via: 'ar' });
-    const forged = proveSender({ ar: 'attacker.example; dkim=pass header.d=acme.com; dmarc=pass header.from=acme.com', arc: null }, 'acme.com', 'mx.cloudflare.net');
-    expect(forged).toMatchObject({ ok: false, reason: expect.stringContaining('names the configured AUTHSERV_ID') });
-    expect(proveSender({ ar: GOOD.replace('mx.cloudflare.net', 'MX.Cloudflare.NET'), arc: null }, 'acme.com', ' mx.cloudflare.net ')).toMatchObject({ ok: true });
-  });
-
-  it('the ARC fallback: topmost ARC-Authentication-Results with i=1 and our authserv-id', () => {
-    const arc = (hop: string, id = 'mx.cloudflare.net') => ({ ar: null, arc: hop + '; ' + id + '; dkim=pass header.d=acme.com' });
-    expect(proveSender(arc('i=1'), 'acme.com', 'mx.cloudflare.net')).toEqual({ ok: true, via: 'arc' });
-    expect(proveSender(arc('i=2'), 'acme.com', 'mx.cloudflare.net')).toMatchObject({ ok: false });
-    expect(proveSender(arc('i=1', 'evil.example'), 'acme.com', 'mx.cloudflare.net')).toMatchObject({ ok: false });
-    expect(proveSender({ ar: 'other; dkim=none', arc: 'i=1; mx.cloudflare.net; dkim=pass header.d=acme.com' }, 'acme.com', 'mx.cloudflare.net')).toEqual({ ok: true, via: 'arc' });
-    expect(proveSender({ ar: null, arc: 'i=1; mx.cloudflare.net; dkim=fail header.d=acme.com; dmarc=none' }, 'acme.com', 'mx.cloudflare.net')).toMatchObject({ ok: false });
-  });
-
-  it('AUTHSERV_HEADER limits trust to one kind of header (the other may be forgeable)', () => {
+  it('fails closed without AUTHSERV_HEADER (or with a value that is not ar/arc), even with both headers present and valid', () => {
     const both = { ar: GOOD, arc: 'i=1; mx.cloudflare.net; dkim=pass header.d=acme.com' };
-    expect(proveSender(both, 'acme.com', 'mx.cloudflare.net', 'arc')).toEqual({ ok: true, via: 'arc' });
-    expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', 'mx.cloudflare.net', 'arc')).toMatchObject({ ok: false });
-    expect(proveSender({ ar: null, arc: both.arc }, 'acme.com', 'mx.cloudflare.net', 'ar')).toMatchObject({ ok: false });
+    for (const only of [undefined, '', '  ', 'both', 'AUTHENTICATION-RESULTS']) expect(proveSender(both, 'acme.com', ID, only), String(only)).toEqual({ ok: false, reason: 'AUTHSERV_HEADER is not set' });
+  });
+
+  it('ar: the topmost Authentication-Results must name AUTHSERV_ID; a forged one above (another server) is refused', () => {
+    expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', ID, 'ar')).toEqual({ ok: true, via: 'ar' });
+    const forged = proveSender({ ar: 'attacker.example; dkim=pass header.d=acme.com; dmarc=pass header.from=acme.com', arc: null }, 'acme.com', ID, 'ar');
+    expect(forged).toMatchObject({ ok: false, reason: expect.stringContaining('names the configured AUTHSERV_ID') });
+    expect(proveSender({ ar: GOOD.replace(ID, 'MX.Cloudflare.NET'), arc: null }, 'acme.com', ' mx.cloudflare.net ', ' AR ')).toMatchObject({ ok: true });
+  });
+
+  it('ar: a forged ARC header is not consulted (the sender can forge the kind the receiver does not add)', () => {
+    expect(proveSender({ ar: null, arc: 'i=1; mx.cloudflare.net; dkim=pass header.d=acme.com' }, 'acme.com', ID, 'ar')).toMatchObject({ ok: false });
+    expect(proveSender({ ar: 'mx.cloudflare.net; dkim=none; dmarc=fail header.from=acme.com', arc: 'i=1; mx.cloudflare.net; dkim=pass header.d=acme.com' }, 'acme.com', ID, 'ar')).toMatchObject({ ok: false });
+  });
+
+  it('arc: the topmost ARC-Authentication-Results with i=1 and our authserv-id; a plain header is not consulted', () => {
+    const arc = (hop: string, id = ID) => ({ ar: null, arc: hop + '; ' + id + '; dkim=pass header.d=acme.com' });
+    expect(proveSender(arc('i=1'), 'acme.com', ID, 'arc')).toEqual({ ok: true, via: 'arc' });
+    expect(proveSender(arc('i=2'), 'acme.com', ID, 'arc')).toMatchObject({ ok: false });
+    expect(proveSender(arc('i=1', 'evil.example'), 'acme.com', ID, 'arc')).toMatchObject({ ok: false });
+    expect(proveSender({ ar: GOOD, arc: null }, 'acme.com', ID, 'arc')).toMatchObject({ ok: false });
+    expect(proveSender({ ar: GOOD, arc: 'i=1; mx.cloudflare.net; dkim=fail header.d=acme.com; dmarc=none' }, 'acme.com', ID, 'arc')).toMatchObject({ ok: false });
   });
 });
 
