@@ -12,12 +12,13 @@
 // A database that isn't migrated yet throws instead (index.ts), so the sender retries later.
 
 import type { BoundEnv } from '../index';
-import { intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, intakeLookups } from '@inbox-angel/db';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
-import { hostedConfig, hostedEnabled, MAX_REPORT_BYTES } from './config';
+import { authenticatedReporter } from '../dmarc/reporter-auth';
+import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 
@@ -68,10 +69,27 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
 
   const fields = { ...base, kind, workspace: target.workspace_id, domain_id: target.domain_id };
   const guarded = withRejectLog(message, fields);
+
+  // Allowance per token and UTC day, counted atomically before any parsing or enrichment. A cheap check of the
+  // Authentication-Results header comes first: a message with an aligned pass is charged to its own reporter domain's
+  // allowance; everything else shares one small bucket, so junk sent to a (public) token can't use up genuine reports.
+  const limits = intakeLimits(env);
+  const day = new Date().toISOString().slice(0, 10);
+  const reporter = authenticatedReporter(message.headers);
+  const intake = forWorkspace(env.DB, target.workspace_id).intake;
+  const ok = reporter
+    ? await intake.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay)
+    : await intake.tryConsume(target.domain_id, day, '', message.rawSize, limits.unauthReportsPerDay, limits.unauthBytesPerDay);
+  if (!ok) {
+    return reject(message, { ...fields, limit: 'daily' }, 'Daily intake limit for this address reached; try again tomorrow');
+  }
   const tenant = await loadTenant(env, { workspaceId: target.workspace_id });
 
   if (kind === 'rua') {
-    const { failure_count } = await handleDmarcReport(guarded, tenant, { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } });
+    const { failure_count } = await handleDmarcReport(guarded, tenant, {
+      maxBytes: MAX_REPORT_BYTES, maxRecords: limits.recordsPerReport, maxNewIps: limits.newIpsPerReport,
+      token: { id: target.domain_id, domain: target.domain },
+    });
     track(tenant, { event: 'report.received', failure_count });
   } else {
     const { failure_count } = await handleTlsRptReport(guarded, tenant, { hosted: { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } } });

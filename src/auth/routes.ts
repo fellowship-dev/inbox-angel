@@ -41,6 +41,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** Better Auth endpoints reachable from outside, as `METHOD /path`. */
 const PASSTHROUGH: readonly RegExp[] = [
   /^GET \/get-session$/,
+  /^GET \/verify-email$/,
   /^POST \/sign-in\/social$/,
   /^GET \/callback\/(github|google)$/,
   /^GET \/error$/,
@@ -97,10 +98,17 @@ async function authError(res: Response, fallback: string): Promise<Response> {
   return out;
 }
 
-/** The session response → `{ token }` for the dashboard, plus the session cookie for browsers. */
-function sessionResponse(res: Response, body: Record<string, unknown>, status = 200): Response {
-  const token = res.headers.get('set-auth-token');
-  const out = json({ token, ...body }, status);
+/** Browsers always say where a request came from; scripts (curl, tests, the CLI) do not. */
+const fromBrowser = (request: Request): boolean => request.headers.has('origin') || request.headers.has('sec-fetch-site');
+
+/**
+ * The session response. The session itself travels in the HttpOnly cookie, which script on the page cannot read, so a
+ * browser is never handed the token in the body. Non-browser callers (no Origin / Sec-Fetch-Site) get `{ token }` to
+ * send as a bearer credential.
+ */
+function sessionResponse(request: Request, res: Response, body: Record<string, unknown>, status = 200): Response {
+  const token = fromBrowser(request) ? undefined : res.headers.get('set-auth-token');
+  const out = json({ ...(token !== undefined ? { token } : {}), ...body }, status);
   for (const cookie of setCookies(res.headers)) out.headers.append('set-cookie', cookie);
   return out;
 }
@@ -111,11 +119,16 @@ async function limited(env: Env, request: Request): Promise<boolean> {
   return !success;
 }
 
-async function turnstileFails(env: Env, request: Request, token: string | undefined): Promise<boolean> {
-  const secret = await platform(env).settings.get('turnstile_secret_key');
-  if (!secret?.value) return false;
-  if (!token) return true;
-  return !(await verifyTurnstile(token, secret.value, request.headers.get('CF-Connecting-IP') ?? ''));
+/**
+ * Bot check. A configured Turnstile secret (hosted: TURNSTILE_SECRET_KEY; else the platform setting) requires a valid
+ * token. Hosted fails closed: without a secret nobody can sign up, so a misconfiguration cannot turn InboxAngel into
+ * an open mail relay. Returns the refusal, or null to carry on.
+ */
+async function botCheck(env: Env, request: Request, token: string | undefined): Promise<Response | null> {
+  const secret = (isSaas(env) ? env.TURNSTILE_SECRET_KEY : undefined) || (await platform(env).settings.get('turnstile_secret_key'))?.value;
+  if (!secret) return isSaas(env) ? err('sign-up is unavailable: bot protection is not configured on this service', 503) : null;
+  if (!token || !(await verifyTurnstile(token, secret, request.headers.get('CF-Connecting-IP') ?? ''))) return err('Bot check failed', 403);
+  return null;
 }
 
 /** Creates a user through Better Auth under the given sign-up intent and returns its session response. */
@@ -158,7 +171,7 @@ export async function handleAuthRoute(
     const t = await tenantFor();
     const mine = !saas || !!t.userId ? t : null;
     const [tsKeyRow, customDomainRow, telemetryRow] = await Promise.all([
-      platform(env).settings.get('turnstile_site_key'),
+      isSaas(env) && env.TURNSTILE_SITE_KEY ? Promise.resolve({ value: env.TURNSTILE_SITE_KEY }) : platform(env).settings.get('turnstile_site_key'),
       mine?.scope.settings.get('custom_domain') ?? null,
       mine?.scope.settings.get('telemetry_opted_in') ?? null,
     ]);
@@ -192,7 +205,7 @@ export async function handleAuthRoute(
     if (!body.email || !body.password) return err('email and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
     if (!EMAIL_RE.test(body.email)) return err('invalid email', 400);
-    if (await turnstileFails(env, request, body.cf_turnstile_token)) return err('Bot check failed', 403);
+    { const bot = await botCheck(env, request, body.cf_turnstile_token); if (bot) return bot; }
 
     const email = body.email.toLowerCase().trim();
     const { res, user } = await signUp(env, request, ctx, { kind: isSetup ? 'setup' : 'signup' }, {
@@ -200,6 +213,8 @@ export async function handleAuthRoute(
     });
     if (!res.ok || !user) return authError(res, 'sign-up failed');
 
+    // Self-host: the instance owner is verified at setup (there may be no outbound email to verify with).
+    if (isSetup) await globalQueries(env.DB).users.markEmailVerified(user.id);
     if (isSetup && body.telemetry !== undefined) await platform(env).settings.set('telemetry_opted_in', body.telemetry ? 'true' : 'false');
     auditUser(env, ctx, user.id, {
       actor_id: user.id, actor_email: email, actor_type: 'user',
@@ -212,7 +227,7 @@ export async function handleAuthRoute(
 
     const hasDomain = !isSetup ? false
       : (await platform(env).domains.list()).length > 0 || !!(await platform(env).settings.get('base_domain'))?.value;
-    return sessionResponse(res, { has_domain: hasDomain }, 201);
+    return sessionResponse(request, res, { has_domain: hasDomain, verification_required: !isSetup && isSaas(env) }, 201);
   }
 
   // ── POST /api/auth/login ────────────────────────────────────
@@ -220,11 +235,16 @@ export async function handleAuthRoute(
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
     const body = await readJson<{ email?: string; password?: string; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);
-    if (await turnstileFails(env, request, body.cf_turnstile_token)) return err('Bot check failed', 403);
+    { const bot = await botCheck(env, request, body.cf_turnstile_token); if (bot) return bot; }
 
     const auth = await createAuth(env, request, { ctx });
     const res = await callAuth(auth, env, request, '/sign-in/email', { body: { email: body.email.toLowerCase().trim(), password: body.password } });
-    if (!res.ok) return res.status === 429 ? authError(res, 'too many requests') : err('invalid credentials', 401);
+    if (!res.ok) {
+      if (res.status === 429) return authError(res, 'too many requests');
+      // Right password, unproven mailbox (hosted): Better Auth has just sent a fresh verification email.
+      if (res.status === 403) return err('verify your email address first — we sent you a new link', 403, 'email_not_verified');
+      return err('invalid credentials', 401);
+    }
 
     const { user } = await res.clone().json() as { user: { id: string; email: string } };
     auditUser(env, ctx, user.id, {
@@ -233,7 +253,38 @@ export async function handleAuthRoute(
       resource_type: 'user', resource_id: user.id, resource_name: user.email,
       meta: { ip: request.headers.get('CF-Connecting-IP') ?? 'unknown' },
     });
-    return sessionResponse(res, {});
+    return sessionResponse(request, res, {});
+  }
+
+  // ── POST /api/auth/resend-verification — always the same answer ──
+  if (path === '/api/auth/resend-verification' && method === 'POST') {
+    if (!isSaas(env)) return err('email verification is not used on this instance', 404);
+    if (await limited(env, request)) return err('Too many requests — try again later', 429);
+    const body = await readJson<{ email?: string }>(request);
+    if (!body.email) return err('email is required', 400);
+    const auth = await createAuth(env, request, { ctx });
+    const res = await callAuth(auth, env, request, '/send-verification-email', { body: { email: body.email.toLowerCase().trim(), callbackURL: '/' } });
+    if (res.status === 429) return authError(res, 'too many requests');
+    return json({ ok: true });
+  }
+
+  // ── GET /api/auth/verify-email — the emailed link ──
+  // Proving the mailbox must not hand over an account whose password someone else chose, so a password set before
+  // the address was verified is discarded, every session ends, and the person who clicked sets their own.
+  if (path === '/api/auth/verify-email' && method === 'GET') {
+    if (await limited(env, request)) return err('Too many requests — try again later', 429);
+    let verified: { id: string } | null = null;
+    const auth = await createAuth(env, request, { ctx, onEmailVerified: u => { verified = u; } });
+    const res = await auth.handler(new Request(request.url, { method: 'GET', headers: request.headers }));
+    if (!verified) return res;
+    const q = globalQueries(env.DB);
+    const { id } = verified as { id: string };
+    if (!(await q.users.hasPassword(id))) return res;
+    await q.users.discardPassword(id);
+    await q.sessions.revokeAll(id);
+    const token = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, '0')).join('');
+    await q.verifications.createResetToken(id, token, Math.floor(Date.now() / 1000));
+    return new Response(null, { status: 302, headers: { location: `/#/reset/${token}` } });
   }
 
   // ── POST /api/auth/logout ───────────────────────────────────
@@ -293,7 +344,7 @@ export async function handleAuthRoute(
 
     // Resetting revokes every session; start a fresh one so the dashboard can carry on.
     const login = await callAuth(auth, env, request, '/sign-in/email', { body: { email: user.email, password: body.password } });
-    return login.ok ? sessionResponse(login, {}) : json({ token: null });
+    return login.ok ? sessionResponse(request, login, {}) : json({ token: null });
   }
 
   // ── Invites: GET info, POST accept ──────────────────────────
@@ -321,6 +372,7 @@ export async function handleAuthRoute(
       if (await limited(env, request)) return err('Too many requests — try again later', 429);
       const me = await currentUser(request, env, ctx).catch(() => null);
       if (!me) return err('sign in as ' + invite.email + ' to accept this invite', 401);
+      if (isSaas(env) && !me.emailVerified) return err('verify your email address before accepting this invite', 403, 'email_not_verified');
       if (me.email.toLowerCase() !== invite.email) return err(`this invite is for ${invite.email}, but you are signed in as ${me.email} — sign out and sign in as ${invite.email} to accept it`, 403, 'wrong_user');
       const team = forWorkspace(env.DB, invite.workspace_id).team;
       if (!(await team.claimInvite(invite.token))) return err('invite not found or expired', 404);
@@ -339,17 +391,27 @@ export async function handleAuthRoute(
     if (!body.name || !body.password) return err('name and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
 
+    // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary account (which must be
+    // verified, and sets its password at verification) and then accepts while signed in as that verified address.
+    if (isSaas(env)) {
+      const created = await signUp(env, request, ctx, { kind: 'signup' }, { name: body.name.trim(), email: invite.email, password: body.password });
+      if (!created.res.ok) return authError(created.res, 'could not create account');
+      return sessionResponse(request, created.res, { verification_required: true, invite_pending: true }, 201);
+    }
+
     const { res, user } = await signUp(env, request, ctx, { kind: 'invite', token: invite.token }, {
       name: body.name.trim(), email: invite.email, password: body.password,
     });
     if (!res.ok || !user) return authError(res, 'could not accept invite');
+    // Self-host: an invited teammate is verified by the invite itself (there is no verification mail to rely on).
+    await globalQueries(env.DB).users.markEmailVerified(user.id);
     auditUser(env, ctx, user.id, {
       actor_id: user.id, actor_email: invite.email, actor_type: 'user',
       action: 'auth.invite_accepted',
       resource_type: 'user', resource_id: user.id, resource_name: invite.email,
       after_value: { email: invite.email, role: invite.role, invited_by: invite.invited_by },
     }, invite.workspace_id);
-    return sessionResponse(res, {}, 201);
+    return sessionResponse(request, res, {}, 201);
   }
 
   // ── Better Auth's own endpoints: OAuth, sessions, change-password ──
@@ -369,7 +431,14 @@ export async function handleAuthRoute(
       try { parsed = JSON.parse(body as string); } catch { return err('Invalid JSON body', 400); }
       body = JSON.stringify({ ...parsed, revokeOtherSessions: true });
     }
-    return auth.handler(new Request(request.url, { method, headers, body }));
+    const res = await auth.handler(new Request(request.url, { method, headers, body }));
+    if (fromBrowser(request) && res.headers.has('set-auth-token')) {
+      // Same rule as sessionResponse: a browser holds its session in the cookie only.
+      const clean = new Response(res.body, res);
+      clean.headers.delete('set-auth-token');
+      return clean;
+    }
+    return res;
   }
 
   return null;

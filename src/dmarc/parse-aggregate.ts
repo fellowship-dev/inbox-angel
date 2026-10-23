@@ -58,10 +58,19 @@ const BARE_IP_INFO = (ip: string): IpInfo => ({
   country_name: null, subdivision: null, city: null, org: null, asn: null,
 });
 
+/** Limits on a single report's work; unset = unlimited (self-host). */
+export interface ParseLimits {
+  /** Refuse (before any lookup) a report with more records than this. */
+  maxRecords?: number;
+  /** Uncached source IPs to enrich per report; further records are stored with bare IP info. */
+  maxNewIps?: number;
+}
+
 async function parseReportRecord(
   record: Record<string, unknown>,
   offline = false,
   db?: D1Database,
+  budget?: { newIps: number },
 ): Promise<ReportRecord> {
   const row = record['row'] as Record<string, unknown>;
   if (!row?.['source_ip']) throw new Error('Source IP address is empty');
@@ -74,7 +83,10 @@ async function parseReportRecord(
     const cached = db ? await getCachedIpInfo(db, ip) : null;
     if (cached) {
       source = cached;
+    } else if (budget && budget.newIps <= 0) {
+      source = BARE_IP_INFO(ip);
     } else {
+      if (budget) budget.newIps--;
       source = await getIpInfo(ip);
       if (db) await cacheIpInfo(db, source).catch(() => {}); // best-effort
     }
@@ -161,6 +173,7 @@ export async function parseAggregateReportXml(
   xml: string | Uint8Array,
   offline = false,
   db?: D1Database,
+  limits: ParseLimits = {},
 ): Promise<AggregateReport> {
   try {
     if (xml instanceof Uint8Array) {
@@ -235,10 +248,15 @@ export async function parseAggregateReportXml(
     if (!rawRecords) throw new InvalidAggregateReport('Missing field: record');
     const recordList = Array.isArray(rawRecords) ? rawRecords : [rawRecords];
 
+    if (limits.maxRecords !== undefined && recordList.length > limits.maxRecords) {
+      throw new InvalidAggregateReport(`Report has ${recordList.length} records; the limit is ${limits.maxRecords}`);
+    }
+    const budget = limits.maxNewIps === undefined ? undefined : { newIps: limits.maxNewIps };
+
     const records: ReportRecord[] = [];
     for (const r of recordList as Record<string, unknown>[]) {
       try {
-        records.push(await parseReportRecord(r, offline, db));
+        records.push(await parseReportRecord(r, offline, db, budget));
       } catch (e) {
         // parsedmarc warns and skips bad records — match that behaviour
         console.warn(`Skipping unparseable record: ${e}`);

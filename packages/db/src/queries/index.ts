@@ -4,6 +4,7 @@ import { apiKeyQueries } from './api-keys';
 import { analyticsQueries } from './analytics';
 import { auditQueries } from './audit';
 import { baseDomainQueries } from './base-domain';
+import { claimQueries } from './claims';
 import { connectionQueries } from './connections';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
@@ -15,6 +16,8 @@ import { settingsQueries } from './settings';
 import { teamQueries } from './team';
 
 export * from './reports';
+export type { DomainClaimRow } from './claims';
+export { claimLookups } from './claims';
 export type { SenderRow, TrendRow } from './analytics';
 export { FIRST_SEEN_HORIZON_DAYS } from './analytics';
 export * from './audit';
@@ -43,6 +46,7 @@ export function forWorkspace(db: DbLike, workspaceId: string) {
 	return {
 		workspaceId,
 		domains: domainQueries(d, workspaceId),
+		claims: claimQueries(d, workspaceId),
 		reports: reportQueries(d, workspaceId),
 		analytics: analyticsQueries(d, workspaceId),
 		monitor: monitorQueries(d, workspaceId),

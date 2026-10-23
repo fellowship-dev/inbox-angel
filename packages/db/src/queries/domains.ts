@@ -28,7 +28,7 @@ export function domainQueries(db: Db, workspaceId: string) {
 			return db.select().from(domains).where(and(mine, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
 		},
 
-		async insert(d: { domain: string; rua_address: string }) {
+		async insert(d: { domain: string; rua_address: string; verified_via?: string }) {
 			// Auto-detect parent: strip the leftmost label and check if the apex exists
 			const parts = d.domain.split('.');
 			let parentId: number | null = null;
@@ -41,7 +41,7 @@ export function domainQueries(db: Db, workspaceId: string) {
 				if (parent) parentId = parent.id;
 			}
 			try {
-				return await db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId }).run();
+				return await db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId, verified_via: d.verified_via }).run();
 			} catch (e) {
 				throw unwrapDriverError(e); // callers match on 'UNIQUE'
 			}

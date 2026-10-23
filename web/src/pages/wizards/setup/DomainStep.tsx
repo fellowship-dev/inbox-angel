@@ -1,10 +1,12 @@
 import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@inbox-angel/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
+import { ClaimCard } from '../../../components/domain/ClaimCard';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepFooter } from '../../../components/wizard/StepNav';
 import { WriteButton } from '../../../components/states';
 import { api, errorMessage } from '../../../lib/api';
+import type { DomainClaim } from '../../../lib/types';
 
 interface Zone {
 	id: string;
@@ -14,9 +16,12 @@ interface Zone {
 
 interface BaseDomainResult {
 	ok: boolean;
-	domain: string;
-	domain_id: number;
-	reports_domain: string;
+	domain: string | null;
+	domain_id?: number;
+	reports_domain?: string;
+	/** 202: the domain's ownership still has to be proven with a DNS TXT record. */
+	pending?: boolean;
+	claim?: DomainClaim;
 }
 
 export const DOMAIN_PATTERN = /^[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -28,6 +33,7 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	const [domain, setDomain] = useState('');
 	const [manual, setManual] = useState(false);
 	const [validation, setValidation] = useState('');
+	const [claim, setClaim] = useState<DomainClaim | null>(null);
 
 	// A failed zone lookup (no Cloudflare token, API down) just means typing the domain by hand.
 	const zones = useQuery({ queryKey: ['zones'], queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
@@ -36,7 +42,10 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 
 	const save = useMutation({
 		mutationFn: (d: string) => api<BaseDomainResult>('/api/settings/base-domain', { method: 'POST', body: { domain: d } }),
-		onSuccess: (r) => onDomainSet(r.domain_id),
+		onSuccess: (r) => {
+			if (r.pending && r.claim) setClaim(r.claim);
+			else if (r.domain_id !== undefined) onDomainSet(r.domain_id);
+		},
 	});
 
 	function submit(e: FormEvent) {
@@ -48,6 +57,14 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 		}
 		setValidation('');
 		save.mutate(d);
+	}
+
+	if (claim) {
+		return (
+			<StepCard title="Verify you own this domain" focusHeading={false}>
+				<ClaimCard claim={claim} onVerified={(d) => onDomainSet(d.id)} onRemoved={() => setClaim(null)} />
+			</StepCard>
+		);
 	}
 
 	const error = validation || (save.isError ? errorMessage(save.error) : '');

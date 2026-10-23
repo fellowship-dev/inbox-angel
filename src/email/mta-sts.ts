@@ -74,12 +74,13 @@ async function createDnsRecord(
   domain: string,
   record: CfDnsRecordInput,
   audit?: MtaStsAuditOpts,
+  cnameTarget?: string,
 ): Promise<string> {
   const cf = await tenant.cfFor(domain);
   const zone = await cf.zoneFor(domain);
   let created;
   try {
-    created = await cf.createDnsRecord(zone.id, record);
+    created = await cf.createDnsRecord(zone.id, record, { cnameTargets: cnameTarget ? [cnameTarget] : undefined });
   } catch (e) {
     throw new Error(`CF DNS create failed for ${record.name}: ${cfErrorText(e)}`);
   }
@@ -263,7 +264,7 @@ export async function provisionMtaSts(
     ttl: 1,       // 1 = auto (CF proxied)
     proxied: true,
     comment: `InboxAngel MTA-STS policy server for ${domain}`,
-  }, audit);
+  }, audit, workerHost);
 
   return { mta_sts_record_id, tls_rpt_record_id, cname_record_id, mx_hosts, policy_id, mode };
 }

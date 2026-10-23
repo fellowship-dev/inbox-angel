@@ -1,4 +1,5 @@
 export { AuthBadge } from './AuthBadge';
+export { ReporterAuthBadge } from './ReporterAuthBadge';
 export { ProviderName } from './ProviderName';
 export { Segmented } from './Segmented';
 export { SourceRow, SourceStatus, SourceTable } from './SourceRow';

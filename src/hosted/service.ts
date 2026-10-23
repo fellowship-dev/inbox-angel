@@ -11,7 +11,7 @@ import type { TenantContext } from '../tenancy/context';
 import { CfError, CfNotConfiguredError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import { discoverMxHosts, generatePolicyId } from '../email/mta-sts';
-import { hostedApex, hostedConfig, hostedEnabled } from './config';
+import { hostedApex, hostedConfig, hostedEnabled, maxHostedDomainsPerWorkspace } from './config';
 import { generateHostedId, generateToken, hashToken, intakeAddress } from './tokens';
 import {
   buildHostedDmarc, buildHostedTlsRpt, hostedNames, openHostedZone, retargetRua, HostedNameError, type HostedRecordWriter,
@@ -111,6 +111,8 @@ export async function enableHosted(
 ): Promise<{ hosted: HostedView; addresses: Addresses }> {
   const { intakeDomain, apex } = requireHosted(tenant);
   if (await tenant.scope.hosted.get(domain.id)) throw new HostedError('Hosted records are already enabled for this domain', 409);
+  const cap = maxHostedDomainsPerWorkspace(tenant.env);
+  if (await tenant.scope.hosted.count() >= cap) throw new HostedError(`This workspace already hosts records for ${cap} domains, the maximum. Disable hosted records on one first.`, 429);
   const resolver = deps.resolver ?? createResolver();
 
   // The SPF the hosted record is built from: given, or what the domain publishes now.

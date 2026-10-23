@@ -9,8 +9,8 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { bearer } from 'better-auth/plugins';
 import { betterAuthSchema, getDb, globalQueries } from '@inbox-angel/db';
 import { hashPassword, verifyPassword } from '../api/password';
-import { baseUrl, oauthProviders, trustedOrigins, type AuthEnv } from './config';
-import { sendPasswordResetEmail } from './mail';
+import { baseUrl, isSaas, oauthProviders, trustedOrigins, type AuthEnv } from './config';
+import { sendPasswordResetEmail, sendVerificationEmail } from './mail';
 import { d1RateLimitStorage } from './rate-limit';
 import { authSecret } from './secret';
 import { assertMaySignUp, provisionUser, type SignupIntent } from './signup-policy';
@@ -23,12 +23,13 @@ const SESSION_SECONDS = 30 * 24 * 3600;
 export async function createAuth(
   env: AuthEnv,
   request: Request,
-  opts: { intent?: SignupIntent; ctx?: Pick<ExecutionContext, 'waitUntil'> } = {},
+  opts: { intent?: SignupIntent; ctx?: Pick<ExecutionContext, 'waitUntil'>; onEmailVerified?: (user: { id: string; email: string }) => void } = {},
 ) {
   const intent: SignupIntent = opts.intent ?? { kind: 'external' };
   const origin = baseUrl(env, new URL(request.url).origin);
   const db = env.DB as D1Database;
   const providers = oauthProviders(env);
+  const saas = isSaas(env);
 
   return betterAuth({
     appName: 'InboxAngel',
@@ -42,6 +43,9 @@ export async function createAuth(
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,
+      // Hosted: no session until the mailbox is proven (sign-up and sign-in both send the verification email).
+      // Self-host: the owner is verified at setup, teammates arrive by invite, and outbound mail may not reach them.
+      requireEmailVerification: saas,
       autoSignIn: true,
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: 3600,
@@ -54,7 +58,25 @@ export async function createAuth(
       },
     },
 
+    emailVerification: {
+      sendOnSignUp: saas,
+      sendOnSignIn: saas,
+      // Verifying never signs anyone in: whoever typed the password at sign-up is not necessarily the mailbox owner, so
+      // verification becomes a set-password step (see the /verify-email route in routes.ts).
+      autoSignInAfterVerification: false,
+      afterEmailVerification: async (user) => { opts.onEmailVerified?.({ id: user.id, email: user.email }); },
+      expiresIn: 24 * 3600,
+      sendVerificationEmail: async ({ user, url }) => {
+        await sendVerificationEmail(env, user, url);
+      },
+    },
+
     socialProviders: providers,
+
+    // Accounts are linked only when both emails are verified: the local account's (so a password registered by
+    // someone else for this address cannot be inherited by the real owner's Google/GitHub login) and the provider's
+    // (no provider is trusted blindly).
+    account: { accountLinking: { enabled: true, requireLocalEmailVerified: true, trustedProviders: [] } },
 
     session: { expiresIn: SESSION_SECONDS, updateAge: 24 * 3600 },
 
@@ -64,10 +86,19 @@ export async function createAuth(
       user: {
         create: {
           before: async (user) => {
-            await assertMaySignUp(env, intent, user.email.toLowerCase());
+            await assertMaySignUp(env, intent, user.email.toLowerCase(), user.emailVerified === true);
           },
           after: async (user) => {
-            await provisionUser(env, intent, { id: user.id, email: user.email.toLowerCase(), name: user.name });
+            await provisionUser(env, intent, { id: user.id, email: user.email.toLowerCase(), name: user.name, emailVerified: user.emailVerified === true });
+          },
+        },
+      },
+      account: {
+        create: {
+          // The first time an OAuth login attaches to a user, every session they already had ends: whoever held them
+          // (e.g. the registrant of a password for this address) no longer has access.
+          after: async (account) => {
+            if (account.providerId !== 'credential') await globalQueries(db).sessions.revokeAll(account.userId);
           },
         },
       },
@@ -97,6 +128,9 @@ export async function createAuth(
 
     advanced: {
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
+      // The browser session cookie: HttpOnly, SameSite=Lax, and Secure whenever the dashboard is served over https.
+      useSecureCookies: origin.startsWith('https://'),
+      defaultCookieAttributes: { httpOnly: true, sameSite: 'lax', path: '/' },
       backgroundTasks: opts.ctx ? { handler: (p: Promise<unknown>) => opts.ctx!.waitUntil(p) } : undefined,
     },
   });

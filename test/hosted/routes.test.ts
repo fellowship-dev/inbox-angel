@@ -5,7 +5,7 @@ vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public fr
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import worker from '../../src/index';
-import { call, makeEnv } from '../auth/helpers';
+import { call, makeEnv, signupVerified } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { hostedNames } from '../../src/hosted/records';
 import { refreshHostedMtaStsMx } from '../../src/hosted/cron';
@@ -22,9 +22,7 @@ async function setup() {
   const env = makeEnv(db, { ...HOSTED_ENV }) as any;
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
   const signup = async (email: string) => {
-    const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
-    expect(r.status).toBe(201);
-    const { token } = await r.json() as { token: string };
+    const token = await signupVerified(env, email);
     const ws = rows('SELECT m.workspace_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0].workspace_id as string;
     return { token, ws };
   };

@@ -1,6 +1,7 @@
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
-import { AlertTriangle, CheckCircle2, Copy, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Copy, XCircle } from 'lucide-react';
 import { Link } from 'react-router';
+import { ClaimCard } from './ClaimCard';
 import type { BulkImportItem, BulkImportResponse } from '../../lib/domain-queries';
 
 const STATUS = {
@@ -8,11 +9,13 @@ const STATUS = {
 	duplicate: { label: 'Already added', variant: 'neutral', Icon: Copy },
 	invalid: { label: 'Invalid', variant: 'danger', Icon: XCircle },
 	error: { label: 'Error', variant: 'danger', Icon: AlertTriangle },
+	pending: { label: 'Waiting for verification', variant: 'warning', Icon: Clock },
 } as const;
 
 function note(r: BulkImportItem): string {
 	const parts: string[] = [];
 	if (r.status === 'imported') parts.push(r.manual_dns ? 'DNS provisioning: manual required' : 'DNS provisioned');
+	if (r.status === 'pending') parts.push('Add the TXT record below to prove ownership');
 	if (r.status === 'duplicate') parts.push('Already registered');
 	if (r.error) parts.push(r.error);
 	return parts.join('. ');
@@ -53,6 +56,14 @@ export function ImportResults({ result, showNotes = true }: { result: BulkImport
 					})}
 				</TableBody>
 			</Table>
+			{result.results.some((r) => r.status === 'pending' && r.claim) ? (
+				<section aria-labelledby="import-waiting" className="space-y-3">
+					<h3 id="import-waiting" className="text-base font-semibold">
+						Waiting for verification
+					</h3>
+					{result.results.flatMap((r) => (r.status === 'pending' && r.claim ? [<ClaimCard key={r.claim.id} claim={r.claim} />] : []))}
+				</section>
+			) : null}
 			{result.imported > 0 ? (
 				<Link to="/" className="inline-block text-sm text-brand-ink underline underline-offset-4">
 					Back to all domains

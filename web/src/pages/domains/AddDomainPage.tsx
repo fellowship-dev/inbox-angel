@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
+import { ClaimCard } from '../../components/domain/ClaimCard';
 import { InheritanceBanner } from '../../components/domain/InheritanceBanner';
 import { ReadOnlyNotice, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
 import { normalizeDomain } from '../../lib/dmarc';
 import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
-import type { AddDomainResult } from '../../lib/types';
+import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
 const POLL_MS = 15_000;
 
@@ -95,20 +96,34 @@ export function AddDomainPage() {
 	const [input, setInput] = useState('');
 	const [manual, setManual] = useState(false);
 	const [result, setResult] = useState<AddDomainResult | null>(null);
+	const [pending, setPending] = useState<PendingDomainResult | null>(null);
 
 	// A missing Cloudflare token (400) or any failure just means "type it in".
 	const zonesQ = useQuery({ queryKey: domainKeys.zones, queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
 	const zones = !manual && zonesQ.data && zonesQ.data.length > 0 ? zonesQ.data : null;
 
 	const add = useMutation({
-		mutationFn: (domain: string) => api<AddDomainResult>('/api/domains', { method: 'POST', body: { domain } }),
+		mutationFn: (domain: string) => api<AddDomainResult | PendingDomainResult>('/api/domains', { method: 'POST', body: { domain } }),
 		onSuccess: async (res) => {
-			setResult(res);
+			// 202: ownership has to be proven first; nothing is monitored yet.
+			if ('pending' in res && res.pending) setPending(res);
+			else setResult(res as AddDomainResult);
 			await qc.invalidateQueries({ queryKey: ['domains'] });
 		},
 	});
 
 	if (result) return <SetupStep result={result} />;
+	if (pending) {
+		return (
+			<div className="max-w-2xl space-y-6">
+				<PageHeader title="Verify you own this domain" description="One DNS record and we can start. Nothing is monitored until it is verified." />
+				<ClaimCard claim={pending.claim} onVerified={(d) => setResult({ domain: d, rua_hint: '' })} onRemoved={() => { setPending(null); setInput(''); }} />
+				<p className="text-sm text-ink-2">
+					You can leave this page: the domain stays under “Waiting for verification” on the <Link className="text-brand-ink underline underline-offset-4" to="/">Domains</Link> page.
+				</p>
+			</div>
+		);
+	}
 
 	function submit(e: FormEvent) {
 		e.preventDefault();

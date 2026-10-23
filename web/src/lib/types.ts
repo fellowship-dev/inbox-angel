@@ -29,6 +29,25 @@ export interface DomainStats {
   stats: DailyStat[];
 }
 
+/** A domain someone asked to monitor but has not proven they own (SaaS). `lost`: another workspace verified it first. */
+export interface DomainClaim {
+  id: number | string;
+  domain: string;
+  status: 'pending' | 'lost';
+  txt_name: string;
+  txt_value: string;
+  created_at: number;
+  last_checked_at: number | null;
+  last_error: string | null;
+}
+
+/** POST /api/domains answers 202 with this when ownership still has to be proven. */
+export interface PendingDomainResult {
+  pending: true;
+  claim: DomainClaim;
+  domain: null;
+}
+
 export interface AddDomainResult {
   domain: Domain;
   rua_hint: string;
@@ -101,6 +120,9 @@ export interface AggregateReport {
   total_count: number;
   pass_count: number;
   fail_count: number;
+  /** Did the report email itself pass DMARC-aligned auth? null = reported before this was recorded. */
+  reporter_auth?: 'pass' | 'fail' | 'none' | null;
+  reporter_auth_domain?: string | null;
 }
 
 export interface SpfFlatConfig {

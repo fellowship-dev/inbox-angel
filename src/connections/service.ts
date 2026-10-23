@@ -14,9 +14,11 @@ import {
   CfAuthError,
   CfClient,
   CfConnectionError,
+  CfRecordNotAllowedError,
   CfZoneNotAllowedError,
   type CfPolicy,
 } from '../tenancy/cf-client';
+import { getMode, type Mode } from '../tenancy/mode';
 import { TokenCrypto, TokenMaterial, envelopeAad, type CryptoEnv } from './crypto';
 import {
   OAuthError,
@@ -27,7 +29,7 @@ import {
   type OAuthTokens,
 } from './oauth';
 
-export type ConnectionEnv = CryptoEnv & OAuthEnv;
+export type ConnectionEnv = CryptoEnv & OAuthEnv & { MODE?: string };
 
 /** What the connection layer needs from its tenant. */
 export interface ConnectionHost {
@@ -353,7 +355,8 @@ export class ConnectionService {
     if (row.status !== 'active') throw new CfConnectionError(row.status, id, row.label);
     this.crypt; // surface a missing key now, not mid-request
 
-    const policy: CfPolicy | undefined = restricted ? policyFor(id, await q.zones(id), await q.blockedZones(id), row.cf_account_id) : undefined;
+    const mode = getMode(this.#host.env);
+    const policy: CfPolicy | undefined = restricted ? policyFor(id, await q.zones(id), await q.blockedZones(id), row.cf_account_id, mode) : undefined;
 
     const now = this.#now;
     if (!row.last_used_at || now - row.last_used_at > LAST_USED_THROTTLE_SECONDS) await q.markUsed(id, now).catch(() => {});
@@ -361,6 +364,7 @@ export class ConnectionService {
     return new CfClient(async () => (await this.#current(id)).material.access(), {
       fetch: this.#host.fetch,
       policy,
+      mode,
       onUnauthorized: () => this.#unauthorized(id),
     });
   }
@@ -513,6 +517,7 @@ function safeOauthConfig(env: OAuthEnv) {
 }
 
 const ZONE_ID = /^[0-9a-f]{32}$/;
+const RECORD_ID = /^[0-9a-f]{32}$/;
 
 /**
  * The allow-list as a CfClient policy. Refuses, without sending anything:
@@ -521,7 +526,8 @@ const ZONE_ID = /^[0-9a-f]{32}$/;
  *  - `/accounts/<id>/…` of any Cloudflare account not derived from the connection: its recorded account and the
  *    accounts of its allowed zones. When none is known, every `/accounts/*` call is refused.
  */
-function policyFor(connectionId: string, zones: CfConnectionZone[], blockedZones: { zone_name: string }[], cfAccountId: string | null): CfPolicy {
+export function policyFor(connectionId: string, zones: CfConnectionZone[], blockedZones: { zone_name: string }[], cfAccountId: string | null, mode: Mode): CfPolicy {
+  const zoneNameById = new Map(zones.map(z => [z.zone_id, z.zone_name.toLowerCase()]));
   const allowed = new Set(zones.map(z => z.zone_id).filter(z => ZONE_ID.test(z)));
   const names = new Set(zones.map(z => z.zone_name.toLowerCase()));
   const blockedNames = blockedZones.map(z => z.zone_name.toLowerCase());
@@ -529,17 +535,40 @@ function policyFor(connectionId: string, zones: CfConnectionZone[], blockedZones
   // is how a child zone created after the list was saved is noticed. Nothing outside the allowed subtrees is asked.
   const inScope = (name: string) => names.has(name) || [...names].some(n => name.endsWith(`.${n}`));
   const accounts = new Set<string>([...(cfAccountId ? [cfAccountId] : []), ...zones.flatMap(z => (z.cf_account_id ? [z.cf_account_id] : []))]);
+  // saas: an operation allow-list. Writes are DNS records only; reads are the few the product makes.
+  const operation = (method: string, path: string) => {
+    const p = path.split('?')[0];
+    const dns = p.match(/^\/zones\/[^/]+\/dns_records(?:\/([^/]+))?$/);
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (!dns) {
+        if (mode === 'saas') throw new CfRecordNotAllowedError('this connection may only write DNS records', { method, path: p });
+        return;
+      }
+      if (dns[1] !== undefined && !RECORD_ID.test(dns[1])) throw new CfRecordNotAllowedError('malformed DNS record id', { method, path: p });
+      return;
+    }
+    if (mode !== 'saas') return;
+    const ok = p === '/zones' || p === '/user/tokens/verify' || p.startsWith('/accounts') ||
+      /^\/zones\/[^/]+(?:\/dns_records(?:\/[^/]+)?|\/workers\/routes)?$/.test(p);
+    if (!ok) throw new CfRecordNotAllowedError('this connection may not read that Cloudflare resource', { method, path: p });
+  };
   return {
-    request(_method, path, query) {
+    request(method, path, query) {
+      // Which zone / account is asked about comes first; only then what is being done to it.
       if (path === '/zones') {
         const name = typeof query?.name === 'string' ? query.name.toLowerCase() : undefined;
         if (!name || !inScope(name)) throw new CfZoneNotAllowedError(name ?? '(zone list)', connectionId);
+        operation(method, path);
         return;
       }
       const zone = path.match(/^\/zones\/([^/?]+)/)?.[1];
       if (zone !== undefined && !(ZONE_ID.test(zone) && allowed.has(zone))) throw new CfZoneNotAllowedError(zone, connectionId);
       const account = path.match(/^\/accounts(?:\/([^/?]+))?/)?.[1];
       if (path.startsWith('/accounts') && (account === undefined || !accounts.has(account))) throw new CfZoneNotAllowedError(account ?? '(account list)', connectionId, 'account');
+      operation(method, path);
+    },
+    zoneName(id) {
+      return zoneNameById.get(id);
     },
     lookup(name) {
       return inScope(name.toLowerCase());

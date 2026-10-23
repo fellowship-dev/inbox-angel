@@ -147,12 +147,18 @@ describe('what a token may file', () => {
     expect(coversDomain('co.uk', 'evil.co.uk')).toBe(false); // a public suffix never covers anything
   });
 
-  it('DMARC for a subdomain is accepted and filed under the token’s domain', async () => {
+  it('DMARC whose policy_published domain is not the token’s domain or a subdomain is rejected (parent, look-alike; case-insensitive match ok)', async () => {
     const w = await twoWorkspaces();
-    const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('mail.a-corp.com', 'sub-1')));
-    await handleHostedEmail(m, w.env);
-    expect(m.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT workspace_id, domain_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_a', domain_id: 1, report_id: 'sub-1' }]);
+    for (const d of ['evila-corp.com', 'corp.com']) {
+      const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml(d, 'p-' + d)));
+      await handleHostedEmail(m, w.env);
+      expect(m.setReject, d).toHaveBeenCalledOnce();
+    }
+    expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
+    const ok = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('A-Corp.com', 'eq-1')));
+    await handleHostedEmail(ok, w.env);
+    expect(ok.setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT domain_id, report_id FROM aggregate_reports')).toEqual([{ domain_id: 1, report_id: 'eq-1' }]);
   });
 
   it('domain A’s token cannot file for domain B of the same workspace, nor for a parent', async () => {

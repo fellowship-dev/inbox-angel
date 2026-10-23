@@ -133,6 +133,24 @@ export function teamQueries(db: Db, workspaceId: string) {
 			return res.length > 0;
 		},
 
+		/** Pending (unused, unexpired) invites of this workspace, newest first. */
+		listPendingInvites() {
+			return db.select().from(invites)
+				.where(and(eq(invites.workspace_id, workspaceId), isNull(invites.used_at), gt(invites.expires_at, sql`unixepoch()`)))
+				.orderBy(sql`${invites.created_at} DESC`).all();
+		},
+
+		/** Revoke a pending invite. False: no such pending invite in this workspace. */
+		async revokeInvite(token: string): Promise<boolean> {
+			const res = await db.delete(invites).where(and(eq(invites.workspace_id, workspaceId), eq(invites.token, token), isNull(invites.used_at))).returning({ token: invites.token }).all();
+			return res.length > 0;
+		},
+
+		/** Revoke every pending invite a user sent (invited_by holds the inviter's email); call when they are removed. */
+		revokeInvitesBy(inviterEmail: string) {
+			return db.delete(invites).where(and(eq(invites.workspace_id, workspaceId), eq(invites.invited_by, inviterEmail), isNull(invites.used_at))).run();
+		},
+
 		markInviteUsed(token: string) {
 			return db.update(invites).set({ used_at: sql`unixepoch()` as any }).where(and(eq(invites.workspace_id, workspaceId), eq(invites.token, token))).run();
 		},

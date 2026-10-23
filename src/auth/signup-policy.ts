@@ -6,8 +6,8 @@
 //
 // Password sign-ups go through our own routes (setup, signup, invite accept), which say why
 // the user is being created (`SignupIntent`). OAuth callbacks reach Better Auth directly and
-// are 'external': they follow the same rules, but invites are matched by email, which the
-// OAuth provider has verified.
+// are 'external': they follow the same rules, but invites are matched by email, and only when the
+// OAuth provider reports that email as verified (an unverified address proves nothing about its holder).
 import { APIError } from 'better-auth/api';
 import { authLookups, forWorkspace, forImplicitWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@inbox-angel/db';
 import { isSaas, type AuthEnv } from './config';
@@ -20,7 +20,8 @@ export type SignupIntent =
 
 const now = () => Math.floor(Date.now() / 1000);
 
-async function inviteFor(db: D1Database, intent: SignupIntent, email: string) {
+async function inviteFor(db: D1Database, intent: SignupIntent, email: string, emailVerified: boolean) {
+  if (intent.kind === 'external' && !emailVerified) return null;
   const invite = intent.kind === 'invite'
     ? await authLookups(db).inviteByToken(intent.token)
     : intent.kind === 'external'
@@ -31,12 +32,12 @@ async function inviteFor(db: D1Database, intent: SignupIntent, email: string) {
 }
 
 /** Throws (rejecting the sign-up) unless this user may be created. */
-export async function assertMaySignUp(env: AuthEnv, intent: SignupIntent, email: string): Promise<void> {
+export async function assertMaySignUp(env: AuthEnv, intent: SignupIntent, email: string, emailVerified = false): Promise<void> {
   const db = env.DB as D1Database;
   const reject = (message: string) => { throw new APIError('FORBIDDEN', { message }); };
 
   if (intent.kind === 'invite') {
-    if (!(await inviteFor(db, intent, email))) reject('invite not found or expired');
+    if (!(await inviteFor(db, intent, email, emailVerified))) reject('invite not found or expired');
     return;
   }
   if (isSaas(env)) {
@@ -53,14 +54,14 @@ export async function assertMaySignUp(env: AuthEnv, intent: SignupIntent, email:
     return;
   }
   if (!ownerExists) return; // first user in via OAuth
-  if (!(await inviteFor(db, intent, email))) reject('sign-up is closed — ask an owner for an invite');
+  if (!(await inviteFor(db, intent, email, emailVerified))) reject('sign-up is closed — ask an owner for an invite');
 }
 
 /** Gives a freshly created user their membership (and in saas mode, their own workspace). */
 export async function provisionUser(
   env: AuthEnv,
   intent: SignupIntent,
-  user: { id: string; email: string; name: string },
+  user: { id: string; email: string; name: string; emailVerified?: boolean },
 ): Promise<{ workspaceId: string; role: MembershipRole }> {
   const db = env.DB as D1Database;
   const fail = async (message: string): Promise<never> => {
@@ -70,7 +71,7 @@ export async function provisionUser(
 
   let placed: { workspaceId: string; role: MembershipRole } | null = null;
 
-  const invite = await inviteFor(db, intent, user.email);
+  const invite = await inviteFor(db, intent, user.email, user.emailVerified === true);
   if (invite) {
     const role: MembershipRole = invite.role === 'admin' ? 'admin' : 'member';
     const team = forWorkspace(db, invite.workspace_id).team;

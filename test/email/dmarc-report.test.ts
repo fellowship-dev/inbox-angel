@@ -133,7 +133,7 @@ describe('handleDmarcReport — happy path', () => {
     await handleDmarcReport(makeMessage(), makeEnv());
 
     // parseDmarcEmail now takes (bytes, offline, db)
-    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything());
+    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), { maxBytes: 25 * 1024 * 1024 });
   });
 
   it('calls storeReport with correct domain id', async () => {

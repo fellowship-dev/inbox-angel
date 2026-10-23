@@ -79,6 +79,7 @@ export async function storeReport(
   report: AggregateReport,
   rawXml: string | null = null,
   notifyFirstReport = false,
+  reporterAuth?: { result: 'pass' | 'fail' | 'none'; domain: string | null },
 ): Promise<StoreReportResult> {
   const { total, pass, fail } = computeCounts(report.records);
   const meta = report.report_metadata;
@@ -95,6 +96,8 @@ export async function storeReport(
     fail_count:  fail,
     // RAW_XML_RETENTION_DAYS=0 (the hosted default): the parsed rows are kept, the original XML is not
     raw_xml:     rawXmlRetentionDays(tenant.env) > 0 ? rawXml : null,
+    reporter_auth: reporterAuth?.result ?? null,
+    reporter_auth_domain: reporterAuth?.domain ?? null,
   });
 
   // ON CONFLICT DO NOTHING — no row written means this report was already delivered

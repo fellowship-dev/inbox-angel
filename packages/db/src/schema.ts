@@ -108,6 +108,8 @@ export const domains = sqliteTable(
 		workspace_id: workspaceId(),
 		/** The Cloudflare connection that manages this domain's zone (0015). Null: the self-host env token, or none. */
 		cf_connection_id: text('cf_connection_id').references((): any => cloudflareConnections.id, { onDelete: 'set null' }),
+		/** How ownership was proven: selfhost | cloudflare | txt | parent | legacy (rows from before 0002). Every row here is verified. */
+		verified_via: text('verified_via').notNull().default('legacy'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),
@@ -136,6 +138,9 @@ export const aggregateReports = sqliteTable(
 		raw_xml: text('raw_xml'),
 		created_at: integer('created_at').notNull().default(now),
 		workspace_id: workspaceId(),
+		/** Did the report email pass DMARC-aligned authentication for the reporter's org domain? pass | fail | none; null: not recorded. */
+		reporter_auth: text('reporter_auth'),
+		reporter_auth_domain: text('reporter_auth_domain'),
 	},
 	(t) => [
 		unique().on(t.domain_id, t.report_id),
@@ -710,4 +715,44 @@ export const WORKSPACE_OWNED_TABLES = [
 	'cloudflare_connections',
 	'cloudflare_connection_zones',
 	'cloudflare_connection_blocked_zones',
+	'domain_claims',
+	'intake_usage',
 ] as const;
+
+// ── Trust hardening (0004) ──────────────────────────────────
+
+/** A domain a workspace wants to monitor but has not yet proven it controls. `domains` holds verified domains only. */
+export const domainClaims = sqliteTable(
+	'domain_claims',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		domain: text('domain').notNull(),
+		/** Value of the TXT record `_inboxangel.<domain>`. */
+		token: text('token').notNull(),
+		status: text('status').notNull().default('pending'),
+		created_at: integer('created_at').notNull().default(now),
+		last_checked_at: integer('last_checked_at'),
+		last_error: text('last_error'),
+	},
+	(t) => [
+		unique().on(t.workspace_id, t.domain),
+		index('idx_domain_claims_domain').on(t.domain),
+		check('domain_claims_status_check', sql`${t.status} IN ('pending', 'lost')`),
+	],
+);
+
+/** Per-domain intake accounting, one row per UTC day. */
+export const intakeUsage = sqliteTable(
+	'intake_usage',
+	{
+		domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		day: text('day').notNull(),
+		/** Authenticated reporter org domain; '' is the shared bucket for unauthenticated mail. */
+		reporter: text('reporter').notNull().default(''),
+		reports: integer('reports').notNull().default(0),
+		bytes: integer('bytes').notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] })],
+);

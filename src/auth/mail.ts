@@ -19,7 +19,7 @@ export async function sendPasswordResetEmail(
   user: { email: string; name: string },
   resetUrl: string,
 ): Promise<void> {
-  const text = `Hi ${user.name},\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
+  const text = `Hi,\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
   const from = await senderAddress(env);
   if (env.SEND_EMAIL && from) {
     try {
@@ -29,5 +29,23 @@ export async function sendPasswordResetEmail(
     }
   } else {
     console.log(`[auth] reset link for ${user.email}: ${resetUrl}`);
+  }
+}
+
+export async function sendVerificationEmail(
+  env: AuthEnv,
+  user: { email: string; name: string },
+  verifyUrl: string,
+): Promise<void> {
+  const text = `Hi,\n\nConfirm your email address to finish setting up your InboxAngel account (you will choose your password on the next page):\n${verifyUrl}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.\n\nInboxAngel`;
+  const from = await senderAddress(env);
+  if (env.SEND_EMAIL && from) {
+    try {
+      await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [user.email], subject: 'Confirm your InboxAngel email', text });
+    } catch (e) {
+      console.error('[auth] verification email send failed:', e);
+    }
+  } else {
+    console.log(`[auth] verification link for ${user.email}: ${verifyUrl}`);
   }
 }

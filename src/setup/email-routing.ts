@@ -190,7 +190,7 @@ export async function ensureNullSenderRecords(
       actions.push(`SPF ${rdomain}: conflict (found "${clean}")`);
     }
   } else {
-    await cf.createDnsRecord(zoneId, { type: 'TXT', name: rdomain, content: `"${spfExpected}"`, ttl: 3600 });
+    await cf.createDnsRecord(zoneId, { type: 'TXT', name: rdomain, content: `"${spfExpected}"`, ttl: 3600 }, { allowedApexes: [rdomain] });
     actions.push(`SPF ${rdomain}: created`);
   }
 

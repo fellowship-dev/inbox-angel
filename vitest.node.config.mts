@@ -8,5 +8,6 @@ export default defineConfig({
     // packages/ui needs jsdom and a built dist: run it with `npm run test:ui`.
     exclude: ['test/index.spec.ts', 'packages/ui/**'],
     environment: 'node',
+    setupFiles: ['test/setup-files/turnstile.ts'],
   },
 });

@@ -43,6 +43,16 @@ interface TeamResponse {
 }
 
 const teamKey = ['team'] as const;
+const invitesKey = ['team-invites'] as const;
+
+interface PendingInvite {
+	id: string;
+	email: string;
+	role: Role;
+	invited_by: string | null;
+	created_at: number;
+	expires_at: number;
+}
 
 export function inviteLink(token: string): string {
 	return `${window.location.origin}/#/invite/${token}`;
@@ -81,7 +91,8 @@ export function MembersPage() {
 							))}
 						</ul>
 					</Section>
-					<InviteSection />
+					<InviteSection isOwner={myRole === 'owner'} />
+					<PendingInvites />
 				</>
 			)}
 		</div>
@@ -177,14 +188,17 @@ function MemberRow({ member, isSelf, myRole }: { member: TeamMember; isSelf: boo
 	);
 }
 
-function InviteSection() {
+function InviteSection({ isOwner }: { isOwner: boolean }) {
 	const [email, setEmail] = useState('');
 	const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
+	const role = isOwner ? inviteRole : 'member';
 	const [link, setLink] = useState<string | null>(null);
+	const qc = useQueryClient();
 	const invite = useMutation({
-		mutationFn: () => api<{ token: string }>('/api/team/invite', { method: 'POST', body: { email: email.trim(), role: inviteRole } }),
+		mutationFn: () => api<{ token: string }>('/api/team/invite', { method: 'POST', body: { email: email.trim(), role } }),
 		onSuccess: ({ token }) => {
 			setLink(inviteLink(token));
+			void qc.invalidateQueries({ queryKey: invitesKey });
 			setEmail('');
 		},
 	});
@@ -202,13 +216,13 @@ function InviteSection() {
 					<Input id="invite-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@yourcompany.com" />
 				</Field>
 				<Field id="invite-role" label="Role">
-					<Select value={inviteRole} onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}>
+					<Select value={role} onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}>
 						<SelectTrigger id="invite-role" aria-label="Role">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="member">Member (read-only)</SelectItem>
-							<SelectItem value="admin">Admin</SelectItem>
+							{isOwner ? <SelectItem value="admin">Admin</SelectItem> : null}
 						</SelectContent>
 					</Select>
 				</Field>
@@ -238,6 +252,40 @@ function InviteSection() {
 					</div>
 				</div>
 			) : null}
+		</Section>
+	);
+}
+
+function PendingInvites() {
+	const qc = useQueryClient();
+	const q = useQuery({ queryKey: invitesKey, queryFn: () => api<{ invites: PendingInvite[] }>('/api/team/invites').then((r) => r.invites), retry: false });
+	const revoke = useMutation({
+		mutationFn: (inv: PendingInvite) => api(`/api/team/invites/${inv.id}`, { method: 'DELETE' }),
+		onSuccess: async (_r, inv) => {
+			toast({ variant: 'success', title: `Invite for ${inv.email} revoked` });
+			await qc.invalidateQueries({ queryKey: invitesKey });
+		},
+		onError: (e) => toast({ variant: 'danger', title: 'Could not revoke the invite', description: errorMessage(e) }),
+	});
+	if (!q.data || q.data.length === 0) return null;
+	return (
+		<Section title="Pending invites" description="Invite links that have not been used yet. Revoking one stops its link from working.">
+			<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1" aria-label="Pending invites">
+				{q.data.map((inv) => (
+					<li key={inv.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+						<div className="min-w-0 flex-1">
+							<p className="truncate font-medium">{inv.email}</p>
+							<p className="text-sm text-ink-2">
+								{inv.invited_by ? `Invited by ${inv.invited_by}. ` : ''}Expires {formatDate(inv.expires_at)}
+							</p>
+						</div>
+						<Badge variant={inv.role === 'member' ? 'neutral' : 'brand'}>{inv.role}</Badge>
+						<WriteButton variant="secondary" size="sm" aria-label={`Revoke invite for ${inv.email}`} loading={revoke.isPending && revoke.variables?.id === inv.id} onClick={() => revoke.mutate(inv)}>
+							Revoke
+						</WriteButton>
+					</li>
+				))}
+			</ul>
 		</Section>
 	);
 }

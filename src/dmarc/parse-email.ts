@@ -2,7 +2,7 @@
 // Chains extractReport() → parseAggregateReportXml(), normalises errors to ParseEmailError.
 
 import { extractReport, ParserError } from './extract-report';
-import { parseAggregateReportXml } from './parse-aggregate';
+import { parseAggregateReportXml, type ParseLimits } from './parse-aggregate';
 import { AggregateReport, InvalidAggregateReport } from './types';
 
 export type { AggregateReport };
@@ -31,7 +31,7 @@ export async function parseDmarcEmail(
   bytes: Uint8Array,
   offline = false,
   db?: D1Database,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number } & ParseLimits = {},
 ): Promise<AggregateReport> {
   let xml: string;
 
@@ -45,7 +45,7 @@ export async function parseDmarcEmail(
   }
 
   try {
-    return await parseAggregateReportXml(xml, offline, db);
+    return await parseAggregateReportXml(xml, offline, db, { maxRecords: opts.maxRecords, maxNewIps: opts.maxNewIps });
   } catch (err) {
     if (err instanceof InvalidAggregateReport) {
       throw new ParseEmailError(`Invalid DMARC report XML: ${err.message}`, err);

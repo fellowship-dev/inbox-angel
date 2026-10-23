@@ -1,17 +1,18 @@
 /**
- * The one place that talks to the Worker's /api. The token lives in localStorage under the same key
- * the Preact dashboard used, so people stay signed in across the switch. OAuth sign-ins have no token:
- * they rely on the session cookie, which `credentials: 'same-origin'` sends.
+ * The one place that talks to the Worker's /api. The session is the server's HttpOnly cookie, sent by
+ * `credentials: 'same-origin'`; the SPA never sees, stores or logs a session token.
  */
 import { workspaceStore } from './workspace';
 
-export const TOKEN_KEY = 'ia_api_key';
-
-export const tokenStore = {
-	get: () => localStorage.getItem(TOKEN_KEY) ?? '',
-	set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
-	clear: () => localStorage.removeItem(TOKEN_KEY),
-};
+/** Older builds kept the session token in localStorage under this key. Delete any leftover on startup. */
+const LEGACY_TOKEN_KEY = 'ia_api_key';
+export function purgeLegacyToken(): void {
+	try {
+		localStorage.removeItem(LEGACY_TOKEN_KEY);
+	} catch {
+		/* storage unavailable */
+	}
+}
 
 export class ApiError extends Error {
 	constructor(
@@ -54,8 +55,6 @@ export interface RequestOptions {
 
 export async function api<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
 	const headers: Record<string, string> = {};
-	const token = tokenStore.get();
-	if (token) headers['X-Api-Key'] = token;
 	if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 	const workspace = opts.workspace === undefined ? workspaceStore.get() : opts.workspace;
 	if (workspace && !path.startsWith('/api/invites/')) headers['X-Workspace-Id'] = workspace;

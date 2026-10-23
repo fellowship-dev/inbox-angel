@@ -16,7 +16,7 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { call, ctx, makeEnv, setupOwner, inviteAndAccept, req } from './helpers';
+import { call, ctx, makeEnv, setupOwner, inviteAndAccept, req, signupVerified } from './helpers';
 import { sessionWorkspaceResolver } from '../../src/auth/resolver';
 import { createApiKey } from '../../src/auth/api-keys';
 
@@ -40,7 +40,7 @@ describe('WorkspaceResolver: session → user → membership → workspace', () 
   it('saas: each signup resolves to its own workspace', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
-    const tok = async (e: string) => ((await (await call(env, 'POST', '/api/auth/signup', { body: { email: e, password: 'password-123' } })).json()) as any).token as string;
+    const tok = (e: string) => signupVerified(env, e);
     const [a, b] = [await tok('a@example.com'), await tok('b@example.com')];
     const [ra, rb] = [await ask(env, a), await ask(env, b)];
     expect(ra!.workspaceId).not.toBe(rb!.workspaceId);
@@ -51,8 +51,8 @@ describe('WorkspaceResolver: session → user → membership → workspace', () 
   it('a user in several workspaces picks one with X-Workspace-Id, and cannot pick one they are not in', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
-    const a = ((await (await call(env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'password-123' } })).json()) as any).token as string;
-    const b = ((await (await call(env, 'POST', '/api/auth/signup', { body: { email: 'b@example.com', password: 'password-123' } })).json()) as any).token as string;
+    const a = await signupVerified(env, 'a@example.com');
+    const b = await signupVerified(env, 'b@example.com');
     const [accA, accB] = [(await ask(env, a))!.workspaceId, (await ask(env, b))!.workspaceId];
     const userA = (await ask(env, a))!.userId!;
     db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role, created_at) VALUES (?, ?, 'member', unixepoch() + 100)").run(accB, userA);

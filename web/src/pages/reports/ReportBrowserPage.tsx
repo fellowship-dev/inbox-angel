@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { BackLink, Segmented, useRouteDomainId } from '../../components/reports';
+import { BackLink, ReporterAuthBadge, Segmented, useRouteDomainId } from '../../components/reports';
 import { ListSkeleton, LoadError } from '../../components/states';
 import { api } from '../../lib/api';
 import { useDomain, useDomains } from '../../lib/queries';
@@ -89,7 +89,10 @@ export function ReportBrowserPage() {
 										</Link>
 									</TableCell>
 									{showDomainColumn ? <TableCell>{r.domain}</TableCell> : null}
-									<TableCell>{r.org_name}</TableCell>
+									<TableCell>
+										{r.org_name}
+										<ReporterAuthBadge auth={r.reporter_auth} />
+									</TableCell>
 									<TableCell className="text-right tabular-nums">{r.pass_count.toLocaleString()}</TableCell>
 									<TableCell className={cn('text-right tabular-nums', r.fail_count > 0 && 'font-semibold text-danger')}>{r.fail_count.toLocaleString()}</TableCell>
 									<TableCell className="whitespace-nowrap text-right tabular-nums">

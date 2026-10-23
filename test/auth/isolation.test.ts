@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 // Two hosted (MODE=saas) workspaces, A and B, each signed up for real. Everything A can do —
 // as a session or as an API key — must neither reveal nor change anything of B's, through
 // every /api route. Table-driven, with a guard that fails when a route is added to the router
@@ -7,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { WORKSPACE_OWNED_TABLES } from '@inbox-angel/db';
-import { call, makeEnv } from './helpers';
+import { call, makeEnv, signupVerified } from './helpers';
 import { createApiKey } from '../../src/auth/api-keys';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from '../hosted/world';
@@ -18,7 +19,7 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 
 /** Strings that exist only in B's data: none may ever appear in a response to A. */
-const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77', 'b-hosted-id-secret', 'b-intake-hash-secret', 'b-cf-label-secret', 'b-cf-envelope-secret', 'b-cf-account-secret', 'b-zone-secret.example.org', 'cfc_b_secret'];
+const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77', 'b-hosted-id-secret', 'b-intake-hash-secret', 'b-cf-label-secret', 'b-cf-envelope-secret', 'b-cf-account-secret', 'b-zone-secret.example.org', 'cfc_b_secret', 'b-pending-secret.example.com', 'b-claim-token-secret'];
 
 const rows = (db: any, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 
@@ -26,9 +27,7 @@ async function world() {
   const db = createMigratedD1();
   const env = makeEnv(db, { ...HOSTED_ENV, ...AUTH, TOKEN_ENCRYPTION_KEY: `k1:${KEY}` });
   const signup = async (email: string) => {
-    const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
-    expect(r.status).toBe(201);
-    const { token } = await r.json() as { token: string };
+    const token = await signupVerified(env, email);
     const m = rows(db, 'SELECT m.workspace_id, m.user_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0];
     return { token, workspaceId: m.workspace_id as string, userId: m.user_id as string };
   };
@@ -44,7 +43,7 @@ async function world() {
   db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'reports_domain', 'reports.a-own.example.com')").run(A.workspaceId); // A finished the wizard
   // B's data, in every workspace-owned table.
   const b = B.workspaceId;
-  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, is_default) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1)").run(b);
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, is_default, verified_via) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1, 'txt')").run(b);
   db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?)").run(b);
   db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (100, 10, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
   // A recent report too: the analytics endpoints only look back 180 days, and these must be able to leak if they ever scope wrongly.
@@ -56,6 +55,8 @@ async function world() {
   db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, workspace_id) VALUES (2, 'b-policy-id', ?)").run(b);
   db.sqlite.prepare("INSERT INTO monitor_subscriptions (id, email, domain, workspace_id) VALUES (30, 'b-member@example.com', 'b-secret.example.com', ?)").run(b);
   db.sqlite.prepare("INSERT INTO invites (token, email, role, invited_by, expires_at, workspace_id) VALUES ('b-invite-token', 'b-member@example.com', 'member', 'b-owner@example.com', 9999999999, ?)").run(b);
+  db.sqlite.prepare("INSERT INTO domain_claims (id, workspace_id, domain, token) VALUES (1, ?, 'b-pending-secret.example.com', 'b-claim-token-secret')").run(b);
+  db.sqlite.prepare("INSERT INTO intake_usage (domain_id, workspace_id, day, reports, bytes) VALUES (2, ?, '2026-10-23', 3, 3000)").run(b);
   db.sqlite.prepare("INSERT INTO audit_log (id, action, resource_name, workspace_id) VALUES (40, 'domain.add', 'b-secret.example.com', ?)").run(b);
   db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'custom_value', 'b-secret-settings-value')").run(b);
   db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key, dmarc_record_id) VALUES (2, ?, 'b-hosted-id-secret', 'z1', 'rec-b')").run(b);
@@ -79,6 +80,9 @@ function snapshotOf(db: any, workspaceId: string) {
   return JSON.stringify(out);
 }
 
+/** What GET /api/team/invites calls B's seeded invite: the first 8 bytes of sha256(token), hex. */
+const B_INVITE_ID = createHash('sha256').update('b-invite-token').digest('hex').slice(0, 16);
+
 type Kind = 'denied' | 'scoped';
 interface Route { method: string; path: string; body?: unknown; kind: Kind; note?: string }
 
@@ -91,6 +95,9 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/domains', kind: 'scoped' },
   { method: 'POST', path: '/api/domains', body: { domain: 'b-secret.example.com' }, kind: 'denied', note: 'hostname already monitored by B' },
   { method: 'DELETE', path: '/api/domains/2', kind: 'denied' },
+  // pending domain claims (SaaS): another workspace's claim is as unreachable as its domain
+  { method: 'POST', path: '/api/domains/claims/1/verify', body: {}, kind: 'denied', note: 'B\'s pending claim' },
+  { method: 'DELETE', path: '/api/domains/claims/1', kind: 'denied', note: 'B\'s pending claim' },
   { method: 'GET', path: '/api/domains/2/stats', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/reports?date=2023-11-14', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/sources', kind: 'denied' },
@@ -170,6 +177,8 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/team', kind: 'scoped' },
   { method: 'POST', path: '/api/team/invite', body: { email: 'new-for-a@example.com' }, kind: 'scoped' },
   { method: 'DELETE', path: '/api/team/u-b-member', kind: 'denied' },
+  { method: 'GET', path: '/api/team/invites', kind: 'scoped' },
+  { method: 'DELETE', path: `/api/team/invites/${B_INVITE_ID}`, kind: 'denied', note: 'B\'s pending invite' },
   { method: 'GET', path: '/api/audit-log', kind: 'scoped' },
   { method: 'GET', path: '/api/me', kind: 'scoped' },
   { method: 'GET', path: '/api/keys', kind: 'scoped' },
@@ -213,9 +222,11 @@ describe('two hosted workspaces: A cannot reach B', () => {
         const key = credential === 'session' ? w.A.token : w.keyA;
         const list = await (await call(w.env, 'GET', '/api/domains', { key })).json() as any;
         expect(list.domains.map((d: any) => d.domain)).toEqual(['a-own.example.com']);
+        // A domain A has not proven is a claim, not a domain: nothing but the claim is written.
         const set = await call(w.env, 'POST', '/api/settings/base-domain', { key, body: { domain: 'fresh-a.example.net' } });
-        expect(set.status).toBeLessThan(300);
-        expect(rows(w.db, "SELECT workspace_id FROM settings WHERE key = 'base_domain'")).toEqual([{ workspace_id: w.A.workspaceId }]);
+        expect(set.status).toBe(202);
+        expect(rows(w.db, "SELECT workspace_id FROM settings WHERE key = 'base_domain'")).toEqual([]);
+        expect(rows(w.db, "SELECT workspace_id FROM domain_claims WHERE domain = 'fresh-a.example.net'")).toEqual([{ workspace_id: w.A.workspaceId }]);
         const invite = await call(w.env, 'POST', '/api/team/invite', { key, body: { email: 'new-for-a@example.com' } });
         expect(invite.status).toBe(201);
         expect(rows(w.db, "SELECT workspace_id FROM invites WHERE email = 'new-for-a@example.com'")).toEqual([{ workspace_id: w.A.workspaceId }]);

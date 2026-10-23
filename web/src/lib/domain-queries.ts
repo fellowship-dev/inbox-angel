@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import type { DomainCheckSummary, DomainStats, FailingSource, MtaStsStatus, OnboardingStatus, SpfFlatStatus, WizardState } from './types';
+import type { DomainCheckSummary, DomainClaim, DomainStats, FailingSource, MtaStsStatus, OnboardingStatus, SpfFlatStatus, WizardState } from './types';
 
 /** GET /api/domains/:id/dns-check. `error` is set when the lookup itself failed: that is not "no record". */
 export interface DnsCheck {
@@ -43,7 +43,9 @@ export interface MonitorSub {
 
 export interface BulkImportItem {
 	domain: string;
-	status: 'imported' | 'duplicate' | 'invalid' | 'error';
+	status: 'imported' | 'duplicate' | 'invalid' | 'error' | 'pending';
+	/** Present when status is 'pending': the DNS proof that makes the domain ours. */
+	claim?: DomainClaim;
 	error?: string;
 	dns_record_id?: string | null;
 	manual_dns?: boolean;

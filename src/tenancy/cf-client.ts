@@ -8,6 +8,9 @@
 // The token lives in a private field: it never appears in errors, logs, JSON or
 // util.inspect output.
 
+import { assertDnsWriteAllowed, type DnsWrite } from '../dns/write-policy';
+import type { Mode } from './mode';
+
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
 export interface CfErrorDetail { code?: number; message: string }
@@ -56,6 +59,14 @@ export class CfZoneNotAllowedError extends Error {
         ? `Zone ${zone} is not in this Cloudflare connection's allow-list`
         : `Cloudflare account ${zone} is not the one this connection belongs to`);
     this.name = 'CfZoneNotAllowedError';
+  }
+}
+/** A DNS write (or other write) that is not one Inbox Angel makes: wrong type, name, content, path or method. Refused before sending. */
+export class CfRecordNotAllowedError extends Error {
+  readonly code = 'cf_record_not_allowed';
+  constructor(readonly reason: string, readonly request?: { method?: string; type?: string; name?: string; path?: string }) {
+    super(`Refused Cloudflare write: ${reason}`);
+    this.name = 'CfRecordNotAllowedError';
   }
 }
 /** None of the domain's candidate zones exists on the token's Cloudflare account. */
@@ -114,6 +125,8 @@ export interface CfPolicy {
   lookup(zoneName: string): boolean;
   /** Throws to refuse a name that falls inside a known child zone that is not allowed. */
   blocked(name: string): void;
+  /** The name of an allowed zone id, so DNS writes can be required to stay inside it. */
+  zoneName?(zoneId: string): string | undefined;
   /** Throws to refuse a zone that zoneFor() found for `domain`. */
   zone(zone: CfZone, domain: string): void;
 }
@@ -121,6 +134,10 @@ export interface CfPolicy {
 export interface CfClientOptions {
   fetch?: typeof fetch;
   policy?: CfPolicy;
+  /** Deployment mode, for the DNS write policy (self-host-only record types). Default 'selfhost'. */
+  mode?: Mode;
+  /** Replaces the default DNS write policy (the hosted-records writer has its own, narrower one). */
+  dnsWritePolicy?: (w: Pick<DnsWrite, 'method' | 'zoneName' | 'type' | 'name' | 'content' | 'patchKeys'>) => void;
   /**
    * Called once when Cloudflare answers 401 to the current token; returns a fresh token to retry the
    * request with, or null. (OAuth access tokens: refresh once, then retry.)
@@ -131,7 +148,11 @@ export interface CfClientOptions {
 export interface CfRequestOptions {
   query?: Record<string, string | number | undefined>;
   body?: unknown;
+  /** Context the caller vouches for, for the DNS write policy (MTA-STS CNAME target, SPF apex names). */
+  dns?: DnsWriteContext;
 }
+
+export interface DnsWriteContext { cnameTargets?: string[]; allowedApexes?: string[] }
 
 interface CfEnvelope<T> { success?: boolean; result?: T; errors?: CfErrorDetail[] }
 
@@ -163,6 +184,9 @@ export class CfClient {
   readonly #policy?: CfPolicy;
   readonly #onUnauthorized?: () => Promise<string | null>;
   readonly #zones = new Map<string, Promise<CfZone | null>>();
+  readonly #zoneNames = new Map<string, string>();
+  readonly #mode: Mode;
+  readonly #dnsWritePolicy?: CfClientOptions['dnsWritePolicy'];
 
   /** `token` may be a function, called for every request (so an expiring token is refreshed lazily). */
   constructor(token: string | (() => Promise<string>), opts: CfClientOptions = {}) {
@@ -170,6 +194,8 @@ export class CfClient {
     this.#token = token;
     this.#policy = opts.policy;
     this.#onUnauthorized = opts.onUnauthorized;
+    this.#mode = opts.mode ?? 'selfhost';
+    this.#dnsWritePolicy = opts.dnsWritePolicy;
     // Looked up per call (not captured) so stubbing globalThis.fetch in tests works.
     this.#fetch = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
@@ -187,7 +213,34 @@ export class CfClient {
   async request<T = unknown>(method: string, path: string, opts: CfRequestOptions = {}): Promise<T> {
     assertSafePath(path);
     this.#policy?.request(method.toUpperCase(), path, opts.query);
+    this.#checkDnsWrite(method.toUpperCase(), path, opts.body, opts.dns);
     return this.#send<T>(method, path, opts, false);
+  }
+
+  /** Every non-GET request touching dns_records passes the write policy here, the one choke point. */
+  #checkDnsWrite(method: string, path: string, body: unknown, ctx?: DnsWriteContext): void {
+    if (method === 'GET' || method === 'HEAD') return;
+    const p = path.split('?')[0];
+    if (!p.includes('/dns_records')) return;
+    const m = p.match(/^\/zones\/([^/]+)\/dns_records(?:\/([A-Za-z0-9_-]+))?$/);
+    if (!m) throw new CfRecordNotAllowedError('unrecognised DNS records path', { method, path: p });
+    const [, zoneId, recordId] = m;
+    if (method === 'POST' ? recordId !== undefined : recordId === undefined) {
+      throw new CfRecordNotAllowedError(`${method} on this DNS records path is not allowed`, { method, path: p });
+    }
+    const b = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+    const w = {
+      method,
+      zoneName: this.#zoneNames.get(zoneId) ?? this.#policy?.zoneName?.(zoneId),
+      type: b.type as string | undefined,
+      name: b.name as string | undefined,
+      content: b.content as string | undefined,
+      patchKeys: Object.keys(b),
+      cnameTargets: ctx?.cnameTargets,
+      allowedApexes: ctx?.allowedApexes,
+    };
+    if (this.#dnsWritePolicy) this.#dnsWritePolicy(w);
+    else assertDnsWriteAllowed({ ...w, mode: this.#mode });
   }
 
   async #send<T>(method: string, path: string, opts: CfRequestOptions, retried: boolean): Promise<T> {
@@ -242,6 +295,7 @@ export class CfClient {
    */
   seedZone(zone: CfZone): void {
     this.#zones.set(zone.name.toLowerCase(), Promise.resolve(zone));
+    this.#zoneNames.set(zone.id, zone.name.toLowerCase());
   }
 
   /** The zone a domain lives in. Throws CfZoneNotFoundError when the account has none. */
@@ -270,6 +324,7 @@ export class CfClient {
       hit = this.request<{ id: string; name: string; account?: { id: string } }[]>('GET', '/zones', { query: { name } })
         .then(list => {
           const z = list?.[0];
+          if (z) this.#zoneNames.set(z.id, z.name.toLowerCase());
           return z ? { id: z.id, name: z.name.toLowerCase(), cfAccountId: z.account?.id } : null;
         });
       this.#zones.set(name, hit);
@@ -301,12 +356,12 @@ export class CfClient {
     return this.request<CfDnsRecord[]>('GET', `/zones/${zoneId}/dns_records`, { query }).then(r => r ?? []);
   }
 
-  createDnsRecord(zoneId: string, record: CfDnsRecordInput): Promise<CfDnsRecord> {
-    return this.request('POST', `/zones/${zoneId}/dns_records`, { body: record });
+  createDnsRecord(zoneId: string, record: CfDnsRecordInput, dns?: DnsWriteContext): Promise<CfDnsRecord> {
+    return this.request('POST', `/zones/${zoneId}/dns_records`, { body: record, dns });
   }
 
-  patchDnsRecord(zoneId: string, recordId: string, patch: Partial<CfDnsRecordInput>): Promise<CfDnsRecord> {
-    return this.request('PATCH', `/zones/${zoneId}/dns_records/${recordId}`, { body: patch });
+  patchDnsRecord(zoneId: string, recordId: string, patch: Partial<CfDnsRecordInput>, dns?: DnsWriteContext): Promise<CfDnsRecord> {
+    return this.request('PATCH', `/zones/${zoneId}/dns_records/${recordId}`, { body: patch, dns });
   }
 
   /** Idempotent: a record that is already gone is not an error. Returns whether something was deleted. */
