@@ -100,6 +100,17 @@ function MemberRow({ member, isSelf, myRole }: { member: TeamMember; isSelf: boo
 		},
 	});
 
+	const workspaceId = useSession().me?.workspace_id;
+	const [handing, setHanding] = useState(false);
+	const transfer = useMutation({
+		mutationFn: () => api(`/api/workspaces/${workspaceId}/transfer-ownership`, { method: 'POST', body: { user_id: member.id } }),
+		onSuccess: async () => {
+			setHanding(false);
+			toast({ variant: 'success', title: `${member.email} is now the owner`, description: 'You are an admin of this workspace now.' });
+			await Promise.all([qc.invalidateQueries({ queryKey: teamKey }), qc.invalidateQueries({ queryKey: ['me'] }), qc.invalidateQueries({ queryKey: ['workspaces'] })]);
+		},
+	});
+
 	// The API refuses these; say so up front instead of offering a button that fails.
 	let blocked: string | null = null;
 	if (isSelf) blocked = 'You cannot remove yourself.';
@@ -120,9 +131,31 @@ function MemberRow({ member, isSelf, myRole }: { member: TeamMember; isSelf: boo
 			</div>
 			<Badge variant={member.role === 'member' ? 'neutral' : 'brand'}>{member.role}</Badge>
 			<p className="text-sm text-ink-2">{member.last_login_at ? `Last sign-in ${formatDate(member.last_login_at)}` : 'Never signed in'}</p>
+			{myRole === 'owner' && !isSelf && member.role !== 'owner' ? (
+				<Button variant="secondary" size="sm" onClick={() => setHanding(true)} aria-label={`Make ${member.email} the owner`}>
+					Make owner
+				</Button>
+			) : null}
 			<WriteButton variant="secondary" size="sm" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setConfirming(true)} aria-label={`Remove ${member.email}`}>
 				Remove
 			</WriteButton>
+			<Dialog open={handing} onOpenChange={setHanding}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Make {member.email} the owner?</DialogTitle>
+						<DialogDescription>They become the workspace's owner, and you become an admin. Only an owner can delete the workspace, export its data or hand ownership on.</DialogDescription>
+					</DialogHeader>
+					{transfer.isError ? <FieldError>{errorMessage(transfer.error)}</FieldError> : null}
+					<DialogFooter>
+						<Button variant="secondary" onClick={() => setHanding(false)}>
+							Cancel
+						</Button>
+						<Button loading={transfer.isPending} onClick={() => transfer.mutate()}>
+							Transfer ownership
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<Dialog open={confirming} onOpenChange={setConfirming}>
 				<DialogContent>
 					<DialogHeader>
