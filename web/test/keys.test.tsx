@@ -124,7 +124,7 @@ describe('API keys', () => {
 
 	it('explains the instance key instead of failing', async () => {
 		renderApp(<ApiKeysPage />, {
-			routes: { 'GET /api/me': { user: null, role: 'owner', account_id: 'acct_default', kind: 'instance' }, 'GET /api/keys': fail(403, 'API keys belong to a user') },
+			routes: { 'GET /api/me': { user: null, role: 'owner', workspace_id: 'ws_default', kind: 'instance' }, 'GET /api/keys': fail(403, 'API keys belong to a user') },
 		});
 		expect(await screen.findByText('API keys belong to a user')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Create key' })).not.toBeInTheDocument();

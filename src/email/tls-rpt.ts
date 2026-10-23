@@ -56,7 +56,7 @@ function parseIsoDate(s: string): number {
 export interface TlsRptOptions {
   /**
    * Hosted intake. Reports may be gzip/zip attachments (as RFC 8460 senders usually send them), capped at
-   * `maxBytes` once decompressed, and every policy must be for a domain this account owns or the whole
+   * `maxBytes` once decompressed, and every policy must be for a domain this workspace owns or the whole
    * report is rejected. Unset (self-host): plain JSON bodies, unknown domains skipped.
    */
   hosted?: { maxBytes: number; token: TokenDomain };
@@ -137,7 +137,7 @@ export async function handleTlsRptReport(
   const dateBegin = parseIsoDate(report['date-range']?.['start-datetime']);
   const dateEnd   = parseIsoDate(report['date-range']?.['end-datetime']);
 
-  // Hosted: a report naming a domain this account doesn't own is spoofed or misrouted. Reject it whole, store nothing.
+  // Hosted: a report naming a domain this workspace doesn't own is spoofed or misrouted. Reject it whole, store nothing.
   if (opts.hosted) {
     if (!Array.isArray(report.policies) || report.policies.length === 0) {
       message.setReject('Invalid TLS-RPT report: no policies');

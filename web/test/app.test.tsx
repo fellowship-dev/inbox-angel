@@ -56,7 +56,7 @@ describe('app', () => {
 		expect(tokenStore.get()).toBe('');
 	});
 
-	it('signs out from the account menu', async () => {
+	it('signs out from the workspace menu', async () => {
 		tokenStore.set('t');
 		const api = boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': { keys: [] }, 'POST /api/auth/logout': { ok: true } });
 		const user = userEvent.setup();

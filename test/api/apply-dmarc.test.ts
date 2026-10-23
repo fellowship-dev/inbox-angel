@@ -4,7 +4,7 @@ import type { Env } from '../../src/index';
 // POST /api/domains/:id/apply-dmarc: the record is written to the zone of *that* domain.
 
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'u', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'u', workspaceId: 'ws_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -25,8 +25,8 @@ import { seedSettings } from '../helpers/tenant';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
 const ZONES = {
-  'acme.com': { id: 'zone-acme', accountId: 'cf-acct' },
-  'other-company.org': { id: 'zone-other', accountId: 'cf-acct' },
+  'acme.com': { id: 'zone-acme', cfAccountId: 'cf-acct' },
+  'other-company.org': { id: 'zone-other', cfAccountId: 'cf-acct' },
 };
 
 /** acme.com is the base domain (its zone is stored); other-company.org lives in a second zone. */
@@ -38,7 +38,7 @@ function makeEnv(domains: { id: number; domain: string; dns_record_id?: string }
   }
   seedSettings(db, {
     base_domain: 'acme.com', reports_domain: 'reports.acme.com', from_email: 'noreply@reports.acme.com',
-    zone_id: 'zone-acme', zone_name: 'acme.com', account_id: 'cf-acct',
+    zone_id: 'zone-acme', zone_name: 'acme.com', cf_account_id: 'cf-acct',
   });
   return { DB: db as unknown as D1Database, API_KEY: 'k', CLOUDFLARE_API_TOKEN: token ?? undefined } as Env;
 }
@@ -130,7 +130,7 @@ describe('apply-dmarc zone targeting (two domains, two zones)', () => {
     expect(lookups).toHaveLength(1);
   });
 
-  it('refuses to write when the domain has no zone on the account (400, nothing written)', async () => {
+  it('refuses to write when the domain has no zone on the Cloudflare account (400, nothing written)', async () => {
     const env = makeEnv([{ id: 4, domain: 'unmanaged.net' }]);
     const res = await handleApi(applyDmarc(4), env, ctx);
     expect(res.status).toBe(400);
@@ -150,7 +150,7 @@ describe('apply-dmarc zone targeting (two domains, two zones)', () => {
 
 describe('apply-dmarc with nested zones', () => {
   it('writes to the child zone even though the parent zone is the stored base zone', async () => {
-    cf.zones['sub.acme.com'] = { id: 'zone-sub', accountId: 'cf-acct' };
+    cf.zones['sub.acme.com'] = { id: 'zone-sub', cfAccountId: 'cf-acct' };
     const env = makeEnv([{ id: 5, domain: 'sub.acme.com' }, { id: 6, domain: 'www.acme.com' }]);
     await handleApi(applyDmarc(5), env, ctx);
     await handleApi(applyDmarc(6), env, ctx);

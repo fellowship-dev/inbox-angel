@@ -7,32 +7,32 @@ import type { BoundEnv } from '../index';
 import { DEFAULT_BRAND_COLOR, TenantContext, type TenantSettings } from './context';
 import { CfConnectionError, CfError, CfNotConfiguredError } from './cf-client';
 import { getMode, type Mode } from './mode';
-import type { ResolvedAccount } from './resolver';
+import type { ResolvedWorkspace } from './resolver';
 
 const KEYS: readonly string[] = [
-  'base_domain', 'zone_id', 'zone_name', 'account_id', 'reports_domain', 'from_email', 'workers_subdomain',
+  'base_domain', 'zone_id', 'zone_name', 'cf_account_id', 'reports_domain', 'from_email', 'workers_subdomain',
   'brand_logo_url', 'brand_color',
 ];
 
-/** The tenant's Cloudflare token. Self-host: the Worker secret. Saas: per-account credentials (none stored yet). */
+/** The tenant's Cloudflare token. Self-host: the Worker secret. Saas: per-workspace credentials (none stored yet). */
 function cfTokenFor(env: BoundEnv, mode: Mode): string | undefined {
   return mode === 'selfhost' ? env.CLOUDFLARE_API_TOKEN || undefined : undefined;
 }
 
 export interface LoadOptions {
-  /** The tenant's Cloudflare token, overriding the default for the mode (per-account credentials). */
+  /** The tenant's Cloudflare token, overriding the default for the mode (per-workspace credentials). */
   cfToken?: string;
   /** Injected Cloudflare transport (tests). */
   fetch?: typeof fetch;
 }
 
-export async function loadTenant(env: BoundEnv, account: ResolvedAccount, opts: LoadOptions = {}): Promise<TenantContext> {
+export async function loadTenant(env: BoundEnv, workspace: ResolvedWorkspace, opts: LoadOptions = {}): Promise<TenantContext> {
   const mode = getMode(env);
   const tenant = new TenantContext({
     env,
-    accountId: account.accountId,
-    userId: account.userId,
-    role: account.role,
+    workspaceId: workspace.workspaceId,
+    userId: workspace.userId,
+    role: workspace.role,
     mode,
     cfToken: opts.cfToken ?? cfTokenFor(env, mode),
     fetch: opts.fetch,
@@ -54,7 +54,7 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
     baseDomain: stored.get('base_domain'),
     zoneId: stored.get('zone_id'),
     zoneName: stored.get('zone_name'),
-    cfAccountId: stored.get('account_id'),
+    cfAccountId: stored.get('cf_account_id'),
     reportsDomain: stored.get('reports_domain'),
     fromEmail: stored.get('from_email'),
     workersSubdomain: stored.get('workers_subdomain'),
@@ -73,9 +73,9 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
   try {
     if (s.baseDomain && (!s.zoneId || !s.cfAccountId) && tenant.hasCloudflare()) {
       const zone = await (await tenant.cfFor(s.baseDomain)).zoneFor(s.baseDomain);
-      s.zoneId = zone.id; s.zoneName = zone.name; s.cfAccountId = zone.accountId ?? s.cfAccountId;
+      s.zoneId = zone.id; s.zoneName = zone.name; s.cfAccountId = zone.cfAccountId ?? s.cfAccountId;
       persist.zone_id = zone.id; persist.zone_name = zone.name;
-      if (zone.accountId) persist.account_id = zone.accountId;
+      if (zone.cfAccountId) persist.cf_account_id = zone.cfAccountId;
     } else if (cf && s.zoneId && !s.zoneName) {
       // Installs that stored a zone id before zone names were kept.
       const zone = await cf.getZone(s.zoneId);
@@ -86,7 +86,7 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
     // the dashboard down. Features that need the zone resolve it again and report the error.
     // (A domain not linked to any connection yet is not worth a log line per request.)
     if (!(e instanceof CfNotConfiguredError)) {
-      console.warn(`[tenant ${tenant.accountId}] Cloudflare lookup failed:`, e instanceof CfError || e instanceof CfConnectionError ? e.message : e instanceof Error ? e.name : 'error');
+      console.warn(`[tenant ${tenant.workspaceId}] Cloudflare lookup failed:`, e instanceof CfError || e instanceof CfConnectionError ? e.message : e instanceof Error ? e.name : 'error');
     }
   }
 

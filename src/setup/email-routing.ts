@@ -44,12 +44,12 @@ export async function registerEmailRoutingDestination(
   tenant: TenantContext,
   email: string,
 ): Promise<boolean> {
-  const accountId = tenant.settings.cfAccountId;
+  const cfAccountId = tenant.settings.cfAccountId;
   const reportsDomain = tenant.settings.reportsDomain;
-  if (!accountId || !reportsDomain || !tenant.hasCloudflare()) return false;
+  if (!cfAccountId || !reportsDomain || !tenant.hasCloudflare()) return false;
   try {
     const cf = await tenant.cfFor(reportsDomain);
-    await cf.request('POST', `/accounts/${accountId}/email/routing/addresses`, { body: { email } });
+    await cf.request('POST', `/accounts/${cfAccountId}/email/routing/addresses`, { body: { email } });
   } catch (e) {
     // "already exists" is fine — address just needs the user to verify if they haven't
     const alreadyExists = e instanceof CfError && e.details.some(d => d.message.toLowerCase().includes('already'));

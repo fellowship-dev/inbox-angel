@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { WriteButton } from '../src/components/states';
 import { READ_ONLY_REASON } from '../src/lib/session';
-import { TeamPage } from '../src/pages/team/TeamPage';
+import { MembersPage } from '../src/pages/members/MembersPage';
 import { fail, renderApp } from './render';
 
 const team = (currentId: string) => ({
@@ -42,9 +42,9 @@ describe('WriteButton', () => {
 	});
 });
 
-describe('Team page', () => {
+describe('Members page', () => {
 	it('lets an owner invite and remove, but not remove themselves or the owner', async () => {
-		renderApp(<TeamPage />, { role: 'owner', routes: { 'GET /api/team': team('o1') } });
+		renderApp(<MembersPage />, { role: 'owner', routes: { 'GET /api/team': team('o1') } });
 		expect(await screen.findByText('Adam')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Create invite link' })).toBeEnabled();
 		expect(screen.getByRole('button', { name: 'Remove admin@example.com' })).toBeEnabled();
@@ -53,7 +53,7 @@ describe('Team page', () => {
 	});
 
 	it('lets an admin remove members but not other admins or the owner', async () => {
-		renderApp(<TeamPage />, { role: 'admin', routes: { 'GET /api/team': team('a1') } });
+		renderApp(<MembersPage />, { role: 'admin', routes: { 'GET /api/team': team('a1') } });
 		await screen.findByText('Mo');
 		expect(screen.getByRole('button', { name: 'Remove member@example.com' })).toBeEnabled();
 		expect(screen.getByRole('button', { name: 'Remove owner@example.com' })).toBeDisabled();
@@ -61,14 +61,14 @@ describe('Team page', () => {
 	});
 
 	it('shows members an explanation and never asks the API for the list', async () => {
-		const { calls } = renderApp(<TeamPage />, { role: 'member', routes: { 'GET /api/team': fail(403, 'admin required') } });
-		expect(await screen.findByText('Only owners and admins can see the team')).toBeInTheDocument();
+		const { calls } = renderApp(<MembersPage />, { role: 'member', routes: { 'GET /api/team': fail(403, 'admin required') } });
+		expect(await screen.findByText('Only owners and admins can see the members')).toBeInTheDocument();
 		expect(screen.getByTestId('read-only-notice')).toBeInTheDocument();
 		expect(calls.some((c) => c.path === '/api/team')).toBe(false);
 	});
 
 	it('creates an invite link with the chosen role', async () => {
-		const { calls } = renderApp(<TeamPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': { token: 'tok-abc' } } });
+		const { calls } = renderApp(<MembersPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': { token: 'tok-abc' } } });
 		const user = userEvent.setup();
 		await screen.findByText('Adam');
 		await user.type(screen.getByLabelText('Email'), 'new@example.com');
@@ -78,7 +78,7 @@ describe('Team page', () => {
 	});
 
 	it('names the conflict when the person already has an account', async () => {
-		renderApp(<TeamPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': fail(409, 'a user with this email already exists') } });
+		renderApp(<MembersPage />, { role: 'owner', routes: { 'GET /api/team': team('o1'), 'POST /api/team/invite': fail(409, 'a user with this email already exists') } });
 		const user = userEvent.setup();
 		await screen.findByText('Adam');
 		await user.type(screen.getByLabelText('Email'), 'adam@example.com');

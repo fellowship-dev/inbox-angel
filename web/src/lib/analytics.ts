@@ -89,7 +89,7 @@ export interface DomainAnalytics {
 	readiness: Readiness;
 }
 
-export interface AccountAnalytics {
+export interface WorkspaceAnalytics {
 	alignment: Alignment;
 	days: number;
 	totals: Totals;
@@ -108,12 +108,12 @@ export interface AccountAnalytics {
 }
 
 export const analyticsKeys = {
-	account: (days: number) => ['analytics', 'account', days] as const,
+	workspace: (days: number) => ['analytics', 'workspace', days] as const,
 	domain: (id: number, days: number) => ['analytics', 'domain', id, days] as const,
 };
 
-export const useAccountAnalytics = (days: number) =>
-	useQuery({ queryKey: analyticsKeys.account(days), queryFn: () => api<AccountAnalytics>(`/api/analytics?days=${days}`), placeholderData: (p) => p });
+export const useWorkspaceAnalytics = (days: number) =>
+	useQuery({ queryKey: analyticsKeys.workspace(days), queryFn: () => api<WorkspaceAnalytics>(`/api/analytics?days=${days}`), placeholderData: (p) => p });
 
 export const useDomainAnalytics = (id: number, days: number) =>
 	useQuery({ queryKey: analyticsKeys.domain(id, days), queryFn: () => api<DomainAnalytics>(`/api/domains/${id}/analytics?days=${days}`), enabled: !Number.isNaN(id), placeholderData: (p) => p });

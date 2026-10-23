@@ -17,7 +17,7 @@ export interface ReportOptions {
   maxBytes?: number;
   /**
    * Hosted intake: the domain the recipient's token belongs to. The report must be for that domain or a subdomain
-   * and is filed under it; any other domain is rejected, even one the same account owns.
+   * and is filed under it; any other domain is rejected, even one the same workspace owns.
    */
   token?: TokenDomain;
 }

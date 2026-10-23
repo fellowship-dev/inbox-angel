@@ -91,7 +91,7 @@ const NOW_S = Math.floor(NOW_MS / 1000);
 function seedAdmin(db: TestDb, admin: { email: string; name: string } | null = ADMIN) {
   if (!admin) return;
   db.sqlite.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', ?, ?, 'admin')").run(admin.email, admin.name);
-  db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES ('acct_default', 'u1', 'owner')").run();
+  db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES ('ws_default', 'u1', 'owner')").run();
 }
 
 /** Insert a domain with one aggregate report in the last 7 days matching `stat`, plus failing-source records. */

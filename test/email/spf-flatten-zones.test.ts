@@ -10,8 +10,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 function world() {
   const cf = stubCloudflare(new FakeCloudflare({
-    'acme.com': { id: 'zone-acme', accountId: 'cf' },
-    'other-company.org': { id: 'zone-other', accountId: 'cf' },
+    'acme.com': { id: 'zone-acme', cfAccountId: 'cf' },
+    'other-company.org': { id: 'zone-other', cfAccountId: 'cf' },
   }));
   cf.seed('zone-acme', { id: 'spf-acme', type: 'TXT', name: 'acme.com', content: 'v=spf1 include:_spf.mail.test -all' });
   cf.seed('zone-other', { id: 'spf-other', type: 'TXT', name: 'other-company.org', content: 'v=spf1 include:_spf.mail.test -all' });

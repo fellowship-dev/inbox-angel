@@ -79,7 +79,7 @@ describe('sign-up policy for OAuth (external) sign-ups', () => {
     const env = makeEnv(db);
     await assertMaySignUp(env as any, { kind: 'external' }, 'first@example.com');
     insertUser(db, 'u1', 'first@example.com');
-    expect(await provisionUser(env as any, { kind: 'external' }, user('u1', 'first@example.com'))).toEqual({ accountId: 'acct_default', role: 'owner' });
+    expect(await provisionUser(env as any, { kind: 'external' }, user('u1', 'first@example.com'))).toEqual({ workspaceId: 'ws_default', role: 'owner' });
   });
 
   it('self-host: closed to strangers once an owner exists, open to invited emails', async () => {
@@ -91,18 +91,18 @@ describe('sign-up policy for OAuth (external) sign-ups', () => {
     await call(env, 'POST', '/api/team/invite', { key: owner, body: { email: 'friend@example.com', role: 'admin' } });
     await assertMaySignUp(env as any, { kind: 'external' }, 'friend@example.com');
     insertUser(db, 'u9', 'friend@example.com');
-    expect(await provisionUser(env as any, { kind: 'external' }, user('u9', 'friend@example.com'))).toEqual({ accountId: 'acct_default', role: 'admin' });
+    expect(await provisionUser(env as any, { kind: 'external' }, user('u9', 'friend@example.com'))).toEqual({ workspaceId: 'ws_default', role: 'admin' });
     expect(rows(db, 'SELECT used_at FROM invites')[0].used_at).not.toBeNull();
   });
 
-  it('saas: anyone may sign up and gets their own account', async () => {
+  it('saas: anyone may sign up and gets their own workspace', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
     await assertMaySignUp(env as any, { kind: 'external' }, 'anyone@example.com');
     insertUser(db, 'u1', 'anyone@example.com');
     const placed = await provisionUser(env as any, { kind: 'external' }, user('u1', 'anyone@example.com'));
     expect(placed.role).toBe('owner');
-    expect(placed.accountId).not.toBe('acct_default');
+    expect(placed.workspaceId).not.toBe('ws_default');
   });
 
   it('a password sign-up cannot claim someone else’s invite by email alone', async () => {

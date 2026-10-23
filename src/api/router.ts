@@ -1,7 +1,7 @@
 // REST API router for InboxAngel Worker.
-// All /api/* routes require authentication: the AccountResolver (default: sessionAccountResolver,
+// All /api/* routes require authentication: the WorkspaceResolver (default: sessionWorkspaceResolver,
 // src/auth/resolver.ts) turns the deprecated API_KEY, a per-user API key or a Better Auth session
-// into {account, user, role}, and the request acts on that account only. Members are read-only.
+// into {workspace, user, role}, and the request acts on that workspace only. Members are read-only.
 //
 // Unauthenticated:
 //   GET  /health                              — liveness probe
@@ -11,7 +11,7 @@
 //   POST /api/monitor                         — subscribe to change alerts (unauthenticated)
 //   GET  /api/auth/status                     — owner configured? OAuth providers, mode
 //   POST /api/auth/setup                      — first-run owner (self-host, closed once an owner exists)
-//   POST /api/auth/signup                     — new account (MODE=saas)
+//   POST /api/auth/signup                     — new workspace (MODE=saas)
 //   POST /api/auth/login                      — password login → session token
 //   POST /api/auth/logout                     — end the session
 //   POST /api/auth/forgot                     — send password reset email
@@ -69,8 +69,8 @@ import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
-import type { AuthedAccount } from '../auth/resolver';
-import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import type { AuthedWorkspace } from '../auth/resolver';
+import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
@@ -79,7 +79,7 @@ import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/em
 import { track } from '../telemetry';
 import { loadTenant, refreshTenant } from '../tenancy/load';
 import type { TenantContext } from '../tenancy/context';
-import { defaultResolver, type AccountResolver } from '../tenancy/resolver';
+import { defaultResolver, type WorkspaceResolver } from '../tenancy/resolver';
 import { CfApiError, CfAuthError, CfConnectionError, CfNotConfiguredError, CfZoneNotAllowedError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
@@ -416,7 +416,7 @@ export async function handleApi(
   request: Request,
   envRaw: Env,
   ctx: ExecutionContext,
-  resolver: AccountResolver = defaultResolver(envRaw),
+  resolver: WorkspaceResolver = defaultResolver(envRaw),
 ): Promise<Response> {
   const res = await _handleApi(request, envRaw, ctx, resolver);
   return withSecurityHeaders(res);
@@ -426,7 +426,7 @@ async function _handleApi(
   request: Request,
   envRaw: Env,
   ctx: ExecutionContext,
-  resolver: AccountResolver,
+  resolver: WorkspaceResolver,
 ): Promise<Response> {
   const env = envRaw;
   const url = new URL(request.url);
@@ -482,20 +482,20 @@ async function _handleApi(
 
   // ── Public routes ───────────────────────────────────────────
   // No credentials, no user data. They act through an explicit anonymous context: the platform's
-  // implicit account (where inbound check mail lands), with no user and no role.
+  // implicit workspace (where inbound check mail lands), with no user and no role.
   // A signed-in caller's own tenant if there is one, else that anonymous context.
   const tenantFor = async () => {
-    let who: Awaited<ReturnType<AccountResolver>> = null;
+    let who: Awaited<ReturnType<WorkspaceResolver>> = null;
     const hasCredential = request.headers.has('x-api-key') || request.headers.has('authorization') || request.headers.has('cookie');
     if (hasCredential) {
       try { who = await resolver(request, env); } catch { /* unusable credential: treated as anonymous here */ }
     }
-    return loadTenant(env, who ?? { accountId: IMPLICIT_ACCOUNT_ID });
+    return loadTenant(env, who ?? { workspaceId: IMPLICIT_WORKSPACE_ID });
   };
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
   if (path === '/api/check-sessions' && method === 'POST') {
-    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no account.
+    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no workspace.
     if (hostedEnabled(env) && hostedConfig(env).canaryDomain) {
       const canary = await issueCanary(env);
       return json(canary, 201);
@@ -550,33 +550,33 @@ async function _handleApi(
     return err('not found', 404);
   }
 
-  // Who is calling, and for which account. The resolver is the seam between authentication and
-  // tenancy: every data access, audit entry, invite and Cloudflare call below uses tenant.accountId.
-  let account: Awaited<ReturnType<AccountResolver>>;
+  // Who is calling, and for which workspace. The resolver is the seam between authentication and
+  // tenancy: every data access, audit entry, invite and Cloudflare call below uses tenant.workspaceId.
+  let workspace: Awaited<ReturnType<WorkspaceResolver>>;
   try {
-    account = await resolver(request, env);
+    workspace = await resolver(request, env);
   } catch (e) {
     if (e instanceof AuthError) return err(e.message, e.status);
     return err('authentication error', 401);
   }
-  if (!account) return err('Unauthorized — sign in, or provide an X-Api-Key header', 401);
-  const tenant = await loadTenant(env, account);
+  if (!workspace) return err('Unauthorized — sign in, or provide an X-Api-Key header', 401);
+  const tenant = await loadTenant(env, workspace);
 
-  const actorRow = account.userId ? await globals(env.DB).users.byId(account.userId) : null;
+  const actorRow = workspace.userId ? await globals(env.DB).users.byId(workspace.userId) : null;
   const userBySession = actorRow ? { id: actorRow.id, email: actorRow.email, name: actorRow.name } : null;
-  const isAdmin = account.role === 'owner' || account.role === 'admin';
+  const isAdmin = workspace.role === 'owner' || workspace.role === 'admin';
   // Members are read-only. POST /api/spf-lookup-count only computes; managing your own API keys is self-service.
   if (!(method === 'GET' || method === 'HEAD') && !isAdmin && !isKeyRoute(path) && path !== '/api/spf-lookup-count') {
     return err('admin required', 403);
   }
 
-  // GET /api/me — who the caller is in this account (the dashboard gates controls on `role`)
+  // GET /api/me — who the caller is in this workspace (the dashboard gates controls on `role`)
   if (path === '/api/me' && method === 'GET') {
     return json({
       user: userBySession,
-      role: account.role ?? 'member',
-      account_id: tenant.accountId,
-      kind: (account as AuthedAccount).kind ?? 'session',
+      role: workspace.role ?? 'member',
+      workspace_id: tenant.workspaceId,
+      kind: (workspace as AuthedWorkspace).kind ?? 'session',
     });
   }
 
@@ -601,11 +601,11 @@ async function _handleApi(
 
       // A different base domain may live in a different zone: forget the stored one so it is re-resolved.
       if (tenant.settings.baseDomain !== domain) {
-        await tenant.scope.settings.setMany({ zone_id: '', zone_name: '', account_id: '' });
+        await tenant.scope.settings.setMany({ zone_id: '', zone_name: '', cf_account_id: '' });
       }
       await refreshTenant(tenant);
       const zoneId = tenant.settings.zoneId;
-      const accountId = tenant.settings.cfAccountId;
+      const cfAccountId = tenant.settings.cfAccountId;
 
       // Create the domain row if it doesn't exist yet, then mark it as default.
       // This is the first domain configured — it becomes the infrastructure hub.
@@ -637,7 +637,7 @@ async function _handleApi(
         domain_id: domainId,
         reports_domain: rd,
         zone_id: zoneId ?? null,
-        account_id: accountId ?? null,
+        cf_account_id: cfAccountId ?? null,
       }, 201);
     }
 
@@ -828,20 +828,20 @@ async function _handleApi(
           let destination_debug: string | undefined;
           const admin = await tenant.scope.team.firstAdmin();
           const admin_email = admin?.email ?? null;
-          const accountId = tenant.settings.cfAccountId;
+          const cfAccountId = tenant.settings.cfAccountId;
           let cf: Awaited<ReturnType<typeof tenant.cfFor>> | null = null;
           if (tenant.hasCloudflare() && rd) {
             try { cf = await tenant.cfFor(rd); } catch (e) { destination_debug = e instanceof Error ? e.message : 'no usable Cloudflare connection'; }
           }
           if (!cf) {
             destination_debug ??= 'no CF token';
-          } else if (!accountId) {
-            destination_debug = 'account ID not resolved';
+          } else if (!cfAccountId) {
+            destination_debug = 'workspace ID not resolved';
           } else if (!admin?.email) {
             destination_debug = 'no admin email found';
           } else {
             try {
-              const destinations = await cf.request<{ email: string; verified?: string | null }[]>('GET', `/accounts/${accountId}/email/routing/addresses`);
+              const destinations = await cf.request<{ email: string; verified?: string | null }[]>('GET', `/accounts/${cfAccountId}/email/routing/addresses`);
               const match = destinations?.find(d => d.email === admin.email);
               if (!match) {
                 destination_debug = `email ${admin.email} not found in routing destinations`;
@@ -1110,11 +1110,11 @@ async function _handleApi(
       } catch (e) {
         return cfFailure(e, 502);
       }
-      const accountId = zone.accountId ?? tenant.settings.cfAccountId;
-      if (!accountId) return err('Account ID not available', 400);
+      const cfAccountId = zone.cfAccountId ?? tenant.settings.cfAccountId;
+      if (!cfAccountId) return err('Account ID not available', 400);
 
       try {
-        await cf.request('PUT', `/accounts/${accountId}/workers/domains`, {
+        await cf.request('PUT', `/accounts/${cfAccountId}/workers/domains`, {
           body: { environment: 'production', hostname, service: workerName, zone_id: zone.id },
         });
       } catch (e) {
@@ -1405,7 +1405,7 @@ async function _handleApi(
       const removed = await tenant.scope.team.getMember(teamMemberMatch[1]).catch(() => null);
       if (!removed) return err('team member not found', 404);
       if (removed?.role === 'owner') return err('the owner cannot be removed', 403);
-      if (removed?.role === 'admin' && account.role !== 'owner') return err('only the owner can remove an admin', 403);
+      if (removed?.role === 'admin' && workspace.role !== 'owner') return err('only the owner can remove an admin', 403);
       await tenant.scope.team.removeUser(teamMemberMatch[1]);
       logAudit(tenant, {
           actor_id: actor.id, actor_email: actor.email, actor_type: 'user',
@@ -1770,7 +1770,7 @@ async function _handleApi(
     }
 
     // /api/cloudflare/* and /api/domains/:id/connection — Cloudflare connections (owner/admin)
-    const connectionResponse = await handleConnectionRoutes(request, tenant, ctx, { role: account.role, user: userBySession });
+    const connectionResponse = await handleConnectionRoutes(request, tenant, ctx, { role: workspace.role, user: userBySession });
     if (connectionResponse) return connectionResponse;
 
     // /api/domains/:id/hosted — hosted records (MODE=saas only)
@@ -1782,7 +1782,7 @@ async function _handleApi(
     if (analyticsResponse) return analyticsResponse;
 
     // /api/keys — per-user API keys
-    const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: account.role, kind: (account as AuthedAccount).kind, user: userBySession });
+    const keyResponse = await handleKeyRoutes(request, tenant, ctx, { role: workspace.role, kind: (workspace as AuthedWorkspace).kind, user: userBySession });
     if (keyResponse) return keyResponse;
 
     return err('not found', 404);

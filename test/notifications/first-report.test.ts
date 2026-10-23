@@ -23,11 +23,11 @@ function makeEnv(overrides: { admin?: typeof ADMIN | null; sendEmail?: boolean; 
     db.sqlite
       .prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', ?, ?, 'admin')")
       .run(admin.email, admin.name ?? '');
-    db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES ('acct_default', 'u1', 'owner')").run();
+    db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES ('ws_default', 'u1', 'owner')").run();
   }
   if (customDomain) {
     db.sqlite
-      .prepare("INSERT INTO settings (account_id, key, value) VALUES ('acct_default', 'custom_domain', ?)")
+      .prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'custom_domain', ?)")
       .run(customDomain);
   }
   return {
@@ -222,7 +222,7 @@ describe('storeReport first-report trigger', () => {
     const db = createMigratedD1();
     db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'rua@reports.acme.com')").run();
     db.sqlite.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'admin@acme.com', 'Admin', 'admin')").run();
-    db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES ('acct_default', 'u1', 'owner')").run();
+    db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES ('ws_default', 'u1', 'owner')").run();
     for (let i = 0; i < existingReports; i++) {
       db.sqlite
         .prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'x', ?, 0, 1)")

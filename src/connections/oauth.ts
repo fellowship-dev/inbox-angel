@@ -54,7 +54,7 @@ export class OAuthError extends Error {
 
 export type OAuthStateFailure = 'malformed' | 'signature' | 'expired' | 'mismatch';
 
-/** The `state` is not one we issued for this user, account and browser (or it is stale). */
+/** The `state` is not one we issued for this user, workspace and browser (or it is stale). */
 export class OAuthStateError extends Error {
   constructor(readonly reason: OAuthStateFailure) {
     super(`invalid OAuth state (${reason})`);
@@ -116,7 +116,7 @@ export function randomId(bytes = 16): string {
 
 /** What a state is bound to: checked again when it comes back. */
 export interface StateBinding {
-  accountId: string;
+  workspaceId: string;
   userId: string;
   /** Random per start; also set as an HttpOnly cookie so only the browser that started the flow can finish it. */
   nonce: string;
@@ -152,7 +152,7 @@ export async function signState(
 ): Promise<string> {
   const payload: StatePayload = {
     v: 1,
-    a: binding.accountId,
+    a: binding.workspaceId,
     u: binding.userId,
     n: binding.nonce,
     e: nowSeconds + STATE_TTL_SECONDS,
@@ -183,7 +183,7 @@ export async function verifyState(
   try { p = JSON.parse(dec.decode(unb64url(parts[0]))); } catch { throw new OAuthStateError('malformed'); }
   if (p.v !== 1 || typeof p.e !== 'number' || typeof p.p !== 'string') throw new OAuthStateError('malformed');
   if (p.e <= nowSeconds) throw new OAuthStateError('expired');
-  if (p.a !== expected.accountId || p.u !== expected.userId || p.n !== expected.nonce) throw new OAuthStateError('mismatch');
+  if (p.a !== expected.workspaceId || p.u !== expected.userId || p.n !== expected.nonce) throw new OAuthStateError('mismatch');
   let verifier: string;
   try { verifier = (await crypt.open(p.p, nonceAad(p.n))).access(); } catch { throw new OAuthStateError('malformed'); }
   return { verifier, label: p.l, returnTo: p.r, connectionId: p.c };

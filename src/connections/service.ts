@@ -1,6 +1,6 @@
-// Cloudflare connections of one account: store, open, refresh, restrict, revoke.
+// Cloudflare connections of one workspace: store, open, refresh, restrict, revoke.
 //
-// One ConnectionService belongs to one TenantContext (one request, or one cron account). It keeps no
+// One ConnectionService belongs to one TenantContext (one request, or one cron workspace). It keeps no
 // module-level state: opened tokens and clients are cached on the instance, which dies with the request.
 //
 // The CfClient it hands out for a connection
@@ -9,7 +9,7 @@
 //   * carries the owner's zone allow-list and refuses every call outside it,
 //   * throws CfConnectionError (not a generic failure) when the connection is broken or revoked.
 
-import type { AccountScope, CfConnectionInfo, CfConnectionZone } from '@inbox-angel/db';
+import type { WorkspaceScope, CfConnectionInfo, CfConnectionZone } from '@inbox-angel/db';
 import {
   CfAuthError,
   CfClient,
@@ -31,8 +31,8 @@ export type ConnectionEnv = CryptoEnv & OAuthEnv;
 
 /** What the connection layer needs from its tenant. */
 export interface ConnectionHost {
-  accountId: string;
-  scope: AccountScope;
+  workspaceId: string;
+  scope: WorkspaceScope;
   env: ConnectionEnv;
   fetch?: typeof fetch;
   /** Called once when a connection turns broken (alert path). */
@@ -153,7 +153,7 @@ export class ConnectionService {
     const account = await this.#soleAccount(cf);
 
     const id = newId();
-    const envelope = await crypt.seal({ access: p.token, expiresAt: Number.isFinite(expires) ? expires : undefined }, envelopeAad(this.#host.accountId, id));
+    const envelope = await crypt.seal({ access: p.token, expiresAt: Number.isFinite(expires) ? expires : undefined }, envelopeAad(this.#host.workspaceId, id));
     await this.#host.scope.connections.insert({
       id,
       label: cleanLabel(p.label) ?? account?.name ?? 'Cloudflare API token',
@@ -178,7 +178,7 @@ export class ConnectionService {
       const existing = await q.getSecret(p.replace);
       if (!existing || existing.auth_type !== 'oauth') throw new CfConnectionError('missing', p.replace);
       try {
-        await this.#assertSameAccount(p.replace, existing.cf_account_id, cf);
+        await this.#assertSameCfAccount(p.replace, existing.cf_account_id, cf);
       } catch (e) {
         // A grant for the wrong Cloudflare account is of no use to anyone: give it back.
         const cfg = safeOauthConfig(this.#host.env);
@@ -189,7 +189,7 @@ export class ConnectionService {
         }
         throw e;
       }
-      await q.reactivate(p.replace, await crypt.seal(p.tokens.material, envelopeAad(this.#host.accountId, p.replace)), scopes);
+      await q.reactivate(p.replace, await crypt.seal(p.tokens.material, envelopeAad(this.#host.workspaceId, p.replace)), scopes);
       this.invalidate();
       return (await this.get(p.replace))!;
     }
@@ -201,7 +201,7 @@ export class ConnectionService {
       cf_account_id: account?.id,
       cf_account_name: account?.name,
       auth_type: 'oauth',
-      token_envelope: await crypt.seal(p.tokens.material, envelopeAad(this.#host.accountId, id)),
+      token_envelope: await crypt.seal(p.tokens.material, envelopeAad(this.#host.workspaceId, id)),
       scopes,
       created_by: p.createdBy,
     });
@@ -223,8 +223,8 @@ export class ConnectionService {
       if (e instanceof CfAuthError) throw new ConnectionInputError('Cloudflare did not accept this API token');
       throw e;
     }
-    await this.#assertSameAccount(id, existing.cf_account_id, cf);
-    await q.reactivate(id, await crypt.seal({ access: token }, envelopeAad(this.#host.accountId, id)), null);
+    await this.#assertSameCfAccount(id, existing.cf_account_id, cf);
+    await q.reactivate(id, await crypt.seal({ access: token }, envelopeAad(this.#host.workspaceId, id)), null);
     this.invalidate();
     return (await this.get(id))!;
   }
@@ -234,7 +234,7 @@ export class ConnectionService {
    * belong to that account. Known accounts = the recorded one plus the accounts of the allow-listed zones; the new
    * grant has to see all of them. If nothing is known (never recorded, no zones) there is nothing to compare.
    */
-  async #assertSameAccount(id: string, recorded: string | null, cf: CfClient): Promise<void> {
+  async #assertSameCfAccount(id: string, recorded: string | null, cf: CfClient): Promise<void> {
     const known = new Set<string>(recorded ? [recorded] : []);
     for (const z of await this.#host.scope.connections.zones(id)) if (z.cf_account_id) known.add(z.cf_account_id);
     if (known.size === 0) return;
@@ -275,7 +275,7 @@ export class ConnectionService {
       revokedRemote = false;
       if (cfg) {
         try {
-          const m = await this.crypt.open(row.token_envelope, envelopeAad(this.#host.accountId, id));
+          const m = await this.crypt.open(row.token_envelope, envelopeAad(this.#host.workspaceId, id));
           const first = m.refresh() ? await revokeToken(cfg, m.refresh()!, 'refresh_token', this.#fetch) : false;
           const second = await revokeToken(cfg, m.access(), 'access_token', this.#fetch);
           revokedRemote = first || second;
@@ -291,10 +291,10 @@ export class ConnectionService {
   // ── Zones ──────────────────────────────────────────────────
 
   /** Every active zone the connection's token can see, with whether Inbox Angel may manage it. */
-  async availableZones(id: string): Promise<{ id: string; name: string; allowed: boolean; accountId?: string }[]> {
+  async availableZones(id: string): Promise<{ id: string; name: string; allowed: boolean; cfAccountId?: string }[]> {
     const cf = await this.#setupClient(id);
     const allowed = new Set((await this.#host.scope.connections.zones(id)).map(z => z.zone_id));
-    return (await cf.listZones()).map(z => ({ id: z.id, name: z.name.toLowerCase(), allowed: allowed.has(z.id), accountId: z.account?.id }));
+    return (await cf.listZones()).map(z => ({ id: z.id, name: z.name.toLowerCase(), allowed: allowed.has(z.id), cfAccountId: z.account?.id }));
   }
 
   /** Replace the allow-list. Every id must be a zone the token can actually see (names come from Cloudflare, not the caller). */
@@ -311,7 +311,7 @@ export class ConnectionService {
     const blocked = [...visible.entries()]
       .filter(([zid, z]) => !chosen.has(zid) && parents.some(p => z.name.endsWith(`.${p}`)))
       .map(([zid, z]) => ({ zone_id: zid, zone_name: z.name }));
-    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)!.name, cf_account_id: visible.get(z)!.accountId })), blocked))) throw new CfConnectionError('missing', id);
+    if (!(await this.#host.scope.connections.setZones(id, unique.map(z => ({ zone_id: z, zone_name: visible.get(z)!.name, cf_account_id: visible.get(z)!.cfAccountId })), blocked))) throw new CfConnectionError('missing', id);
     this.invalidate();
     return unique.map(z => ({ id: z, name: visible.get(z)!.name }));
   }
@@ -374,14 +374,14 @@ export class ConnectionService {
     const row = await q.getSecret(id);
     if (!row) throw new CfConnectionError('missing', id);
     if (row.status !== 'active') throw new CfConnectionError(row.status, id, row.label);
-    const aad = envelopeAad(this.#host.accountId, id);
+    const aad = envelopeAad(this.#host.workspaceId, id);
     let material: TokenMaterial;
     try {
       material = await this.crypt.open(row.token_envelope, aad);
     } catch (e) {
       // This is the operator's problem (the key was changed or dropped), not the customer's: the connection is
       // not marked broken and nobody is alerted. Every call through it fails with a 503 until the key is restored.
-      console.error(`[connections] ${this.#host.accountId}: stored credentials of connection ${id} cannot be opened with the configured key (${e instanceof Error ? e.name : 'error'}); check the server key setting`);
+      console.error(`[connections] ${this.#host.workspaceId}: stored credentials of connection ${id} cannot be opened with the configured key (${e instanceof Error ? e.name : 'error'}); check the server key setting`);
       throw e;
     }
     let envelope = row.token_envelope;
@@ -414,7 +414,7 @@ export class ConnectionService {
       throw new CfConnectionError('broken', id, row.label);
     }
 
-    const aad = envelopeAad(this.#host.accountId, id);
+    const aad = envelopeAad(this.#host.workspaceId, id);
     let tokens: OAuthTokens;
     try {
       tokens = await refreshTokens(cfg, refreshToken, this.#fetch, this.#now);

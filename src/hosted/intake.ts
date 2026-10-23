@@ -1,12 +1,12 @@
 // Central intake for the hosted service (MODE=saas, SAAS_ENABLED=1).
 //
-//   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → account + domain
+//   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → workspace + domain
 //   tls-rpt+<token>@rua.inboxangel.io   TLS-RPT report
 //   check+<token>@canary.inboxangel.io  anonymous free check (src/hosted/canary.ts)
 //
 // Subdomains can't have a catch-all, so one Email Routing rule per base address (`rua@`, `tls-rpt@`,
-// `check@`) delivers every `+token` variant here. The token picks the account; the report's own
-// domain must then belong to that account (anti-spoof). There is no default-account fallback.
+// `check@`) delivers every `+token` variant here. The token picks the workspace; the report's own
+// domain must then belong to that workspace (anti-spoof). There is no default-workspace fallback.
 //
 // Rejections are permanent (message.setReject → 5xx, the sender stops retrying) and logged with a reason.
 // A database that isn't migrated yet throws instead (index.ts), so the sender retries later.
@@ -66,9 +66,9 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   const target = await intakeLookups(env.DB).resolveToken(hash, Math.floor(Date.now() / 1000));
   if (!target) return reject(message, { ...base, kind, token: hash.slice(0, 8) }, 'Unknown intake token');
 
-  const fields = { ...base, kind, account: target.account_id, domain_id: target.domain_id };
+  const fields = { ...base, kind, workspace: target.workspace_id, domain_id: target.domain_id };
   const guarded = withRejectLog(message, fields);
-  const tenant = await loadTenant(env, { accountId: target.account_id });
+  const tenant = await loadTenant(env, { workspaceId: target.workspace_id });
 
   if (kind === 'rua') {
     const { failure_count } = await handleDmarcReport(guarded, tenant, { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } });

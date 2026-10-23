@@ -4,15 +4,15 @@ import { domains, monitorSubscriptions } from '../schema';
 
 type Baseline = Pick<typeof monitorSubscriptions.$inferSelect, 'spf_record' | 'dmarc_policy' | 'dmarc_pct' | 'dmarc_record'>;
 
-export function monitorQueries(db: Db, accountId: string) {
-	const mine = eq(monitorSubscriptions.account_id, accountId);
+export function monitorQueries(db: Db, workspaceId: string) {
+	const mine = eq(monitorSubscriptions.workspace_id, workspaceId);
 
 	return {
 		insert(s: { email: string; domain: string; session_token?: string | null } & Partial<Baseline>) {
 			return db
 				.insert(monitorSubscriptions)
 				.values({
-					account_id: accountId,
+					workspace_id: workspaceId,
 					email: s.email,
 					domain: s.domain,
 					session_token: s.session_token ?? null,
@@ -21,7 +21,7 @@ export function monitorQueries(db: Db, accountId: string) {
 					dmarc_pct: s.dmarc_pct ?? null,
 					dmarc_record: s.dmarc_record ?? null,
 				})
-				.onConflictDoNothing({ target: [monitorSubscriptions.account_id, monitorSubscriptions.email, monitorSubscriptions.domain] })
+				.onConflictDoNothing({ target: [monitorSubscriptions.workspace_id, monitorSubscriptions.email, monitorSubscriptions.domain] })
 				.run();
 		},
 
@@ -30,7 +30,7 @@ export function monitorQueries(db: Db, accountId: string) {
 			return db
 				.select({ ms: monitorSubscriptions })
 				.from(monitorSubscriptions)
-				.innerJoin(domains, and(eq(domains.domain, monitorSubscriptions.domain), eq(domains.account_id, accountId)))
+				.innerJoin(domains, and(eq(domains.domain, monitorSubscriptions.domain), eq(domains.workspace_id, workspaceId)))
 				.where(and(mine, eq(monitorSubscriptions.active, 1), eq(domains.alerts_enabled, 1)))
 				.orderBy(sql`${monitorSubscriptions.last_checked_at} ASC NULLS FIRST`)
 				.limit(limit)

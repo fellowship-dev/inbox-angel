@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forAccount, IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 
 const NOW = Math.floor(Date.now() / 1000);
 
 async function seed() {
   const db = createMigratedD1();
-  const q = forAccount(db, IMPLICIT_ACCOUNT_ID);
+  const q = forWorkspace(db, IMPLICIT_WORKSPACE_ID);
   const { meta } = await q.domains.insert({ domain: 'example.com', rua_address: 'rua@r.test' });
   const id = Number(meta.last_row_id);
   await q.domains.updateDmarcPolicy(id, 'reject');
@@ -52,9 +52,9 @@ describe('reports.checkSummary', () => {
     expect(await q.reports.checkSummary(999, 0)).toBeNull();
   });
 
-  it('returns null for a domain owned by another account', async () => {
+  it('returns null for a domain owned by another workspace', async () => {
     const { db, id } = await seed();
-    db.sqlite.exec("INSERT INTO accounts (id, name) VALUES ('acct_b', 'B')");
-    expect(await forAccount(db, 'acct_b').reports.checkSummary(id, 0)).toBeNull();
+    db.sqlite.exec("INSERT INTO workspaces (id, name) VALUES ('ws_b', 'B')");
+    expect(await forWorkspace(db, 'ws_b').reports.checkSummary(id, 0)).toBeNull();
   });
 });

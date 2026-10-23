@@ -56,21 +56,21 @@ All handlers run `assertSchemaReady(env.DB)` (from `@inbox-angel/db`) before bus
 
 ### `src/tenancy/` — Tenant context and Cloudflare client
 
-Everything one request (or one cron account) needs is built per request and thrown away with it. There is **no module-level per-tenant state** in `src/` (`test/tenancy/guards.test.ts` enforces it), so concurrent requests for different accounts in one isolate cannot see each other's zones, settings or branding.
+Everything one request (or one cron workspace) needs is built per request and thrown away with it. There is **no module-level per-tenant state** in `src/` (`test/tenancy/guards.test.ts` enforces it), so concurrent requests for different workspaces in one isolate cannot see each other's zones, settings or branding.
 
 | File | Role |
 |------|------|
 | `mode.ts` | `MODE=selfhost\|saas` from env; defaults to `selfhost` |
-| `resolver.ts` | `AccountResolver` seam `(request, env) => {accountId, userId?, role?} \| null`. The self-host resolver always returns the implicit account (`acct_default`); the auth lane plugs in a session-based one. Also `listCronAccounts` (self-host: just the one) |
-| `context.ts` | `TenantContext`: `accountId`, `mode`, `settings` (base/reports domain, from address, branding, stored zone), `scope` (account-scoped queries), `cf()` (the Cloudflare client factory), `zoneFor(domain)` |
-| `load.ts` | `loadTenant(env, account)` reads the tenant's settings from D1, derives defaults, resolves the base domain's zone once and persists it. Replaces the old `enrichEnv()` cache |
+| `resolver.ts` | `WorkspaceResolver` seam `(request, env) => {workspaceId, userId?, role?} \| null`. The self-host resolver always returns the implicit workspace (`ws_default`); the auth lane plugs in a session-based one. Also `listCronWorkspaces` (self-host: just the one) |
+| `context.ts` | `TenantContext`: `workspaceId`, `mode`, `settings` (base/reports domain, from address, branding, stored zone), `scope` (workspace-scoped queries), `cf()` (the Cloudflare client factory), `zoneFor(domain)` |
+| `load.ts` | `loadTenant(env, workspace)` reads the tenant's settings from D1, derives defaults, resolves the base domain's zone once and persists it. Replaces the old `enrichEnv()` cache |
 | `cf-client.ts` | `CfClient`: the only code that talks to `api.cloudflare.com` |
 
 **`CfClient`** is bound to one token. `zoneFor(domain)` finds the zone of *that* domain by its registrable name (`a.b.acme.com` → `acme.com`; shortest candidate first, so `co.uk` style suffixes are skipped) and caches answers for the client's lifetime, which is one request. Every DNS write (apply-dmarc, apply-spf, the SPF flattener, MTA-STS, DMARC mode change) targets the zone of the domain it is for. Records under the reports domain (the `_report._dmarc` authorisation record, Email Routing, null-sender records) go to the reports domain's zone. Failures are typed: `CfNetworkError`, `CfAuthError` (401/403), `CfNotFoundError`, `CfApiError`, `CfZoneNotFoundError`, `CfNotConfiguredError`. The token is held in a private field and never appears in errors, JSON, `inspect` output or logs.
 
-**Crons** (`src/cron.ts`) fan out over the accounts, each in its own `try`, so one account's Cloudflare 403 doesn't stop the others.
+**Crons** (`src/cron.ts`) fan out over the workspaces, each in its own `try`, so one workspace's Cloudflare 403 doesn't stop the others.
 
-**Credentials:** self-host uses the `CLOUDFLARE_API_TOKEN` secret. In `saas` mode no token is used until per-account credentials exist (`loadTenant`'s `cfToken` option is the seam); the operator's token is never shared across tenants.
+**Credentials:** self-host uses the `CLOUDFLARE_API_TOKEN` secret. In `saas` mode no token is used until per-workspace credentials exist (`loadTenant`'s `cfToken` option is the seam); the operator's token is never shared across tenants.
 
 | Env | Purpose |
 |-----|---------|
@@ -81,11 +81,11 @@ Everything one request (or one cron account) needs is built per request and thro
 
 ### `src/connections/` — Cloudflare connections (OAuth + pasted tokens)
 
-One Inbox Angel account holds several Cloudflare connections; each domain is linked to the one that manages its zone. `crypto.ts` seals tokens (AES-GCM, versioned key id), `oauth.ts` is the PKCE protocol and signed state, `service.ts` stores, refreshes, restricts (zone allow-list) and revokes, `routes.ts` is `/api/cloudflare/*` and `PUT /api/domains/:id/connection`, `relay.ts` is the optional self-host redirect relay (inert unless configured). `TenantContext.cfFor(domain)` is how the rest of the Worker gets a client. See [cloudflare-oauth.md](cloudflare-oauth.md).
+One Inbox Angel workspace holds several Cloudflare connections; each domain is linked to the one that manages its zone. `crypto.ts` seals tokens (AES-GCM, versioned key id), `oauth.ts` is the PKCE protocol and signed state, `service.ts` stores, refreshes, restricts (zone allow-list) and revokes, `routes.ts` is `/api/cloudflare/*` and `PUT /api/domains/:id/connection`, `relay.ts` is the optional self-host redirect relay (inert unless configured). `TenantContext.cfFor(domain)` is how the rest of the Worker gets a client. See [cloudflare-oauth.md](cloudflare-oauth.md).
 
 ### `src/hosted/` — Hosted (SaaS) intake and records
 
-Only active with `MODE=saas` + `SAAS_ENABLED=1`; see [hosted.md](hosted.md). `intake.ts` routes `rua+<token>@` / `tls-rpt+<token>@` mail to the token's account (no default-account fallback), `canary.ts` handles the anonymous `check+<token>@`, `records.ts` is the name-guarded writer for `*.h.<zone>`, `zones.ts` tracks the 3,500-record quota and is the shard seam, `pointers.ts` verifies the customer's CNAME/SPF pointers, `service.ts` + `routes.ts` are `/api/domains/:id/hosted`, `cron.ts` is the daily zone diff.
+Only active with `MODE=saas` + `SAAS_ENABLED=1`; see [hosted.md](hosted.md). `intake.ts` routes `rua+<token>@` / `tls-rpt+<token>@` mail to the token's workspace (no default-workspace fallback), `canary.ts` handles the anonymous `check+<token>@`, `records.ts` is the name-guarded writer for `*.h.<zone>`, `zones.ts` tracks the 3,500-record quota and is the shard seam, `pointers.ts` verifies the customer's CNAME/SPF pointers, `service.ts` + `routes.ts` are `/api/domains/:id/hosted`, `cron.ts` is the daily zone diff.
 
 ---
 
@@ -94,7 +94,7 @@ Only active with `MODE=saas` + `SAAS_ENABLED=1`; see [hosted.md](hosted.md). `in
 Optional, opt-in telemetry. Disabled by default. Users opt in through the dashboard settings page, which writes `telemetry_opted_in = "true"` to the D1 settings table.
 
 **Privacy guarantees**
-- Anonymous ID: `SHA-256(cloudflare_account_id + worker_name)[:16]` (saas also mixes in the tenant's account id) — a one-way hash, cannot be reversed
+- Anonymous ID: `SHA-256(cloudflare_account_id + worker_name)[:16]` (saas also mixes in the tenant's workspace id) — a one-way hash, cannot be reversed
 - Collected: event type, typed properties (counts, statuses), worker version, anonymous ID, unix timestamp
 - Never collected: domain names, email addresses, IP addresses, report contents
 
@@ -116,7 +116,7 @@ Fire-and-forget. Never throws. Silently no-ops if telemetry is disabled or if th
 | `check.created` / `check.received` | Free one-shot email check |
 | `report.received` / `tls-rpt.received` | DMARC or TLS report ingested |
 
-The opt-in state is read once per `TenantContext` (not cached at module level, so it can't leak between accounts).
+The opt-in state is read once per `TenantContext` (not cached at module level, so it can't leak between workspaces).
 
 ---
 

@@ -1,4 +1,4 @@
-import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import type { BoundEnv } from '../../src/index';
 import { TenantContext, type TenantSettings } from '../../src/tenancy/context';
@@ -7,7 +7,7 @@ import type { Mode } from '../../src/tenancy/mode';
 export interface MakeTenantOptions {
   db?: unknown;
   env?: Partial<BoundEnv>;
-  accountId?: string;
+  workspaceId?: string;
   settings?: Partial<TenantSettings>;
   cfToken?: string;
   fetch?: typeof fetch;
@@ -19,7 +19,7 @@ export function makeTenant(o: MakeTenantOptions = {}): TenantContext {
   const db = (o.db ?? createMigratedD1()) as D1Database;
   return new TenantContext({
     env: { DB: db, ...o.env } as BoundEnv,
-    accountId: o.accountId ?? IMPLICIT_ACCOUNT_ID,
+    workspaceId: o.workspaceId ?? IMPLICIT_WORKSPACE_ID,
     mode: o.mode,
     settings: {
       reportsDomain: 'reports.test.com',
@@ -31,9 +31,9 @@ export function makeTenant(o: MakeTenantOptions = {}): TenantContext {
   });
 }
 
-/** Store settings for an account the way the wizard does, so loadTenant() sees them. */
-export function seedSettings(db: unknown, settings: Record<string, string>, accountId = IMPLICIT_ACCOUNT_ID): void {
+/** Store settings for a workspace the way the wizard does, so loadTenant() sees them. */
+export function seedSettings(db: unknown, settings: Record<string, string>, workspaceId = IMPLICIT_WORKSPACE_ID): void {
   const sqlite = (db as ReturnType<typeof createMigratedD1>).sqlite;
-  const stmt = sqlite.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?) ON CONFLICT DO NOTHING');
-  for (const [k, v] of Object.entries(settings)) stmt.run(accountId, k, v);
+  const stmt = sqlite.prepare('INSERT INTO settings (workspace_id, key, value) VALUES (?, ?, ?) ON CONFLICT DO NOTHING');
+  for (const [k, v] of Object.entries(settings)) stmt.run(workspaceId, k, v);
 }

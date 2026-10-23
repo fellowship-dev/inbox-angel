@@ -1,21 +1,21 @@
 /**
- * Queries on tables that are deliberately NOT account-scoped (see GLOBAL_TABLES
+ * Queries on tables that are deliberately NOT workspace-scoped (see GLOBAL_TABLES
  * in schema.ts): credentials lookups, anonymous free-check results, the shared
  * IP cache. Anything here must not return or modify tenant data.
  */
 import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
-import { accounts, authRateLimits, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
+import { workspaces, authRateLimits, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
 export function globalQueries(dbLike: DbLike) {
 	const db = getDb(dbLike);
 	return {
-		accounts: {
-			/** Every tenant, for crons that fan out per account. */
-			create: (id: string, name: string) => db.insert(accounts).values({ id, name }).run(),
-			ids: () => db.select({ id: accounts.id }).from(accounts).orderBy(accounts.created_at).all().then((rows) => rows.map((r) => r.id)),
+		workspaces: {
+			/** Every tenant, for crons that fan out per workspace. */
+			create: (id: string, name: string) => db.insert(workspaces).values({ id, name }).run(),
+			ids: () => db.select({ id: workspaces.id }).from(workspaces).orderBy(workspaces.created_at).all().then((rows) => rows.map((r) => r.id)),
 		},
 
 		users: {
@@ -65,7 +65,7 @@ export function globalQueries(dbLike: DbLike) {
 			insert: (r: Omit<NewCheckResult, 'session_token' | 'spf_lookup_count'> & { session_token?: string | null; spf_lookup_count?: number | null }) =>
 				db.insert(checkResults).values({ ...r, session_token: r.session_token ?? null, spf_lookup_count: r.spf_lookup_count ?? null }).run(),
 			byToken: (token: string) => db.select().from(checkResults).where(eq(checkResults.session_token, token)).get().then((r) => r ?? null),
-			/** Latest results for the given sender domains. Callers pass only their own account's domains. */
+			/** Latest results for the given sender domains. Callers pass only their own workspace's domains. */
 			latestForDomains: (domains: string[], limit = 20) =>
 				domains.length === 0
 					? Promise.resolve([])

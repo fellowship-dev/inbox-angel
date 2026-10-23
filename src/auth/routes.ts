@@ -6,7 +6,7 @@
 // Auth's own endpoints (OAuth, sessions, change-password) is exposed as-is under /api/auth/;
 // everything else (notably /sign-up/email, which would bypass the sign-up policy) is not.
 import type { BoundEnv as Env } from '../index';
-import { authLookups, forAccount, globalQueries, IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import { authLookups, forWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 import { logAudit, type AuditEntry } from '../audit/log';
 import { track } from '../telemetry';
 import { TenantContext } from '../tenancy/context';
@@ -23,16 +23,16 @@ const err = (message: string, status: number) => json({ error: message }, status
 const setCookies = (h: Headers): string[] => (h as Headers & { getSetCookie(): string[] }).getSetCookie();
 
 /**
- * Platform-level settings (Turnstile keys, first-run state) live on the implicit account. Nothing
+ * Platform-level settings (Turnstile keys, first-run state) live on the implicit workspace. Nothing
  * tenant-owned is read through this: user data always goes through the caller's own TenantContext.
  */
-const platform = (env: Env) => forAccount(env.DB, IMPLICIT_ACCOUNT_ID);
+const platform = (env: Env) => forWorkspace(env.DB, IMPLICIT_WORKSPACE_ID);
 
-/** Audit an auth event in the account the user acts in (their first membership). */
-function auditUser(env: Env, ctx: ExecutionContext, userId: string, entry: AuditEntry, accountId?: string): void {
+/** Audit an auth event in the workspace the user acts in (their first membership). */
+function auditUser(env: Env, ctx: ExecutionContext, userId: string, entry: AuditEntry, workspaceId?: string): void {
   ctx.waitUntil((async () => {
-    const acct = accountId ?? (await authLookups(env.DB).membershipsOf(userId))[0]?.account_id;
-    if (acct) logAudit({ db: env.DB, accountId: acct }, entry);
+    const ws = workspaceId ?? (await authLookups(env.DB).membershipsOf(userId))[0]?.workspace_id;
+    if (ws) logAudit({ db: env.DB, workspaceId: ws }, entry);
   })().catch(() => {}));
 }
 
@@ -153,7 +153,7 @@ export async function handleAuthRoute(
   if (path === '/api/auth/status' && method === 'GET') {
     const saas = isSaas(env);
     const configured = saas ? true : await platform(env).team.hasOwner();
-    // Account-specific facts (custom domain, base domain, domains) come from the caller's own tenant
+    // Workspace-specific facts (custom domain, base domain, domains) come from the caller's own tenant
     // when they are signed in; an anonymous visitor gets the self-host instance's, or nothing in saas.
     const t = await tenantFor();
     const mine = !saas || !!t.userId ? t : null;
@@ -179,7 +179,7 @@ export async function handleAuthRoute(
   }
 
   // ── POST /api/auth/setup — first-run owner (self-host; closed once an owner exists) ──
-  // ── POST /api/auth/signup — new account (MODE=saas) ─────────
+  // ── POST /api/auth/signup — new workspace (MODE=saas) ─────────
   if ((path === '/api/auth/setup' || path === '/api/auth/signup') && method === 'POST') {
     const isSetup = path === '/api/auth/setup';
     const ip = clientIp(request);
@@ -208,7 +208,7 @@ export async function handleAuthRoute(
       after_value: { email, role: 'owner' },
       meta: { ip },
     });
-    if (isSetup) track(new TenantContext({ env, accountId: IMPLICIT_ACCOUNT_ID }), { event: 'instance.born' }); // fire-and-forget
+    if (isSetup) track(new TenantContext({ env, workspaceId: IMPLICIT_WORKSPACE_ID }), { event: 'instance.born' }); // fire-and-forget
 
     const hasDomain = !isSetup ? false
       : (await platform(env).domains.list()).length > 0 || !!(await platform(env).settings.get('base_domain'))?.value;
@@ -320,7 +320,7 @@ export async function handleAuthRoute(
       action: 'auth.invite_accepted',
       resource_type: 'user', resource_id: user.id, resource_name: invite.email,
       after_value: { email: invite.email, role: invite.role, invited_by: invite.invited_by },
-    }, invite.account_id);
+    }, invite.workspace_id);
     return sessionResponse(res, {}, 201);
   }
 

@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { gzipSync, strToU8 } from 'fflate';
-import { intakeLookups, forAccount, resetSchemaReadyCache } from '@inbox-angel/db';
+import { intakeLookups, forWorkspace, resetSchemaReadyCache } from '@inbox-angel/db';
 import { createTestD1 } from '@inbox-angel/db/testing';
 import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
 import { coversDomain } from '../../src/hosted/scope';
 import { generateToken, hashToken, intakeAddress, isTokenShaped, parseRecipient } from '../../src/hosted/tokens';
-import { resolveInboundAccount } from '../../src/tenancy/resolver';
+import { resolveInboundWorkspace } from '../../src/tenancy/resolver';
 import { dmarcXml, fakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime, zipReportMime } from '../helpers/mail';
-import { NOW, nxdomain, quiet, twoAccounts } from './world';
+import { NOW, nxdomain, quiet, twoWorkspaces } from './world';
 
 // cloudflare:email only exists in workerd.
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
@@ -34,55 +34,55 @@ describe('tokens', () => {
     expect(parseRecipient('rua@rua.inboxangel.io')).toEqual({ base: 'rua', host: RUA });
   });
 
-  it('resolve to account + domain; only the hash is stored', async () => {
-    const w = await twoAccounts();
+  it('resolve to workspace + domain; only the hash is stored', async () => {
+    const w = await twoWorkspaces();
     const look = intakeLookups(w.env.DB);
-    expect(await look.resolveToken(await hashToken(w.tokenA), NOW)).toEqual({ account_id: 'acct_a', domain_id: 1, domain: 'a-corp.com' });
-    expect(await look.resolveToken(await hashToken(w.tokenB), NOW)).toEqual({ account_id: 'acct_b', domain_id: 2, domain: 'b-corp.org' });
+    expect(await look.resolveToken(await hashToken(w.tokenA), NOW)).toEqual({ workspace_id: 'ws_a', domain_id: 1, domain: 'a-corp.com' });
+    expect(await look.resolveToken(await hashToken(w.tokenB), NOW)).toEqual({ workspace_id: 'ws_b', domain_id: 2, domain: 'b-corp.org' });
     expect(await look.resolveToken(await hashToken(generateToken()), NOW)).toBeNull();
     expect(JSON.stringify(w.rows('SELECT * FROM intake_tokens'))).not.toContain(w.tokenA);
   });
 
   it('rotate: the new token works at once, the old one only for the grace period', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const look = intakeLookups(w.env.DB);
     const fresh = generateToken();
-    await forAccount(w.env.DB, 'acct_a').intake.set(1, await hashToken(fresh), NOW + 100);
-    expect((await look.resolveToken(await hashToken(fresh), NOW + 101))?.account_id).toBe('acct_a');
-    expect((await look.resolveToken(await hashToken(w.tokenA), NOW + 101))?.account_id).toBe('acct_a'); // grace
+    await forWorkspace(w.env.DB, 'ws_a').intake.set(1, await hashToken(fresh), NOW + 100);
+    expect((await look.resolveToken(await hashToken(fresh), NOW + 101))?.workspace_id).toBe('ws_a');
+    expect((await look.resolveToken(await hashToken(w.tokenA), NOW + 101))?.workspace_id).toBe('ws_a'); // grace
     expect(await look.resolveToken(await hashToken(w.tokenA), NOW + 100 + 72 * 3600 + 1)).toBeNull(); // expired
-    expect((await look.resolveToken(await hashToken(fresh), NOW + 100 + 72 * 3600 + 1))?.account_id).toBe('acct_a');
+    expect((await look.resolveToken(await hashToken(fresh), NOW + 100 + 72 * 3600 + 1))?.workspace_id).toBe('ws_a');
   });
 });
 
 describe('DMARC aggregate reports', () => {
-  it('are routed to the account the token belongs to', async () => {
-    const w = await twoAccounts();
+  it('are routed to the workspace the token belongs to', async () => {
+    const w = await twoWorkspaces();
     const a = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'ra')));
     const b = fakeMessage(`rua+${w.tokenB}@${RUA}`, zipReportMime(dmarcXml('b-corp.org', 'rb')));
     await handleHostedEmail(a, w.env);
     await handleHostedEmail(b, w.env);
     expect(a.setReject).not.toHaveBeenCalled();
     expect(b.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT account_id, domain_id, report_id FROM aggregate_reports ORDER BY domain_id')).toEqual([
-      { account_id: 'acct_a', domain_id: 1, report_id: 'ra' },
-      { account_id: 'acct_b', domain_id: 2, report_id: 'rb' },
+    expect(w.rows('SELECT workspace_id, domain_id, report_id FROM aggregate_reports ORDER BY domain_id')).toEqual([
+      { workspace_id: 'ws_a', domain_id: 1, report_id: 'ra' },
+      { workspace_id: 'ws_b', domain_id: 2, report_id: 'rb' },
     ]);
-    expect(w.rows('SELECT DISTINCT account_id FROM report_records ORDER BY 1').map(r => r.account_id)).toEqual(['acct_a', 'acct_b']);
+    expect(w.rows('SELECT DISTINCT workspace_id FROM report_records ORDER BY 1').map(r => r.workspace_id)).toEqual(['ws_a', 'ws_b']);
   });
 
-  it('a report for a domain the token’s account does not own is rejected for good, and stored nowhere', async () => {
-    const w = await twoAccounts();
+  it('a report for a domain the token’s workspace does not own is rejected for good, and stored nowhere', async () => {
+    const w = await twoWorkspaces();
     const spoof = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'spoof')));
     await handleHostedEmail(spoof, w.env);
     expect(spoof.setReject).toHaveBeenCalledOnce();
     expect(spoof.setReject.mock.calls[0][0]).toMatch(/Unknown domain b-corp\.org/);
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
-    expect(console.warn).toHaveBeenCalledWith('[intake] rejected', expect.stringContaining('"account":"acct_a"'));
+    expect(console.warn).toHaveBeenCalledWith('[intake] rejected', expect.stringContaining('"workspace":"ws_a"'));
   });
 
   it('an unknown token is rejected with a logged reason, and never touches the database', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const m = fakeMessage(`rua+${generateToken()}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).toHaveBeenCalledWith('Unknown intake token');
@@ -91,7 +91,7 @@ describe('DMARC aggregate reports', () => {
   });
 
   it.each([['no tag', `rua@${RUA}`], ['a malformed token', `rua+nope@${RUA}`], ['an unknown base address', `postmaster+x@${RUA}`], ['a foreign host', 'rua+x@reports.acme.com']])('%s is rejected', async (_n, to) => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const m = fakeMessage(to, gzipReportMime(dmarcXml('a-corp.com')));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).toHaveBeenCalledOnce();
@@ -99,7 +99,7 @@ describe('DMARC aggregate reports', () => {
   });
 
   it('malformed attachments are rejected, not stored', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     for (const raw of [
       mimeWithAttachment(strToU8('this is not a report'), 'r.xml.gz', 'application/gzip'),
       mimeWithAttachment(new Uint8Array([0x1f, 0x8b, 1, 2, 3, 4]), 'r.xml.gz', 'application/gzip'),
@@ -114,7 +114,7 @@ describe('DMARC aggregate reports', () => {
   });
 
   it('caps reports at 25 MiB: a small gzip that inflates past it, and an oversized message, are rejected', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const bomb = '<?xml version="1.0"?><feedback>' + ' '.repeat(26 * 1024 * 1024) + '</feedback>';
     const compressed = gzipSync(strToU8(bomb));
     expect(compressed.length).toBeLessThan(200_000);
@@ -129,7 +129,7 @@ describe('DMARC aggregate reports', () => {
   }, BIG_REPORT_TIMEOUT);
 
   it('accepts a report just under the cap', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const big = dmarcXml('a-corp.com', 'big').replace('</feedback>', '<!--' + 'x'.repeat(20 * 1024 * 1024) + '--></feedback>');
     const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, mimeWithAttachment(gzipSync(strToU8(big)), 'r.xml.gz', 'application/gzip'));
     await handleHostedEmail(m, w.env);
@@ -148,16 +148,16 @@ describe('what a token may file', () => {
   });
 
   it('DMARC for a subdomain is accepted and filed under the token’s domain', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('mail.a-corp.com', 'sub-1')));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT account_id, domain_id, report_id FROM aggregate_reports')).toEqual([{ account_id: 'acct_a', domain_id: 1, report_id: 'sub-1' }]);
+    expect(w.rows('SELECT workspace_id, domain_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_a', domain_id: 1, report_id: 'sub-1' }]);
   });
 
-  it('domain A’s token cannot file for domain B of the same account, nor for a parent', async () => {
-    const w = await twoAccounts();
-    w.db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (3, 'acct_a', 'a-other.com', 'x'), (4, 'acct_a', 'corp.com', 'x')").run();
+  it('domain A’s token cannot file for domain B of the same workspace, nor for a parent', async () => {
+    const w = await twoWorkspaces();
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'a-other.com', 'x'), (4, 'ws_a', 'corp.com', 'x')").run();
     for (const domain of ['a-other.com', 'corp.com']) {
       const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml(domain, 'x-' + domain)));
       await handleHostedEmail(m, w.env);
@@ -171,7 +171,7 @@ describe('what a token may file', () => {
   });
 
   it('TLS-RPT for the domain and a subdomain files as one row under the token’s domain', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const pol = (d: string) => ({ policy: { 'policy-type': 'sts', 'policy-domain': d }, summary: { 'total-successful-session-count': 4, 'total-failure-session-count': 1 } });
     const m = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(tlsRptJson('a-corp.com', { policies: [pol('a-corp.com'), pol('mail.a-corp.com')] })));
     await handleHostedEmail(m, w.env);
@@ -181,20 +181,20 @@ describe('what a token may file', () => {
 });
 
 describe('TLS-RPT reports', () => {
-  it('are stored under the token’s account, from a JSON body or a gzip attachment', async () => {
-    const w = await twoAccounts();
+  it('are stored under the token’s workspace, from a JSON body or a gzip attachment', async () => {
+    const w = await twoWorkspaces();
     await handleHostedEmail(fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(tlsRptJson('a-corp.com'))), w.env);
     const gz = fakeMessage(`tls-rpt+${w.tokenB}@${RUA}`, tlsRptMime(tlsRptJson('b-corp.org'), true));
     await handleHostedEmail(gz, w.env);
     expect(gz.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT account_id, domain_id, total_success, total_failure FROM tls_reports ORDER BY domain_id')).toEqual([
-      { account_id: 'acct_a', domain_id: 1, total_success: 10, total_failure: 2 },
-      { account_id: 'acct_b', domain_id: 2, total_success: 10, total_failure: 2 },
+    expect(w.rows('SELECT workspace_id, domain_id, total_success, total_failure FROM tls_reports ORDER BY domain_id')).toEqual([
+      { workspace_id: 'ws_a', domain_id: 1, total_success: 10, total_failure: 2 },
+      { workspace_id: 'ws_b', domain_id: 2, total_success: 10, total_failure: 2 },
     ]);
   });
 
-  it('a policy-domain the account does not own rejects the whole report', async () => {
-    const w = await twoAccounts();
+  it('a policy-domain the workspace does not own rejects the whole report', async () => {
+    const w = await twoWorkspaces();
     const json = tlsRptJson('a-corp.com', { policies: [
       { policy: { 'policy-type': 'sts', 'policy-domain': 'a-corp.com' }, summary: { 'total-successful-session-count': 1, 'total-failure-session-count': 0 } },
       { policy: { 'policy-type': 'sts', 'policy-domain': 'b-corp.org' }, summary: { 'total-successful-session-count': 1, 'total-failure-session-count': 0 } },
@@ -206,7 +206,7 @@ describe('TLS-RPT reports', () => {
   });
 
   it.each([['not JSON', 'Subject: x\r\n\r\nhello'], ['no policies', JSON.stringify({ 'organization-name': 'x', policies: [] })]])('%s is rejected', async (_n, body) => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const raw = body.startsWith('Subject') ? body : tlsRptMime(body);
     const m = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, raw);
     await handleHostedEmail(m, w.env);
@@ -215,7 +215,7 @@ describe('TLS-RPT reports', () => {
   });
 
   it('a compressed report over the cap is rejected', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const huge = tlsRptJson('a-corp.com', { 'contact-info': 'x'.repeat(26 * 1024 * 1024) });
     const m = fakeMessage(`tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(huge, true));
     await handleHostedEmail(m, w.env);
@@ -223,15 +223,15 @@ describe('TLS-RPT reports', () => {
   }, BIG_REPORT_TIMEOUT);
 });
 
-describe('saas has no default account', () => {
-  it('resolveInboundAccount refuses to answer in saas and still answers in self-host', async () => {
-    await expect(resolveInboundAccount({ MODE: 'saas' } as any, 'rua@x.io')).rejects.toThrow(/by token/);
-    expect(await resolveInboundAccount({} as any, 'rua@reports.acme.com')).toBe('acct_default');
+describe('saas has no default workspace', () => {
+  it('resolveInboundWorkspace refuses to answer in saas and still answers in self-host', async () => {
+    await expect(resolveInboundWorkspace({ MODE: 'saas' } as any, 'rua@x.io')).rejects.toThrow(/by token/);
+    expect(await resolveInboundWorkspace({} as any, 'rua@reports.acme.com')).toBe('ws_default');
   });
 
-  it('mail that carries no valid token is never filed under acct_default', async () => {
-    const w = await twoAccounts();
-    w.db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (9, 'acct_default', 'a-corp.net', 'x')").run();
+  it('mail that carries no valid token is never filed under ws_default', async () => {
+    const w = await twoWorkspaces();
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (9, 'ws_default', 'a-corp.net', 'x')").run();
     for (const to of [`rua@${RUA}`, 'rua@reports.a-corp.net', `rua+${generateToken()}@${RUA}`]) {
       const m = fakeMessage(to, gzipReportMime(dmarcXml('a-corp.net')));
       await worker.email(m, w.env as any, ctx);
@@ -240,11 +240,11 @@ describe('saas has no default account', () => {
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
   });
 
-  it('through the Worker entry point: delivered to the right account', async () => {
-    const w = await twoAccounts();
+  it('through the Worker entry point: delivered to the right workspace', async () => {
+    const w = await twoWorkspaces();
     const m = fakeMessage(`rua+${w.tokenB}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'via-worker')));
     await worker.email(m, w.env as any, ctx);
-    expect(w.rows('SELECT account_id, report_id FROM aggregate_reports')).toEqual([{ account_id: 'acct_b', report_id: 'via-worker' }]);
+    expect(w.rows('SELECT workspace_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_b', report_id: 'via-worker' }]);
   });
 
   it('a database that is not migrated yet throws (the sender retries) instead of rejecting', async () => {
@@ -255,11 +255,11 @@ describe('saas has no default account', () => {
   });
 
   it('a deployment missing its hosted config throws too, rather than dropping mail', async () => {
-    const w = await twoAccounts({ INTAKE_DOMAIN: '' });
+    const w = await twoWorkspaces({ INTAKE_DOMAIN: '' });
     const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
     await expect(handleHostedEmail(m, w.env)).rejects.toThrow(/not configured/);
     expect(m.setReject).not.toHaveBeenCalled();
-    const off = await twoAccounts({ SAAS_ENABLED: '' });
+    const off = await twoWorkspaces({ SAAS_ENABLED: '' });
     await expect(handleHostedEmail(fakeMessage(`rua+${off.tokenA}@${RUA}`, 'x'), off.env)).rejects.toThrow(/not configured/);
   });
 });

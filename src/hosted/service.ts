@@ -1,6 +1,6 @@
 // Hosted records for one domain: enable, status, rotate the intake token, verify the customer's pointers, disable.
 //
-// Everything here acts through the caller's TenantContext (account-scoped queries) and writes DNS only through
+// Everything here acts through the caller's TenantContext (workspace-scoped queries) and writes DNS only through
 // the hosted-records writer (src/hosted/records.ts). The intake token is shown once, on enable and on rotate:
 // only its hash is stored. (It is also published in the hosted DMARC / TLS-RPT records, which is why rotation
 // edits those records rather than asking the customer to change anything.)

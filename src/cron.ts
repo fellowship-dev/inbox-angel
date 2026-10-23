@@ -1,13 +1,13 @@
-// Cron work, one account at a time.
+// Cron work, one workspace at a time.
 //
-// A scheduled event fans out over the accounts (self-host: just the one). Each account runs in
-// its own try/catch, so one account's failure (a revoked Cloudflare token answering 403, a broken
-// row) is logged and skipped instead of stopping the accounts after it.
+// A scheduled event fans out over the workspaces (self-host: just the one). Each workspace runs in
+// its own try/catch, so one workspace's failure (a revoked Cloudflare token answering 403, a broken
+// row) is logged and skipped instead of stopping the workspaces after it.
 
 import type { BoundEnv } from './index';
 import { loadTenant } from './tenancy/load';
 import type { TenantContext } from './tenancy/context';
-import { listCronAccounts, type ResolvedAccount } from './tenancy/resolver';
+import { listCronWorkspaces, type ResolvedWorkspace } from './tenancy/resolver';
 import { checkSubscription, detectRollbackRisk } from './monitor/check';
 import { sendChangeNotification } from './monitor/notify';
 import { sendWeeklyDigests } from './digest/weekly';
@@ -27,31 +27,31 @@ export async function mapLimit<T>(items: readonly T[], limit: number, fn: (item:
 }
 
 export interface CronOptions {
-  /** Accounts to cover. Default: listCronAccounts(env). */
-  accounts?: string[];
-  /** How to build each account's TenantContext. Default: loadTenant. */
-  load?: (env: BoundEnv, account: ResolvedAccount) => Promise<TenantContext>;
+  /** Workspaces to cover. Default: listCronWorkspaces(env). */
+  workspaces?: string[];
+  /** How to build each workspace's TenantContext. Default: loadTenant. */
+  load?: (env: BoundEnv, workspace: ResolvedWorkspace) => Promise<TenantContext>;
 }
 
-export async function runCronForAccounts(
+export async function runCronForWorkspaces(
   event: ScheduledController,
   env: BoundEnv,
   ctx: ExecutionContext,
   opts: CronOptions = {},
 ): Promise<void> {
   const load = opts.load ?? loadTenant;
-  const accounts = opts.accounts ?? await listCronAccounts(env);
-  for (const accountId of accounts) {
+  const workspaces = opts.workspaces ?? await listCronWorkspaces(env);
+  for (const workspaceId of workspaces) {
     try {
-      const tenant = await load(env, { accountId });
+      const tenant = await load(env, { workspaceId });
       await runCron(event, tenant, ctx);
     } catch (e) {
-      console.error(`[cron ${event.cron}] account ${accountId} failed:`, e instanceof Error ? `${e.name}: ${e.message}` : 'unknown error');
+      console.error(`[cron ${event.cron}] workspace ${workspaceId} failed:`, e instanceof Error ? `${e.name}: ${e.message}` : 'unknown error');
     }
   }
 }
 
-/** One cron tick for one account. */
+/** One cron tick for one workspace. */
 async function runCron(event: ScheduledController, tenant: TenantContext, ctx: ExecutionContext): Promise<void> {
   // Daily telemetry heartbeat — every day 11am UTC
   if (event.cron === '0 11 * * *') {

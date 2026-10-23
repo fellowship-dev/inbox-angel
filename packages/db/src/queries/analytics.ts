@@ -37,11 +37,11 @@ export interface TrendRow {
 }
 
 /**
- * Read-only aggregates behind the analytics pages. Every statement is bound to the account, and `domainId`
- * (when given) is checked against the account's own domains by the join, so a foreign id yields no rows.
+ * Read-only aggregates behind the analytics pages. Every statement is bound to the workspace, and `domainId`
+ * (when given) is checked against the workspace's own domains by the join, so a foreign id yields no rows.
  */
-export function analyticsQueries(db: Db, accountId: string) {
-	const A = sql`${accountId}`;
+export function analyticsQueries(db: Db, workspaceId: string) {
+	const A = sql`${workspaceId}`;
 	const scope = (domainId: number | null) => (domainId === null ? sql`` : sql`AND ar.domain_id = ${domainId}`);
 
 	return {
@@ -67,8 +67,8 @@ export function analyticsQueries(db: Db, accountId: string) {
 					MAX(rr.country_code) AS country_code
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				JOIN domains d ON d.id = ar.domain_id AND d.account_id = ${A}
-				WHERE ar.account_id = ${A} AND rr.account_id = ${A}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.date_begin >= ${horizon} ${scope(domainId)}
 				GROUP BY rr.source_ip, d.id, rr.header_from, rr.spf_domain, rr.spf_result, rr.dkim_domain, rr.dkim_result
 				HAVING messages > 0 OR advice_messages > 0
@@ -85,8 +85,8 @@ export function analyticsQueries(db: Db, accountId: string) {
 					SUM(ar.pass_count)  AS passed,
 					SUM(ar.fail_count)  AS failed
 				FROM aggregate_reports ar
-				JOIN domains d ON d.id = ar.domain_id AND d.account_id = ${A}
-				WHERE ar.account_id = ${A} AND ar.date_begin >= ${since} ${scope(domainId)}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${since} ${scope(domainId)}
 				GROUP BY day
 				ORDER BY day ASC
 			`);
@@ -98,13 +98,13 @@ export function analyticsQueries(db: Db, accountId: string) {
 			const rows = await db.all<{ first: number | null }>(sql`
 				SELECT MIN(ar.date_begin) AS first
 				FROM aggregate_reports ar
-				JOIN domains d ON d.id = ar.domain_id AND d.account_id = ${A}
-				WHERE ar.account_id = ${A} AND ar.date_begin >= ${horizon} ${scope(domainId)}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${horizon} ${scope(domainId)}
 			`);
 			return rows[0]?.first ?? null;
 		},
 
-		/** Per-domain totals for the account-wide page (every domain listed, with zeros when it has no reports). */
+		/** Per-domain totals for the workspace-wide page (every domain listed, with zeros when it has no reports). */
 		domainTotals(since: number) {
 			return db.all<{ domain_id: number; domain: string; dmarc_policy: string | null; dmarc_pct: number | null; spf_record: string | null; spf_lookup_count: number | null; total: number; passed: number; days_with_reports: number }>(sql`
 				SELECT
@@ -118,8 +118,8 @@ export function analyticsQueries(db: Db, accountId: string) {
 					COALESCE(SUM(r.pass_count), 0) AS passed,
 					COUNT(DISTINCT date(datetime(r.date_begin, 'unixepoch'))) AS days_with_reports
 				FROM domains d
-				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.account_id = ${A} AND r.date_begin >= ${since}
-				WHERE d.account_id = ${A}
+				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
+				WHERE d.workspace_id = ${A}
 				GROUP BY d.id, d.domain, d.dmarc_policy, d.dmarc_pct, d.spf_record, d.spf_lookup_count
 				ORDER BY d.domain
 			`);

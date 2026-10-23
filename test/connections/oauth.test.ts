@@ -6,7 +6,7 @@ import {
 import { AUTH } from './mock-oauth';
 
 const crypt = TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))) });
-const B = { accountId: 'acct_a', userId: 'user_1', nonce: 'nonce-1' };
+const B = { workspaceId: 'ws_a', userId: 'user_1', nonce: 'nonce-1' };
 const NOW = 1_800_000_000;
 
 describe('OAuth configuration', () => {
@@ -50,9 +50,9 @@ describe('signed state', () => {
     const state = await signState(crypt, B, newVerifier(), {}, NOW);
     const [body, sig] = state.split('.');
     const forged = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
-    forged.a = 'acct_b';
+    forged.a = 'ws_b';
     const forgedBody = btoa(JSON.stringify(forged)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    await expect(verifyState(crypt, `${forgedBody}.${sig}`, { ...B, accountId: 'acct_b' }, NOW)).rejects.toMatchObject({ reason: 'signature' });
+    await expect(verifyState(crypt, `${forgedBody}.${sig}`, { ...B, workspaceId: 'ws_b' }, NOW)).rejects.toMatchObject({ reason: 'signature' });
     await expect(verifyState(crypt, `${body}.${sig.slice(0, -2)}AA`, B, NOW)).rejects.toMatchObject({ reason: 'signature' });
     await expect(verifyState(crypt, 'garbage', B, NOW)).rejects.toMatchObject({ reason: 'malformed' });
     await expect(verifyState(crypt, `${body}.`, B, NOW)).rejects.toBeInstanceOf(OAuthStateError);
@@ -64,9 +64,9 @@ describe('signed state', () => {
     await expect(verifyState(crypt, state, B, NOW + STATE_TTL_SECONDS)).rejects.toMatchObject({ reason: 'expired' });
   });
 
-  it('is bound to the account, the user and the browser nonce', async () => {
+  it('is bound to the workspace, the user and the browser nonce', async () => {
     const state = await signState(crypt, B, newVerifier(), {}, NOW);
-    for (const other of [{ ...B, accountId: 'acct_b' }, { ...B, userId: 'user_2' }, { ...B, nonce: 'nonce-2' }]) {
+    for (const other of [{ ...B, workspaceId: 'ws_b' }, { ...B, userId: 'user_2' }, { ...B, nonce: 'nonce-2' }]) {
       await expect(verifyState(crypt, state, other, NOW)).rejects.toMatchObject({ reason: 'mismatch' });
     }
   });

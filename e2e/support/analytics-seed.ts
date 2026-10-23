@@ -14,7 +14,7 @@ export function analyticsSeedSql(domainId: number, domain: string, now = Math.fl
 		{ ip: '167.89.1.1', count: 5, pass: true, spf: ['pass', `em.${domain}`], dkim: ['pass', domain], ptr: 'o1.em.sendgrid.net', base: 'sendgrid.net', org: 'SendGrid', recent: true },
 	];
 	const q = (v: string | null) => (v === null ? 'NULL' : `'${v.replace(/'/g, "''")}'`);
-	const out: string[] = [`UPDATE domains SET spf_record = 'v=spf1 include:_spf.google.com ~all', dmarc_policy = 'none' WHERE id = ${domainId} AND account_id = 'acct_default';`];
+	const out: string[] = [`UPDATE domains SET spf_record = 'v=spf1 include:_spf.google.com ~all', dmarc_policy = 'none' WHERE id = ${domainId} AND workspace_id = 'ws_default';`];
 	for (let ago = 1; ago <= 30; ago++) {
 		const today = entries.filter((e) => !e.recent || ago <= 2);
 		const total = today.reduce((n, e) => n + e.count, 0);
@@ -22,12 +22,12 @@ export function analyticsSeedSql(domainId: number, domain: string, now = Math.fl
 		const begin = Math.floor((now - ago * DAY) / DAY) * DAY;
 		const rid = `e2e-${domainId}-${ago}`;
 		out.push(
-			`INSERT OR IGNORE INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, account_id) VALUES (${domainId}, 'google.com', '${rid}', ${begin}, ${begin + DAY - 1}, ${total}, ${pass}, ${total - pass}, 'acct_default');`,
+			`INSERT OR IGNORE INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (${domainId}, 'google.com', '${rid}', ${begin}, ${begin + DAY - 1}, ${total}, ${pass}, ${total - pass}, 'ws_default');`,
 		);
 		for (const e of today) {
 			out.push(
-				`INSERT INTO report_records (report_id, source_ip, count, disposition, spf_result, spf_domain, dkim_result, dkim_domain, header_from, reverse_dns, base_domain, org, account_id) ` +
-					`SELECT id, '${e.ip}', ${e.count}, '${e.pass ? 'none' : 'quarantine'}', ${q(e.spf[0])}, ${q(e.spf[1])}, ${q(e.dkim[0])}, ${q(e.dkim[1])}, ${q(domain)}, ${q(e.ptr ?? null)}, ${q(e.base ?? null)}, ${q(e.org ?? null)}, 'acct_default' ` +
+				`INSERT INTO report_records (report_id, source_ip, count, disposition, spf_result, spf_domain, dkim_result, dkim_domain, header_from, reverse_dns, base_domain, org, workspace_id) ` +
+					`SELECT id, '${e.ip}', ${e.count}, '${e.pass ? 'none' : 'quarantine'}', ${q(e.spf[0])}, ${q(e.spf[1])}, ${q(e.dkim[0])}, ${q(e.dkim[1])}, ${q(domain)}, ${q(e.ptr ?? null)}, ${q(e.base ?? null)}, ${q(e.org ?? null)}, 'ws_default' ` +
 					`FROM aggregate_reports WHERE domain_id = ${domainId} AND report_id = '${rid}';`,
 			);
 		}

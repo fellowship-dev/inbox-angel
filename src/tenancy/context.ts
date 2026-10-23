@@ -1,19 +1,19 @@
-// Everything one request (or one cron account) needs to know about its tenant.
+// Everything one request (or one cron workspace) needs to know about its tenant.
 //
-// A TenantContext is built per request and thrown away with it: account-scoped
+// A TenantContext is built per request and thrown away with it: workspace-scoped
 // queries, the tenant's settings (domains, branding, Cloudflare ids) and a
 // Cloudflare client keyed by that tenant's token. There is no module-level
 // per-tenant state anywhere in src/, so concurrent requests for different
-// accounts in one isolate cannot see each other's data.
+// workspaces in one isolate cannot see each other's data.
 
 import type { BoundEnv } from '../index';
-import { forAccount, type AccountScope } from '@inbox-angel/db';
+import { forWorkspace, type WorkspaceScope } from '@inbox-angel/db';
 import { CfClient, CfNotConfiguredError, CfZoneNotFoundError, zoneCandidates, type CfZone } from './cf-client';
 import { ConnectionService } from '../connections/service';
 import { logAudit } from '../audit/log';
 import { notifyConnectionBroken } from '../monitor/notify';
 import { getMode, type Mode } from './mode';
-import type { ResolvedAccount } from './resolver';
+import type { ResolvedWorkspace } from './resolver';
 
 /** Script name of existing installs; also the default for new ones. */
 export const DEFAULT_WORKER_NAME = 'inbox-angel-worker';
@@ -29,7 +29,7 @@ export interface TenantSettings {
   /** Cloudflare zone of the base domain. */
   zoneId?: string;
   zoneName?: string;
-  /** Cloudflare account id (not the tenant's accountId). */
+  /** Cloudflare account id (not the tenant's workspaceId). */
   cfAccountId?: string;
   reportsDomain?: string;
   fromEmail?: string;
@@ -43,7 +43,7 @@ export interface Brand { color: string; logoUrl?: string }
 
 export interface TenantInit {
   env: BoundEnv;
-  accountId: string;
+  workspaceId: string;
   userId?: string;
   role?: string;
   mode?: Mode;
@@ -55,14 +55,14 @@ export interface TenantInit {
 }
 
 export class TenantContext {
-  readonly accountId: string;
+  readonly workspaceId: string;
   readonly userId?: string;
   readonly role?: string;
   readonly mode: Mode;
   readonly env: BoundEnv;
   readonly db: D1Database;
-  /** Account-scoped queries: every tenant-data read and write goes through this. */
-  readonly scope: AccountScope;
+  /** Workspace-scoped queries: every tenant-data read and write goes through this. */
+  readonly scope: WorkspaceScope;
   settings: TenantSettings;
 
   readonly #cfToken?: string;
@@ -77,12 +77,12 @@ export class TenantContext {
   constructor(init: TenantInit) {
     this.env = init.env;
     this.db = init.env.DB;
-    this.accountId = init.accountId;
+    this.workspaceId = init.workspaceId;
     this.userId = init.userId;
     this.role = init.role;
     this.mode = init.mode ?? getMode(init.env);
     this.settings = { brandColor: DEFAULT_BRAND_COLOR, ...init.settings };
-    this.scope = forAccount(this.db, init.accountId);
+    this.scope = forWorkspace(this.db, init.workspaceId);
     this.#cfToken = init.cfToken;
     this.#fetch = init.fetch;
   }
@@ -97,15 +97,15 @@ export class TenantContext {
     if (!this.#cf) {
       this.#cf = new CfClient(this.#cfToken, { fetch: this.#fetch });
       const { zoneId, zoneName, cfAccountId } = this.settings;
-      if (zoneId && zoneName) this.#cf.seedZone({ id: zoneId, name: zoneName, accountId: cfAccountId });
+      if (zoneId && zoneName) this.#cf.seedZone({ id: zoneId, name: zoneName, cfAccountId });
     }
     return this.#cf;
   }
 
-  /** This account's Cloudflare connections (OAuth or pasted token). */
+  /** This workspace's Cloudflare connections (OAuth or pasted token). */
   get connections(): ConnectionService {
     return (this.#connections ??= new ConnectionService({
-      accountId: this.accountId,
+      workspaceId: this.workspaceId,
       scope: this.scope,
       env: this.env,
       fetch: this.#fetch,
@@ -120,7 +120,7 @@ export class TenantContext {
     }));
   }
 
-  /** Remember (from loadTenant) whether the account has any connection, for the synchronous availability checks. */
+  /** Remember (from loadTenant) whether the workspace has any connection, for the synchronous availability checks. */
   setHasConnections(has: boolean): void { this.#hasConnections = has; }
 
   /** Is any Cloudflare credential available: the self-host token, or a connection (whatever its status)? */
@@ -128,7 +128,7 @@ export class TenantContext {
 
   /**
    * The Cloudflare client that manages `domain`'s zone. The domain (or the nearest parent in this
-   * account) is linked to a connection: that connection's client, restricted to its allow-list.
+   * workspace) is linked to a connection: that connection's client, restricted to its allow-list.
    * Not linked: the self-host token (selfhost mode only) or CfNotConfiguredError.
    * A broken or revoked connection throws CfConnectionError.
    */
@@ -179,7 +179,7 @@ export class TenantContext {
   }
 
   /**
-   * The account's workers.dev subdomain (the `acme` in `worker.acme.workers.dev`). Stored once
+   * The Cloudflare account's workers.dev subdomain (the `acme` in `worker.acme.workers.dev`). Stored once
    * resolved; looked up lazily because only a few features need it.
    */
   async workersSubdomain(): Promise<string | undefined> {
@@ -207,8 +207,8 @@ export class TenantContext {
   }
 
   // env holds secrets (CLOUDFLARE_API_TOKEN, API_KEY): never let a log line or JSON.stringify reach it.
-  toJSON(): { redacted: true; accountId: string } { return { redacted: true, accountId: this.accountId }; }
-  [Symbol.for('nodejs.util.inspect.custom')](): string { return `TenantContext { accountId: '${this.accountId}', mode: '${this.mode}' }`; }
+  toJSON(): { redacted: true; workspaceId: string } { return { redacted: true, workspaceId: this.workspaceId }; }
+  [Symbol.for('nodejs.util.inspect.custom')](): string { return `TenantContext { workspaceId: '${this.workspaceId}', mode: '${this.mode}' }`; }
 
   /** Forget the Cloudflare client and cached flags after settings changed. */
   invalidate(): void {
@@ -219,4 +219,4 @@ export class TenantContext {
   }
 }
 
-export type { ResolvedAccount };
+export type { ResolvedWorkspace };

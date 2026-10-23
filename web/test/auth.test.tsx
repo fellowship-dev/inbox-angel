@@ -96,7 +96,7 @@ describe('first-run setup', () => {
 });
 
 describe('hosted sign-up', () => {
-	it('lets people create an account when sign-up is open, and switch back', async () => {
+	it('lets people create a workspace when sign-up is open, and switch back', async () => {
 		renderApp(<AuthPage />, { role: null, status: { mode: 'saas', signup_open: true } });
 		const user = userEvent.setup();
 		await user.click(await screen.findByRole('button', { name: 'Create an account' }));

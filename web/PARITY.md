@@ -297,7 +297,7 @@ Wizard shell/logic:
 - [x] Persist: "Continue"/"Next" => `markAndAdvance('complete')`, "Skip for now" => `'skipped'`; both `PUT /api/domains/:id/wizard-state {<stepKey>: state}` (errors swallowed), then next step; last step => `done()`. Body `WizardState {domain,spf,dkim,dmarc,routing}` each `'not_started'|'complete'|'skipped'`.
 
 Step 1 - Domain (only when no domains exist):
-- [x] Title "What's your main domain?" explaining a `reports` subdomain is created and all future domains send reports there. Cloudflare zone dropdown (+ "Not listed? Enter manually") or text input (Enter key submits). Validation regex `^[a-z0-9.-]+\.[a-z]{2,}$` (after lowercase/trim) else "Enter a valid domain like yourdomain.com". Continue disabled if empty. API: `POST /api/settings/base-domain` `{domain}` -> `{ok, domain, domain_id, reports_domain, zone_id, account_id}`. Then marks domain complete, loads status, goes to step 2 (`#/domains/<id>/setup/2`). Header here shows "Step 1 of 5" and "Skip setup ->".
+- [x] Title "What's your main domain?" explaining a `reports` subdomain is created and all future domains send reports there. Cloudflare zone dropdown (+ "Not listed? Enter manually") or text input (Enter key submits). Validation regex `^[a-z0-9.-]+\.[a-z]{2,}$` (after lowercase/trim) else "Enter a valid domain like yourdomain.com". Continue disabled if empty. API: `POST /api/settings/base-domain` `{domain}` -> `{ok, domain, domain_id, reports_domain, zone_id, workspace_id}`. Then marks domain complete, loads status, goes to step 2 (`#/domains/<id>/setup/2`). Header here shows "Step 1 of 5" and "Skip setup ->".
 
 Step 2 - SPF:
 - [x] Badge by `spfSeverity`: no record => warning; lookup count > 9 error, >= 8 warning, else good. After apply, badge becomes info.
@@ -379,9 +379,9 @@ Library: `jspdf`, client-side only, A4 mm, filename `email-auth-report.pdf` (`do
 
 ## 21. New in v2 (not in the Preact dashboard)
 
-- [x] API keys screen `#/keys`: create (name, optional expiry) shows the secret once with copy; list with prefix, created, last used, expiry, owner (admins see the account's keys); revoke one; revoke all of mine. API: `GET/POST /api/keys`, `DELETE /api/keys/:id`, `POST /api/keys/revoke-all`.
+- [x] API keys screen `#/keys`: create (name, optional expiry) shows the secret once with copy; list with prefix, created, last used, expiry, owner (admins see the workspace's keys); revoke one; revoke all of mine. API: `GET/POST /api/keys`, `DELETE /api/keys/:id`, `POST /api/keys/revoke-all`.
 - [x] Role awareness: `GET /api/me` (added in this lane) gives the role; write controls disabled for members everywhere; Team and Audit explain when the API says "admin required".
-- [x] Settings screen `#/settings`: account (name, email, role), change password (`POST /api/auth/change-password`), theme, instance (version, base domain, custom domain, telemetry state where readable), sign out everywhere else.
+- [x] Settings screen `#/settings`: workspace (name, email, role), change password (`POST /api/auth/change-password`), theme, instance (version, base domain, custom domain, telemetry state where readable), sign out everywhere else.
 - [x] Theme toggle (light/dark) in the top bar and wizard chrome.
 - [x] Sidebar app shell with collapsible sidebar and mobile drawer.
 - [x] Domain overview as Level cards (Delivering → Authenticated → Protected) with findings (`web/src/lib/levels.ts`).

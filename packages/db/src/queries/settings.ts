@@ -2,13 +2,13 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { settings } from '../schema';
 
-export function settingsQueries(db: Db, accountId: string) {
+export function settingsQueries(db: Db, workspaceId: string) {
 	const upsert = (key: string, value: string) =>
 		db
 			.insert(settings)
-			.values({ account_id: accountId, key, value })
+			.values({ workspace_id: workspaceId, key, value })
 			.onConflictDoUpdate({
-				target: [settings.account_id, settings.key],
+				target: [settings.workspace_id, settings.key],
 				set: { value: sql`excluded.value`, updated_at: sql`unixepoch()` as any },
 			});
 
@@ -18,31 +18,31 @@ export function settingsQueries(db: Db, accountId: string) {
 			return db
 				.select({ value: settings.value })
 				.from(settings)
-				.where(and(eq(settings.account_id, accountId), eq(settings.key, key)))
+				.where(and(eq(settings.workspace_id, workspaceId), eq(settings.key, key)))
 				.get()
 				.then((r) => r ?? null);
 		},
 
 		/** Store `value` only if the key is unset, then return whatever is stored (safe under concurrent first calls). */
 		async setIfAbsent(key: string, value: string): Promise<string> {
-			await db.insert(settings).values({ account_id: accountId, key, value }).onConflictDoNothing().run();
+			await db.insert(settings).values({ workspace_id: workspaceId, key, value }).onConflictDoNothing().run();
 			const row = await db
 				.select({ value: settings.value })
 				.from(settings)
-				.where(and(eq(settings.account_id, accountId), eq(settings.key, key)))
+				.where(and(eq(settings.workspace_id, workspaceId), eq(settings.key, key)))
 				.get();
 			return row!.value;
 		},
 
 		/** Store `value` only if the key is unset. True when this call stored it (a one-time claim, safe under concurrent callers). */
 		async claim(key: string, value: string): Promise<boolean> {
-			const r = await db.insert(settings).values({ account_id: accountId, key, value }).onConflictDoNothing().run();
+			const r = await db.insert(settings).values({ workspace_id: workspaceId, key, value }).onConflictDoNothing().run();
 			return (r.meta.changes ?? 0) > 0;
 		},
 
-		/** Delete this account's settings whose key starts with `prefix` and whose value (a unix time) is not after `nowSeconds`. */
+		/** Delete this workspace's settings whose key starts with `prefix` and whose value (a unix time) is not after `nowSeconds`. */
 		async deleteExpired(prefix: string, nowSeconds: number): Promise<void> {
-			await db.delete(settings).where(and(eq(settings.account_id, accountId), sql`${settings.key} LIKE ${prefix + '%'} AND CAST(${settings.value} AS INTEGER) <= ${nowSeconds}`)).run();
+			await db.delete(settings).where(and(eq(settings.workspace_id, workspaceId), sql`${settings.key} LIKE ${prefix + '%'} AND CAST(${settings.value} AS INTEGER) <= ${nowSeconds}`)).run();
 		},
 
 		set(key: string, value: string) {
@@ -55,7 +55,7 @@ export function settingsQueries(db: Db, accountId: string) {
 			const rows = await db
 				.select({ key: settings.key, value: settings.value })
 				.from(settings)
-				.where(and(eq(settings.account_id, accountId), inArray(settings.key, keys)));
+				.where(and(eq(settings.workspace_id, workspaceId), inArray(settings.key, keys)));
 			return new Map(rows.map((r) => [r.key, r.value]));
 		},
 

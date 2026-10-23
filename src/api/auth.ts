@@ -10,7 +10,7 @@ export type { AuthEnv };
 export interface AuthContext {
   /** The user's id; 'instance' for the deprecated API_KEY. */
   userId: string;
-  accountId: string;
+  workspaceId: string;
   role: Principal['role'];
   kind: Principal['kind'];
   user: Principal['user'];
@@ -33,7 +33,7 @@ export async function requireAuth(
   }
   return {
     userId: principal.user?.id ?? 'instance',
-    accountId: principal.accountId,
+    workspaceId: principal.workspaceId,
     role: principal.role,
     kind: principal.kind,
     user: principal.user,

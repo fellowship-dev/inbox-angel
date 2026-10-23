@@ -1,4 +1,4 @@
-// Daily hosted jobs (MODE=saas, SAAS_ENABLED=1), run once per day after the per-account cron:
+// Daily hosted jobs (MODE=saas, SAAS_ENABLED=1), run once per day after the per-workspace cron:
 //   1. reconcile the hosted zone: count every record (quota), warn at 3,200, and diff what is there against
 //      what the database says we wrote. Records outside `*.h.<zone>` are only counted and fingerprinted, never
 //      touched: the job reports a change in them, it can't make one.
@@ -9,7 +9,7 @@
 // It piggybacks on the existing 11:00 UTC schedule, so no new trigger is needed in wrangler.jsonc.
 
 import type { BoundEnv } from '../index';
-import { globalQueries, intakeLookups, forAccount } from '@inbox-angel/db';
+import { globalQueries, intakeLookups, forWorkspace } from '@inbox-angel/db';
 import { mapLimit } from '../cron';
 import { hostedApex, hostedConfig, hostedEnabled } from './config';
 import { hostedNames, openHostedZone } from './records';
@@ -27,7 +27,7 @@ export interface ZoneReport {
   quota: ZoneQuota;
   /** Records we expect (from the database) that the zone doesn't have. Reported, not recreated: the DMARC/TLS-RPT content carries a token we no longer hold. */
   missing: string[];
-  /** Records under the hosted label that no domain accounts for. Reported, never deleted. */
+  /** Records under the hosted label that no domain workspaces for. Reported, never deleted. */
   orphans: string[];
   /** The records outside the hosted label differ from yesterday's fingerprint. */
   restChanged: boolean;
@@ -89,7 +89,7 @@ export async function verifyAllPointers(env: BoundEnv, opts: { resolver?: Resolv
   let checked = 0;
   await mapLimit(rows, 5, async h => {
     try {
-      const q = forAccount(env.DB, h.account_id);
+      const q = forWorkspace(env.DB, h.workspace_id);
       const domain = await q.domains.getById(h.domain_id);
       if (!domain) return;
       const r = await verifyPointers(domain.domain, h.hosted_id, apex, opts.resolver);
@@ -119,7 +119,7 @@ export async function refreshHostedSpf(env: BoundEnv, opts: { fetch?: typeof fet
       if (!slot) throw new Error(`unknown zone ${h.zone_key}`);
       let writer = writers.get(slot.key);
       if (!writer) writers.set(slot.key, writer = await openHostedZone(env, slot.name, { fetch: opts.fetch }));
-      const domain = await forAccount(env.DB, h.account_id).domains.getById(h.domain_id);
+      const domain = await forWorkspace(env.DB, h.workspace_id).domains.getById(h.domain_id);
       if (!domain) continue;
       const flat = await flattenSource(domain.domain, h.spf_source!, resolver);
       if (!flat.ok) throw new Error(flat.errors.map(e => e.message).join('; '));
@@ -144,7 +144,7 @@ export async function refreshHostedMtaStsMx(env: BoundEnv, opts: { fetch?: typeo
   let updated = 0;
   for (const h of (await intakeLookups(env.DB).allHosted()).filter(h => h.mta_sts_txt_record_id)) {
     try {
-      const q = forAccount(env.DB, h.account_id);
+      const q = forWorkspace(env.DB, h.workspace_id);
       const [domain, cfg] = await Promise.all([q.domains.getById(h.domain_id), q.mtaSts.get(h.domain_id)]);
       if (!domain || !cfg?.enabled) continue;
       const live = await discover(domain.domain);

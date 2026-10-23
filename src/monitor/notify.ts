@@ -75,7 +75,7 @@ export async function sendChangeNotification(
 }
 
 /**
- * Tell the account's owner and admins that a Cloudflare connection stopped working: DNS changes for the
+ * Tell the workspace's owner and admins that a Cloudflare connection stopped working: DNS changes for the
  * domains behind it fail until someone reconnects. Same channel as the change alerts (SEND_EMAIL, else a log line).
  */
 export async function notifyConnectionBroken(
@@ -98,7 +98,7 @@ export async function notifyConnectionBroken(
   ].join('\n');
 
   if (!tenant.env.SEND_EMAIL || !tenant.settings.fromEmail || to.length === 0) {
-    console.warn(`[connections] ${tenant.accountId}: connection ${info.id} is broken (${info.detail}); no alert email could be sent`);
+    console.warn(`[connections] ${tenant.workspaceId}: connection ${info.id} is broken (${info.detail}); no alert email could be sent`);
     return;
   }
   for (const email of to) {

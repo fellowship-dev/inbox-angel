@@ -5,8 +5,8 @@
  * `test/schema-drift.test.ts` applies every migration to an empty database and
  * compares the result with the tables declared here.
  *
- * Tenancy: every row that belongs to a tenant carries `account_id`. Self-hosted
- * installs have exactly one account, IMPLICIT_ACCOUNT_ID. Tables that are
+ * Tenancy: every row that belongs to a tenant carries `workspace_id`. Self-hosted
+ * installs have exactly one workspace, IMPLICIT_WORKSPACE_ID. Tables that are
  * deliberately global are listed in GLOBAL_TABLES.
  */
 import { sql } from 'drizzle-orm';
@@ -21,8 +21,8 @@ import {
 	unique,
 } from 'drizzle-orm/sqlite-core';
 
-/** Id of the one account every self-hosted install has. */
-export const IMPLICIT_ACCOUNT_ID = 'acct_default';
+/** Id of the one workspace every self-hosted install has. */
+export const IMPLICIT_WORKSPACE_ID = 'ws_default';
 
 export const MEMBERSHIP_ROLES = ['owner', 'admin', 'member'] as const;
 export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
@@ -30,17 +30,17 @@ export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number];
 const now = sql`(unixepoch())`;
 
 /**
- * `account_id` on tables added to in 0012. SQLite cannot add a NOT NULL column
+ * `workspace_id` on tables added to in 0012. SQLite cannot add a NOT NULL column
  * with a REFERENCES clause unless its default is NULL, and rebuilding a table
  * that other tables cascade from would delete their rows — so these columns are
- * `NOT NULL DEFAULT 'acct_default'` without an FK. Query helpers always set the
+ * `NOT NULL DEFAULT 'ws_default'` without an FK. Query helpers always set the
  * value explicitly; the default exists so the backfill is a metadata-only change.
  */
-const accountId = () => text('account_id').notNull().default(IMPLICIT_ACCOUNT_ID);
+const workspaceId = () => text('workspace_id').notNull().default(IMPLICIT_WORKSPACE_ID);
 
-// ── Accounts ────────────────────────────────────────────────
+// ── Workspaces ────────────────────────────────────────────────
 
-export const accounts = sqliteTable('accounts', {
+export const workspaces = sqliteTable('workspaces', {
 	id: text('id').primaryKey(),
 	name: text('name').notNull(),
 	created_at: integer('created_at').notNull().default(now),
@@ -49,19 +49,19 @@ export const accounts = sqliteTable('accounts', {
 export const memberships = sqliteTable(
 	'memberships',
 	{
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 		role: text('role', { enum: MEMBERSHIP_ROLES }).notNull().default('member'),
 		created_at: integer('created_at').notNull().default(now),
 	},
 	(t) => [
-		primaryKey({ columns: [t.account_id, t.user_id] }),
+		primaryKey({ columns: [t.workspace_id, t.user_id] }),
 		index('idx_memberships_user').on(t.user_id),
 		check('memberships_role_check', sql`${t.role} IN ('owner', 'admin', 'member')`),
 	],
 );
 
-// ── Users (global: one person can belong to several accounts) ──
+// ── Users (global: one person can belong to several workspaces) ──
 
 export const users = sqliteTable(
 	'users',
@@ -89,7 +89,7 @@ export const domains = sqliteTable(
 	'domains',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
-		// Globally unique: a hostname can only be monitored by one account.
+		// Globally unique: a hostname can only be monitored by one workspace.
 		domain: text('domain').notNull().unique(),
 		rua_address: text('rua_address').notNull(),
 		dmarc_policy: text('dmarc_policy'),
@@ -105,7 +105,7 @@ export const domains = sqliteTable(
 		is_default: integer('is_default').notNull().default(0),
 		alerts_enabled: integer('alerts_enabled').notNull().default(1),
 		spf_lookup_count: integer('spf_lookup_count'),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 		/** The Cloudflare connection that manages this domain's zone (0015). Null: the self-host env token, or none. */
 		cf_connection_id: text('cf_connection_id').references((): any => cloudflareConnections.id, { onDelete: 'set null' }),
 	},
@@ -113,9 +113,9 @@ export const domains = sqliteTable(
 		index('idx_domains_domain').on(t.domain),
 		index('idx_domains_cf_connection').on(t.cf_connection_id),
 		index('idx_domains_parent').on(t.parent_id),
-		index('idx_domains_account').on(t.account_id),
-		// At most one default domain per account.
-		uniqueIndex('idx_domains_is_default').on(t.account_id).where(sql`${t.is_default} = 1`),
+		index('idx_domains_workspace').on(t.workspace_id),
+		// At most one default domain per workspace.
+		uniqueIndex('idx_domains_is_default').on(t.workspace_id).where(sql`${t.is_default} = 1`),
 	],
 );
 
@@ -135,13 +135,13 @@ export const aggregateReports = sqliteTable(
 		fail_count: integer('fail_count').notNull().default(0),
 		raw_xml: text('raw_xml'),
 		created_at: integer('created_at').notNull().default(now),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
 	(t) => [
 		unique().on(t.domain_id, t.report_id),
 		index('idx_agg_reports_domain').on(t.domain_id),
 		index('idx_agg_reports_date').on(t.date_begin),
-		index('idx_agg_reports_account').on(t.account_id, t.date_begin),
+		index('idx_agg_reports_workspace').on(t.workspace_id, t.date_begin),
 	],
 );
 
@@ -163,12 +163,12 @@ export const reportRecords = sqliteTable(
 		base_domain: text('base_domain'),
 		country_code: text('country_code'),
 		org: text('org'),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
 	(t) => [
 		index('idx_records_report').on(t.report_id),
 		index('idx_records_ip').on(t.source_ip),
-		index('idx_records_account').on(t.account_id),
+		index('idx_records_workspace').on(t.workspace_id),
 	],
 );
 
@@ -187,12 +187,12 @@ export const tlsReports = sqliteTable(
 		failure_details: text('failure_details'),
 		raw_json: text('raw_json'),
 		created_at: integer('created_at').notNull().default(now),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
 	(t) => [
 		unique().on(t.domain_id, t.org_name, t.date_begin),
 		index('idx_tls_reports_domain').on(t.domain_id, t.date_begin),
-		index('idx_tls_reports_account').on(t.account_id),
+		index('idx_tls_reports_workspace').on(t.workspace_id),
 	],
 );
 
@@ -212,9 +212,9 @@ export const spfFlattenConfig = sqliteTable(
 		last_error: text('last_error'),
 		created_at: integer('created_at').notNull().default(now),
 		updated_at: integer('updated_at').notNull().default(now),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
-	(t) => [index('idx_spf_flatten_account').on(t.account_id)],
+	(t) => [index('idx_spf_flatten_workspace').on(t.workspace_id)],
 );
 
 export const mtaStsConfig = sqliteTable(
@@ -232,9 +232,9 @@ export const mtaStsConfig = sqliteTable(
 		last_error: text('last_error'),
 		created_at: integer('created_at').notNull().default(now),
 		updated_at: integer('updated_at').notNull().default(now),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
-	(t) => [index('idx_mta_sts_account').on(t.account_id)],
+	(t) => [index('idx_mta_sts_workspace').on(t.workspace_id)],
 );
 
 // ── Monitoring subscriptions (free-check "watch my domain") ──
@@ -253,10 +253,10 @@ export const monitorSubscriptions = sqliteTable(
 		active: integer('active').$type<0 | 1>().notNull().default(1),
 		last_checked_at: integer('last_checked_at'),
 		created_at: integer('created_at').notNull().default(now),
-		account_id: text('account_id').notNull().default(IMPLICIT_ACCOUNT_ID).references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().default(IMPLICIT_WORKSPACE_ID).references(() => workspaces.id, { onDelete: 'cascade' }),
 	},
 	(t) => [
-		unique().on(t.account_id, t.email, t.domain),
+		unique().on(t.workspace_id, t.email, t.domain),
 		index('idx_monitor_active').on(t.active, t.last_checked_at),
 		index('idx_monitor_domain').on(t.domain),
 	],
@@ -267,12 +267,12 @@ export const monitorSubscriptions = sqliteTable(
 export const settings = sqliteTable(
 	'settings',
 	{
-		account_id: text('account_id').notNull().default(IMPLICIT_ACCOUNT_ID).references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().default(IMPLICIT_WORKSPACE_ID).references(() => workspaces.id, { onDelete: 'cascade' }),
 		key: text('key').notNull(),
 		value: text('value').notNull(),
 		updated_at: integer('updated_at').notNull().default(now),
 	},
-	(t) => [primaryKey({ columns: [t.account_id, t.key] })],
+	(t) => [primaryKey({ columns: [t.workspace_id, t.key] })],
 );
 
 export const invites = sqliteTable(
@@ -285,9 +285,9 @@ export const invites = sqliteTable(
 		created_at: integer('created_at').notNull().default(now),
 		expires_at: integer('expires_at').notNull(),
 		used_at: integer('used_at'),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
-	(t) => [index('idx_invites_account').on(t.account_id)],
+	(t) => [index('idx_invites_workspace').on(t.workspace_id)],
 );
 
 export const auditLog = sqliteTable(
@@ -305,19 +305,19 @@ export const auditLog = sqliteTable(
 		after_value: text('after_value'),
 		meta: text('meta'),
 		created_at: integer('created_at').notNull().default(now),
-		account_id: accountId(),
+		workspace_id: workspaceId(),
 	},
 	(t) => [
 		index('idx_audit_created').on(sql`${t.created_at} DESC`),
 		index('idx_audit_actor').on(t.actor_id),
 		index('idx_audit_resource').on(t.resource_type, t.resource_id),
-		index('idx_audit_account').on(t.account_id, sql`${t.created_at} DESC`),
+		index('idx_audit_workspace').on(t.workspace_id, sql`${t.created_at} DESC`),
 	],
 );
 
-// ── Global tables (intentionally NOT account-scoped) ────────
+// ── Global tables (intentionally NOT workspace-scoped) ────────
 
-/** Anonymous free-check results: not tied to any account. */
+/** Anonymous free-check results: not tied to any workspace. */
 export const checkResults = sqliteTable(
 	'check_results',
 	{
@@ -391,7 +391,7 @@ export const sessions = sqliteTable(
 	(t) => [index('idx_sessions_user').on(t.userId)],
 );
 
-/** One row per login method: the `credential` password, or an OAuth provider link. (Not the tenant `accounts` table.) */
+/** One row per login method: the `credential` password, or an OAuth provider link. (Not the tenant `workspaces` table.) */
 export const authAccounts = sqliteTable(
 	'auth_accounts',
 	{
@@ -431,14 +431,14 @@ export const authRateLimits = sqliteTable('auth_rate_limits', {
 });
 
 /**
- * Per-user API keys, scoped to one account. Only a SHA-256 of the key is stored;
+ * Per-user API keys, scoped to one workspace. Only a SHA-256 of the key is stored;
  * `prefix` (the first characters of the key) is what the UI shows.
  */
 export const apiKeys = sqliteTable(
 	'api_keys',
 	{
 		id: text('id').primaryKey(),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		user_id: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 		name: text('name').notNull(),
 		prefix: text('prefix').notNull(),
@@ -448,7 +448,7 @@ export const apiKeys = sqliteTable(
 		expires_at: integer('expires_at'),
 		revoked_at: integer('revoked_at'),
 	},
-	(t) => [index('idx_api_keys_account').on(t.account_id), index('idx_api_keys_user').on(t.user_id)],
+	(t) => [index('idx_api_keys_workspace').on(t.workspace_id), index('idx_api_keys_user').on(t.user_id)],
 );
 
 // ── Hosted (SaaS) intake ────────────────────────────────────
@@ -457,20 +457,20 @@ export const apiKeys = sqliteTable(
  * Per-domain intake token for the central report address (`rua+<token>@rua.<intake domain>`).
  * Only the SHA-256 of the token is stored. Rotation keeps the previous hash valid until
  * `prev_expires_at` so reports already in flight (receivers cache the rua address) still arrive.
- * Looked up by hash before the account is known (queries/intake.ts).
+ * Looked up by hash before the workspace is known (queries/intake.ts).
  */
 export const intakeTokens = sqliteTable(
 	'intake_tokens',
 	{
 		domain_id: integer('domain_id').primaryKey().references(() => domains.id, { onDelete: 'cascade' }),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		token_hash: text('token_hash').notNull().unique(),
 		prev_token_hash: text('prev_token_hash'),
 		prev_expires_at: integer('prev_expires_at'),
 		created_at: integer('created_at').notNull().default(now),
 		rotated_at: integer('rotated_at'),
 	},
-	(t) => [index('idx_intake_tokens_account').on(t.account_id), index('idx_intake_tokens_prev').on(t.prev_token_hash)],
+	(t) => [index('idx_intake_tokens_workspace').on(t.workspace_id), index('idx_intake_tokens_prev').on(t.prev_token_hash)],
 );
 
 /**
@@ -482,7 +482,7 @@ export const hostedDomains = sqliteTable(
 	'hosted_domains',
 	{
 		domain_id: integer('domain_id').primaryKey().references(() => domains.id, { onDelete: 'cascade' }),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		hosted_id: text('hosted_id').notNull().unique(),
 		/** Which hosted zone holds the records (the shard seam; see src/hosted/zones.ts). */
 		zone_key: text('zone_key').notNull(),
@@ -500,7 +500,7 @@ export const hostedDomains = sqliteTable(
 		pointers_checked_at: integer('pointers_checked_at'),
 		created_at: integer('created_at').notNull().default(now),
 	},
-	(t) => [index('idx_hosted_domains_account').on(t.account_id)],
+	(t) => [index('idx_hosted_domains_workspace').on(t.workspace_id)],
 );
 
 /** Record counts of the operator's hosted-records zone(s): quota tracking and the daily diff. */
@@ -535,7 +535,7 @@ export type CfAuthType = (typeof CF_AUTH_TYPES)[number];
 export type CfConnectionStatus = (typeof CF_CONNECTION_STATUSES)[number];
 
 /**
- * A Cloudflare account an Inbox Angel account has connected (OAuth, or a pasted API token). One account
+ * A Cloudflare account an Inbox Angel workspace has connected (OAuth, or a pasted API token). One workspace
  * can hold several. `token_envelope` is the AES-GCM envelope of {access, refresh, expires_at}
  * (src/connections/crypto.ts): the plaintext token is never stored, and list queries never select the column.
  */
@@ -543,7 +543,7 @@ export const cloudflareConnections = sqliteTable(
 	'cloudflare_connections',
 	{
 		id: text('id').primaryKey(),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		label: text('label').notNull(),
 		cf_account_id: text('cf_account_id'),
 		cf_account_name: text('cf_account_name'),
@@ -557,7 +557,7 @@ export const cloudflareConnections = sqliteTable(
 		last_used_at: integer('last_used_at'),
 	},
 	(t) => [
-		index('idx_cf_connections_account').on(t.account_id),
+		index('idx_cf_connections_workspace').on(t.workspace_id),
 		check('cf_connections_auth_type_check', sql`${t.auth_type} IN ('oauth', 'token')`),
 		check('cf_connections_status_check', sql`${t.status} IN ('active', 'broken', 'revoked')`),
 	],
@@ -572,7 +572,7 @@ export const cloudflareConnectionZones = sqliteTable(
 	'cloudflare_connection_zones',
 	{
 		connection_id: text('connection_id').notNull().references(() => cloudflareConnections.id, { onDelete: 'cascade' }),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		zone_id: text('zone_id').notNull(),
 		zone_name: text('zone_name').notNull(),
 		/** The Cloudflare account that owns the zone (from Cloudflare when the zone was allowed): what `/accounts/*` calls are checked against. */
@@ -581,7 +581,7 @@ export const cloudflareConnectionZones = sqliteTable(
 	},
 	(t) => [
 		primaryKey({ columns: [t.connection_id, t.zone_id] }),
-		index('idx_cf_connection_zones_account').on(t.account_id),
+		index('idx_cf_connection_zones_workspace').on(t.workspace_id),
 	],
 );
 
@@ -594,37 +594,37 @@ export const cloudflareConnectionBlockedZones = sqliteTable(
 	'cloudflare_connection_blocked_zones',
 	{
 		connection_id: text('connection_id').notNull().references(() => cloudflareConnections.id, { onDelete: 'cascade' }),
-		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		zone_id: text('zone_id').notNull(),
 		zone_name: text('zone_name').notNull(),
 		created_at: integer('created_at').notNull().default(now),
 	},
 	(t) => [
 		primaryKey({ columns: [t.connection_id, t.zone_id] }),
-		index('idx_cf_connection_blocked_account').on(t.account_id),
+		index('idx_cf_connection_blocked_workspace').on(t.workspace_id),
 	],
 );
 
 /**
- * Tables with no account_id, and why. `test/account-predicates.test.ts` uses
+ * Tables with no workspace_id, and why. `test/workspace-predicates.test.ts` uses
  * this list: anything else that is tenant data must be scoped.
  */
 export const GLOBAL_TABLES = {
-	accounts: 'the tenant registry itself',
-	users: 'a user can belong to several accounts; membership carries the role',
+	workspaces: 'the tenant registry itself',
+	users: 'a user can belong to several workspaces; membership carries the role',
 	check_results: 'anonymous public free-check results, not tenant data',
 	ip_info: 'shared public IP-metadata cache',
 	password_reset_tokens: 'keyed by user_id, which is global (superseded by verifications)',
-	sessions: 'keyed by user; a session is resolved to an account through memberships',
+	sessions: 'keyed by user; a session is resolved to a workspace through memberships',
 	auth_accounts: 'login methods of a user (password / OAuth link), keyed by user',
 	verifications: 'one-time auth tokens (password reset), keyed by identifier',
 	auth_rate_limits: 'auth endpoint rate-limit counters, keyed by IP and path',
 	hosted_zones: 'operator-owned: record counts of the hosted-records zone(s), not tenant data',
-	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any account',
+	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any workspace',
 } as const;
 
-/** Tables that must carry an `account_id` column. */
-export const ACCOUNT_OWNED_TABLES = [
+/** Tables that must carry an `workspace_id` column. */
+export const WORKSPACE_OWNED_TABLES = [
 	'memberships',
 	'domains',
 	'aggregate_reports',

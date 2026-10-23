@@ -2,7 +2,7 @@
 //
 // One CfClient is bound to one API token. It resolves the zone of each domain on
 // demand (by the domain's registrable name) and remembers the answers for its own
-// lifetime, which is one request or one cron account. Nothing is cached at module
+// lifetime, which is one request or one cron workspace. Nothing is cached at module
 // level, so two tenants in one isolate can never see each other's zones.
 //
 // The token lives in a private field: it never appears in errors, logs, JSON or
@@ -78,7 +78,7 @@ export class CfConnectionError extends Error {
   }
 }
 
-export interface CfZone { id: string; name: string; accountId?: string }
+export interface CfZone { id: string; name: string; cfAccountId?: string }
 
 export interface CfDnsRecord {
   id: string;
@@ -268,7 +268,7 @@ export class CfClient {
       hit = this.request<{ id: string; name: string; account?: { id: string } }[]>('GET', '/zones', { query: { name } })
         .then(list => {
           const z = list?.[0];
-          return z ? { id: z.id, name: z.name.toLowerCase(), accountId: z.account?.id } : null;
+          return z ? { id: z.id, name: z.name.toLowerCase(), cfAccountId: z.account?.id } : null;
         });
       this.#zones.set(name, hit);
       // A failed lookup must not stay cached: the next caller retries.
@@ -318,7 +318,7 @@ export class CfClient {
     }
   }
 
-  // ── Account-level ───────────────────────────────────────────
+  // ── Cloudflare-account-level ───────────────────────────────────────────
 
   /** API tokens only: is this token valid (`status: active`)? */
   verifyToken(): Promise<{ id?: string; status: string; expires_on?: string }> {
@@ -330,8 +330,8 @@ export class CfClient {
     return this.request<{ id: string; name: string }[]>('GET', '/accounts', { query: { per_page: 50 } }).then(r => r ?? []);
   }
 
-  workersSubdomain(accountId: string): Promise<{ subdomain: string } | null> {
-    return this.request('GET', `/accounts/${accountId}/workers/subdomain`);
+  workersSubdomain(cfAccountId: string): Promise<{ subdomain: string } | null> {
+    return this.request('GET', `/accounts/${cfAccountId}/workers/subdomain`);
   }
 }
 

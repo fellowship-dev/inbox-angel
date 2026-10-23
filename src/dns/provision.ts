@@ -65,7 +65,7 @@ export async function provisionDomain(
     cf = await tenant.cfFor(reportsDomain);
     zoneId = (await cf.zoneFor(reportsDomain)).id;
   } catch (e) {
-    // The token's account has no zone for the reports domain (or the domain is not linked to a connection): the user adds the record by hand.
+    // The token's workspace has no zone for the reports domain (or the domain is not linked to a connection): the user adds the record by hand.
     if (e instanceof CfZoneNotFoundError || e instanceof CfNotConfiguredError) return { recordId: null, recordName, manual: true };
     throw new DnsProvisionError(`DNS provision failed: ${cfErrorText(e)}`, e);
   }

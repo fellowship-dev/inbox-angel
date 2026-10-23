@@ -7,17 +7,17 @@ import { SenderInventory } from '../../components/analytics/SenderInventory';
 import { TrendChart } from '../../components/analytics/TrendChart';
 import { WindowPills } from '../../components/reports';
 import { ListSkeleton, LoadError, PageSkeleton, Section } from '../../components/states';
-import { READINESS_LABEL, fmtPct, useAccountAnalytics, useDomainAnalytics, type AccountAnalytics, type DomainAnalytics } from '../../lib/analytics';
+import { READINESS_LABEL, fmtPct, useWorkspaceAnalytics, useDomainAnalytics, type WorkspaceAnalytics, type DomainAnalytics } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
 import { DEFAULT_WINDOW, type WindowDays } from '../../lib/reports';
 import { useDomainId } from '../../app';
 import { useDomain } from '../../lib/queries';
 import { BackLink } from '../../components/reports';
 
-type Data = AccountAnalytics | DomainAnalytics;
+type Data = WorkspaceAnalytics | DomainAnalytics;
 
 function Body({ data, days }: { data: Data; days: number }) {
-	const account = 'domains' in data;
+	const workspace = 'domains' in data;
 	return (
 		<div className="space-y-8">
 			<StatGroup className="sm:grid-cols-4" aria-label={`Last ${days} days`}>
@@ -27,7 +27,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 				<Stat label="Senders" value={formatNumber(data.sender_count)} />
 			</StatGroup>
 
-			{!account ? (
+			{!workspace ? (
 				<Section title="Enforcement readiness" description="Is it safe to move to the next DMARC step?">
 					<ReadinessCard readiness={data.readiness} />
 				</Section>
@@ -70,7 +70,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 			)}
 
 			<Section title="What to fix next" description="Ranked by how much of your mail each problem touches.">
-				<FixList fixes={data.fixes} showDomain={account} />
+				<FixList fixes={data.fixes} showDomain={workspace} />
 			</Section>
 
 			<Section title="Pass rate trend" description={`Messages per ${days > 30 ? 'week' : 'day'}, passed and failed DMARC.`}>
@@ -78,7 +78,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 			</Section>
 
 			<Section title="Sender inventory" description="Every source that sent mail as your domain.">
-				<SenderInventory senders={data.senders} showDomains={account} alignment={data.alignment} />
+				<SenderInventory senders={data.senders} showDomains={workspace} alignment={data.alignment} />
 				{data.sender_count > data.senders.length ? <p className="text-sm text-ink-2">Showing the {data.senders.length} biggest of {formatNumber(data.sender_count)} senders.</p> : null}
 			</Section>
 		</div>
@@ -98,7 +98,7 @@ function Frame({ q, days, setDays, title, description, eyebrow, actions }: { q: 
 /** All domains: "what is happening with my mail". */
 export function AnalyticsPage() {
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
-	const q = useAccountAnalytics(days);
+	const q = useWorkspaceAnalytics(days);
 	return <Frame q={q} days={days} setDays={setDays} title="Analytics" description="What is happening with your mail, across every domain." />;
 }
 

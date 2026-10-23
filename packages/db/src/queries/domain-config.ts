@@ -4,8 +4,8 @@ import { domains, mtaStsConfig, spfFlattenConfig } from '../schema';
 
 export type MtaStsMode = 'testing' | 'enforce';
 
-export function spfFlattenQueries(db: Db, accountId: string) {
-	const mine = eq(spfFlattenConfig.account_id, accountId);
+export function spfFlattenQueries(db: Db, workspaceId: string) {
+	const mine = eq(spfFlattenConfig.workspace_id, workspaceId);
 	const forDomain = (id: number) => and(mine, eq(spfFlattenConfig.domain_id, id));
 	const touch = sql`unixepoch()` as any;
 
@@ -21,10 +21,10 @@ export function spfFlattenQueries(db: Db, accountId: string) {
 		upsert(c: { domain_id: number; canonical_record: string; lookup_count: number | null; cf_record_id: string | null }) {
 			return db
 				.insert(spfFlattenConfig)
-				.values({ account_id: accountId, domain_id: c.domain_id, enabled: 1, cf_record_id: c.cf_record_id, canonical_record: c.canonical_record, lookup_count: c.lookup_count })
+				.values({ workspace_id: workspaceId, domain_id: c.domain_id, enabled: 1, cf_record_id: c.cf_record_id, canonical_record: c.canonical_record, lookup_count: c.lookup_count })
 				.onConflictDoUpdate({
 					target: spfFlattenConfig.domain_id,
-					// An upsert must never move a row to another account.
+					// An upsert must never move a row to another workspace.
 					setWhere: mine,
 					set: {
 						enabled: 1,
@@ -56,8 +56,8 @@ export function spfFlattenQueries(db: Db, accountId: string) {
 	};
 }
 
-export function mtaStsQueries(db: Db, accountId: string) {
-	const mine = eq(mtaStsConfig.account_id, accountId);
+export function mtaStsQueries(db: Db, workspaceId: string) {
+	const mine = eq(mtaStsConfig.workspace_id, workspaceId);
 	const forDomain = (id: number) => and(mine, eq(mtaStsConfig.domain_id, id));
 	const touch = sql`unixepoch()` as any;
 
@@ -71,7 +71,7 @@ export function mtaStsQueries(db: Db, accountId: string) {
 			return db
 				.select({ m: mtaStsConfig })
 				.from(mtaStsConfig)
-				.innerJoin(domains, and(eq(domains.id, mtaStsConfig.domain_id), eq(domains.account_id, accountId)))
+				.innerJoin(domains, and(eq(domains.id, mtaStsConfig.domain_id), eq(domains.workspace_id, workspaceId)))
 				.where(and(mine, eq(domains.domain, domain), eq(mtaStsConfig.enabled, 1)))
 				.get()
 				.then((r) => r?.m ?? null);
@@ -82,7 +82,7 @@ export function mtaStsQueries(db: Db, accountId: string) {
 		},
 
 		insert(c: { domain_id: number; mode: MtaStsMode; mx_hosts: string; policy_id: string; mta_sts_record_id: string | null; tls_rpt_record_id: string | null; cname_record_id: string | null }) {
-			return db.insert(mtaStsConfig).values({ ...c, account_id: accountId }).run();
+			return db.insert(mtaStsConfig).values({ ...c, workspace_id: workspaceId }).run();
 		},
 
 		updateMode(domainId: number, mode: MtaStsMode, policy_id: string) {

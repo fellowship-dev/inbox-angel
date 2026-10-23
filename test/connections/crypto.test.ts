@@ -7,7 +7,7 @@ const K1 = `k1:${key(1)}`;
 const K2 = `k2:${key(2)}`;
 const SECRET = 'cf-access-token-SECRET-1234567890';
 const REFRESH = 'cf-refresh-token-SECRET-abcdefghij';
-const AAD = envelopeAad('acct_a', 'cfc_1');
+const AAD = envelopeAad('ws_a', 'cfc_1');
 
 describe('token envelope', () => {
   it('round-trips access, refresh and expiry', async () => {
@@ -40,8 +40,8 @@ describe('token envelope', () => {
   it('does not open for another row, a tampered ciphertext, or the wrong key', async () => {
     const c = TokenCrypto.fromEnv({ TOKEN_ENCRYPTION_KEY: K1 });
     const envelope = await c.seal({ access: SECRET }, AAD);
-    await expect(c.open(envelope, envelopeAad('acct_b', 'cfc_1'))).rejects.toBeInstanceOf(TokenEnvelopeError);
-    await expect(c.open(envelope, envelopeAad('acct_a', 'cfc_2'))).rejects.toBeInstanceOf(TokenEnvelopeError);
+    await expect(c.open(envelope, envelopeAad('ws_b', 'cfc_1'))).rejects.toBeInstanceOf(TokenEnvelopeError);
+    await expect(c.open(envelope, envelopeAad('ws_a', 'cfc_2'))).rejects.toBeInstanceOf(TokenEnvelopeError);
     const parts = envelope.split('.');
     const flipped = parts[3].slice(0, -2) + (parts[3].endsWith('AA') ? 'BB' : 'AA');
     await expect(c.open([...parts.slice(0, 3), flipped].join('.'), AAD)).rejects.toBeInstanceOf(TokenEnvelopeError);

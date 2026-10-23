@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { forAccount, authLookups, globalQueries, IMPLICIT_ACCOUNT_ID } from '../src';
+import { forWorkspace, authLookups, globalQueries, IMPLICIT_WORKSPACE_ID } from '../src';
 import { createMigratedD1, type TestD1 } from '../src/testing';
 
-const A = IMPLICIT_ACCOUNT_ID;
-const B = 'acct_b';
+const A = IMPLICIT_WORKSPACE_ID;
+const B = 'ws_b';
 let d1: TestD1;
-let a: ReturnType<typeof forAccount>;
-let b: ReturnType<typeof forAccount>;
+let a: ReturnType<typeof forWorkspace>;
+let b: ReturnType<typeof forWorkspace>;
 
 const report = (domain_id: number, report_id = 'r1', over = {}) => ({
 	domain_id, org_name: 'google', report_id, date_begin: 1_000_000, date_end: 1_086_400, total_count: 10, pass_count: 8, fail_count: 2, raw_xml: null, ...over,
@@ -17,21 +17,21 @@ const rec = (report_id: number, ip = '1.1.1.1') => ({
 
 beforeEach(() => {
 	d1 = createMigratedD1();
-	d1.sqlite.exec(`INSERT INTO accounts (id, name) VALUES ('${B}', 'Other')`);
-	a = forAccount(d1, A);
-	b = forAccount(d1, B);
+	d1.sqlite.exec(`INSERT INTO workspaces (id, name) VALUES ('${B}', 'Other')`);
+	a = forWorkspace(d1, A);
+	b = forWorkspace(d1, B);
 });
 
 describe('domains', () => {
-	it('insert / get / list round-trip within an account', async () => {
+	it('insert / get / list round-trip within a workspace', async () => {
 		const r = await a.domains.insert({ domain: 'acme.com', rua_address: 'x@r.test' });
 		const id = Number(r.meta.last_row_id);
-		expect(await a.domains.getById(id)).toMatchObject({ domain: 'acme.com', account_id: A, is_default: 0, alerts_enabled: 1 });
+		expect(await a.domains.getById(id)).toMatchObject({ domain: 'acme.com', workspace_id: A, is_default: 0, alerts_enabled: 1 });
 		expect(await a.domains.getByName('acme.com')).toMatchObject({ id });
 		expect(await a.domains.list()).toHaveLength(1);
 	});
 
-	it('detects the parent domain (same account only)', async () => {
+	it('detects the parent domain (same workspace only)', async () => {
 		await a.domains.insert({ domain: 'acme.com', rua_address: 'x' });
 		await a.domains.insert({ domain: 'mail.acme.com', rua_address: 'x' });
 		const sub = await a.domains.getByName('mail.acme.com');
@@ -44,12 +44,12 @@ describe('domains', () => {
 		expect((await a.domains.getByName('www.other.org'))!.parent_id).toBeNull();
 	});
 
-	it('domain names are unique across accounts', async () => {
+	it('domain names are unique across workspaces', async () => {
 		await a.domains.insert({ domain: 'acme.com', rua_address: 'x' });
 		await expect(b.domains.insert({ domain: 'acme.com', rua_address: 'x' })).rejects.toThrow(/UNIQUE constraint failed: domains.domain/);
 	});
 
-	it('one default domain per account, independently', async () => {
+	it('one default domain per workspace, independently', async () => {
 		const ida = Number((await a.domains.insert({ domain: 'a1.com', rua_address: 'x' })).meta.last_row_id);
 		const ida2 = Number((await a.domains.insert({ domain: 'a2.com', rua_address: 'x' })).meta.last_row_id);
 		const idb = Number((await b.domains.insert({ domain: 'b1.com', rua_address: 'x' })).meta.last_row_id);
@@ -62,7 +62,7 @@ describe('domains', () => {
 	});
 });
 
-describe('an account-scoped query cannot see or touch another account', () => {
+describe('a workspace-scoped query cannot see or touch another workspace', () => {
 	let domA: number, repA: number;
 	beforeEach(async () => {
 		domA = Number((await a.domains.insert({ domain: 'acme.com', rua_address: 'x' })).meta.last_row_id);
@@ -149,15 +149,15 @@ describe('an account-scoped query cannot see or touch another account', () => {
 		expect(await a.team.list()).toHaveLength(1);
 	});
 
-	it('inserts are stamped with the caller’s account, never another', async () => {
+	it('inserts are stamped with the caller’s workspace, never another', async () => {
 		const idB = Number((await b.domains.insert({ domain: 'b.com', rua_address: 'x' })).meta.last_row_id);
 		await b.reports.insertAggregate(report(idB));
 		await b.settings.set('brand_color', '#bbb');
 		await b.audit.insert({ action: 'x' });
 		expect(await b.settings.get('brand_color')).toEqual({ value: '#bbb' });
 		expect(await a.settings.get('brand_color')).toEqual({ value: '#abc' });
-		expect(d1.sqlite.prepare("SELECT COUNT(*) n FROM audit_log WHERE account_id = ?").get(B)).toEqual({ n: 1 });
-		expect(d1.sqlite.prepare("SELECT COUNT(*) n FROM aggregate_reports WHERE account_id = ?").get(B)).toEqual({ n: 1 });
+		expect(d1.sqlite.prepare("SELECT COUNT(*) n FROM audit_log WHERE workspace_id = ?").get(B)).toEqual({ n: 1 });
+		expect(d1.sqlite.prepare("SELECT COUNT(*) n FROM aggregate_reports WHERE workspace_id = ?").get(B)).toEqual({ n: 1 });
 	});
 });
 
@@ -198,7 +198,7 @@ describe('behaviour carried over from the old queries.ts', () => {
 		await a.settings.setMany({});
 	});
 
-	it('the same setting key can exist in two accounts', async () => {
+	it('the same setting key can exist in two workspaces', async () => {
 		await a.settings.set('reports_domain', 'a.test');
 		await b.settings.set('reports_domain', 'b.test');
 		expect(await a.settings.get('reports_domain')).toEqual({ value: 'a.test' });
@@ -229,7 +229,7 @@ describe('behaviour carried over from the old queries.ts', () => {
 		expect(await a.audit.list({ limit: 9999 })).toHaveLength(5);
 	});
 
-	it('team: first admin becomes owner; removing a user deletes them when they have no other account', async () => {
+	it('team: first admin becomes owner; removing a user deletes them when they have no other workspace', async () => {
 		await a.team.addUser({ id: 'u1', email: 'one@x.test', name: 'One', password_hash: 'h', role: 'admin' });
 		await a.team.addUser({ id: 'u2', email: 'two@x.test', name: 'Two', password_hash: 'h', role: 'admin' });
 		await a.team.addUser({ id: 'u3', email: 'three@x.test', name: 'Three', password_hash: null, role: 'member' });
@@ -237,7 +237,7 @@ describe('behaviour carried over from the old queries.ts', () => {
 		expect(roles).toEqual([{ user_id: 'u1', role: 'owner' }, { user_id: 'u2', role: 'admin' }, { user_id: 'u3', role: 'member' }]);
 		expect((await a.team.firstAdmin())!.id).toBe('u1');
 		// u2 also joins B, then is removed from A: the user survives.
-		d1.sqlite.exec(`INSERT INTO memberships (account_id, user_id, role) VALUES ('${B}', 'u2', 'member')`);
+		d1.sqlite.exec(`INSERT INTO memberships (workspace_id, user_id, role) VALUES ('${B}', 'u2', 'member')`);
 		await a.team.removeUser('u2');
 		expect(await b.team.getMember('u2')).toMatchObject({ id: 'u2' });
 		await a.team.removeUser('u3');
@@ -260,7 +260,7 @@ describe('global queries', () => {
 		await a.team.addUser({ id: 'u1', email: 'one@x.test', name: 'One', password_hash: 'h', role: 'admin' });
 		expect(await g.users.byEmail('one@x.test')).toMatchObject({ id: 'u1' });
 		expect(await g.users.byId('u1')).toMatchObject({ email: 'one@x.test' });
-		expect(await authLookups(d1).membershipsOf('u1')).toEqual([{ account_id: 'acct_default', role: 'owner' }]);
+		expect(await authLookups(d1).membershipsOf('u1')).toEqual([{ workspace_id: 'ws_default', role: 'owner' }]);
 
 		await g.checkResults.insert({ from_email: 'a@b.c', from_domain: 'b.c', overall_status: 'exposed', report_sent: 0, session_token: 'tk' });
 		expect(await g.checkResults.byToken('tk')).toMatchObject({ from_domain: 'b.c', spf_lookup_count: null });

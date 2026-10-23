@@ -1,6 +1,6 @@
 # Cloudflare connections: OAuth and pasted tokens
 
-An Inbox Angel **account** (one per business: a Fellowship account, a separate Lexgo account…) can connect **one or more
+An Inbox Angel **workspace** (one per business: a Fellowship workspace, a separate Lexgo workspace…) can connect **one or more
 Cloudflare accounts**. Each connection is either
 
 * **OAuth**: the user clicks *Connect Cloudflare*, consents at Cloudflare, and Inbox Angel keeps the access + refresh token; or
@@ -69,13 +69,13 @@ Migration `0015` (`npm run migrate`) adds the tables.
 ## How it works
 
 * **Storage.** `cloudflare_connections` holds `token_envelope`: `ia1.<key id>.<iv>.<ciphertext>`, AES-256-GCM via WebCrypto,
-  of `{access, refresh, expires_at}`. The additional authenticated data is `<account id>|<connection id>`, so a ciphertext
+  of `{access, refresh, expires_at}`. The additional authenticated data is `<workspace id>|<connection id>`, so a ciphertext
   copied to another row does not open. List queries never select the column; the API serializes an explicit whitelist.
   Tokens never reach logs, JSON or error messages (`TokenMaterial` refuses `JSON.stringify` and `util.inspect`).
 * **PKCE + state.** `POST …/oauth/start` generates a verifier and a signed `state` (HMAC-SHA256, 10-minute TTL) bound to the
-  account, the user and a random nonce that is also set as an HttpOnly `ia_cf_oauth` cookie. The verifier is sealed
+  workspace, the user and a random nonce that is also set as an HttpOnly `ia_cf_oauth` cookie. The verifier is sealed
   *inside* the state, so it never leaves in the clear. The callback requires the cookie, the signature, the TTL and the
-  same account and user, then redeems the code with the verifier. Anything else is `400`.
+  same workspace and user, then redeems the code with the verifier. Anything else is `400`.
 * **Refresh.** An expired access token is refreshed before use, once per request (concurrent calls share it); a `401`
   from Cloudflare triggers one forced refresh and one retry. Refresh tokens are single-use, so an isolate that loses the
   race re-reads what the winner stored instead of failing.
@@ -83,7 +83,7 @@ Migration `0015` (`npm run migrate`) adds the tables.
   answers `503` ("for the server operator to fix") and logs one line; the connection is **not** marked broken and nobody is
   alerted. Restore the key and everything works again.
 * **Broken.** If Cloudflare refuses the refresh (or a pasted token is rejected) the connection becomes `broken`. Calls
-  through it fail with `409 {code: "cf_connection_broken", connection_id}` without calling Cloudflare. The account's owners
+  through it fail with `409 {code: "cf_connection_broken", connection_id}` without calling Cloudflare. The workspace's owners
   and admins get an email (same `SEND_EMAIL` path as the change alerts) and an audit entry `cf_connection.broken`, once.
   Reconnecting (`oauth/start` with `connection_id`, or `PUT …/token`) makes it `active` again and keeps its zones and links.
 * **Zone enforcement.** Every client for a stored connection carries its allow-list and refuses, before any request leaves
@@ -108,7 +108,7 @@ Migration `0015` (`npm run migrate`) adds the tables.
   has to see the recorded account and the accounts of the allowed zones, else `409 cf_account_mismatch` (OAuth: redirect with
   `?cf_error=cf_account_mismatch`, and the new grant is revoked). Add a different account as a new connection.
 * **State is single use.** The first callback with a valid state spends it (even a refusal); a replay is `400 oauth_state_used`.
-* **Routing.** `tenant.cfFor(domain)` finds the domain (or its nearest parent in the account), then its connection, then that
+* **Routing.** `tenant.cfFor(domain)` finds the domain (or its nearest parent in the workspace), then its connection, then that
   connection's client. A domain without a connection uses the self-host `CLOUDFLARE_API_TOKEN` **in self-host mode only**;
   in `MODE=saas` it gets `400 "… is not linked to a Cloudflare connection"`. Existing call sites (DNS apply, SPF flatten,
   MTA-STS, Email Routing, provisioning, cron) go through it.
@@ -117,8 +117,8 @@ Migration `0015` (`npm run migrate`) adds the tables.
 
 ## API
 
-All endpoints need a signed-in **owner or admin** (members get `403`, including for reads), act on the caller's account
-only, and answer `404` for another account's ids. JSON in and out; writes need the usual same-origin/CSRF rules.
+All endpoints need a signed-in **owner or admin** (members get `403`, including for reads), act on the caller's workspace
+only, and answer `404` for another workspace's ids. JSON in and out; writes need the usual same-origin/CSRF rules.
 Errors are `{ "error": "…", "code"?: "…" }`.
 
 ### `GET /api/cloudflare/connections`
@@ -182,7 +182,7 @@ answers `302` to `return_to` (default `/`) with a query parameter appended:
 * `?cf_connection=<id>`: connected; continue to *pick zones*;
 * `?cf_error=<code>`: Cloudflare refused (`access_denied`) or the exchange failed (`invalid_grant`…).
 
-If the state itself is invalid (tampered, expired, other user/account/browser, already used) there is no redirect: `400
+If the state itself is invalid (tampered, expired, other user/workspace/browser, already used) there is no redirect: `400
 { "code": "oauth_state_signature" | "oauth_state_expired" | "oauth_state_mismatch" | "oauth_state_used" | … }`, so the UI should offer *Try again*.
 
 ### `PUT /api/domains/:id/connection`

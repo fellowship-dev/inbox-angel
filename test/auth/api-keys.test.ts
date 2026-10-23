@@ -51,7 +51,7 @@ describe('per-user API keys', () => {
     const stored = rows(db, 'SELECT * FROM api_keys');
     expect(stored).toHaveLength(1);
     expect(JSON.stringify(stored[0])).not.toContain(body.key);
-    expect(stored[0]).toMatchObject({ account_id: 'acct_default', name: 'deploy bot', prefix: body.prefix, revoked_at: null, last_used_at: null });
+    expect(stored[0]).toMatchObject({ workspace_id: 'ws_default', name: 'deploy bot', prefix: body.prefix, revoked_at: null, last_used_at: null });
     expect(stored[0].key_hash).toMatch(/^[0-9a-f]{64}$/);
 
     expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(200);
@@ -136,19 +136,19 @@ describe('per-user API keys', () => {
     expect((await call(env, 'DELETE', `/api/keys/${memberKey.id}`, { key: owner })).status).toBe(200);
   });
 
-  it('is scoped to its account: a key resolves to the account it was created in', async () => {
+  it('is scoped to its workspace: a key resolves to the workspace it was created in', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
     await call(env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'password-123' } });
-    const m = rows(db, 'SELECT user_id, account_id FROM memberships')[0];
+    const m = rows(db, 'SELECT user_id, workspace_id FROM memberships')[0];
     const { createApiKey } = await import('../../src/auth/api-keys');
-    const body = await createApiKey(db as unknown as D1Database, { accountId: m.account_id, userId: m.user_id, name: 'k' });
-    const row = rows(db, 'SELECT account_id FROM api_keys')[0];
-    expect(row.account_id).toMatch(/^acct_[0-9a-f]{32}$/);
-    expect(row.account_id).not.toBe('acct_default');
+    const body = await createApiKey(db as unknown as D1Database, { workspaceId: m.workspace_id, userId: m.user_id, name: 'k' });
+    const row = rows(db, 'SELECT workspace_id FROM api_keys')[0];
+    expect(row.workspace_id).toMatch(/^ws_[0-9a-f]{32}$/);
+    expect(row.workspace_id).not.toBe('ws_default');
 
     const { resolveApiKey } = await import('../../src/auth/api-keys');
-    expect(await resolveApiKey(db as unknown as D1Database, body.key)).toMatchObject({ accountId: row.account_id, role: 'owner' });
+    expect(await resolveApiKey(db as unknown as D1Database, body.key)).toMatchObject({ workspaceId: row.workspace_id, role: 'owner' });
   });
 
   it('validates input', async () => {

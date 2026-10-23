@@ -4,7 +4,7 @@ import type { Domain } from '../../src/db/types';
 
 // Mock auth
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', workspaceId: 'ws_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -48,7 +48,7 @@ function makeEnv(overrides: { cfToken?: string; flattenEnabled?: boolean } = {})
   // acme.com is the base domain; its zone is stored, so no zone lookup is needed for it.
   seedSettings(db, {
     base_domain: 'acme.com', reports_domain: 'reports.test.com', from_email: 'noreply@reports.test.com',
-    zone_id: 'zone-test-123', zone_name: 'acme.com', account_id: 'acct-test', workers_subdomain: 'testworker',
+    zone_id: 'zone-test-123', zone_name: 'acme.com', cf_account_id: 'acct-test', workers_subdomain: 'testworker',
   });
 
   return {
@@ -365,8 +365,8 @@ describe('POST /api/spf-lookup-count', () => {
 describe('apply-spf zone targeting', () => {
   it('writes each domain into its own zone (two domains, two zones)', async () => {
     const cf = stubCloudflare(new FakeCloudflare({
-      'acme.com': { id: 'zone-test-123', accountId: 'acct-test' },
-      'other-company.org': { id: 'zone-other', accountId: 'acct-test' },
+      'acme.com': { id: 'zone-test-123', cfAccountId: 'acct-test' },
+      'other-company.org': { id: 'zone-other', cfAccountId: 'acct-test' },
     }));
     const env = makeEnv();
     (env.DB as any).sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (2, ?, ?)').run('other-company.org', 'rua@reports.test.com');
@@ -378,7 +378,7 @@ describe('apply-spf zone targeting', () => {
     expect(cf.records.get('zone-other')).toEqual([expect.objectContaining({ name: 'other-company.org', content: 'v=spf1 include:mail.example.net -all' })]);
   });
 
-  it('400s without writing when the domain has no zone on the account', async () => {
+  it('400s without writing when the domain has no zone on the Cloudflare account', async () => {
     const cf = stubCloudflare(new FakeCloudflare({ 'acme.com': { id: 'zone-test-123' } }));
     const env = makeEnv();
     (env.DB as any).sqlite.prepare('INSERT INTO domains (id, domain, rua_address) VALUES (2, ?, ?)').run('unmanaged.net', 'rua@reports.test.com');

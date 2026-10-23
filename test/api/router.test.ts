@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../../src/index';
 import { createMigratedD1, type TestD1 } from '@inbox-angel/db/testing';
-import { IMPLICIT_ACCOUNT_ID } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', workspaceId: 'ws_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -47,8 +47,8 @@ function makeEnv(): TestEnv {
 
 function seedDomain(env: TestEnv, d: { id: number; domain: string; dns_record_id?: string | null; parent_id?: number | null }) {
   env.DB.sqlite
-    .prepare('INSERT INTO domains (id, account_id, domain, rua_address, dns_record_id, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(d.id, IMPLICIT_ACCOUNT_ID, d.domain, 'rua@reports.inboxangel.io', d.dns_record_id ?? null, d.parent_id ?? null);
+    .prepare('INSERT INTO domains (id, workspace_id, domain, rua_address, dns_record_id, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(d.id, IMPLICIT_WORKSPACE_ID, d.domain, 'rua@reports.inboxangel.io', d.dns_record_id ?? null, d.parent_id ?? null);
 }
 
 function seedCheckResult(env: TestEnv, token: string, fromDomain = 'acme.com') {
@@ -217,7 +217,7 @@ describe('POST /api/domains', () => {
     const body = await res.json() as any;
     expect(body.domain.domain).toBe('acme.com');
     expect(body.rua_hint).toContain('rua=mailto:rua@reports.inboxangel.io');
-    expect(rows(env, 'SELECT domain, account_id FROM domains')).toEqual([{ domain: 'acme.com', account_id: IMPLICIT_ACCOUNT_ID }]);
+    expect(rows(env, 'SELECT domain, workspace_id FROM domains')).toEqual([{ domain: 'acme.com', workspace_id: IMPLICIT_WORKSPACE_ID }]);
   });
 
   it('lowercases and trims the domain', async () => {
@@ -489,7 +489,7 @@ describe('GET /api/domains/:id/wizard-state', () => {
     const env = makeEnv();
     seedDomain(env, { id: 1, domain: 'acme.com' });
     const savedState = { spf: 'complete', dkim: 'skipped', dmarc: 'not_started', routing: 'not_started' };
-    env.DB.sqlite.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(IMPLICIT_ACCOUNT_ID, 'wizard_state_1', JSON.stringify(savedState));
+    env.DB.sqlite.prepare('INSERT INTO settings (workspace_id, key, value) VALUES (?, ?, ?)').run(IMPLICIT_WORKSPACE_ID, 'wizard_state_1', JSON.stringify(savedState));
     const res = await handleApi(req('GET', '/api/domains/1/wizard-state'), env, ctx);
     expect(res.status).toBe(200);
     const body = await res.json() as any;

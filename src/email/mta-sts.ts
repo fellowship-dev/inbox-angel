@@ -204,7 +204,7 @@ async function getWorkerRoute(tenant: TenantContext, domain: string): Promise<st
     }
   } catch { /* no route listing available: fall through to workers.dev */ }
 
-  // workers.dev addresses carry the account's workers subdomain; without it the name doesn't resolve.
+  // workers.dev addresses carry the Cloudflare account's workers subdomain; without it the name doesn't resolve.
   const subdomain = await tenant.workersSubdomain();
   if (!subdomain) {
     throw new Error(`Cannot determine the public hostname of Worker "${worker}": no route in this zone and the workers.dev subdomain is unknown`);

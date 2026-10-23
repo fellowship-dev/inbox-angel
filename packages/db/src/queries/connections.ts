@@ -1,5 +1,5 @@
 /**
- * Cloudflare connections of one account, and the zones each may manage.
+ * Cloudflare connections of one workspace, and the zones each may manage.
  *
  * `list`/`get` never select `token_envelope`: the ciphertext leaves the database only through
  * `getSecret`, which the connection layer (src/connections) calls to decrypt a token.
@@ -38,10 +38,10 @@ export type CfConnectionInfo = {
 
 export interface CfConnectionZone { zone_id: string; zone_name: string; cf_account_id?: string | null }
 
-export function connectionQueries(db: Db, accountId: string) {
-	const mine = eq(cloudflareConnections.account_id, accountId);
+export function connectionQueries(db: Db, workspaceId: string) {
+	const mine = eq(cloudflareConnections.workspace_id, workspaceId);
 	const one = (id: string) => and(mine, eq(cloudflareConnections.id, id));
-	const myZones = eq(cloudflareConnectionZones.account_id, accountId);
+	const myZones = eq(cloudflareConnectionZones.workspace_id, workspaceId);
 
 	return {
 		list(): Promise<CfConnectionInfo[]> {
@@ -82,7 +82,7 @@ export function connectionQueries(db: Db, accountId: string) {
 		}) {
 			return db
 				.insert(cloudflareConnections)
-				.values({ ...c, cf_account_id: c.cf_account_id ?? null, cf_account_name: c.cf_account_name ?? null, scopes: c.scopes ?? null, created_by: c.created_by ?? null, account_id: accountId })
+				.values({ ...c, cf_account_id: c.cf_account_id ?? null, cf_account_name: c.cf_account_name ?? null, scopes: c.scopes ?? null, created_by: c.created_by ?? null, workspace_id: workspaceId })
 				.run();
 		},
 
@@ -130,7 +130,7 @@ export function connectionQueries(db: Db, accountId: string) {
 
 		async delete(id: string): Promise<boolean> {
 			// Explicit even though the foreign key does the same: linked domains must never keep a dangling id.
-			await db.update(domains).set({ cf_connection_id: null }).where(and(eq(domains.account_id, accountId), eq(domains.cf_connection_id, id))).run();
+			await db.update(domains).set({ cf_connection_id: null }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.cf_connection_id, id))).run();
 			const r = await db.delete(cloudflareConnections).where(one(id)).run();
 			return (r.meta.changes ?? 0) > 0;
 		},
@@ -151,22 +151,22 @@ export function connectionQueries(db: Db, accountId: string) {
 			return db
 				.select({ zone_id: cloudflareConnectionBlockedZones.zone_id, zone_name: cloudflareConnectionBlockedZones.zone_name })
 				.from(cloudflareConnectionBlockedZones)
-				.where(and(eq(cloudflareConnectionBlockedZones.account_id, accountId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId)))
+				.where(and(eq(cloudflareConnectionBlockedZones.workspace_id, workspaceId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId)))
 				.all();
 		},
 
-		/** Replace the allow-list and the known blocked child zones (atomic). False when the connection is not this account's. */
+		/** Replace the allow-list and the known blocked child zones (atomic). False when the connection is not this workspace's. */
 		async setZones(connectionId: string, zones: CfConnectionZone[], blocked: { zone_id: string; zone_name: string }[] = []): Promise<boolean> {
 			const owned = await db.select({ id: cloudflareConnections.id }).from(cloudflareConnections).where(one(connectionId)).get();
 			if (!owned) return false;
 			const stmts = [
 				db.delete(cloudflareConnectionZones).where(and(myZones, eq(cloudflareConnectionZones.connection_id, connectionId))),
-				db.delete(cloudflareConnectionBlockedZones).where(and(eq(cloudflareConnectionBlockedZones.account_id, accountId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId))),
+				db.delete(cloudflareConnectionBlockedZones).where(and(eq(cloudflareConnectionBlockedZones.workspace_id, workspaceId), eq(cloudflareConnectionBlockedZones.connection_id, connectionId))),
 				...(zones.length
-					? [db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase(), cf_account_id: z.cf_account_id ?? null })))]
+					? [db.insert(cloudflareConnectionZones).values(zones.map((z) => ({ connection_id: connectionId, workspace_id: workspaceId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase(), cf_account_id: z.cf_account_id ?? null })))]
 					: []),
 				...(blocked.length
-					? [db.insert(cloudflareConnectionBlockedZones).values(blocked.map((z) => ({ connection_id: connectionId, account_id: accountId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() })))]
+					? [db.insert(cloudflareConnectionBlockedZones).values(blocked.map((z) => ({ connection_id: connectionId, workspace_id: workspaceId, zone_id: z.zone_id, zone_name: z.zone_name.toLowerCase() })))]
 					: []),
 			];
 			await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
@@ -178,7 +178,7 @@ export function connectionQueries(db: Db, accountId: string) {
 			const r = await db
 				.select({ n: sql<number>`count(*)` })
 				.from(domains)
-				.where(and(eq(domains.account_id, accountId), eq(domains.cf_connection_id, connectionId)))
+				.where(and(eq(domains.workspace_id, workspaceId), eq(domains.cf_connection_id, connectionId)))
 				.get();
 			return r?.n ?? 0;
 		},
