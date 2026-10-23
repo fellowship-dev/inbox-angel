@@ -31,8 +31,9 @@ export const ANONYMOUS_WORKSPACE_ID = '__anonymous__';
 
 export interface CanarySession { token: string; email: string; expires_at: number }
 
-export async function issueCanary(env: BoundEnv, nowSeconds = Math.floor(Date.now() / 1000)): Promise<CanarySession | null> {
-  const { canaryDomain } = hostedConfig(env);
+/** `domain`: the address domain; the hosted canary domain unless a self-host reports domain is given. */
+export async function issueCanary(env: BoundEnv, nowSeconds = Math.floor(Date.now() / 1000), domain?: string): Promise<CanarySession | null> {
+  const canaryDomain = domain ?? hostedConfig(env).canaryDomain;
   if (!canaryDomain) return null;
   const token = generateToken();
   const expires_at = nowSeconds + CANARY_TTL_SECONDS;

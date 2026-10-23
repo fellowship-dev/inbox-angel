@@ -239,6 +239,30 @@ export interface Me {
   role: Role;
   workspace_id: string;
   kind: 'instance' | 'api_key' | 'session';
+  /** Runs this instance (OWNER_EMAIL, or the self-host owner): sees the leads page. */
+  instance_owner?: boolean;
+}
+
+/** GET /api/leads (instance owner only) */
+export interface LeadRow {
+  id: number;
+  email: string;
+  domain: string;
+  source: string;
+  level: 'protected' | 'at_risk' | 'exposed' | null;
+  step: number;
+  steps_total: number;
+  status: 'active' | 'completed' | 'unsubscribed' | 'bounced' | 'replied' | 'booked' | 'converted';
+  next_send_at: number | null;
+  last_sent_at: number | null;
+  created_at: number;
+  last_activity_at: number;
+}
+
+export interface LeadsResponse {
+  leads: LeadRow[];
+  counts: Record<string, number>;
+  delivery: { enabled: boolean; can_send: boolean; provider: string | null; blockers: string[]; warnings: string[] };
 }
 
 /** GET /api/auth/status (public) */

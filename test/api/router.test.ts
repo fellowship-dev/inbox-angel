@@ -119,8 +119,9 @@ describe('POST /api/check-sessions', () => {
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(typeof body.token).toBe('string');
-    // Token is used directly as the local-part (no check- prefix)
-    expect(body.email).toMatch(/^[a-z0-9]+@reports\.inboxangel\.io$/);
+    // check+<token>@: the only local part the self-host email handler accepts for a free check
+    expect(body.email).toBe(`check+${body.token}@reports.inboxangel.io`);
+    expect(body.token).toMatch(/^[a-z2-7]{32}$/);
   });
 
   it('generates a unique token each call', async () => {
@@ -419,15 +420,23 @@ describe('GET /api/reports/:id', () => {
 // ── POST /api/monitor ─────────────────────────────────────────
 
 describe('POST /api/monitor', () => {
-  it('returns 201 with domain and email when session exists', async () => {
+  const withMail = () => {
     const env = makeEnv();
+    const send = vi.fn().mockResolvedValue({ messageId: 'm1' });
+    (env as any).SEND_EMAIL = { send };
+    return { env, send };
+  };
+
+  it('returns 202, stores an unconfirmed subscription and sends one confirmation email (double opt-in)', async () => {
+    const { env, send } = withMail();
     seedCheckResult(env, 'tok123');
     const res = await handleApi(req('POST', '/api/monitor', { email: 'user@example.com', session_token: 'tok123' }), env, ctx);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     const body = await res.json() as any;
-    expect(body.domain).toBe('acme.com');
-    expect(body.email).toBe('user@example.com');
-    expect(rows(env, 'SELECT email, domain FROM monitor_subscriptions')).toEqual([{ email: 'user@example.com', domain: 'acme.com' }]);
+    expect(body).toMatchObject({ domain: 'acme.com', email: 'user@example.com', status: 'pending_confirmation' });
+    expect(rows(env, 'SELECT email, domain, confirmed_at FROM monitor_subscriptions')).toEqual([{ email: 'user@example.com', domain: 'acme.com', confirmed_at: null }]);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][0].text).toContain('/api/monitor/confirm?t=');
   });
 
   it('returns 400 when email is missing', async () => {
@@ -453,9 +462,10 @@ describe('POST /api/monitor', () => {
   it('does not require auth', async () => {
     const env = makeEnv();
     seedCheckResult(env, 'tok123');
+    (env as any).SEND_EMAIL = { send: vi.fn().mockResolvedValue({}) };
     vi.mocked(authMod.requireAuth).mockRejectedValueOnce(new authMod.AuthError('Unauthorized'));
     const res = await handleApi(req('POST', '/api/monitor', { email: 'u@x.com', session_token: 'tok123' }), env, ctx);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
   });
 });
 

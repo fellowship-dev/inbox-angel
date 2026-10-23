@@ -17,6 +17,7 @@ import { flattenSpf } from './email/spf-flattener';
 import { lookupSpf } from './email/dns-check';
 import { runRetention } from './lifecycle/retention';
 import { retryRevocations } from './lifecycle/revoke';
+import { expireUnconfirmedMonitors, runFunnelCron } from './funnel/cron';
 import { discoverMxHosts, generatePolicyId, updateMtaStsTxtRecord } from './email/mta-sts';
 
 const SPF_REFRESH_CONCURRENCY = 5;
@@ -45,6 +46,7 @@ export async function runCronForWorkspaces(
   if (event.cron === LIFECYCLE_CRON) return runDataLifecycle(env);
   const load = opts.load ?? loadTenant;
   const workspaces = opts.workspaces ?? await listCronWorkspaces(env);
+  await runFunnelCron(event, env);
   for (const workspaceId of workspaces) {
     try {
       const tenant = await load(env, { workspaceId });
@@ -114,6 +116,7 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
   }
 
   // Daily monitor check — every day 8am UTC (default / catch-all)
+  await expireUnconfirmedMonitors(tenant);
   // Also refresh SPF lookup counts for all domains
   const allDomains = await tenant.scope.domains.list();
   // Awaited (a floating promise can be cut off when the invocation ends), a few at a time.

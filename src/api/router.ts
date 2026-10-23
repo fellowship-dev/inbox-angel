@@ -8,7 +8,9 @@
 //   GET  /api/version                         — running vs latest version
 //   POST /api/check-sessions                  — create a free-check session (hosted: expiring check+<token>@canary address)
 //   GET  /api/check-sessions/:token           — poll for free-check result
-//   POST /api/monitor                         — subscribe to change alerts (unauthenticated)
+//   POST /api/monitor                         — request change alerts (unauthenticated, double opt-in: a confirmation email first)
+//   GET|POST /api/unsubscribe?t=              — signed, login-free unsubscribe (src/funnel/routes.ts)
+//   GET  /api/monitor/confirm?t=              — confirm a change-alert subscription
 //   GET  /api/auth/status                     — owner configured? OAuth providers, mode
 //   POST /api/auth/setup                      — first-run owner (self-host, closed once an owner exists)
 //   POST /api/auth/signup                     — new workspace (MODE=saas)
@@ -48,6 +50,7 @@
 //   GET    /api/reports                       — list recent aggregate reports
 //   GET    /api/reports/:id                   — single report with per-IP records
 //   GET    /api/check-results                 — recent free check results (last 20)
+//   GET    /api/leads, POST /api/leads/:id/stop — free-check leads and the onboarding sequence (instance owner only)
 //   GET/POST /api/keys, POST /api/keys/revoke-all, DELETE /api/keys/:id — per-user API keys
 //   GET    /api/workspaces                    — the caller's workspaces (role, member count)
 //   POST   /api/workspaces                    — create a workspace (caller becomes owner)
@@ -80,8 +83,12 @@ import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } fr
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { openHostedZone } from '../hosted/records';
 import { issueCanary } from '../hosted/canary';
+import { isCorsPath, preflight, withCors } from './cors';
+import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
+import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, workspaceLifecycle } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle } from '@inbox-angel/db';
+import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
@@ -107,6 +114,10 @@ import {
   buildPolicyFile,
   patchCfDnsRecord,
 } from '../email/mta-sts';
+
+/** Free-check sessions one IP may create per window. */
+export const CHECK_SESSIONS_PER_IP = 10;
+const CHECK_SESSION_WINDOW_MS = 3600_000;
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -207,6 +218,7 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
       email: email.toLowerCase().trim(),
       domain,
       session_token: null,
+      confirmed_at: Math.floor(Date.now() / 1000), // a signed-in account holder adding their own domain: no confirmation needed
       spf_record: null,
       dmarc_policy: null,
       dmarc_pct: null,
@@ -457,6 +469,12 @@ export async function handleApi(
   ctx: ExecutionContext,
   resolver: WorkspaceResolver = defaultResolver(envRaw),
 ): Promise<Response> {
+  // The marketing site's free-check calls (SITE_ORIGINS only): answer preflights here, add CORS headers to the rest.
+  const path = new URL(request.url).pathname;
+  if (isCorsPath(path)) {
+    if (request.method.toUpperCase() === 'OPTIONS') return withSecurityHeaders(preflight(request, envRaw));
+    return withSecurityHeaders(withCors(request, envRaw, await _handleApi(request, envRaw, ctx, resolver)));
+  }
   const res = await _handleApi(request, envRaw, ctx, resolver);
   return withSecurityHeaders(res);
 }
@@ -533,20 +551,29 @@ async function _handleApi(
   };
 
   // POST /api/check-sessions — generate a unique free-check email for a browser session
+  // Unsubscribe and monitor confirmation links: the signed token is the credential, no login.
+  const funnelResponse = await handlePublicFunnelRoute(request, env);
+  if (funnelResponse) return funnelResponse;
+
   if (path === '/api/check-sessions' && method === 'POST') {
+    // Per-IP limit on creating sessions (each is a database row and an address anyone can mail). The IP is only kept as a hash.
+    const ip = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for') ?? 'unknown';
+    const hit = await globalQueries(env.DB).rateLimit.hit(`check-session:${await keyedHash(env, 'ip', ip)}`, Date.now(), CHECK_SESSION_WINDOW_MS);
+    if (hit.count > CHECK_SESSIONS_PER_IP) {
+      return Response.json({ error: 'too many check sessions from this address, try again later' }, { status: 429, headers: { 'Retry-After': String(CHECK_SESSION_WINDOW_MS / 1000) } });
+    }
     // Hosted: an expiring, single-use check+<token>@canary address that belongs to no workspace.
     if (hostedEnabled(env) && hostedConfig(env).canaryDomain) {
       const canary = await issueCanary(env);
       return json(canary, 201);
     }
+    // Self-host: the same expiring, single-use check+<token>@<reports domain> address. Mail to any other local part is dropped.
     const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
     if (!rd) return err('Reports domain not configured — complete the setup wizard first', 500);
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-      .map(b => chars[b % chars.length]).join('');
+    const session = await issueCanary(env, undefined, rd);
     track(tenant, { event: 'check.created' }); // fire-and-forget
-    return json({ token, email: `${token}@${rd}` }, 201);
+    return json(session, 201);
   }
 
   // GET /api/check-sessions/:token — poll until the check email has been processed
@@ -567,17 +594,20 @@ async function _handleApi(
     const checkResult = await globals(env.DB).checkResults.byToken(body.session_token);
     if (!checkResult) return err('check result not found — send the test email first', 404);
 
-    await tenant.scope.monitor.insert({
-      email: body.email.toLowerCase().trim(),
+    // Double opt-in: this stores an unconfirmed subscription and emails a confirmation link; alerts start only when it is clicked.
+    const outcome = await requestMonitorSubscription(env, tenant, {
+      email: body.email,
       domain: checkResult.from_domain,
-      session_token: body.session_token,
-      spf_record: checkResult.spf_record,
-      dmarc_policy: checkResult.dmarc_policy,
-      dmarc_pct: null,  // not stored in check_results; will be populated on first cron run
-      dmarc_record: checkResult.dmarc_record,
-    });
-
-    return json({ domain: checkResult.from_domain, email: body.email }, 201);
+      sessionToken: body.session_token,
+      clientIp: request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for') ?? 'unknown',
+      baseline: {
+        spf_record: checkResult.spf_record,
+        dmarc_policy: checkResult.dmarc_policy,
+        dmarc_pct: null,  // not stored in check_results; will be populated on first cron run
+        dmarc_record: checkResult.dmarc_record,
+      },
+    }, url.origin);
+    return json(outcome.body, outcome.status);
   }
 
   // /api/auth/* and /api/invites/*: status, setup, signup, login, logout, forgot, reset, OAuth, invites
@@ -623,14 +653,19 @@ async function _handleApi(
   }
 
   // GET /api/me — who the caller is in this workspace (the dashboard gates controls on `role`)
+  const instanceOwner = isInstanceOwner(env, { kind: (workspace as AuthedWorkspace).kind, email: userBySession?.email, role: workspace.role, workspaceId: workspace.workspaceId });
   if (path === '/api/me' && method === 'GET') {
     return json({
+      instance_owner: instanceOwner,
       user: userBySession,
       role: workspace.role ?? 'member',
       workspace_id: tenant.workspaceId,
       kind: (workspace as AuthedWorkspace).kind ?? 'session',
     });
   }
+
+  const leadResponse = await handleLeadRoutes(request, env, instanceOwner);
+  if (leadResponse) return leadResponse;
 
   try {
     // POST /api/settings/base-domain — wizard step 0: set the base domain

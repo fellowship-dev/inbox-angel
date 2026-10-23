@@ -75,6 +75,32 @@ function htmlLayout(title: string, bodyHtml: string, brand: Brand): string {
 </html>`;
 }
 
+// ── Plain letter (onboarding sequence) ────────────────────────
+
+export type LetterBlock = string | { heading: string } | { list: string[] } | { cta: { label: string; url: string } };
+
+/** A plain, text-first letter in the shared brand layout: paragraphs, headings, lists and one call-to-action button. */
+export function buildLetterHtml(p: { title: string; blocks: LetterBlock[]; brand?: Brand }): string {
+  const brand = p.brand ?? DEFAULT_BRAND;
+  const body = p.blocks.map((b) => {
+    if (typeof b === 'string') return `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">${esc(b)}</p>`;
+    if ('heading' in b) return `<h2 style="margin:20px 0 8px;font-size:16px;">${esc(b.heading)}</h2>`;
+    if ('list' in b) return `<ul style="margin:0 0 14px;padding-left:20px;font-size:15px;line-height:1.6;">${b.list.map((i) => `<li style="margin-bottom:6px;">${esc(i)}</li>`).join('')}</ul>`;
+    return `<p style="margin:20px 0;"><a href="${esc(b.cta.url)}" style="display:inline-block;padding:10px 18px;border-radius:4px;background:${esc(brand.color)};color:#fff;font-size:15px;font-weight:600;text-decoration:none;">${esc(b.cta.label)}</a></p>`;
+  }).join('\n');
+  return htmlLayout(p.title, body, brand);
+}
+
+/** The same letter as plain text. */
+export function buildLetterText(blocks: LetterBlock[]): string {
+  return blocks.map((b) => {
+    if (typeof b === 'string') return b;
+    if ('heading' in b) return b.heading.toUpperCase();
+    if ('list' in b) return b.list.map((i) => `- ${i}`).join('\n');
+    return `${b.cta.label}: ${b.cta.url}`;
+  }).join('\n\n');
+}
+
 // ── Weekly digest ─────────────────────────────────────────────
 
 function domainSection(
@@ -173,6 +199,8 @@ export interface FreeCheckHtmlParams {
   auth: AuthResultsHeader | null;
   dns: DnsCheckResult;
   brand?: Brand;
+  /** The line telling the sender about the follow-up emails, with its unsubscribe link. */
+  disclosure?: { text: string; unsubscribeUrl: string };
 }
 
 export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
@@ -225,6 +253,10 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
 InboxAngel can walk you through each fix and monitor your domain 24/7.
 <a href="https://inboxangel.com" style="color:${esc((p.brand ?? DEFAULT_BRAND).color)};">Start free monitoring →</a>
 </p>`;
+  }
+
+  if (p.disclosure) {
+    body += `<p style="margin:16px 0 0;font-size:13px;color:#374151;">${esc(p.disclosure.text)} <a href="${esc(p.disclosure.unsubscribeUrl)}" style="color:#374151;">Unsubscribe</a></p>`;
   }
 
   return htmlLayout(`Email Security Check — ${summary.domain}`, body, p.brand ?? DEFAULT_BRAND);

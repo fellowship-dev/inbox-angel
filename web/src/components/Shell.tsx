@@ -12,7 +12,7 @@ import {
 	WorkspaceSwitcher,
 	type RenderNavLink,
 } from '@inbox-angel/ui';
-import { BarChart3, Globe, History, KeyRound, LogOut, Mail, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
+import { BarChart3, Globe, History, KeyRound, LogOut, Mail, MailPlus, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
 import { switchToWorkspace, useWorkspaces } from '../lib/workspaces';
@@ -46,6 +46,7 @@ export function Shell() {
 		{ label: 'Members', href: '/members', icon: <Users /> },
 		{ label: 'API keys', href: '/keys', icon: <KeyRound /> },
 		{ label: 'Audit log', href: '/audit', icon: <History /> },
+		...(me?.instance_owner ? [{ label: 'Leads', href: '/leads', icon: <MailPlus /> }] : []),
 		{ label: 'Settings', href: '/settings', icon: <Settings /> },
 	].map((i) => ({ ...i, current: isCurrent(pathname, i.href) }));
 

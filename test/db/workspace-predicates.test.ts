@@ -148,12 +148,12 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		expect(scan(walk(join(ROOT, 'src'))).found).toEqual([]);
 	});
 
-	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, three in workspaces.ts: a user own workspaces and routing by reports domain / hostname, five in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id)', () => {
+	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, one in funnel.ts: an unsubscribe removes the address from every workspace, three in workspaces.ts: a user own workspaces and routing by reports domain / hostname, five in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id)', () => {
 		const files = walk(join(ROOT, 'packages/db/src/queries')).filter((f) => !/global(-lifecycle)?\.ts$/.test(f));
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(13);
+		expect(exemptions).toBe(14);
 	});
 
 	it('global.ts only touches allow-listed global tables', () => {
@@ -166,7 +166,7 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 
 	it('the allow-list matches the schema', () => {
 		for (const t of GLOBAL) expect(OWNED.has(t)).toBe(false);
-		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'ip_info', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'users', 'verifications', 'workspaces']);
+		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'ip_info', 'leads', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'suppression', 'users', 'verifications', 'workspaces']);
 	});
 });
 
