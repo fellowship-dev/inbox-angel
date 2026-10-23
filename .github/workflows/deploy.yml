@@ -38,7 +38,7 @@ jobs:
       - name: Build dashboard
         run: npm run build:dashboard
 
-      - name: Migrate D1 (idempotent; adopts older installs)
+      - name: Migrate D1
         run: npm run migrate
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
