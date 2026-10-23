@@ -4,7 +4,7 @@
 // What is collected:
 //   - Event type and typed properties (counts, statuses, version)
 //   - Worker version
-//   - A stable anonymous ID: SHA-256(account_id + worker_name), truncated to 16 hex chars
+//   - A stable anonymous ID: SHA-256(Cloudflare account id + worker_name), truncated to 16 hex chars
 //     This is a one-way hash — it cannot be reversed to identify your instance.
 //   - Timestamp (unix seconds)
 //
@@ -47,7 +47,7 @@ async function anonymousId(tenant: TenantContext): Promise<string> {
   const cfAccountId = tenant.settings.cfAccountId ?? '';
   const base = `${cfAccountId}:${tenant.workerName}`;
   // Self-host keeps its original id; in saas each tenant is its own "instance".
-  const raw = tenant.mode === 'saas' ? `${base}:${tenant.accountId}` : base;
+  const raw = tenant.mode === 'saas' ? `${base}:${tenant.workspaceId}` : base;
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2, '0'))

@@ -1,41 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dc4c3707-c58a-49d3-9cea-83ee101f7b4b",
+  "id": "1b7df8f5-e8ff-4184-b1a2-7941ae653189",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "accounts": {
-      "name": "accounts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "aggregate_reports": {
       "name": "aggregate_reports",
       "columns": {
@@ -120,13 +88,13 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
@@ -144,10 +112,10 @@
           ],
           "isUnique": false
         },
-        "idx_agg_reports_account": {
-          "name": "idx_agg_reports_account",
+        "idx_agg_reports_workspace": {
+          "name": "idx_agg_reports_workspace",
           "columns": [
-            "account_id",
+            "workspace_id",
             "date_begin"
           ],
           "isUnique": false
@@ -190,8 +158,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -263,10 +231,10 @@
           ],
           "isUnique": true
         },
-        "idx_api_keys_account": {
-          "name": "idx_api_keys_account",
+        "idx_api_keys_workspace": {
+          "name": "idx_api_keys_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         },
@@ -279,12 +247,12 @@
         }
       },
       "foreignKeys": {
-        "api_keys_account_id_accounts_id_fk": {
-          "name": "api_keys_account_id_accounts_id_fk",
+        "api_keys_workspace_id_workspaces_id_fk": {
+          "name": "api_keys_workspace_id_workspaces_id_fk",
           "tableFrom": "api_keys",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -399,13 +367,13 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
@@ -431,10 +399,10 @@
           ],
           "isUnique": false
         },
-        "idx_audit_account": {
-          "name": "idx_audit_account",
+        "idx_audit_workspace": {
+          "name": "idx_audit_workspace",
           "columns": [
-            "account_id",
+            "workspace_id",
             "\"created_at\" DESC"
           ],
           "isUnique": false
@@ -820,8 +788,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -851,10 +819,10 @@
         }
       },
       "indexes": {
-        "idx_cf_connection_blocked_account": {
-          "name": "idx_cf_connection_blocked_account",
+        "idx_cf_connection_blocked_workspace": {
+          "name": "idx_cf_connection_blocked_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -873,12 +841,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "cloudflare_connection_blocked_zones_account_id_accounts_id_fk": {
-          "name": "cloudflare_connection_blocked_zones_account_id_accounts_id_fk",
+        "cloudflare_connection_blocked_zones_workspace_id_workspaces_id_fk": {
+          "name": "cloudflare_connection_blocked_zones_workspace_id_workspaces_id_fk",
           "tableFrom": "cloudflare_connection_blocked_zones",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -909,8 +877,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -947,10 +915,10 @@
         }
       },
       "indexes": {
-        "idx_cf_connection_zones_account": {
-          "name": "idx_cf_connection_zones_account",
+        "idx_cf_connection_zones_workspace": {
+          "name": "idx_cf_connection_zones_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -969,12 +937,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "cloudflare_connection_zones_account_id_accounts_id_fk": {
-          "name": "cloudflare_connection_zones_account_id_accounts_id_fk",
+        "cloudflare_connection_zones_workspace_id_workspaces_id_fk": {
+          "name": "cloudflare_connection_zones_workspace_id_workspaces_id_fk",
           "tableFrom": "cloudflare_connection_zones",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1005,8 +973,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1093,21 +1061,21 @@
         }
       },
       "indexes": {
-        "idx_cf_connections_account": {
-          "name": "idx_cf_connections_account",
+        "idx_cf_connections_workspace": {
+          "name": "idx_cf_connections_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "cloudflare_connections_account_id_accounts_id_fk": {
-          "name": "cloudflare_connections_account_id_accounts_id_fk",
+        "cloudflare_connections_workspace_id_workspaces_id_fk": {
+          "name": "cloudflare_connections_workspace_id_workspaces_id_fk",
           "tableFrom": "cloudflare_connections",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1249,13 +1217,13 @@
           "notNull": false,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         },
         "cf_connection_id": {
           "name": "cf_connection_id",
@@ -1294,17 +1262,17 @@
           ],
           "isUnique": false
         },
-        "idx_domains_account": {
-          "name": "idx_domains_account",
+        "idx_domains_workspace": {
+          "name": "idx_domains_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         },
         "idx_domains_is_default": {
           "name": "idx_domains_is_default",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": true,
           "where": "\"domains\".\"is_default\" = 1"
@@ -1352,8 +1320,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1467,10 +1435,10 @@
           ],
           "isUnique": true
         },
-        "idx_hosted_domains_account": {
-          "name": "idx_hosted_domains_account",
+        "idx_hosted_domains_workspace": {
+          "name": "idx_hosted_domains_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -1489,12 +1457,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "hosted_domains_account_id_accounts_id_fk": {
-          "name": "hosted_domains_account_id_accounts_id_fk",
+        "hosted_domains_workspace_id_workspaces_id_fk": {
+          "name": "hosted_domains_workspace_id_workspaces_id_fk",
           "tableFrom": "hosted_domains",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1570,8 +1538,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1622,10 +1590,10 @@
           ],
           "isUnique": true
         },
-        "idx_intake_tokens_account": {
-          "name": "idx_intake_tokens_account",
+        "idx_intake_tokens_workspace": {
+          "name": "idx_intake_tokens_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         },
@@ -1651,12 +1619,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "intake_tokens_account_id_accounts_id_fk": {
-          "name": "intake_tokens_account_id_accounts_id_fk",
+        "intake_tokens_workspace_id_workspaces_id_fk": {
+          "name": "intake_tokens_workspace_id_workspaces_id_fk",
           "tableFrom": "intake_tokens",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1723,20 +1691,20 @@
           "notNull": false,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
-        "idx_invites_account": {
-          "name": "idx_invites_account",
+        "idx_invites_workspace": {
+          "name": "idx_invites_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -1809,8 +1777,8 @@
     "memberships": {
       "name": "memberships",
       "columns": {
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1850,12 +1818,12 @@
         }
       },
       "foreignKeys": {
-        "memberships_account_id_accounts_id_fk": {
-          "name": "memberships_account_id_accounts_id_fk",
+        "memberships_workspace_id_workspaces_id_fk": {
+          "name": "memberships_workspace_id_workspaces_id_fk",
           "tableFrom": "memberships",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1878,12 +1846,12 @@
         }
       },
       "compositePrimaryKeys": {
-        "memberships_account_id_user_id_pk": {
+        "memberships_workspace_id_user_id_pk": {
           "columns": [
-            "account_id",
+            "workspace_id",
             "user_id"
           ],
-          "name": "memberships_account_id_user_id_pk"
+          "name": "memberships_workspace_id_user_id_pk"
         }
       },
       "uniqueConstraints": {},
@@ -1976,13 +1944,13 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
@@ -2001,10 +1969,10 @@
           ],
           "isUnique": false
         },
-        "monitor_subscriptions_account_id_email_domain_unique": {
-          "name": "monitor_subscriptions_account_id_email_domain_unique",
+        "monitor_subscriptions_workspace_id_email_domain_unique": {
+          "name": "monitor_subscriptions_workspace_id_email_domain_unique",
           "columns": [
-            "account_id",
+            "workspace_id",
             "email",
             "domain"
           ],
@@ -2012,12 +1980,12 @@
         }
       },
       "foreignKeys": {
-        "monitor_subscriptions_account_id_accounts_id_fk": {
-          "name": "monitor_subscriptions_account_id_accounts_id_fk",
+        "monitor_subscriptions_workspace_id_workspaces_id_fk": {
+          "name": "monitor_subscriptions_workspace_id_workspaces_id_fk",
           "tableFrom": "monitor_subscriptions",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -2123,20 +2091,20 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
-        "idx_mta_sts_account": {
-          "name": "idx_mta_sts_account",
+        "idx_mta_sts_workspace": {
+          "name": "idx_mta_sts_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -2316,13 +2284,13 @@
           "notNull": false,
           "autoincrement": false
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
@@ -2340,10 +2308,10 @@
           ],
           "isUnique": false
         },
-        "idx_records_account": {
-          "name": "idx_records_account",
+        "idx_records_workspace": {
+          "name": "idx_records_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -2467,13 +2435,13 @@
     "settings": {
       "name": "settings",
       "columns": {
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         },
         "key": {
           "name": "key",
@@ -2500,12 +2468,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "settings_account_id_accounts_id_fk": {
-          "name": "settings_account_id_accounts_id_fk",
+        "settings_workspace_id_workspaces_id_fk": {
+          "name": "settings_workspace_id_workspaces_id_fk",
           "tableFrom": "settings",
-          "tableTo": "accounts",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "account_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -2515,12 +2483,12 @@
         }
       },
       "compositePrimaryKeys": {
-        "settings_account_id_key_pk": {
+        "settings_workspace_id_key_pk": {
           "columns": [
-            "account_id",
+            "workspace_id",
             "key"
           ],
-          "name": "settings_account_id_key_pk"
+          "name": "settings_workspace_id_key_pk"
         }
       },
       "uniqueConstraints": {},
@@ -2609,20 +2577,20 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
-        "idx_spf_flatten_account": {
-          "name": "idx_spf_flatten_account",
+        "idx_spf_flatten_workspace": {
+          "name": "idx_spf_flatten_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         }
@@ -2722,13 +2690,13 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
-        "account_id": {
-          "name": "account_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'acct_default'"
+          "default": "'ws_default'"
         }
       },
       "indexes": {
@@ -2740,10 +2708,10 @@
           ],
           "isUnique": false
         },
-        "idx_tls_reports_account": {
-          "name": "idx_tls_reports_account",
+        "idx_tls_reports_workspace": {
+          "name": "idx_tls_reports_workspace",
           "columns": [
-            "account_id"
+            "workspace_id"
           ],
           "isUnique": false
         },
@@ -2950,6 +2918,38 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "workspaces": {
+      "name": "workspaces",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     }
   },
   "views": {},
@@ -2968,7 +2968,7 @@
           }
         }
       },
-      "idx_audit_account": {
+      "idx_audit_workspace": {
         "columns": {
           "\"created_at\" DESC": {
             "isExpression": true

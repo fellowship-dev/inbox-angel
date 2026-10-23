@@ -179,7 +179,7 @@ export const AUDIT_FILTERS = [
 	{ label: 'Domains', value: 'domain.' },
 	{ label: 'SPF', value: 'spf_flatten.' },
 	{ label: 'MTA-STS', value: 'mta_sts.' },
-	{ label: 'Team', value: 'team.' },
+	{ label: 'Members', value: 'team.' },
 	{ label: 'Cron', value: 'cron.' },
 ] as const;
 

@@ -6,7 +6,7 @@ import { makeTenant } from '../helpers/tenant';
 afterEach(() => vi.unstubAllGlobals());
 
 /** The fake doesn't model Email Routing; answer those endpoints and record the rest as usual. */
-function routingWorld(zones: Record<string, { id: string; accountId?: string }>) {
+function routingWorld(zones: Record<string, { id: string; cfAccountId?: string }>) {
   const cf = new FakeCloudflare(zones);
   const base = cf.fetch.getMockImplementation()!;
   const rules: Record<string, unknown> = {};

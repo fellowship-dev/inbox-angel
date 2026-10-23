@@ -3,7 +3,7 @@
 //   check+<token>@canary.inboxangel.io
 //
 // The token is issued by POST /api/check-sessions, stored hashed with an expiry, and good for one
-// email. It resolves to an anonymous check session, never to an account: results land in
+// email. It resolves to an anonymous check session, never to a workspace: results land in
 // check_results (global) and the browser polls them by the same token.
 
 import type { BoundEnv } from '../index';
@@ -26,8 +26,8 @@ export const CANARY_WINDOW_MS = 3600_000;
 /** A check email is small; anything bigger is not one. */
 const MAX_CANARY_BYTES = 5 * 1024 * 1024;
 
-/** Not an account: the id of the context an anonymous check runs in. It owns no rows. */
-export const ANONYMOUS_ACCOUNT_ID = '__anonymous__';
+/** Not a workspace: the id of the context an anonymous check runs in. It owns no rows. */
+export const ANONYMOUS_WORKSPACE_ID = '__anonymous__';
 
 export interface CanarySession { token: string; email: string; expires_at: number }
 
@@ -76,7 +76,7 @@ export async function handleCanaryEmail(message: ForwardableEmailMessage, env: B
 
   const tenant = new TenantContext({
     env,
-    accountId: ANONYMOUS_ACCOUNT_ID,
+    workspaceId: ANONYMOUS_WORKSPACE_ID,
     mode: 'saas',
     settings: { reportsDomain: canaryDomain, fromEmail: `noreply@${canaryDomain}` },
   });

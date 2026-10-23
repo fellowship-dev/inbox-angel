@@ -1,5 +1,5 @@
 // /api/domains/:id/hosted — the domain's hosted records (MODE=saas, SAAS_ENABLED=1). Tenant-scoped like every
-// other route: the domain is looked up through the caller's account, so another account's id is a 404.
+// other route: the domain is looked up through the caller's workspace, so another workspace's id is a 404.
 //
 // Also GET /api/hosted/config: { enabled }, whether the hosted UI applies (MODE=saas and SAAS_ENABLED=1). No domain, no tenant data.
 //   GET    /api/domains/:id/hosted               status: record names, the pointers to add, their verification, Level inputs

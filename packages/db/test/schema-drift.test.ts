@@ -4,7 +4,7 @@ import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import type { SQL } from 'drizzle-orm';
 import * as schema from '../src/schema';
-import { ACCOUNT_OWNED_TABLES, GLOBAL_TABLES } from '../src/schema';
+import { WORKSPACE_OWNED_TABLES, GLOBAL_TABLES } from '../src/schema';
 import { freshDb } from './helpers';
 
 const tables = Object.values(schema).filter((v) => is(v as any, SQLiteTable)) as unknown as SQLiteTable[];
@@ -90,15 +90,15 @@ describe('schema.ts matches what migrations/*.sql produce', () => {
 		});
 	}
 
-	it('every table is either account-owned (has account_id) or explicitly global', () => {
-		const owned = new Set<string>(ACCOUNT_OWNED_TABLES);
+	it('every table is either workspace-owned (has workspace_id) or explicitly global', () => {
+		const owned = new Set<string>(WORKSPACE_OWNED_TABLES);
 		const global = new Set(Object.keys(GLOBAL_TABLES));
 		for (const t of tables) {
 			const cfg = getTableConfig(t);
-			const has = cfg.columns.some((c) => c.name === 'account_id');
+			const has = cfg.columns.some((c) => c.name === 'workspace_id');
 			if (global.has(cfg.name)) expect(has, `${cfg.name} is global`).toBe(false);
-			else expect(owned.has(cfg.name), `${cfg.name} must be in ACCOUNT_OWNED_TABLES or GLOBAL_TABLES`).toBe(true);
-			if (owned.has(cfg.name)) expect(has, `${cfg.name} needs account_id`).toBe(true);
+			else expect(owned.has(cfg.name), `${cfg.name} must be in WORKSPACE_OWNED_TABLES or GLOBAL_TABLES`).toBe(true);
+			if (owned.has(cfg.name)) expect(has, `${cfg.name} needs workspace_id`).toBe(true);
 		}
 	});
 });

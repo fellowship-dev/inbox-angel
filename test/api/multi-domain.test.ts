@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import type { Env } from '../../src/index';
 
 // Mock auth so all requests pass
 vi.mock('../../src/api/auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', accountId: 'acct_default', role: 'owner', kind: 'instance', user: null }),
+  requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', workspaceId: 'ws_default', role: 'owner', kind: 'instance', user: null }),
   AuthError: class AuthError extends Error {
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
@@ -108,32 +106,6 @@ describe('PUT /api/domains/:id/set-default', () => {
   });
 });
 
-// ── Migration 0005 backfill SQL ────────────────────────────────
-
-describe('migration 0005 backfill', () => {
-  const migrationSql = readFileSync(
-    join(__dirname, '../../migrations/0006_add_is_default.sql'),
-    'utf-8'
-  );
-
-  it('adds is_default column with DEFAULT 0', () => {
-    expect(migrationSql).toContain('ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0');
-  });
-
-  it('backfills is_default=1 only when exactly one domain exists', () => {
-    // Backfill uses COUNT(*) = 1 guard so multi-domain deploys are unaffected
-    expect(migrationSql).toContain("COUNT(*) FROM domains) = 1");
-  });
-
-  it('backfills the oldest domain (order by created_at ASC)', () => {
-    expect(migrationSql).toContain('ORDER BY created_at ASC LIMIT 1');
-  });
-
-  it('creates unique index on is_default to enforce single default', () => {
-    expect(migrationSql).toMatch(/CREATE UNIQUE INDEX.*is_default.*WHERE is_default = 1/s);
-  });
-});
-
 // ── loadTenant() default domain fallback (unit) ────────────────
 
 describe('loadTenant() fallback to is_default=1', () => {
@@ -142,7 +114,7 @@ describe('loadTenant() fallback to is_default=1', () => {
     // no base_domain in settings, but a default domain exists
     db.sqlite.exec("INSERT INTO domains (id, domain, rua_address, is_default) VALUES (1, 'fallback.com', 'r@x.com', 1)");
 
-    const tenant = await loadTenant({ DB: db } as any, { accountId: 'acct_default' });
+    const tenant = await loadTenant({ DB: db } as any, { workspaceId: 'ws_default' });
 
     expect(tenant.settings.baseDomain).toBe('fallback.com');
     expect(tenant.settings.reportsDomain).toBe('reports.fallback.com');

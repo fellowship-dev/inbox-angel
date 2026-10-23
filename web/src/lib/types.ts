@@ -237,7 +237,7 @@ export type Role = 'owner' | 'admin' | 'member';
 export interface Me {
   user: { id: string; email: string; name: string } | null;
   role: Role;
-  account_id: string;
+  workspace_id: string;
   kind: 'instance' | 'api_key' | 'session';
 }
 

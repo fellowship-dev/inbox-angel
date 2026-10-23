@@ -10,8 +10,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 function world() {
   const cf = stubCloudflare(new FakeCloudflare({
-    'acme.com': { id: 'zone-acme', accountId: 'cf' },
-    'other-company.org': { id: 'zone-other', accountId: 'cf' },
+    'acme.com': { id: 'zone-acme', cfAccountId: 'cf' },
+    'other-company.org': { id: 'zone-other', cfAccountId: 'cf' },
   }));
   cf.mx['acme.com'] = ['10 mx.acme.com.'];
   cf.mx['other-company.org'] = ['10 mx.other-company.org.'];

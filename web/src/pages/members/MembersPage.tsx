@@ -47,7 +47,7 @@ export function inviteLink(token: string): string {
 	return `${window.location.origin}/#/invite/${token}`;
 }
 
-export function TeamPage() {
+export function MembersPage() {
 	const { role: myRole, canWrite } = useSession();
 	const team = useQuery({
 		queryKey: teamKey,
@@ -59,18 +59,18 @@ export function TeamPage() {
 
 	return (
 		<div className="space-y-8">
-			<PageHeader title="Team" description="Everyone here can see all domains and reports. Owners and admins can change things." />
+			<PageHeader title="Members" description="Everyone here can see all domains and reports. Owners and admins can change things." />
 			<ReadOnlyNotice />
 			{!canWrite ? (
-				<EmptyState icon={<Users />} title="Only owners and admins can see the team" description="Ask an owner if you need to know who has access, or want someone invited." />
+				<EmptyState icon={<Users />} title="Only owners and admins can see the members" description="Ask an owner if you need to know who has access, or want someone invited." />
 			) : team.isPending ? (
-				<ListSkeleton rows={3} label="Loading team" />
+				<ListSkeleton rows={3} label="Loading members" />
 			) : team.isError ? (
-				<LoadError error={team.error} onRetry={() => team.refetch()} title="Could not load the team" />
+				<LoadError error={team.error} onRetry={() => team.refetch()} title="Could not load the members" />
 			) : (
 				<>
 					<Section title="Members">
-						<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1" aria-label="Team members">
+						<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1" aria-label="Members">
 							{team.data.users.map((m) => (
 								<MemberRow key={m.id} member={m} isSelf={m.id === team.data.current_user_id} myRole={myRole} />
 							))}
@@ -158,10 +158,10 @@ function InviteSection() {
 	}
 
 	return (
-		<Section title="Invite a teammate" description="We do not send email: you get a one-time link to pass on. It expires in 7 days.">
+		<Section title="Invite a member" description="We do not send email: you get a one-time link to pass on. It expires in 7 days.">
 			<form onSubmit={submit} className="grid gap-4 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
 				<Field id="invite-email" label="Email">
-					<Input id="invite-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@yourcompany.com" />
+					<Input id="invite-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@yourcompany.com" />
 				</Field>
 				<Field id="invite-role" label="Role">
 					<Select value={inviteRole} onValueChange={(v) => setInviteRole(v as 'member' | 'admin')}>
@@ -181,7 +181,7 @@ function InviteSection() {
 			{invite.isError ? <FieldError>{invite.error instanceof ApiError && invite.error.status === 409 ? 'Someone with this email already has an account.' : errorMessage(invite.error)}</FieldError> : null}
 			{link ? (
 				<div className="space-y-2 rounded-lg border border-line bg-surface-2 p-4" role="status">
-					<p className="text-sm font-medium">Send this link to your teammate. It works once.</p>
+					<p className="text-sm font-medium">Send this link to the person you are inviting. It works once.</p>
 					<div className="flex items-center gap-2">
 						<code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface-1 px-3 py-2 font-mono text-sm" data-testid="invite-link">
 							{link}

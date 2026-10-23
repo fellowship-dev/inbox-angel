@@ -1,5 +1,5 @@
 import { getDb, type DbLike } from '../client';
-import { IMPLICIT_ACCOUNT_ID } from '../schema';
+import { IMPLICIT_WORKSPACE_ID } from '../schema';
 import { apiKeyQueries } from './api-keys';
 import { analyticsQueries } from './analytics';
 import { auditQueries } from './audit';
@@ -27,34 +27,34 @@ export type { MtaStsMode } from './domain-config';
 export { globalQueries } from './global';
 
 /**
- * Every tenant-data query, bound to one account. There is deliberately no way
- * to build a query on these tables without an account id.
+ * Every tenant-data query, bound to one workspace. There is deliberately no way
+ * to build a query on these tables without a workspace id.
  *
- *   const q = forAccount(env.DB, accountId);
+ *   const q = forWorkspace(env.DB, workspaceId);
  *   const domains = await q.domains.list();
  */
-export function forAccount(db: DbLike, accountId: string) {
+export function forWorkspace(db: DbLike, workspaceId: string) {
 	const d = getDb(db);
 	return {
-		accountId,
-		domains: domainQueries(d, accountId),
-		reports: reportQueries(d, accountId),
-		analytics: analyticsQueries(d, accountId),
-		monitor: monitorQueries(d, accountId),
-		settings: settingsQueries(d, accountId),
-		spf: spfFlattenQueries(d, accountId),
-		mtaSts: mtaStsQueries(d, accountId),
-		audit: auditQueries(d, accountId),
-		team: teamQueries(d, accountId),
-		apiKeys: apiKeyQueries(d, accountId),
-		connections: connectionQueries(d, accountId),
-		intake: intakeQueries(d, accountId),
-		hosted: hostedQueries(d, accountId),
-		heartbeat: () => heartbeatStats(d, accountId),
+		workspaceId,
+		domains: domainQueries(d, workspaceId),
+		reports: reportQueries(d, workspaceId),
+		analytics: analyticsQueries(d, workspaceId),
+		monitor: monitorQueries(d, workspaceId),
+		settings: settingsQueries(d, workspaceId),
+		spf: spfFlattenQueries(d, workspaceId),
+		mtaSts: mtaStsQueries(d, workspaceId),
+		audit: auditQueries(d, workspaceId),
+		team: teamQueries(d, workspaceId),
+		apiKeys: apiKeyQueries(d, workspaceId),
+		connections: connectionQueries(d, workspaceId),
+		intake: intakeQueries(d, workspaceId),
+		hosted: hostedQueries(d, workspaceId),
+		heartbeat: () => heartbeatStats(d, workspaceId),
 	};
 }
 
-export type AccountScope = ReturnType<typeof forAccount>;
+export type WorkspaceScope = ReturnType<typeof forWorkspace>;
 
-/** Self-hosted installs have exactly one account. */
-export const forImplicitAccount = (db: DbLike) => forAccount(db, IMPLICIT_ACCOUNT_ID);
+/** Self-hosted installs have exactly one workspace. */
+export const forImplicitWorkspace = (db: DbLike) => forWorkspace(db, IMPLICIT_WORKSPACE_ID);

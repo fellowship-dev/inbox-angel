@@ -32,7 +32,7 @@ export function Shell() {
 		{ label: 'Domains', href: '/', icon: <Globe /> },
 		{ label: 'Analytics', href: '/analytics', icon: <BarChart3 /> },
 		{ label: 'Email check', href: '/check', icon: <Mail /> },
-		{ label: 'Team', href: '/team', icon: <Users /> },
+		{ label: 'Members', href: '/members', icon: <Users /> },
 		{ label: 'API keys', href: '/keys', icon: <KeyRound /> },
 		{ label: 'Audit log', href: '/audit', icon: <History /> },
 		{ label: 'Settings', href: '/settings', icon: <Settings /> },

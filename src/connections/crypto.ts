@@ -9,8 +9,8 @@
 //   (`k2:<base64>,k1:<base64>`); every listed key still opens, new envelopes use the first, and an envelope
 //   sealed under an older key is re-sealed the next time it is used (isCurrent / reseal). With more than one key
 //   every key must carry its id: a lone bare key means "k1", and ids are never taken from position.
-// * The additional authenticated data binds an envelope to its row (`<account>|<connection>`), so a
-//   ciphertext copied onto another connection or account does not open.
+// * The additional authenticated data binds an envelope to its row (`<workspace>|<connection>`), so a
+//   ciphertext copied onto another connection or workspace does not open.
 // * Opened tokens live in a TokenMaterial, which refuses to serialize or inspect: the plaintext never
 //   reaches logs, JSON or error messages. Errors here never contain it either.
 //
@@ -189,4 +189,4 @@ export class TokenCrypto {
 }
 
 /** What an envelope is bound to. */
-export const envelopeAad = (accountId: string, connectionId: string) => `${accountId}|${connectionId}`;
+export const envelopeAad = (workspaceId: string, connectionId: string) => `${workspaceId}|${connectionId}`;

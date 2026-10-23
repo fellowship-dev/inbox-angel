@@ -3,7 +3,7 @@
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
 
-> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default account. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and apply migration 0014. Mail addressed without a valid token is rejected, not filed anywhere.
+> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and apply migration 0014. Mail addressed without a valid token is rejected, not filed anywhere.
 
 Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Customer setup](#customer-setup) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits-and-quotas)
 
@@ -90,7 +90,7 @@ re-reads a record before changing or deleting it to be sure it sits at the expec
 
 ### 5. Crons
 
-The daily hosted job runs inside the existing `0 11 * * *` trigger (after the per-account work), so `wrangler.jsonc` needs no new trigger:
+The daily hosted job runs inside the existing `0 11 * * *` trigger (after the per-workspace work), so `wrangler.jsonc` needs no new trigger:
 
 1. **Zone reconcile**: lists the whole records zone, stores the record count (quota), warns at 3,200, and diffs it against the database:
    expected records that are missing and records under `*.h.` that no domain owns are **reported, never fixed or deleted**.
@@ -133,27 +133,27 @@ Notes for the customer:
 
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
 
-1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to account + domain. The `TenantContext` is built for that account. **There is no default-account fallback in `saas`**: `resolveInboundAccount` throws.
+1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to workspace + domain. The `TenantContext` is built for that workspace. **There is no default-workspace fallback in `saas`**: `resolveInboundWorkspace` throws.
 2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed. Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read.
-3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain. Any other domain is rejected for good and nothing is stored, **including another domain of the same account**. Subdomains need no registration of their own.
+3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain. Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**. Subdomains need no registration of their own.
 4. `check+` at `CANARY_DOMAIN`: see below.
 
 | Outcome | Behaviour |
 |---------|-----------|
 | unknown/expired token, malformed token, unknown base address or host | `setReject` (permanent 5xx), logged `[intake] rejected {reason, …}` |
-| report for a domain the account does not own (spoof) | `setReject`, logged with the account |
+| report for a domain the workspace does not own (spoof) | `setReject`, logged with the workspace |
 | malformed or oversized attachment, no policies in a TLS-RPT | `setReject`, logged |
 | schema not migrated, or hosted env missing | the Worker **throws**: the sender retries later and the report is not lost |
 
-**Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no account, no rows),
+**Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
 Rate limits (shared `auth_rate_limits` counters, 1-hour windows): 5 per **authenticated** sender domain (a passing DMARC/DKIM/SPF result in the `Authentication-Results` header Cloudflare adds, reduced to its registrable domain), 20 for senders that authenticate as nothing (one shared bucket), and 500 overall. The `From` header is never used as a key, so a spoofed From cannot use up a real domain's allowance; the cost of that is that unauthenticated senders compete for one small bucket.
 
-**MTA-STS host** (`src/hosted/policy-host.ts`): `mta-sts.<id>.h.<zone>` → the tenant whose hosted id is `<id>`; `mta-sts.<customer domain>` → the tenant hosting that domain; anything else 404. Never the implicit account in `saas`.
+**MTA-STS host** (`src/hosted/policy-host.ts`): `mta-sts.<id>.h.<zone>` → the tenant whose hosted id is `<id>`; `mta-sts.<customer domain>` → the tenant hosting that domain; anything else 404. Never the implicit workspace in `saas`.
 
 ## API
 
-All under `/api/domains/:id/hosted`, authenticated like every other route and scoped to the caller's account (another account's domain id is a `404`). Writes need an owner/admin; members can `GET`.
+All under `/api/domains/:id/hosted`, authenticated like every other route and scoped to the caller's workspace (another workspace's domain id is a `404`). Writes need an owner/admin; members can `GET`.
 `404` when hosted mode is off.
 
 | Method & path | Body | Response |

@@ -12,7 +12,7 @@ describe('requireAuth', () => {
   it('treats a matching API_KEY as the instance admin (no user, never echoes the key)', async () => {
     const req = makeRequest({ 'x-api-key': 'test-key-org_abc123' });
     const ctx = await requireAuth(req, ENV);
-    expect(ctx).toMatchObject({ userId: 'instance', kind: 'instance', role: 'owner', accountId: 'acct_default', user: null });
+    expect(ctx).toMatchObject({ userId: 'instance', kind: 'instance', role: 'owner', workspaceId: 'ws_default', user: null });
   });
 
   it('throws AuthError when x-api-key is missing', async () => {

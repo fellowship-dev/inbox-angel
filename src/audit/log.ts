@@ -11,7 +11,7 @@
 import { scope } from '../db/scope';
 
 /** What an audit entry is written for: a TenantContext satisfies this. */
-export interface AuditTarget { db: D1Database; accountId: string }
+export interface AuditTarget { db: D1Database; workspaceId: string }
 
 export interface AuditEntry {
   actor_id?: string | null;
@@ -33,7 +33,7 @@ export function logAudit(
 ): void {
   const run = Promise.resolve()
     .then(() =>
-      scope(target.db, target.accountId).audit.insert({
+      scope(target.db, target.workspaceId).audit.insert({
         actor_id: entry.actor_id,
         actor_email: entry.actor_email,
         actor_type: entry.actor_type,

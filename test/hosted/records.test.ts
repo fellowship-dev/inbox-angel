@@ -8,7 +8,7 @@ import { hashToken } from '../../src/hosted/tokens';
 import { makeTenant } from '../helpers/tenant';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { dnsFrom } from './dns';
-import { HOSTED_ENV, NOW, quiet, twoAccounts } from './world';
+import { HOSTED_ENV, NOW, quiet, twoWorkspaces } from './world';
 
 const CFG = { recordsZone: 'inboxangel.io', recordsLabel: 'h' };
 
@@ -107,7 +107,7 @@ describe('zone quota', () => {
   });
 
   it('chooseZone logs a warning at 3,200 and refuses when the zone cannot take the records', async () => {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const q = globalQueries(w.env.DB);
     await q.hostedZones.upsert({ zone_key: 'z1', zone_id: 'zone-h', zone_name: 'inboxangel.io' });
 
@@ -131,12 +131,12 @@ describe('hosted records for a domain', () => {
   const resolver = dnsFrom({ '_spf.example.net': { TXT: ['v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.7 -all'] } });
 
   async function setup() {
-    const w = await twoAccounts();
+    const w = await twoWorkspaces();
     const cf = stubCloudflare(new FakeCloudflare({ 'inboxangel.io': { id: ZONE } }));
     cf.seed(ZONE, { type: 'A', name: 'www.inboxangel.io', content: '192.0.2.1' });
     cf.seed(ZONE, { type: 'MX', name: 'inboxangel.io', content: '10 mx.example' });
-    const tenant = (acct = 'acct_a') => makeTenant({ db: w.db, accountId: acct, env: HOSTED_ENV as any });
-    const domain = async (id = 1, acct = 'acct_a') => (await tenant(acct).scope.domains.getById(id))!;
+    const tenant = (ws = 'ws_a') => makeTenant({ db: w.db, workspaceId: ws, env: HOSTED_ENV as any });
+    const domain = async (id = 1, ws = 'ws_a') => (await tenant(ws).scope.domains.getById(id))!;
     return { w, cf, tenant, domain };
   }
   const zoneRecords = (cf: FakeCloudflare) => cf.records.get(ZONE)!;
@@ -164,7 +164,7 @@ describe('hosted records for a domain', () => {
 
     // the address in the record resolves back to this domain; only its hash is stored
     const token = addresses.rua.slice(4, 36);
-    expect(await intakeLookups(w.db as any).resolveToken(await hashToken(token), NOW)).toMatchObject({ account_id: 'acct_a', domain: 'a-corp.com' });
+    expect(await intakeLookups(w.db as any).resolveToken(await hashToken(token), NOW)).toMatchObject({ workspace_id: 'ws_a', domain: 'a-corp.com' });
     expect(JSON.stringify(w.rows('SELECT * FROM intake_tokens'))).not.toContain(token);
     expect(w.rows("SELECT record_count FROM hosted_zones WHERE zone_key = 'z1'")).toEqual([{ record_count: 3 }]);
 
@@ -182,7 +182,7 @@ describe('hosted records for a domain', () => {
     const { hosted } = await enableHosted(tenant(), await domain(), { spfRecord: SOURCE, mtaSts: true }, { resolver });
     const names = hostedNames(hosted.hosted_id, 'h.inboxangel.io');
     expect(zoneRecords(cf).filter(r => r.name === names.mtaSts).map(r => r.type).sort()).toEqual(['AAAA', 'TXT']);
-    expect(w.rows('SELECT mode, mx_hosts, account_id FROM mta_sts_config')).toEqual([{ mode: 'testing', mx_hosts: 'mx1.mail.example', account_id: 'acct_a' }]);
+    expect(w.rows('SELECT mode, mx_hosts, workspace_id FROM mta_sts_config')).toEqual([{ mode: 'testing', mx_hosts: 'mx1.mail.example', workspace_id: 'ws_a' }]);
     expect(hosted.pointers.map(p => p.purpose)).toContain('mta_sts');
     expect(w.rows("SELECT record_count FROM hosted_zones")).toEqual([{ record_count: 5 }]);
   });
@@ -192,13 +192,13 @@ describe('hosted records for a domain', () => {
     await enableHosted(tenant(), await domain(), { spfRecord: SOURCE }, { resolver });
     await expect(enableHosted(tenant(), await domain(), { spfRecord: SOURCE }, { resolver })).rejects.toMatchObject({ status: 409 });
 
-    const d2 = await domain(2, 'acct_b');
-    await expect(enableHosted(tenant('acct_b'), d2, { spfRecord: 'v=spf1 include:gone.example.net -all' }, { resolver })).rejects.toMatchObject({ status: 422 });
+    const d2 = await domain(2, 'ws_b');
+    await expect(enableHosted(tenant('ws_b'), d2, { spfRecord: 'v=spf1 include:gone.example.net -all' }, { resolver })).rejects.toMatchObject({ status: 422 });
     expect(w.rows('SELECT * FROM hosted_domains WHERE domain_id = 2')).toEqual([]);
 
     const before = zoneRecords(cf).length;
     w.db.sqlite.prepare("UPDATE hosted_zones SET record_count = 3499 WHERE zone_key = 'z1'").run();
-    await expect(enableHosted(tenant('acct_b'), d2, { spfRecord: SOURCE }, { resolver })).rejects.toMatchObject({ status: 507 });
+    await expect(enableHosted(tenant('ws_b'), d2, { spfRecord: SOURCE }, { resolver })).rejects.toMatchObject({ status: 507 });
     expect(zoneRecords(cf).length).toBe(before); // nothing written
   });
 
@@ -230,8 +230,8 @@ describe('hosted records for a domain', () => {
     const look = intakeLookups(w.db as any);
     const old = addresses.rua.slice(4, 36);
     const fresh = next.rua.slice(4, 36);
-    expect((await look.resolveToken(await hashToken(fresh), NOW))?.account_id).toBe('acct_a');
-    expect((await look.resolveToken(await hashToken(old), Math.floor(Date.now() / 1000)))?.account_id).toBe('acct_a');
+    expect((await look.resolveToken(await hashToken(fresh), NOW))?.workspace_id).toBe('ws_a');
+    expect((await look.resolveToken(await hashToken(old), Math.floor(Date.now() / 1000)))?.workspace_id).toBe('ws_a');
     expect(await look.resolveToken(await hashToken(old), Math.floor(Date.now() / 1000) + 73 * 3600)).toBeNull();
   });
 

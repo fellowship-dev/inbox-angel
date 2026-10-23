@@ -58,7 +58,7 @@ const ADMIN_ONLY_READS: Array<[string, string]> = [
 
 async function world() {
   const db = createMigratedD1();
-  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id) VALUES (1, 'acme.com', 'rua@reports.example.com', 'acct_default')").run();
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id) VALUES (1, 'acme.com', 'rua@reports.example.com', 'ws_default')").run();
   const env = makeEnv(db);
   const owner = await setupOwner(env);
   return { env, owner, admin: await inviteAndAccept(env, owner, 'admin@example.com', 'admin'), member: await inviteAndAccept(env, owner, 'member@example.com', 'member') };
@@ -140,7 +140,7 @@ describe('GET /api/me', () => {
       const body = await res.json() as any;
       expect(body.role).toBe(role);
       expect(body.user.email).toBe(email);
-      expect(body.account_id).toBeTruthy();
+      expect(body.workspace_id).toBeTruthy();
     }
   });
 

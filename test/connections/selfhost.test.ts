@@ -14,10 +14,10 @@ async function selfhost(extra: Record<string, unknown> = {}) {
   const db = createMigratedD1();
   const env = makeEnv(db, { CLOUDFLARE_API_TOKEN: 'env-tok-0123456789', ...extra }) as any;
   const owner = await setupOwner(env);
-  const insert = db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (?, 'acct_default', ?, 'rua@x')");
+  const insert = db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (?, 'ws_default', ?, 'rua@x')");
   insert.run(1, 'home.com');
   insert.run(2, 'other.org');
-  const cf = new FakeCloudflare({ 'home.com': { id: 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1', accountId: 'cf-1' }, 'other.org': { id: 'e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2', accountId: 'cf-1' } });
+  const cf = new FakeCloudflare({ 'home.com': { id: 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1', cfAccountId: 'cf-1' }, 'other.org': { id: 'e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2', cfAccountId: 'cf-1' } });
   cf.accounts = [{ id: 'cf-1', name: 'Home' }];
   vi.stubGlobal('fetch', cf.fetch);
   const api = (method: string, path: string, body?: unknown) => call(env, method, path, { key: owner, body });

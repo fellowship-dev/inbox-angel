@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 const dns = vi.hoisted(() => ({ dmarc: undefined as string | null | undefined }));
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forAccount } from '@inbox-angel/db';
+import { forWorkspace } from '@inbox-angel/db';
 import { call, makeEnv, inviteAndAccept, setupOwner } from '../auth/helpers';
 import { handleAnalyticsRoutes } from '../../src/analytics/routes';
 import { makeTenant } from '../helpers/tenant';
@@ -14,10 +14,10 @@ async function world() {
   const db = createMigratedD1();
   const env = makeEnv(db, {}) as any;
   const owner = await setupOwner(env);
-  const q = forAccount(db, 'acct_default');
+  const q = forWorkspace(db, 'ws_default');
   const id = Number((await q.domains.insert({ domain: 'acme.com', rua_address: 'rua@r.test' })).meta.last_row_id);
   db.sqlite.prepare("UPDATE domains SET spf_record = ?, dmarc_policy = 'none' WHERE id = ?").run(SPF, id);
-  await seedDomainReports(db, 'acct_default', id, 'acme.com', lastDays(20), STORY);
+  await seedDomainReports(db, 'ws_default', id, 'acme.com', lastDays(20), STORY);
   return { db, env, owner, id };
 }
 
@@ -56,7 +56,7 @@ describe('GET /api/domains/:id/analytics', () => {
 
   it('uses the live record when it is readable', async () => {
     const t = await world();
-    const tenant = makeTenant({ db: t.db, accountId: 'acct_default' });
+    const tenant = makeTenant({ db: t.db, workspaceId: 'ws_default' });
     const res = await handleAnalyticsRoutes(new Request('https://x.test/api/domains/' + t.id + '/analytics'), tenant, {
       lookupDmarc: async () => 'v=DMARC1; p=quarantine; t=y; rua=mailto:rua@r.test',
     });
@@ -94,9 +94,9 @@ describe('GET /api/domains/:id/analytics', () => {
 });
 
 describe('GET /api/analytics', () => {
-  it('rolls the whole account up, with a readiness line per domain', async () => {
+  it('rolls the whole workspace up, with a readiness line per domain', async () => {
     const t = await world();
-    const q = forAccount(t.db, 'acct_default');
+    const q = forWorkspace(t.db, 'ws_default');
     const quiet = Number((await q.domains.insert({ domain: 'quiet.org', rua_address: 'rua@r.test' })).meta.last_row_id);
     const body = await (await call(t.env, 'GET', '/api/analytics?days=30', { key: t.owner })).json() as any;
 
@@ -108,7 +108,7 @@ describe('GET /api/analytics', () => {
     expect(byName['quiet.org']).toMatchObject({ domain_id: quiet, messages: 0, pass_rate: null, readiness: { status: 'no_policy' } });
   });
 
-  it('is empty, not an error, for an account without reports', async () => {
+  it('is empty, not an error, for a workspace without reports', async () => {
     const env = makeEnv(createMigratedD1(), {}) as any;
     const owner = await setupOwner(env);
     const body = await (await call(env, 'GET', '/api/analytics', { key: owner })).json() as any;
@@ -120,7 +120,7 @@ describe('analytics queries', () => {
   it('returns one row per source and authenticated domain, windowed counts with whole-horizon first/last seen', async () => {
     const t = await world();
     const now = Math.floor(Date.now() / 1000);
-    const q = forAccount(t.db, 'acct_default');
+    const q = forWorkspace(t.db, 'ws_default');
     const rows = await q.analytics.senderRows(t.id, Math.floor(now / 86400) * 86400 - 5 * 86400, Math.floor(now / 86400) * 86400 - 30 * 86400, now);
     const g = rows.find((r) => r.source_ip === '209.85.220.41')!;
     expect(g.messages).toBe(5 * 80); // days 1..5 only
@@ -129,11 +129,11 @@ describe('analytics queries', () => {
     expect(await q.analytics.senderRows(t.id, now + 86400, now + 86400, now)).toEqual([]); // nothing in a future window
   });
 
-  it('never reaches another account’s domain, even by id', async () => {
+  it('never reaches another workspace’s domain, even by id', async () => {
     const t = await world();
-    t.db.sqlite.exec("INSERT INTO accounts (id, name) VALUES ('acct_b', 'B')");
+    t.db.sqlite.exec("INSERT INTO workspaces (id, name) VALUES ('ws_b', 'B')");
     const now = Math.floor(Date.now() / 1000);
-    const other = forAccount(t.db, 'acct_b');
+    const other = forWorkspace(t.db, 'ws_b');
     expect(await other.analytics.senderRows(t.id, 0, 0, now)).toEqual([]);
     expect(await other.analytics.trend(t.id, 0)).toEqual([]);
     expect(await other.analytics.earliestReport(t.id, now)).toBeNull();
@@ -174,7 +174,7 @@ describe('readiness parity with rollout-next', () => {
     expect(a.readiness).toMatchObject({ policy_source: 'stored', current: { policy: 'quarantine', testing: true }, next: { policy: 'quarantine', testing: false } });
   });
 
-  it('the account-wide view reads the stored pct too', async () => {
+  it('the workspace-wide view reads the stored pct too', async () => {
     const t = await world();
     t.db.sqlite.prepare("UPDATE domains SET dmarc_policy = 'quarantine', dmarc_pct = 0 WHERE id = ?").run(t.id);
     const body = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
@@ -199,7 +199,7 @@ describe('estimated alignment', () => {
     expect(sg(strict).spf_aligned_pct).toBe(0); // em.acme.com is not acme.com
     expect(sg(strict).dkim_aligned_pct).toBe(100);
     dns.dmarc = undefined;
-    const account = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
-    expect(account.alignment).toMatchObject({ basis: 'assumed', estimated: true });
+    const workspace = await (await call(t.env, 'GET', '/api/analytics', { key: t.owner })).json() as any;
+    expect(workspace.alignment).toMatchObject({ basis: 'assumed', estimated: true });
   });
 });

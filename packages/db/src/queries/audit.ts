@@ -26,13 +26,13 @@ export interface AuditListOptions {
 	until?: number;
 }
 
-export function auditQueries(db: Db, accountId: string) {
+export function auditQueries(db: Db, workspaceId: string) {
 	return {
 		insert(e: AuditEntryRow) {
 			return db
 				.insert(auditLog)
 				.values({
-					account_id: accountId,
+					workspace_id: workspaceId,
 					actor_id: e.actor_id ?? null,
 					actor_email: e.actor_email ?? null,
 					actor_type: e.actor_type ?? 'user',
@@ -62,7 +62,7 @@ export function auditQueries(db: Db, accountId: string) {
 			return db
 				.select()
 				.from(auditLog)
-				.where(and(eq(auditLog.account_id, accountId), ...where))
+				.where(and(eq(auditLog.workspace_id, workspaceId), ...where))
 				.orderBy(desc(auditLog.created_at))
 				.limit(safeLimit)
 				.offset(offset)

@@ -51,7 +51,7 @@ describe('canary (Check Email) addressing', () => {
     expect(JSON.stringify(stored)).not.toContain(s.token);
   });
 
-  it('resolves to an anonymous session: replies with the fixed free-check report, stores a global result, no account is involved', async () => {
+  it('resolves to an anonymous session: replies with the fixed free-check report, stores a global result, no workspace is involved', async () => {
     const t = setup();
     const s = await t.issue();
     const m = await t.send(s.email);
@@ -68,11 +68,11 @@ describe('canary (Check Email) addressing', () => {
     const poll = await call(t.env, 'GET', `/api/check-sessions/${s.token}`);
     expect(poll.status).toBe(200);
     expect((await poll.json() as any).status).toBe('done');
-    // nothing was written under any account
+    // nothing was written under any workspace
     for (const table of ['domains', 'audit_log', 'monitor_subscriptions']) {
-      expect(t.rows(`SELECT * FROM ${table} WHERE account_id NOT IN ('acct_default')`)).toEqual([]);
+      expect(t.rows(`SELECT * FROM ${table} WHERE workspace_id NOT IN ('ws_default')`)).toEqual([]);
     }
-    expect(t.rows("SELECT * FROM settings WHERE account_id = '__anonymous__'")).toEqual([]);
+    expect(t.rows("SELECT * FROM settings WHERE workspace_id = '__anonymous__'")).toEqual([]);
   });
 
   it('is single use', async () => {

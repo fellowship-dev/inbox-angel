@@ -23,8 +23,8 @@ describe('zoneCandidates', () => {
 
 describe('CfClient.zoneFor', () => {
   it('finds the zone of a subdomain by its registrable name and returns the Cloudflare account', async () => {
-    const fake = new FakeCloudflare({ 'acme.com': { id: 'z1', accountId: 'acct-1' } });
-    expect(await clientFor(fake).zoneFor('a.b.acme.com')).toEqual({ id: 'z1', name: 'acme.com', accountId: 'acct-1' });
+    const fake = new FakeCloudflare({ 'acme.com': { id: 'z1', cfAccountId: 'acct-1' } });
+    expect(await clientFor(fake).zoneFor('a.b.acme.com')).toEqual({ id: 'z1', name: 'acme.com', cfAccountId: 'acct-1' });
   });
 
   it('skips names Cloudflare has no zone for (co.uk) and finds the real one', async () => {
@@ -177,6 +177,6 @@ describe('TenantContext never leaks the env secrets', () => {
     const out = [JSON.stringify(t), inspect(t, { depth: 6 }), JSON.stringify({ wrapped: t }), `${inspect({ nested: [t] }, { depth: 6 })}`].join('\n');
     expect(out).not.toContain(TOKEN);
     expect(out).not.toContain('api-key-secret');
-    expect(out).toContain('acct_default');
+    expect(out).toContain('ws_default');
   });
 });

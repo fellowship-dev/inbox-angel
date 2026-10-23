@@ -1,4 +1,4 @@
-// Two hosted (MODE=saas) accounts, A and B, each signed up for real. Everything A can do —
+// Two hosted (MODE=saas) workspaces, A and B, each signed up for real. Everything A can do —
 // as a session or as an API key — must neither reveal nor change anything of B's, through
 // every /api route. Table-driven, with a guard that fails when a route is added to the router
 // without being added here.
@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { ACCOUNT_OWNED_TABLES } from '@inbox-angel/db';
+import { WORKSPACE_OWNED_TABLES } from '@inbox-angel/db';
 import { call, makeEnv } from './helpers';
 import { createApiKey } from '../../src/auth/api-keys';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
@@ -29,52 +29,52 @@ async function world() {
     const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
     expect(r.status).toBe(201);
     const { token } = await r.json() as { token: string };
-    const m = rows(db, 'SELECT m.account_id, m.user_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0];
-    return { token, accountId: m.account_id as string, userId: m.user_id as string };
+    const m = rows(db, 'SELECT m.workspace_id, m.user_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0];
+    return { token, workspaceId: m.workspace_id as string, userId: m.user_id as string };
   };
   const A = await signup('a-owner@example.com');
   const B = await signup('b-owner@example.com');
-  expect(A.accountId).not.toBe(B.accountId);
+  expect(A.workspaceId).not.toBe(B.workspaceId);
 
-  const keyA = (await createApiKey(db as any, { accountId: A.accountId, userId: A.userId, name: 'a' })).key;
-  const keyB = await createApiKey(db as any, { accountId: B.accountId, userId: B.userId, name: 'b-key' });
+  const keyA = (await createApiKey(db as any, { workspaceId: A.workspaceId, userId: A.userId, name: 'a' })).key;
+  const keyB = await createApiKey(db as any, { workspaceId: B.workspaceId, userId: B.userId, name: 'b-key' });
 
   // A's own data (ids interleave with B's on purpose).
-  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id) VALUES (1, 'a-own.example.com', 'rua@a.test', ?)").run(A.accountId);
-  db.sqlite.prepare("INSERT INTO settings (account_id, key, value) VALUES (?, 'reports_domain', 'reports.a-own.example.com')").run(A.accountId); // A finished the wizard
-  // B's data, in every account-owned table.
-  const b = B.accountId;
-  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id, is_default) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1)").run(b);
-  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, account_id) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?)").run(b);
-  db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, account_id) VALUES (100, 10, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id) VALUES (1, 'a-own.example.com', 'rua@a.test', ?)").run(A.workspaceId);
+  db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'reports_domain', 'reports.a-own.example.com')").run(A.workspaceId); // A finished the wizard
+  // B's data, in every workspace-owned table.
+  const b = B.workspaceId;
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, is_default) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1)").run(b);
+  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?)").run(b);
+  db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (100, 10, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
   // A recent report too: the analytics endpoints only look back 180 days, and these must be able to leak if they ever scope wrongly.
   const recent = Math.floor(Date.now() / 1000) - 2 * 86400;
-  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, account_id) VALUES (11, 2, 'B-Org-Secret', 'r-b-recent', ?, ?, 5, 0, 5, ?)").run(recent, recent + 86399, b);
-  db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, account_id) VALUES (101, 11, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
-  db.sqlite.prepare("INSERT INTO tls_reports (id, domain_id, org_name, date_begin, date_end, account_id) VALUES (20, 2, 'B-Org-Secret', 1700000000, 1700086400, ?)").run(b);
-  db.sqlite.prepare("INSERT INTO spf_flatten_config (domain_id, canonical_record, flattened_record, account_id) VALUES (2, 'v=spf1 include:B-Spf-Secret ~all', 'v=spf1 ip4:198.51.100.77 ~all', ?)").run(b);
-  db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, account_id) VALUES (2, 'b-policy-id', ?)").run(b);
-  db.sqlite.prepare("INSERT INTO monitor_subscriptions (id, email, domain, account_id) VALUES (30, 'b-member@example.com', 'b-secret.example.com', ?)").run(b);
-  db.sqlite.prepare("INSERT INTO invites (token, email, role, invited_by, expires_at, account_id) VALUES ('b-invite-token', 'b-member@example.com', 'member', 'b-owner@example.com', 9999999999, ?)").run(b);
-  db.sqlite.prepare("INSERT INTO audit_log (id, action, resource_name, account_id) VALUES (40, 'domain.add', 'b-secret.example.com', ?)").run(b);
-  db.sqlite.prepare("INSERT INTO settings (account_id, key, value) VALUES (?, 'custom_value', 'b-secret-settings-value')").run(b);
-  db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, account_id, hosted_id, zone_key, dmarc_record_id) VALUES (2, ?, 'b-hosted-id-secret', 'z1', 'rec-b')").run(b);
-  db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, account_id, token_hash) VALUES (2, ?, 'b-intake-hash-secret')").run(b);
-  db.sqlite.prepare("INSERT INTO cloudflare_connections (id, account_id, label, cf_account_id, cf_account_name, auth_type, token_envelope, scopes) VALUES ('cfc_b_secret', ?, 'b-cf-label-secret', 'b-cf-account-secret', 'b-cf-account-secret', 'oauth', 'ia1.k1.b-cf-envelope-secret.b-cf-envelope-secret', 'zone:read')").run(b);
-  db.sqlite.prepare("INSERT INTO cloudflare_connection_zones (connection_id, account_id, zone_id, zone_name, cf_account_id) VALUES ('cfc_b_secret', ?, ?, 'b-zone-secret.example.org', 'b-cf-account-secret')").run(b, Z.b);
+  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (11, 2, 'B-Org-Secret', 'r-b-recent', ?, ?, 5, 0, 5, ?)").run(recent, recent + 86399, b);
+  db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (101, 11, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO tls_reports (id, domain_id, org_name, date_begin, date_end, workspace_id) VALUES (20, 2, 'B-Org-Secret', 1700000000, 1700086400, ?)").run(b);
+  db.sqlite.prepare("INSERT INTO spf_flatten_config (domain_id, canonical_record, flattened_record, workspace_id) VALUES (2, 'v=spf1 include:B-Spf-Secret ~all', 'v=spf1 ip4:198.51.100.77 ~all', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, workspace_id) VALUES (2, 'b-policy-id', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO monitor_subscriptions (id, email, domain, workspace_id) VALUES (30, 'b-member@example.com', 'b-secret.example.com', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO invites (token, email, role, invited_by, expires_at, workspace_id) VALUES ('b-invite-token', 'b-member@example.com', 'member', 'b-owner@example.com', 9999999999, ?)").run(b);
+  db.sqlite.prepare("INSERT INTO audit_log (id, action, resource_name, workspace_id) VALUES (40, 'domain.add', 'b-secret.example.com', ?)").run(b);
+  db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES (?, 'custom_value', 'b-secret-settings-value')").run(b);
+  db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key, dmarc_record_id) VALUES (2, ?, 'b-hosted-id-secret', 'z1', 'rec-b')").run(b);
+  db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, workspace_id, token_hash) VALUES (2, ?, 'b-intake-hash-secret')").run(b);
+  db.sqlite.prepare("INSERT INTO cloudflare_connections (id, workspace_id, label, cf_account_id, cf_account_name, auth_type, token_envelope, scopes) VALUES ('cfc_b_secret', ?, 'b-cf-label-secret', 'b-cf-account-secret', 'b-cf-account-secret', 'oauth', 'ia1.k1.b-cf-envelope-secret.b-cf-envelope-secret', 'zone:read')").run(b);
+  db.sqlite.prepare("INSERT INTO cloudflare_connection_zones (connection_id, workspace_id, zone_id, zone_name, cf_account_id) VALUES ('cfc_b_secret', ?, ?, 'b-zone-secret.example.org', 'b-cf-account-secret')").run(b, Z.b);
   db.sqlite.prepare("UPDATE domains SET cf_connection_id = 'cfc_b_secret' WHERE id = 2").run();
   db.sqlite.prepare("INSERT INTO users (id, email, name) VALUES ('u-b-member', 'b-member@example.com', 'B Member')").run();
-  db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES (?, 'u-b-member', 'member')").run(b);
+  db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, 'u-b-member', 'member')").run(b);
 
   return { db, env, A, B, keyA, keyB };
 }
 
-/** Everything B owns, across every account-owned table, as comparable JSON. */
-function snapshotOf(db: any, accountId: string) {
-  const tables = [...ACCOUNT_OWNED_TABLES].filter(t => t !== 'memberships' || true);
+/** Everything B owns, across every workspace-owned table, as comparable JSON. */
+function snapshotOf(db: any, workspaceId: string) {
+  const tables = [...WORKSPACE_OWNED_TABLES].filter(t => t !== 'memberships' || true);
   const out: Record<string, unknown> = {};
-  for (const t of tables) out[t] = rows(db, `SELECT * FROM ${t} WHERE account_id = ? ORDER BY 1, 2`, accountId);
-  out.users = rows(db, 'SELECT id, email FROM users WHERE id IN (SELECT user_id FROM memberships WHERE account_id = ?) ORDER BY id', accountId);
+  for (const t of tables) out[t] = rows(db, `SELECT * FROM ${t} WHERE workspace_id = ? ORDER BY 1, 2`, workspaceId);
+  out.users = rows(db, 'SELECT id, email FROM users WHERE id IN (SELECT user_id FROM memberships WHERE workspace_id = ?) ORDER BY id', workspaceId);
   return JSON.stringify(out);
 }
 
@@ -83,7 +83,7 @@ interface Route { method: string; path: string; body?: unknown; kind: Kind; note
 
 /**
  * `denied`: addresses B's resource by id/key/token — A must get a 4xx and nothing may change.
- * `scoped`: acts on "the caller's account" — A may succeed, but only ever on A's own data.
+ * `scoped`: acts on "the caller's workspace" — A may succeed, but only ever on A's own data.
  */
 const ROUTES: Route[] = [
   // domains
@@ -130,7 +130,7 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/domains/1/analytics', kind: 'scoped' },
   { method: 'GET', path: '/api/domains/2/analytics?days=90', kind: 'denied' },
   { method: 'POST', path: '/api/domains/2/analytics', body: {}, kind: 'denied', note: 'no write verb exists; must not reach B either' },
-  // Cloudflare connections (src/connections/routes.ts): owner/admin, the caller's own account only
+  // Cloudflare connections (src/connections/routes.ts): owner/admin, the caller's own workspace only
   { method: 'GET', path: '/api/cloudflare/connections', kind: 'scoped' },
   { method: 'POST', path: '/api/cloudflare/connections', body: { token: 'a-pasted-token-0123456789abcdef' }, kind: 'scoped' },
   { method: 'GET', path: '/api/cloudflare/connections/cfc_b_secret', kind: 'denied' },
@@ -152,7 +152,7 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/reports/10', kind: 'denied' },
   { method: 'GET', path: '/api/check-results', kind: 'scoped' },
   { method: 'PATCH', path: '/api/monitor-subs/30', body: { active: false }, kind: 'denied' },
-  // settings & setup (act on the caller's own account)
+  // settings & setup (act on the caller's own workspace)
   { method: 'POST', path: '/api/settings/base-domain', body: { domain: 'fresh-a.example.net' }, kind: 'scoped' },
   { method: 'POST', path: '/api/settings/register-destination', body: { email: 'a@example.com' }, kind: 'scoped' },
   { method: 'POST', path: '/api/setup/email-routing', body: {}, kind: 'scoped' },
@@ -170,18 +170,18 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/keys/revoke-all', body: {}, kind: 'scoped' },
 ];
 
-/** Public routes: no account, no account data. */
+/** Public routes: no workspace, no workspace data. */
 const PUBLIC = [/^\/api\/version$/, /^\/api\/check-sessions/, /^\/api\/monitor$/];
 
-describe('two hosted accounts: A cannot reach B', () => {
+describe('two hosted workspaces: A cannot reach B', () => {
   for (const credential of ['session', 'api key'] as const) {
     describe(`as A, by ${credential}`, () => {
       it('every /api route: no B data in any response, B’s data and audit trail unchanged, no Cloudflare call for B', async () => {
         const w = await world();
-        const cf = new FakeCloudflare({ 'b-secret.example.com': { id: 'zone-b', accountId: 'cf-b' }, 'a-own.example.com': { id: 'zone-a', accountId: 'cf-a' } });
+        const cf = new FakeCloudflare({ 'b-secret.example.com': { id: 'zone-b', cfAccountId: 'cf-b' }, 'a-own.example.com': { id: 'zone-a', cfAccountId: 'cf-a' } });
         stubCloudflare(cf);
         const key = credential === 'session' ? w.A.token : w.keyA;
-        const before = snapshotOf(w.db, w.B.accountId);
+        const before = snapshotOf(w.db, w.B.workspaceId);
         const failures: string[] = [];
 
         for (const r of ROUTES) {
@@ -195,48 +195,48 @@ describe('two hosted accounts: A cannot reach B', () => {
         }
 
         expect(failures).toEqual([]);
-        expect(snapshotOf(w.db, w.B.accountId)).toBe(before);
+        expect(snapshotOf(w.db, w.B.workspaceId)).toBe(before);
         expect(cf.calls.filter(c => c.zoneId === 'zone-b')).toEqual([]);
         // B's credentials still work (A revoking "all my keys" did not touch B's)
         expect(rows(w.db, 'SELECT revoked_at FROM api_keys WHERE id = ?', w.keyB.id)).toEqual([{ revoked_at: null }]);
       });
 
-      it('A’s own account is still usable, and A’s writes land in A’s account', async () => {
+      it('A’s own workspace is still usable, and A’s writes land in A’s workspace', async () => {
         const w = await world();
         const key = credential === 'session' ? w.A.token : w.keyA;
         const list = await (await call(w.env, 'GET', '/api/domains', { key })).json() as any;
         expect(list.domains.map((d: any) => d.domain)).toEqual(['a-own.example.com']);
         const set = await call(w.env, 'POST', '/api/settings/base-domain', { key, body: { domain: 'fresh-a.example.net' } });
         expect(set.status).toBeLessThan(300);
-        expect(rows(w.db, "SELECT account_id FROM settings WHERE key = 'base_domain'")).toEqual([{ account_id: w.A.accountId }]);
+        expect(rows(w.db, "SELECT workspace_id FROM settings WHERE key = 'base_domain'")).toEqual([{ workspace_id: w.A.workspaceId }]);
         const invite = await call(w.env, 'POST', '/api/team/invite', { key, body: { email: 'new-for-a@example.com' } });
         expect(invite.status).toBe(201);
-        expect(rows(w.db, "SELECT account_id FROM invites WHERE email = 'new-for-a@example.com'")).toEqual([{ account_id: w.A.accountId }]);
-        expect(rows(w.db, 'SELECT DISTINCT actor_email FROM audit_log WHERE account_id = ? AND id != 40', w.B.accountId).every(r => r.actor_email !== 'a-owner@example.com')).toBe(true); // A's activity never lands in B's trail
-        expect(rows(w.db, 'SELECT COUNT(*) n FROM audit_log WHERE account_id = ?', w.A.accountId)[0].n).toBeGreaterThan(0);
+        expect(rows(w.db, "SELECT workspace_id FROM invites WHERE email = 'new-for-a@example.com'")).toEqual([{ workspace_id: w.A.workspaceId }]);
+        expect(rows(w.db, 'SELECT DISTINCT actor_email FROM audit_log WHERE workspace_id = ? AND id != 40', w.B.workspaceId).every(r => r.actor_email !== 'a-owner@example.com')).toBe(true); // A's activity never lands in B's trail
+        expect(rows(w.db, 'SELECT COUNT(*) n FROM audit_log WHERE workspace_id = ?', w.A.workspaceId)[0].n).toBeGreaterThan(0);
         const team = await (await call(w.env, 'GET', '/api/team', { key })).json() as any;
         expect(team.users.map((u: any) => u.email)).toEqual(['a-owner@example.com']);
       });
     });
   }
 
-  it('A cannot pick B with X-Account-Id (session); API keys ignore the header', async () => {
+  it('A cannot pick B with X-Workspace-Id (session); API keys ignore the header', async () => {
     const w = await world();
-    const sess = await call(w.env, 'GET', '/api/domains', { key: w.A.token, headers: { 'x-account-id': w.B.accountId } });
+    const sess = await call(w.env, 'GET', '/api/domains', { key: w.A.token, headers: { 'x-workspace-id': w.B.workspaceId } });
     expect(sess.status).toBe(403);
     expect(await sess.text()).not.toContain('b-secret');
-    const viaKey = await (await call(w.env, 'GET', '/api/domains', { key: w.keyA, headers: { 'x-account-id': w.B.accountId } })).json() as any;
+    const viaKey = await (await call(w.env, 'GET', '/api/domains', { key: w.keyA, headers: { 'x-workspace-id': w.B.workspaceId } })).json() as any;
     expect(viaKey.domains.map((d: any) => d.domain)).toEqual(['a-own.example.com']);
   });
 
-  it('A’s credentials never resolve to B’s account, and B’s never to A’s', async () => {
+  it('A’s credentials never resolve to B’s workspace, and B’s never to A’s', async () => {
     const w = await world();
-    const { sessionAccountResolver } = await import('../../src/auth/resolver');
-    const who = (key: string) => sessionAccountResolver(new Request('https://ia.example.com/api/domains', { headers: { 'x-api-key': key } }), w.env);
-    expect(await who(w.A.token)).toMatchObject({ accountId: w.A.accountId });
-    expect(await who(w.keyA)).toMatchObject({ accountId: w.A.accountId });
-    expect(await who(w.B.token)).toMatchObject({ accountId: w.B.accountId });
-    expect(await who(w.keyB.key)).toMatchObject({ accountId: w.B.accountId });
+    const { sessionWorkspaceResolver } = await import('../../src/auth/resolver');
+    const who = (key: string) => sessionWorkspaceResolver(new Request('https://ia.example.com/api/domains', { headers: { 'x-api-key': key } }), w.env);
+    expect(await who(w.A.token)).toMatchObject({ workspaceId: w.A.workspaceId });
+    expect(await who(w.keyA)).toMatchObject({ workspaceId: w.A.workspaceId });
+    expect(await who(w.B.token)).toMatchObject({ workspaceId: w.B.workspaceId });
+    expect(await who(w.keyB.key)).toMatchObject({ workspaceId: w.B.workspaceId });
   });
 
   it('a member of B cannot act on A either, and a B-key listing shows only B’s keys', async () => {
@@ -253,7 +253,7 @@ describe('two hosted accounts: A cannot reach B', () => {
     const anonCheck = await (await call(w.env, 'GET', '/api/check-results')).status;
     for (const s of SECRETS) expect(status).not.toContain(s);
     expect(anonCheck).toBe(401);
-    // an anonymous visitor to a hosted instance sees no account's domains in status
+    // an anonymous visitor to a hosted instance sees no workspace's domains in status
     expect(JSON.parse(status)).toMatchObject({ has_domain: false, base_domain: null, custom_domain: null });
   });
 
@@ -286,7 +286,7 @@ describe('two hosted accounts: A cannot reach B', () => {
     expect(documented.filter(d => /cfc_b_secret|domains\/2/.test(d) && !denied.includes(d))).toEqual([]);
   });
 
-  it('analytics shows each account only its own senders (B sees its own, A sees none of them)', async () => {
+  it('analytics shows each workspace only its own senders (B sees its own, A sees none of them)', async () => {
     const w = await world();
     const own = await (await call(w.env, 'GET', '/api/analytics', { key: w.B.token })).text();
     expect(own).toContain('198.51.100.77'); // control: the secret really is in B's rollup, so its absence for A means something
@@ -302,7 +302,7 @@ describe('two hosted accounts: A cannot reach B', () => {
     expect(JSON.stringify(await res.json())).not.toMatch(/b-hosted-id-secret|b-intake-hash-secret/);
   });
 
-  it('table covers every account-data route in the router (add new routes here)', () => {
+  it('table covers every workspace-data route in the router (add new routes here)', () => {
     const src = readFileSync(join(__dirname, '../../src/api/router.ts'), 'utf8');
     const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const literal = [...src.matchAll(/path === '(\/api\/[^']+)' && method === '(\w+)'/g)]

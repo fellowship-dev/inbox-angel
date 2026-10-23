@@ -5,7 +5,7 @@ import type { Env } from '../../src/index';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1, createTestD1, applyMigrations, migrationFiles } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const LEGACY_KEY = 'legacy-auto-key-0000';
@@ -85,17 +85,4 @@ describe('first-run setup auth', () => {
     expect(again.status).toBe(409);
   });
 
-  it('migration no longer creates an auto key and removes a legacy one', () => {
-    // Apply everything before the accounts migration, plant a legacy key, then apply the rest.
-    const files = migrationFiles();
-    const accounts = files.find(f => f.startsWith('0012'))!;
-    const before = files[files.indexOf(accounts) - 1];
-    const db = createTestD1();
-    applyMigrations(db.sqlite, { through: before });
-    db.sqlite.prepare("INSERT INTO settings (key, value) VALUES ('auto_api_key', ?)").run(LEGACY_KEY);
-    applyMigrations(db.sqlite);
-    expect(db.sqlite.prepare("SELECT 1 FROM settings WHERE key = 'auto_api_key'").get()).toBeUndefined();
-    // A fresh install doesn't create one either.
-    expect(createMigratedD1().sqlite.prepare("SELECT 1 FROM settings WHERE key = 'auto_api_key'").get()).toBeUndefined();
-  });
 });

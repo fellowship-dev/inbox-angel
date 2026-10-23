@@ -1,5 +1,5 @@
 // Seeded report data for the analytics tests: one story per domain, dated relative to a fixed "now".
-import { forAccount } from '@inbox-angel/db';
+import { forWorkspace } from '@inbox-angel/db';
 
 export const DAY = 86400;
 
@@ -18,8 +18,8 @@ export interface Entry {
 }
 
 /** One aggregate report per day-ago, holding every entry that applies on that day. Returns the report count. */
-export async function seedDomainReports(db: any, accountId: string, domainId: number, header: string, days: number[], entries: Entry[], now = Math.floor(Date.now() / 1000)) {
-  const q = forAccount(db, accountId);
+export async function seedDomainReports(db: any, workspaceId: string, domainId: number, header: string, days: number[], entries: Entry[], now = Math.floor(Date.now() / 1000)) {
+  const q = forWorkspace(db, workspaceId);
   let n = 0;
   for (const ago of days) {
     const todays = entries.filter((e) => !e.daysAgo || e.daysAgo.includes(ago));

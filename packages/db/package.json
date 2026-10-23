@@ -1,7 +1,7 @@
 {
   "name": "@inbox-angel/db",
   "version": "0.1.0",
-  "description": "Drizzle ORM schema, migrations and account-scoped typed queries for InboxAngel on Cloudflare D1.",
+  "description": "Drizzle ORM schema, migrations and workspace-scoped typed queries for InboxAngel on Cloudflare D1.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",

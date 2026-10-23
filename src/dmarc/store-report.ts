@@ -66,7 +66,7 @@ function mapRecord(
 /**
  * Inserts an aggregate report + its records into D1.
  *
- * @param tenant      the account the report is stored for
+ * @param tenant      the workspace the report is stored for
  * @param domainId    D1 domains.id for the monitored domain
  * @param report      Parsed AggregateReport from parseDmarcEmail()
  * @param rawXml      Original XML string to store for reprocessing (nullable)

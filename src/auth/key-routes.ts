@@ -1,4 +1,4 @@
-// /api/keys — per-user API keys, scoped to the caller's account.
+// /api/keys — per-user API keys, scoped to the caller's workspace.
 import type { TenantContext } from '../tenancy/context';
 import { logAudit } from '../audit/log';
 import type { AuthContext } from '../api/auth';
@@ -29,7 +29,7 @@ export async function handleKeyRoutes(
   const keys = tenant.scope.apiKeys;
   const isAdmin = auth.role === 'owner' || auth.role === 'admin';
 
-  // GET /api/keys — your keys (owners and admins: everyone's in the account). Prefixes only.
+  // GET /api/keys — your keys (owners and admins: everyone's in the workspace). Prefixes only.
   if (path === '/api/keys' && method === 'GET') {
     if (!auth.user) return err('API keys belong to a user — sign in as one', 403);
     return json({ keys: await keys.list(isAdmin ? undefined : auth.user.id) });
@@ -45,7 +45,7 @@ export async function handleKeyRoutes(
     if (!name || name.length > 80) return err('name is required (max 80 characters)', 400);
     const days = body.expires_in_days;
     if (days !== undefined && (typeof days !== 'number' || !(days > 0) || days > 3650)) return err('expires_in_days must be between 1 and 3650', 400);
-    const created = await createApiKey(tenant.db, { accountId: tenant.accountId, userId: auth.user.id, name, expiresInDays: days });
+    const created = await createApiKey(tenant.db, { workspaceId: tenant.workspaceId, userId: auth.user.id, name, expiresInDays: days });
     logAudit(tenant, {
       actor_id: auth.user.id, actor_email: auth.user.email, actor_type: 'user',
       action: 'api_key.created', resource_type: 'api_key', resource_id: created.id, resource_name: name,
@@ -65,7 +65,7 @@ export async function handleKeyRoutes(
     return json({ ok: true, revoked: n });
   }
 
-  // DELETE /api/keys/:id — revoke. Your own, or any in the account if you are an owner/admin.
+  // DELETE /api/keys/:id — revoke. Your own, or any in the workspace if you are an owner/admin.
   const m = path.match(/^\/api\/keys\/([^/]+)$/);
   if (m && method === 'DELETE') {
     const existing = await keys.get(m[1]);

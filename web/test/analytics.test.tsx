@@ -172,7 +172,7 @@ describe('analytics pages', () => {
 		await waitFor(() => expect(calls.some((c) => c.path === '/api/domains/1/analytics?days=7')).toBe(true));
 	});
 
-	it('account page: per-domain readiness links to the domain', async () => {
+	it('workspace page: per-domain readiness links to the domain', async () => {
 		renderApp(<AnalyticsPage />, {
 			routes: {
 				'GET /api/analytics': {

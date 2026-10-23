@@ -9,7 +9,7 @@ import { call, makeEnv } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { hostedNames } from '../../src/hosted/records';
 import { refreshHostedMtaStsMx } from '../../src/hosted/cron';
-import { runCronForAccounts } from '../../src/cron';
+import { runCronForWorkspaces } from '../../src/cron';
 import { makeTenant } from '../helpers/tenant';
 import { HOSTED_ENV, quiet } from './world';
 
@@ -25,13 +25,13 @@ async function setup() {
     const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
     expect(r.status).toBe(201);
     const { token } = await r.json() as { token: string };
-    const acct = rows('SELECT m.account_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0].account_id as string;
-    return { token, acct };
+    const ws = rows('SELECT m.workspace_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0].workspace_id as string;
+    return { token, ws };
   };
   const A = await signup('a@example.com');
   const B = await signup('b@example.com');
-  db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (1, ?, 'a-corp.com', 'x')").run(A.acct);
-  db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (2, ?, 'b-corp.org', 'x')").run(B.acct);
+  db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, ?, 'a-corp.com', 'x')").run(A.ws);
+  db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (2, ?, 'b-corp.org', 'x')").run(B.ws);
   const cf = stubCloudflare(new FakeCloudflare({ 'inboxangel.io': { id: ZONE } }));
   cf.doh['a-corp.com'] = ['v=spf1 include:_spf.example.net -all'];
   cf.doh['_spf.example.net'] = ['v=spf1 ip4:192.0.2.0/24 -all'];
@@ -56,7 +56,7 @@ describe('/api/domains/:id/hosted', () => {
     const names = hostedNames(hosted.hosted_id, APEX);
     expect(addresses.rua).toMatch(/^rua\+[a-z2-7]{32}@rua\.inboxangel\.io$/);
     expect(hosted.records).toEqual({ dmarc: names.dmarc, spf: names.spf, tls_rpt: names.tlsRpt, mta_sts: names.mtaSts });
-    expect(t.rows('SELECT account_id FROM hosted_domains')).toEqual([{ account_id: t.A.acct }]);
+    expect(t.rows('SELECT workspace_id FROM hosted_domains')).toEqual([{ workspace_id: t.A.ws }]);
     expect(t.rows("SELECT resource_name FROM audit_log WHERE action = 'hosted.enable'")).toEqual([{ resource_name: 'a-corp.com' }]);
 
     // GET never shows the token again
@@ -119,7 +119,7 @@ describe('GET /api/hosted/config', () => {
 describe('MTA-STS policy host', () => {
   const policyReq = (host: string) => new Request(`https://${host}/.well-known/mta-sts.txt`);
 
-  it('resolves the tenant from the hosted id (and from the customer hostname), never from a default account', async () => {
+  it('resolves the tenant from the hosted id (and from the customer hostname), never from a default workspace', async () => {
     const t = await setup();
     const { hosted } = await (await call(t.env, 'POST', '/api/domains/1/hosted', { key: t.A.token, body: { mta_sts: true } })).json() as any;
     const idHost = hostedNames(hosted.hosted_id, APEX).mtaSts;
@@ -135,9 +135,9 @@ describe('MTA-STS policy host', () => {
     expect((await worker.fetch(policyReq('mta-sts.b-corp.org'), t.env, ctx)).status).toBe(404);
     expect((await worker.fetch(policyReq('mta-sts.nobody.example'), t.env, ctx)).status).toBe(404);
 
-    // the implicit account's config is not served on a hosted instance
-    t.db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (9, 'acct_default', 'legacy.example', 'x')").run();
-    t.db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, account_id, mx_hosts, mode) VALUES (9, 'p', 'acct_default', 'mx.legacy.example', 'enforce')").run();
+    // the implicit workspace's config is not served on a hosted instance
+    t.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (9, 'ws_default', 'legacy.example', 'x')").run();
+    t.db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, workspace_id, mx_hosts, mode) VALUES (9, 'p', 'ws_default', 'mx.legacy.example', 'enforce')").run();
     expect((await worker.fetch(policyReq('mta-sts.legacy.example'), t.env, ctx)).status).toBe(404);
   });
 
@@ -189,9 +189,9 @@ describe('legacy MTA-STS and domain paths on a hosted domain', () => {
   it('the legacy daily MX job skips hosted domains; the hosted job refreshes them', async () => {
     const t = await hostedWithMtaSts();
     t.cf.mx['a-corp.com'] = ['10 mx7.mail.example.'];
-    const tenant = makeTenant({ db: t.db, accountId: t.A.acct, env: HOSTED_ENV as any, cfToken: 'customer-token', fetch: t.cf.fetch as any });
+    const tenant = makeTenant({ db: t.db, workspaceId: t.A.ws, env: HOSTED_ENV as any, cfToken: 'customer-token', fetch: t.cf.fetch as any });
     t.cf.calls.length = 0;
-    await runCronForAccounts({ cron: '0 8 * * *' } as ScheduledController, t.env, ctx, { accounts: [t.A.acct], load: async () => tenant });
+    await runCronForWorkspaces({ cron: '0 8 * * *' } as ScheduledController, t.env, ctx, { workspaces: [t.A.ws], load: async () => tenant });
     expect(t.cf.calls.filter(c => c.method === 'PATCH')).toEqual([]);
     expect(t.rows('SELECT mx_hosts FROM mta_sts_config')).toEqual([{ mx_hosts: 'mx1.mail.example' }]);
 

@@ -82,7 +82,7 @@ const ExplorePage = lazy(() => import('./pages/reports/ExplorePage').then((m) =>
 const ReportBrowserPage = lazy(() => import('./pages/reports/ReportBrowserPage').then((m) => ({ default: m.ReportBrowserPage })));
 const ReportDetailPage = lazy(() => import('./pages/reports/ReportDetailPage').then((m) => ({ default: m.ReportDetailPage })));
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const TeamPage = lazy(() => import('./pages/team/TeamPage').then((m) => ({ default: m.TeamPage })));
+const MembersPage = lazy(() => import('./pages/members/MembersPage').then((m) => ({ default: m.MembersPage })));
 const DmarcWizardPage = lazy(() => import('./pages/wizards/DmarcWizardPage').then((m) => ({ default: m.DmarcWizardPage })));
 const MtaStsPage = lazy(() => import('./pages/wizards/MtaStsPage').then((m) => ({ default: m.MtaStsPage })));
 const SetupWizardPage = lazy(() => import('./pages/wizards/SetupWizardPage').then((m) => ({ default: m.SetupWizardPage })));
@@ -112,7 +112,7 @@ function AppRoutes() {
 				<Route path="ct-discover" element={<CtDiscoverPage />} />
 				<Route path="analytics" element={<AnalyticsPage />} />
 				<Route path="check" element={<EmailCheckPage />} />
-				<Route path="team" element={<TeamPage />} />
+				<Route path="members" element={<MembersPage />} />
 				<Route path="keys" element={<ApiKeysPage />} />
 				<Route path="audit" element={<AuditLogPage />} />
 				<Route path="settings" element={<SettingsPage />} />

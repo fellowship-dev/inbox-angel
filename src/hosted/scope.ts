@@ -1,5 +1,5 @@
 // What a domain's intake token may file reports for: that domain and its subdomains, nothing else.
-// Not other domains of the same account, not a parent, not a sibling.
+// Not other domains of the same workspace, not a parent, not a sibling.
 
 import { normalizeDomain, organizationalDomain } from '@inbox-angel/dns-checks';
 

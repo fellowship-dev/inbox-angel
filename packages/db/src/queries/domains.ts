@@ -2,8 +2,8 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { unwrapDriverError, type Db } from '../client';
 import { cloudflareConnections, domains } from '../schema';
 
-export function domainQueries(db: Db, accountId: string) {
-	const mine = eq(domains.account_id, accountId);
+export function domainQueries(db: Db, workspaceId: string) {
+	const mine = eq(domains.workspace_id, workspaceId);
 	const touch = sql`unixepoch()`;
 
 	return {
@@ -23,7 +23,7 @@ export function domainQueries(db: Db, accountId: string) {
 			return db.select().from(domains).where(and(mine, eq(domains.parent_id, parentId))).orderBy(asc(domains.domain)).all();
 		},
 
-		/** The account's default ("home base") domain, if one is set. */
+		/** The workspace's default ("home base") domain, if one is set. */
 		getDefault() {
 			return db.select().from(domains).where(and(mine, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
 		},
@@ -41,7 +41,7 @@ export function domainQueries(db: Db, accountId: string) {
 				if (parent) parentId = parent.id;
 			}
 			try {
-				return await db.insert(domains).values({ account_id: accountId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId }).run();
+				return await db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId }).run();
 			} catch (e) {
 				throw unwrapDriverError(e); // callers match on 'UNIQUE'
 			}
@@ -51,7 +51,7 @@ export function domainQueries(db: Db, accountId: string) {
 			return db.delete(domains).where(and(mine, eq(domains.id, id))).run();
 		},
 
-		/** Make `id` the account's only default domain (atomic). */
+		/** Make `id` the workspace's only default domain (atomic). */
 		setDefault(id: number) {
 			return db.batch([
 				db.update(domains).set({ is_default: 0 }).where(mine),
@@ -71,11 +71,11 @@ export function domainQueries(db: Db, accountId: string) {
 			return db.update(domains).set({ rollout_rec_policy: policy, rollout_rec_pct: pct, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},
 
-		/** Link a domain to one of this account's Cloudflare connections (null unlinks). False: no such domain or connection. */
+		/** Link a domain to one of this workspace's Cloudflare connections (null unlinks). False: no such domain or connection. */
 		async setConnection(id: number, connectionId: string | null): Promise<boolean> {
 			if (connectionId !== null) {
 				const c = await db.select({ id: cloudflareConnections.id }).from(cloudflareConnections)
-					.where(and(eq(cloudflareConnections.account_id, accountId), eq(cloudflareConnections.id, connectionId))).get();
+					.where(and(eq(cloudflareConnections.workspace_id, workspaceId), eq(cloudflareConnections.id, connectionId))).get();
 				if (!c) return false;
 			}
 			const r = await db.update(domains).set({ cf_connection_id: connectionId, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();

@@ -52,7 +52,7 @@ test('sender inventory, what to fix next and readiness from seeded reports', asy
 	await page.getByRole('button', { name: 'Last 90 days' }).click();
 	await expect(page.getByRole('columnheader', { name: 'Week of' })).toBeVisible();
 
-	// Account-wide page lists the domain and links to it.
+	// Workspace-wide page lists the domain and links to it.
 	await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Analytics' }).click();
 	await expect(page.getByRole('heading', { name: 'Analytics', level: 1 })).toBeVisible();
 	await page.getByRole('link', { name: DOMAIN }).first().click();

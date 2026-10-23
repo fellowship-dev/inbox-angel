@@ -1,6 +1,6 @@
 // Analytics: "what is happening with my mail", read-only and tenant-scoped like every other route.
 //
-//   GET /api/analytics?days=7|30|90              account-wide: pass-rate trend, sender inventory, what to fix next, per-domain readiness
+//   GET /api/analytics?days=7|30|90              workspace-wide: pass-rate trend, sender inventory, what to fix next, per-domain readiness
 //   GET /api/domains/:id/analytics?days=…        the same for one domain, with live enforcement readiness
 //
 // The window (`days`, default 30, at most 90) shapes the trend and the inventory. Fixes and readiness always
@@ -20,7 +20,7 @@ const err = (message: string, status: number) => json({ error: message }, status
 const ROUTE = /^\/api\/(?:domains\/([^/]+)\/)?analytics$/;
 const ADVICE_DAYS = 30;
 const MAX_SENDERS = 200;
-const MAX_ACCOUNT_FIXES = 25;
+const MAX_WORKSPACE_FIXES = 25;
 
 export interface AnalyticsDeps {
   /** The live DMARC record: a string, null for "no record", undefined when the lookup failed. */
@@ -132,7 +132,7 @@ export async function handleAnalyticsRoutes(request: Request, tenant: TenantCont
     return { d, fixes, readiness };
   });
 
-  const fixes: Fix[] = perDomain.flatMap((p) => p.fixes).sort((a, b) => fixScore(b) - fixScore(a) || a.id.localeCompare(b.id)).slice(0, MAX_ACCOUNT_FIXES);
+  const fixes: Fix[] = perDomain.flatMap((p) => p.fixes).sort((a, b) => fixScore(b) - fixScore(a) || a.id.localeCompare(b.id)).slice(0, MAX_WORKSPACE_FIXES);
 
   return json({
     days, totals: sum(trend), trend, alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },

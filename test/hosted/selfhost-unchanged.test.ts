@@ -22,8 +22,8 @@ const { MODE: _m, SAAS_ENABLED: _s, ...HOSTED_VARS_ONLY } = HOSTED_ENV;
 
 function selfHost(extra: Record<string, unknown> = {}) {
   const db = createMigratedD1();
-  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, account_id) VALUES (1, 'acme.com', 'rua@reports.acme.com', 'acct_default')").run();
-  db.sqlite.prepare("INSERT INTO settings (account_id, key, value) VALUES ('acct_default', 'base_domain', 'acme.com')").run();
+  db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id) VALUES (1, 'acme.com', 'rua@reports.acme.com', 'ws_default')").run();
+  db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'acme.com')").run();
   const env = makeEnv(db, { ...HOSTED_VARS_ONLY, ...extra }) as any; // hosted vars present, MODE unset
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
   return { db, env, rows };
@@ -33,12 +33,12 @@ beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('self-host is unchanged', () => {
-  it('rua@reports.<base> files the report under the implicit account, by the report’s own domain, no token', async () => {
+  it('rua@reports.<base> files the report under the implicit workspace, by the report’s own domain, no token', async () => {
     const s = selfHost();
     const m = fakeMessage('rua@reports.acme.com', gzipReportMime(dmarcXml('acme.com', 'golden-1')));
     await worker.email(m, s.env, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
-    expect(s.rows('SELECT account_id, report_id FROM aggregate_reports')).toEqual([{ account_id: 'acct_default', report_id: 'golden-1' }]);
+    expect(s.rows('SELECT workspace_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_default', report_id: 'golden-1' }]);
   });
 
   it('an unknown domain is rejected exactly as before', async () => {
@@ -52,7 +52,7 @@ describe('self-host is unchanged', () => {
     const s = selfHost();
     const plain = fakeMessage('tls-rpt@reports.acme.com', tlsRptMime(tlsRptJson('acme.com')));
     await worker.email(plain, s.env, ctx);
-    expect(s.rows('SELECT account_id, total_success FROM tls_reports')).toEqual([{ account_id: 'acct_default', total_success: 10 }]);
+    expect(s.rows('SELECT workspace_id, total_success FROM tls_reports')).toEqual([{ workspace_id: 'ws_default', total_success: 10 }]);
 
     const unknown = fakeMessage('tls-rpt@reports.acme.com', tlsRptMime(tlsRptJson('elsewhere.org')));
     await worker.email(unknown, s.env, ctx);
@@ -79,9 +79,9 @@ describe('self-host is unchanged', () => {
     expect(s.rows('SELECT * FROM canary_tokens')).toEqual([]);
   });
 
-  it('MTA-STS policy is served from the implicit account by hostname', async () => {
+  it('MTA-STS policy is served from the implicit workspace by hostname', async () => {
     const s = selfHost();
-    s.db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, account_id, mx_hosts, mode) VALUES (1, 'p1', 'acct_default', 'mx.acme.com', 'enforce')").run();
+    s.db.sqlite.prepare("INSERT INTO mta_sts_config (domain_id, policy_id, workspace_id, mx_hosts, mode) VALUES (1, 'p1', 'ws_default', 'mx.acme.com', 'enforce')").run();
     const res = await worker.fetch(new Request('https://mta-sts.acme.com/.well-known/mta-sts.txt'), s.env, ctx);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('version: STSv1\nmode: enforce\nmx: mx.acme.com\nmax_age: 86400\n');

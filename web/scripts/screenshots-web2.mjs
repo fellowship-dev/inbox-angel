@@ -31,7 +31,7 @@ const sql = async (text) => {
 };
 let domain = (await list()).find((d) => d.domain === DOMAIN);
 if (!domain) {
-	await sql(`INSERT OR IGNORE INTO domains (account_id, domain, rua_address) VALUES ('acct_default', '${DOMAIN}', 'rua@reports.example');`);
+	await sql(`INSERT OR IGNORE INTO domains (workspace_id, domain, rua_address) VALUES ('ws_default', '${DOMAIN}', 'rua@reports.example');`);
 	domain = (await list()).find((d) => d.domain === DOMAIN);
 	await sql(analyticsSeedSql(domain.id, DOMAIN));
 }

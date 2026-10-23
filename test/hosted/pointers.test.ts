@@ -5,7 +5,7 @@ import { hostedNames } from '../../src/hosted/records';
 import { verifyDomainPointers } from '../../src/hosted/service';
 import { makeTenant } from '../helpers/tenant';
 import { dnsFrom, type DnsName } from './dns';
-import { HOSTED_ENV, NOW, quiet, twoAccounts } from './world';
+import { HOSTED_ENV, NOW, quiet, twoWorkspaces } from './world';
 
 const ID = 'abcdefghijklmnop';
 const APEX = 'h.inboxangel.io';
@@ -70,14 +70,14 @@ describe('pointer verification', () => {
 
 describe('stored status', () => {
   async function seed() {
-    const w = await twoAccounts();
-    w.db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, account_id, hosted_id, zone_key) VALUES (1, 'acct_a', ?, 'z1'), (2, 'acct_b', 'bbbbbbbbbbbbbbbb', 'z1')").run(ID);
+    const w = await twoWorkspaces();
+    w.db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key) VALUES (1, 'ws_a', ?, 'z1'), (2, 'ws_b', 'bbbbbbbbbbbbbbbb', 'z1')").run(ID);
     return w;
   }
 
   it('verifyDomainPointers stores the answers and the time, for that domain only', async () => {
     const w = await seed();
-    const tenant = makeTenant({ db: w.db, accountId: 'acct_a', env: HOSTED_ENV as any });
+    const tenant = makeTenant({ db: w.db, workspaceId: 'ws_a', env: HOSTED_ENV as any });
     const domain = (await tenant.scope.domains.getById(1))!;
     const view = await verifyDomainPointers(tenant, domain, { resolver: dnsFrom(inPlace()), now: () => NOW * 1000 });
     expect(view.pointer_status).toEqual({ dmarc: 'ok', spf: 'ok', mta_sts: 'ok', tls_rpt: 'ok', checked_at: NOW });
@@ -88,7 +88,7 @@ describe('stored status', () => {
     ]);
   });
 
-  it('the daily job checks every hosted domain in every account', async () => {
+  it('the daily job checks every hosted domain in every workspace', async () => {
     const w = await seed();
     const resolver = dnsFrom({ ...inPlace(), '_dmarc.b-corp.org': { CNAME: hostedNames('bbbbbbbbbbbbbbbb', APEX).dmarc } });
     expect(await verifyAllPointers(w.env, { resolver, now: () => NOW * 1000 })).toBe(2);

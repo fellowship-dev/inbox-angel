@@ -22,7 +22,7 @@ import { handleApi } from '../../src/api/router';
 const rows = (db: ReturnType<typeof createMigratedD1>, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 
 describe('self-host: first signup and login', () => {
-  it('first signup becomes owner of acct_default; setup then closes', async () => {
+  it('first signup becomes owner of ws_default; setup then closes', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db);
     const status = await (await call(env, 'GET', '/api/auth/status')).json() as any;
@@ -30,8 +30,8 @@ describe('self-host: first signup and login', () => {
 
     const token = await setupOwner(env);
     expect(token).toBeTruthy();
-    expect(rows(db, 'SELECT account_id, role FROM memberships')).toEqual([{ account_id: 'acct_default', role: 'owner' }]);
-    expect(rows(db, 'SELECT COUNT(*) n FROM accounts')).toEqual([{ n: 1 }]);
+    expect(rows(db, 'SELECT workspace_id, role FROM memberships')).toEqual([{ workspace_id: 'ws_default', role: 'owner' }]);
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 1 }]);
 
     expect(((await (await call(env, 'GET', '/api/auth/status')).json()) as any).configured).toBe(true);
     const again = await call(env, 'POST', '/api/auth/setup', { body: { email: 'other@example.com', password: 'another-password' } });
@@ -110,7 +110,7 @@ describe('invites map to memberships', () => {
     const acc = await call(env, 'POST', `/api/invites/${token}`, { body: { name: 'New', password: 'invitee-password-1' } });
     expect(acc.status).toBe(201);
     expect(rows(db, "SELECT m.role FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = 'new@example.com'")).toEqual([{ role: 'admin' }]);
-    expect(rows(db, 'SELECT COUNT(*) n FROM accounts')).toEqual([{ n: 1 }]);
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 1 }]);
 
     const reuse = await call(env, 'POST', `/api/invites/${token}`, { body: { name: 'Again', password: 'invitee-password-1' } });
     expect(reuse.status).toBe(404);
@@ -142,8 +142,8 @@ describe('invites map to memberships', () => {
   });
 });
 
-describe('MODE=saas: an account per signup', () => {
-  it('each signup creates its own account and owner membership; setup is refused', async () => {
+describe('MODE=saas: a workspace per signup', () => {
+  it('each signup creates its own workspace and owner membership; setup is refused', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
     const status = await (await call(env, 'GET', '/api/auth/status')).json() as any;
@@ -154,11 +154,11 @@ describe('MODE=saas: an account per signup', () => {
       const r = await call(env, 'POST', '/api/auth/signup', { body: { name: e, email: e, password: 'password-123' } });
       expect(r.status).toBe(201);
     }
-    const ms = rows(db, "SELECT m.account_id, m.role, u.email FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY u.email");
+    const ms = rows(db, "SELECT m.workspace_id, m.role, u.email FROM memberships m JOIN users u ON u.id = m.user_id ORDER BY u.email");
     expect(ms.map(m => m.role)).toEqual(['owner', 'owner']);
-    expect(new Set(ms.map(m => m.account_id)).size).toBe(2);
-    expect(ms.every(m => m.account_id !== 'acct_default')).toBe(true);
-    expect(rows(db, 'SELECT COUNT(*) n FROM accounts')).toEqual([{ n: 3 }]);
+    expect(new Set(ms.map(m => m.workspace_id)).size).toBe(2);
+    expect(ms.every(m => m.workspace_id !== 'ws_default')).toBe(true);
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 3 }]);
   });
 
   it('self-host refuses /api/auth/signup', async () => {

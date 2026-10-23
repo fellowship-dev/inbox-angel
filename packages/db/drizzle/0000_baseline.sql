@@ -1,9 +1,3 @@
-CREATE TABLE `accounts` (
-	`id` text PRIMARY KEY NOT NULL,
-	`name` text NOT NULL,
-	`created_at` integer DEFAULT (unixepoch()) NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `aggregate_reports` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`domain_id` integer NOT NULL,
@@ -16,17 +10,17 @@ CREATE TABLE `aggregate_reports` (
 	`fail_count` integer DEFAULT 0 NOT NULL,
 	`raw_xml` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_agg_reports_domain` ON `aggregate_reports` (`domain_id`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_date` ON `aggregate_reports` (`date_begin`);--> statement-breakpoint
-CREATE INDEX `idx_agg_reports_account` ON `aggregate_reports` (`account_id`,`date_begin`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_workspace` ON `aggregate_reports` (`workspace_id`,`date_begin`);--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
 CREATE TABLE `api_keys` (
 	`id` text PRIMARY KEY NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`name` text NOT NULL,
 	`prefix` text NOT NULL,
@@ -35,12 +29,12 @@ CREATE TABLE `api_keys` (
 	`last_used_at` integer,
 	`expires_at` integer,
 	`revoked_at` integer,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `api_keys_key_hash_unique` ON `api_keys` (`key_hash`);--> statement-breakpoint
-CREATE INDEX `idx_api_keys_account` ON `api_keys` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_api_keys_workspace` ON `api_keys` (`workspace_id`);--> statement-breakpoint
 CREATE INDEX `idx_api_keys_user` ON `api_keys` (`user_id`);--> statement-breakpoint
 CREATE TABLE `audit_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -55,13 +49,13 @@ CREATE TABLE `audit_log` (
 	`after_value` text,
 	`meta` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `idx_audit_created` ON `audit_log` ("created_at" DESC);--> statement-breakpoint
 CREATE INDEX `idx_audit_actor` ON `audit_log` (`actor_id`);--> statement-breakpoint
 CREATE INDEX `idx_audit_resource` ON `audit_log` (`resource_type`,`resource_id`);--> statement-breakpoint
-CREATE INDEX `idx_audit_account` ON `audit_log` (`account_id`,"created_at" DESC);--> statement-breakpoint
+CREATE INDEX `idx_audit_workspace` ON `audit_log` (`workspace_id`,"created_at" DESC);--> statement-breakpoint
 CREATE TABLE `auth_accounts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -120,32 +114,32 @@ CREATE INDEX `idx_check_results_domain` ON `check_results` (`from_domain`);--> s
 CREATE INDEX `idx_check_results_token` ON `check_results` (`session_token`);--> statement-breakpoint
 CREATE TABLE `cloudflare_connection_blocked_zones` (
 	`connection_id` text NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`zone_id` text NOT NULL,
 	`zone_name` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	PRIMARY KEY(`connection_id`, `zone_id`),
 	FOREIGN KEY (`connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_cf_connection_blocked_account` ON `cloudflare_connection_blocked_zones` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_cf_connection_blocked_workspace` ON `cloudflare_connection_blocked_zones` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `cloudflare_connection_zones` (
 	`connection_id` text NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`zone_id` text NOT NULL,
 	`zone_name` text NOT NULL,
 	`cf_account_id` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	PRIMARY KEY(`connection_id`, `zone_id`),
 	FOREIGN KEY (`connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_cf_connection_zones_account` ON `cloudflare_connection_zones` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_cf_connection_zones_workspace` ON `cloudflare_connection_zones` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `cloudflare_connections` (
 	`id` text PRIMARY KEY NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`label` text NOT NULL,
 	`cf_account_id` text,
 	`cf_account_name` text,
@@ -157,12 +151,12 @@ CREATE TABLE `cloudflare_connections` (
 	`created_by` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`last_used_at` integer,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "cf_connections_auth_type_check" CHECK("cloudflare_connections"."auth_type" IN ('oauth', 'token')),
 	CONSTRAINT "cf_connections_status_check" CHECK("cloudflare_connections"."status" IN ('active', 'broken', 'revoked'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_cf_connections_account` ON `cloudflare_connections` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_cf_connections_workspace` ON `cloudflare_connections` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `domains` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`domain` text NOT NULL,
@@ -180,7 +174,7 @@ CREATE TABLE `domains` (
 	`is_default` integer DEFAULT 0 NOT NULL,
 	`alerts_enabled` integer DEFAULT 1 NOT NULL,
 	`spf_lookup_count` integer,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`cf_connection_id` text,
 	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`cf_connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE set null
@@ -190,11 +184,11 @@ CREATE UNIQUE INDEX `domains_domain_unique` ON `domains` (`domain`);--> statemen
 CREATE INDEX `idx_domains_domain` ON `domains` (`domain`);--> statement-breakpoint
 CREATE INDEX `idx_domains_cf_connection` ON `domains` (`cf_connection_id`);--> statement-breakpoint
 CREATE INDEX `idx_domains_parent` ON `domains` (`parent_id`);--> statement-breakpoint
-CREATE INDEX `idx_domains_account` ON `domains` (`account_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`account_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint
+CREATE INDEX `idx_domains_workspace` ON `domains` (`workspace_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`workspace_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint
 CREATE TABLE `hosted_domains` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`hosted_id` text NOT NULL,
 	`zone_key` text NOT NULL,
 	`dmarc_record_id` text,
@@ -210,11 +204,11 @@ CREATE TABLE `hosted_domains` (
 	`pointers_checked_at` integer,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `hosted_domains_hosted_id_unique` ON `hosted_domains` (`hosted_id`);--> statement-breakpoint
-CREATE INDEX `idx_hosted_domains_account` ON `hosted_domains` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_hosted_domains_workspace` ON `hosted_domains` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `hosted_zones` (
 	`zone_key` text PRIMARY KEY NOT NULL,
 	`zone_id` text NOT NULL,
@@ -226,18 +220,18 @@ CREATE TABLE `hosted_zones` (
 --> statement-breakpoint
 CREATE TABLE `intake_tokens` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`token_hash` text NOT NULL,
 	`prev_token_hash` text,
 	`prev_expires_at` integer,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`rotated_at` integer,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `intake_tokens_token_hash_unique` ON `intake_tokens` (`token_hash`);--> statement-breakpoint
-CREATE INDEX `idx_intake_tokens_account` ON `intake_tokens` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_intake_tokens_workspace` ON `intake_tokens` (`workspace_id`);--> statement-breakpoint
 CREATE INDEX `idx_intake_tokens_prev` ON `intake_tokens` (`prev_token_hash`);--> statement-breakpoint
 CREATE TABLE `invites` (
 	`token` text PRIMARY KEY NOT NULL,
@@ -247,10 +241,10 @@ CREATE TABLE `invites` (
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`expires_at` integer NOT NULL,
 	`used_at` integer,
-	`account_id` text DEFAULT 'acct_default' NOT NULL
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `idx_invites_account` ON `invites` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_invites_workspace` ON `invites` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `ip_info` (
 	`ip` text PRIMARY KEY NOT NULL,
 	`reverse_dns` text,
@@ -262,12 +256,12 @@ CREATE TABLE `ip_info` (
 );
 --> statement-breakpoint
 CREATE TABLE `memberships` (
-	`account_id` text NOT NULL,
+	`workspace_id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`role` text DEFAULT 'member' NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	PRIMARY KEY(`account_id`, `user_id`),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade,
+	PRIMARY KEY(`workspace_id`, `user_id`),
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "memberships_role_check" CHECK("memberships"."role" IN ('owner', 'admin', 'member'))
 );
@@ -285,13 +279,13 @@ CREATE TABLE `monitor_subscriptions` (
 	`active` integer DEFAULT 1 NOT NULL,
 	`last_checked_at` integer,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_monitor_active` ON `monitor_subscriptions` (`active`,`last_checked_at`);--> statement-breakpoint
 CREATE INDEX `idx_monitor_domain` ON `monitor_subscriptions` (`domain`);--> statement-breakpoint
-CREATE UNIQUE INDEX `monitor_subscriptions_account_id_email_domain_unique` ON `monitor_subscriptions` (`account_id`,`email`,`domain`);--> statement-breakpoint
+CREATE UNIQUE INDEX `monitor_subscriptions_workspace_id_email_domain_unique` ON `monitor_subscriptions` (`workspace_id`,`email`,`domain`);--> statement-breakpoint
 CREATE TABLE `mta_sts_config` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
 	`enabled` integer DEFAULT 1 NOT NULL,
@@ -305,11 +299,11 @@ CREATE TABLE `mta_sts_config` (
 	`last_error` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_mta_sts_account` ON `mta_sts_config` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_mta_sts_workspace` ON `mta_sts_config` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `password_reset_tokens` (
 	`token` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -334,13 +328,13 @@ CREATE TABLE `report_records` (
 	`base_domain` text,
 	`country_code` text,
 	`org` text,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	FOREIGN KEY (`report_id`) REFERENCES `aggregate_reports`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_records_report` ON `report_records` (`report_id`);--> statement-breakpoint
 CREATE INDEX `idx_records_ip` ON `report_records` (`source_ip`);--> statement-breakpoint
-CREATE INDEX `idx_records_account` ON `report_records` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_records_workspace` ON `report_records` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -356,12 +350,12 @@ CREATE TABLE `sessions` (
 CREATE UNIQUE INDEX `sessions_token_unique` ON `sessions` (`token`);--> statement-breakpoint
 CREATE INDEX `idx_sessions_user` ON `sessions` (`user_id`);--> statement-breakpoint
 CREATE TABLE `settings` (
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`key` text NOT NULL,
 	`value` text NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
-	PRIMARY KEY(`account_id`, `key`),
-	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
+	PRIMARY KEY(`workspace_id`, `key`),
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `spf_flatten_config` (
@@ -376,11 +370,11 @@ CREATE TABLE `spf_flatten_config` (
 	`last_error` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_spf_flatten_account` ON `spf_flatten_config` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_spf_flatten_workspace` ON `spf_flatten_config` (`workspace_id`);--> statement-breakpoint
 CREATE TABLE `tls_reports` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`domain_id` integer NOT NULL,
@@ -392,12 +386,12 @@ CREATE TABLE `tls_reports` (
 	`failure_details` text,
 	`raw_json` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`account_id` text DEFAULT 'acct_default' NOT NULL,
+	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_tls_reports_domain` ON `tls_reports` (`domain_id`,`date_begin`);--> statement-breakpoint
-CREATE INDEX `idx_tls_reports_account` ON `tls_reports` (`account_id`);--> statement-breakpoint
+CREATE INDEX `idx_tls_reports_workspace` ON `tls_reports` (`workspace_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `tls_reports_domain_id_org_name_date_begin_unique` ON `tls_reports` (`domain_id`,`org_name`,`date_begin`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -425,4 +419,9 @@ CREATE TABLE `verifications` (
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `idx_verifications_identifier` ON `verifications` (`identifier`);
+CREATE INDEX `idx_verifications_identifier` ON `verifications` (`identifier`);--> statement-breakpoint
+CREATE TABLE `workspaces` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL
+);

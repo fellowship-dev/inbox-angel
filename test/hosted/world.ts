@@ -1,7 +1,7 @@
-// Shared setup for the hosted tests: a saas D1 with two accounts that each own a domain.
+// Shared setup for the hosted tests: a saas D1 with two workspaces that each own a domain.
 import { vi } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forAccount } from '@inbox-angel/db';
+import { forWorkspace } from '@inbox-angel/db';
 import type { BoundEnv } from '../../src/index';
 import { hashToken, generateToken } from '../../src/hosted/tokens';
 
@@ -26,16 +26,16 @@ export function quiet() {
 
 export const nxdomain = () => vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ Status: 3 }), { status: 200 }));
 
-export async function twoAccounts(extraEnv: Record<string, string> = {}) {
+export async function twoWorkspaces(extraEnv: Record<string, string> = {}) {
   const db = createMigratedD1();
-  for (const id of ['acct_a', 'acct_b']) db.sqlite.prepare('INSERT INTO accounts (id, name) VALUES (?, ?)').run(id, id);
-  db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (1, 'acct_a', 'a-corp.com', 'x')").run();
-  db.sqlite.prepare("INSERT INTO domains (id, account_id, domain, rua_address) VALUES (2, 'acct_b', 'b-corp.org', 'x')").run();
+  for (const id of ['ws_a', 'ws_b']) db.sqlite.prepare('INSERT INTO workspaces (id, name) VALUES (?, ?)').run(id, id);
+  db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, 'ws_a', 'a-corp.com', 'x')").run();
+  db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (2, 'ws_b', 'b-corp.org', 'x')").run();
   const env = { DB: db as unknown as D1Database, ...HOSTED_ENV, ...extraEnv } as unknown as BoundEnv;
   const tokenA = generateToken();
   const tokenB = generateToken();
-  await forAccount(env.DB, 'acct_a').intake.set(1, await hashToken(tokenA), NOW);
-  await forAccount(env.DB, 'acct_b').intake.set(2, await hashToken(tokenB), NOW);
+  await forWorkspace(env.DB, 'ws_a').intake.set(1, await hashToken(tokenA), NOW);
+  await forWorkspace(env.DB, 'ws_b').intake.set(2, await hashToken(tokenB), NOW);
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
   return { db, env, tokenA, tokenB, rows };
 }

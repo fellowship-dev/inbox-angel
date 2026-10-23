@@ -5,7 +5,7 @@
  */
 
 /** The newest migration this build of the code depends on. Bump with every new migration. */
-export const REQUIRED_MIGRATION = '0015_cloudflare_connections.sql';
+export const REQUIRED_MIGRATION = '0001_baseline.sql';
 
 export class SchemaNotReadyError extends Error {
 	constructor(detail: string) {

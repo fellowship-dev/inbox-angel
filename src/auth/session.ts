@@ -1,11 +1,11 @@
-// Resolves "who is calling, and in which account, with what role" from a request.
+// Resolves "who is calling, and in which workspace, with what role" from a request.
 //
 // Credentials, in order:
-//   1. the deprecated API_KEY env var                    → instance admin (owner of acct_default, no user)
-//   2. `X-Api-Key` / `Authorization: Bearer` ia_…        → a per-user API key (its account, its owner's current role)
+//   1. the deprecated API_KEY env var                    → instance admin (owner of ws_default, no user)
+//   2. `X-Api-Key` / `Authorization: Bearer` ia_…        → a per-user API key (its workspace, its owner's current role)
 //   3. `X-Api-Key` / `Authorization: Bearer` <token>     → a Better Auth session (the dashboard keeps its token in localStorage)
 //   4. the Better Auth session cookie                    → same session, sent by the browser (OAuth sign-in)
-import { authLookups, globalQueries, IMPLICIT_ACCOUNT_ID, type MembershipRole } from '@inbox-angel/db';
+import { authLookups, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@inbox-angel/db';
 import { resolveApiKey, looksLikeApiKey } from './api-keys';
 import { createAuth } from './index';
 import type { AuthEnv } from './config';
@@ -29,7 +29,7 @@ export interface Principal {
   viaCookie: boolean;
   /** Null for the instance API key, which belongs to no one. */
   user: { id: string; email: string; name: string } | null;
-  accountId: string;
+  workspaceId: string;
   role: MembershipRole;
   apiKeyId?: string;
 }
@@ -89,24 +89,24 @@ async function fromSession(
   if (!session) return null;
 
   let memberships = await authLookups(env.DB as D1Database).membershipsOf(session.user.id);
-  // Self-host has exactly one account: whatever else the table holds, the caller acts in it.
-  if (!isSaas(env)) memberships = memberships.filter(m => m.account_id === IMPLICIT_ACCOUNT_ID);
-  if (memberships.length === 0) throw new AuthError('this user is not a member of any account', 403);
-  // A user in several accounts picks one with X-Account-Id; otherwise their oldest membership.
-  const wanted = request.headers.get('x-account-id');
-  const chosen = (wanted && memberships.find(m => m.account_id === wanted)) || (!wanted ? memberships[0] : null);
-  if (!chosen) throw new AuthError('not a member of that account', 403);
+  // Self-host has exactly one workspace: whatever else the table holds, the caller acts in it.
+  if (!isSaas(env)) memberships = memberships.filter(m => m.workspace_id === IMPLICIT_WORKSPACE_ID);
+  if (memberships.length === 0) throw new AuthError('this user is not a member of any workspace', 403);
+  // A user in several workspaces picks one with X-Workspace-Id; otherwise their oldest membership.
+  const wanted = request.headers.get('x-workspace-id');
+  const chosen = (wanted && memberships.find(m => m.workspace_id === wanted)) || (!wanted ? memberships[0] : null);
+  if (!chosen) throw new AuthError('not a member of that workspace', 403);
 
   return {
     kind: 'session',
     viaCookie: !token,
     user: { id: session.user.id, email: session.user.email, name: session.user.name },
-    accountId: chosen.account_id,
+    workspaceId: chosen.workspace_id,
     role: chosen.role,
   };
 }
 
-/** Resolve the caller, or null if no valid credential was presented. Throws AuthError(403) for a valid user with no usable account. */
+/** Resolve the caller, or null if no valid credential was presented. Throws AuthError(403) for a valid user with no usable workspace. */
 export async function authenticate(
   request: Request,
   env: AuthEnv,
@@ -115,20 +115,20 @@ export async function authenticate(
   const presented = presentedCredential(request);
 
   if (presented && env.API_KEY && (await safeEqual(presented, env.API_KEY))) {
-    return { kind: 'instance', viaCookie: false, user: null, accountId: IMPLICIT_ACCOUNT_ID, role: 'owner' };
+    return { kind: 'instance', viaCookie: false, user: null, workspaceId: IMPLICIT_WORKSPACE_ID, role: 'owner' };
   }
   if (!env.DB) return null;
 
   if (presented && looksLikeApiKey(presented)) {
     const key = await resolveApiKey(env.DB, presented);
-    if (!key || (!isSaas(env) && key.accountId !== IMPLICIT_ACCOUNT_ID)) return null;
+    if (!key || (!isSaas(env) && key.workspaceId !== IMPLICIT_WORKSPACE_ID)) return null;
     const user = await globalQueries(env.DB).users.byId(key.userId);
     if (!user) return null;
     return {
       kind: 'api_key',
       viaCookie: false,
       user: { id: user.id, email: user.email, name: user.name },
-      accountId: key.accountId,
+      workspaceId: key.workspaceId,
       role: key.role,
       apiKeyId: key.keyId,
     };

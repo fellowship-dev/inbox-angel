@@ -1,4 +1,4 @@
-// /api/cloudflare/* — Cloudflare connections of the caller's account. Documented in docs/cloudflare-oauth.md.
+// /api/cloudflare/* — Cloudflare connections of the caller's workspace. Documented in docs/cloudflare-oauth.md.
 //
 //   GET    /api/cloudflare/connections                    connections + what this deployment offers (OAuth, pasted tokens)
 //   POST   /api/cloudflare/connections                    { token, label? }  add a pasted API token (verified with Cloudflare first)
@@ -11,8 +11,8 @@
 //   GET    /api/cloudflare/oauth/callback                 Cloudflare sends the browser here; redirects to return_to
 //   PUT    /api/domains/:id/connection                    { connection_id | null }  link a domain to the connection that manages its zone
 //
-// Everything needs an owner or admin (reads too: the list shows account names and scopes), and acts on the
-// caller's account only: another account's connection or domain id is a 404.
+// Everything needs an owner or admin (reads too: the list shows workspace names and scopes), and acts on the
+// caller's workspace only: another workspace's connection or domain id is a 404.
 
 import type { TenantContext } from '../tenancy/context';
 import {
@@ -105,7 +105,7 @@ export async function handleConnectionRoutes(
       const nonce = randomId();
       const state = await signState(
         crypt,
-        { accountId: tenant.accountId, userId: caller.user.id, nonce },
+        { workspaceId: tenant.workspaceId, userId: caller.user.id, nonce },
         verifier,
         { label, returnTo: safeReturnTo(body.return_to), connectionId },
         now(),
@@ -267,7 +267,7 @@ async function oauthCallback(
   const crypt = tenant.connections.crypt;
   let verified;
   try {
-    verified = await verifyState(crypt, state, { accountId: tenant.accountId, userId: caller.user.id, nonce: stateNonce }, nowSeconds);
+    verified = await verifyState(crypt, state, { workspaceId: tenant.workspaceId, userId: caller.user.id, nonce: stateNonce }, nowSeconds);
   } catch (e) {
     if (e instanceof OAuthStateError) return clearCookie(err('invalid or expired state: start again', 400, `oauth_state_${e.reason}`), request);
     throw e;

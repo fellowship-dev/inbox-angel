@@ -3,12 +3,12 @@ import { handleApi } from './api/router';
 import { handleRelay, isRelayPath, relayEnabled } from './connections/relay';
 import { scope } from './db/scope';
 import { loadTenant } from './tenancy/load';
-import { resolveInboundAccount } from './tenancy/resolver';
+import { resolveInboundWorkspace } from './tenancy/resolver';
 import { getMode } from './tenancy/mode';
 import { handleHostedEmail } from './hosted/intake';
 import { resolvePolicyHost } from './hosted/policy-host';
 import { runHostedCron } from './hosted/cron';
-import { runCronForAccounts } from './cron';
+import { runCronForWorkspaces } from './cron';
 import { buildPolicyFile } from './email/mta-sts';
 import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
 
@@ -75,7 +75,7 @@ export default {
     // mta-sts.domain.com CNAME → this Worker; CF Universal SSL covers HTTPS
     if (hostname.startsWith('mta-sts.') && pathname === '/.well-known/mta-sts.txt') {
       const policyHost = await resolvePolicyHost(env, hostname);
-      const config = policyHost && await scope(env.DB, policyHost.accountId).mtaSts.getEnabledByDomain(policyHost.domain);
+      const config = policyHost && await scope(env.DB, policyHost.workspaceId).mtaSts.getEnabledByDomain(policyHost.domain);
       if (!config) return new Response('MTA-STS not configured for this domain', { status: 404 });
       const mxHosts = config.mx_hosts ? config.mx_hosts.split(',').filter(Boolean) : [];
       const policy = buildPolicyFile(config.mode, mxHosts, 86400);
@@ -106,9 +106,9 @@ export default {
       throw e;
     }
     const bound = env as BoundEnv;
-    // Hosted: the token in the recipient picks the account (or the anonymous check); there is no default account.
+    // Hosted: the token in the recipient picks the workspace (or the anonymous check); there is no default workspace.
     if (getMode(bound) === 'saas') return handleHostedEmail(message, bound);
-    const tenant = await loadTenant(bound, { accountId: await resolveInboundAccount(bound, message.to) });
+    const tenant = await loadTenant(bound, { workspaceId: await resolveInboundWorkspace(bound, message.to) });
     await handleEmail(message, tenant, ctx);
   },
 
@@ -121,7 +121,7 @@ export default {
       console.error('[cron]', e instanceof Error ? e.message : e);
       return;
     }
-    await runCronForAccounts(event, env as BoundEnv, ctx);
+    await runCronForWorkspaces(event, env as BoundEnv, ctx);
     await runHostedCron(event, env as BoundEnv, ctx);
   },
 } satisfies ExportedHandler<Env>;
@@ -155,7 +155,7 @@ function setupPage(): Response {
     <li>Set your API token:<br><pre>wrangler secret put CLOUDFLARE_API_TOKEN</pre>
       <small>This is the only secret you need. Your domain is configured in the setup wizard after first login.</small>
     </li>
-    <li>Deploy:<br><pre>npm run deploy</pre>Then visit your dashboard, create an account, and enter your domain in the setup wizard.</li>
+    <li>Deploy:<br><pre>npm run deploy</pre>Then visit your dashboard, create a workspace, and enter your domain in the setup wizard.</li>
   </ol>
   <div class="note">
     Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>

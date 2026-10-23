@@ -25,19 +25,19 @@ const cols = {
 	revoked_at: apiKeys.revoked_at,
 };
 
-/** Per-user API keys of one account. The key itself is never stored, only its hash. */
-export function apiKeyQueries(db: Db, accountId: string) {
+/** Per-user API keys of one workspace. The key itself is never stored, only its hash. */
+export function apiKeyQueries(db: Db, workspaceId: string) {
 	return {
 		insert(k: { id: string; user_id: string; name: string; prefix: string; key_hash: string; expires_at?: number | null }) {
-			return db.insert(apiKeys).values({ ...k, expires_at: k.expires_at ?? null, account_id: accountId }).run();
+			return db.insert(apiKeys).values({ ...k, expires_at: k.expires_at ?? null, workspace_id: workspaceId }).run();
 		},
 
-		/** Active (unrevoked) keys in this account, newest first; optionally only one user's. */
+		/** Active (unrevoked) keys in this workspace, newest first; optionally only one user's. */
 		list(userId?: string): Promise<ApiKeyInfo[]> {
 			return db
 				.select(cols)
 				.from(apiKeys)
-				.where(and(eq(apiKeys.account_id, accountId), isNull(apiKeys.revoked_at), userId ? eq(apiKeys.user_id, userId) : undefined))
+				.where(and(eq(apiKeys.workspace_id, workspaceId), isNull(apiKeys.revoked_at), userId ? eq(apiKeys.user_id, userId) : undefined))
 				.orderBy(desc(apiKeys.created_at), desc(apiKeys.id))
 				.all();
 		},
@@ -46,17 +46,17 @@ export function apiKeyQueries(db: Db, accountId: string) {
 			return db
 				.select(cols)
 				.from(apiKeys)
-				.where(and(eq(apiKeys.account_id, accountId), eq(apiKeys.id, id)))
+				.where(and(eq(apiKeys.workspace_id, workspaceId), eq(apiKeys.id, id)))
 				.get()
 				.then((r) => r ?? null);
 		},
 
-		/** Revoke every active key of one user in this account; returns how many. */
+		/** Revoke every active key of one user in this workspace; returns how many. */
 		async revokeAllForUser(userId: string, now: number): Promise<number> {
 			const res = await db
 				.update(apiKeys)
 				.set({ revoked_at: now })
-				.where(and(eq(apiKeys.account_id, accountId), eq(apiKeys.user_id, userId), isNull(apiKeys.revoked_at)))
+				.where(and(eq(apiKeys.workspace_id, workspaceId), eq(apiKeys.user_id, userId), isNull(apiKeys.revoked_at)))
 				.returning({ id: apiKeys.id });
 			return res.length;
 		},
@@ -66,7 +66,7 @@ export function apiKeyQueries(db: Db, accountId: string) {
 			const res = await db
 				.update(apiKeys)
 				.set({ revoked_at: now })
-				.where(and(eq(apiKeys.account_id, accountId), eq(apiKeys.id, id), isNull(apiKeys.revoked_at)))
+				.where(and(eq(apiKeys.workspace_id, workspaceId), eq(apiKeys.id, id), isNull(apiKeys.revoked_at)))
 				.returning({ id: apiKeys.id });
 			return res.length > 0;
 		},

@@ -91,31 +91,31 @@ export interface DomainCheckSummary {
 	mta_sts_mode: string | null;
 }
 
-type NewReport = Omit<typeof aggregateReports.$inferInsert, 'id' | 'created_at' | 'account_id'>;
-type NewRecord = Omit<typeof reportRecords.$inferInsert, 'id' | 'created_at' | 'account_id'>;
-type NewTlsReport = Omit<typeof tlsReports.$inferInsert, 'id' | 'created_at' | 'account_id'>;
+type NewReport = Omit<typeof aggregateReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
+type NewRecord = Omit<typeof reportRecords.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
+type NewTlsReport = Omit<typeof tlsReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
 
-export function reportQueries(db: Db, accountId: string) {
-	const A = sql`${accountId}`;
+export function reportQueries(db: Db, workspaceId: string) {
+	const A = sql`${workspaceId}`;
 
 	return {
 		insertAggregate(r: NewReport) {
 			// Re-delivered reports (same domain_id + report_id) are ignored.
-			return db.insert(aggregateReports).values({ ...r, account_id: accountId }).onConflictDoNothing().run();
+			return db.insert(aggregateReports).values({ ...r, workspace_id: workspaceId }).onConflictDoNothing().run();
 		},
 
 		insertRecords(records: NewRecord[]) {
-			const rows = records.map((r) => db.insert(reportRecords).values({ ...r, account_id: accountId }));
+			const rows = records.map((r) => db.insert(reportRecords).values({ ...r, workspace_id: workspaceId }));
 			return db.batch(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
 		},
 
-		/** Most recent aggregate reports across the account's domains. */
+		/** Most recent aggregate reports across the workspace's domains. */
 		recent(limit = 30) {
 			return db
 				.select({ r: aggregateReports, domain: domains.domain })
 				.from(aggregateReports)
-				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.account_id, accountId)))
-				.where(eq(aggregateReports.account_id, accountId))
+				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId)))
+				.where(eq(aggregateReports.workspace_id, workspaceId))
 				.orderBy(desc(aggregateReports.date_begin))
 				.limit(limit)
 				.all()
@@ -127,8 +127,8 @@ export function reportQueries(db: Db, accountId: string) {
 			return db
 				.select({ r: aggregateReports, domain: domains.domain })
 				.from(aggregateReports)
-				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.account_id, accountId)))
-				.where(and(eq(aggregateReports.account_id, accountId), eq(aggregateReports.id, id)))
+				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId)))
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.id, id)))
 				.get()
 				.then((x) => (x ? { ...x.r, domain: x.domain } : null));
 		},
@@ -137,7 +137,7 @@ export function reportQueries(db: Db, accountId: string) {
 			return db
 				.select()
 				.from(reportRecords)
-				.where(and(eq(reportRecords.account_id, accountId), eq(reportRecords.report_id, reportId)))
+				.where(and(eq(reportRecords.workspace_id, workspaceId), eq(reportRecords.report_id, reportId)))
 				.orderBy(desc(reportRecords.count))
 				.all();
 		},
@@ -146,7 +146,7 @@ export function reportQueries(db: Db, accountId: string) {
 			return db
 				.select({ cnt: sql<number>`COUNT(*)` })
 				.from(aggregateReports)
-				.where(and(eq(aggregateReports.account_id, accountId), eq(aggregateReports.domain_id, domainId)))
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId)))
 				.get()
 				.then((r) => r?.cnt ?? 0);
 		},
@@ -164,8 +164,8 @@ export function reportQueries(db: Db, accountId: string) {
 					COALESCE(SUM(r.fail_count),  0) AS fail_messages,
 					COUNT(r.id) AS report_count
 				FROM domains d
-				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.account_id = ${A} AND r.date_begin >= ${since}
-				WHERE d.account_id = ${A}
+				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
+				WHERE d.workspace_id = ${A}
 				GROUP BY d.id, d.domain, d.dmarc_policy
 				ORDER BY d.domain
 			`);
@@ -177,7 +177,7 @@ export function reportQueries(db: Db, accountId: string) {
 				       MAX(rr.base_domain) AS base_domain, MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.account_id = ${A} AND rr.account_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.domain_id = ${domainId} AND ar.date_begin >= ${since}
 				  AND (rr.dkim_result = 'fail' OR rr.spf_result = 'fail')
 				GROUP BY rr.source_ip
@@ -202,7 +202,7 @@ export function reportQueries(db: Db, accountId: string) {
 					MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.account_id = ${A} AND rr.account_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.domain_id = ${domainId}
 				  AND ar.date_begin >= ${since}
 				  AND (rr.spf_result != 'pass' OR rr.dkim_result != 'pass')
@@ -227,7 +227,7 @@ export function reportQueries(db: Db, accountId: string) {
 					MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.account_id = ${A} AND rr.account_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.domain_id = ${domainId}
 				  AND ar.date_begin >= ${since}
 				GROUP BY rr.source_ip, rr.header_from, rr.spf_domain, rr.dkim_domain
@@ -243,7 +243,7 @@ export function reportQueries(db: Db, accountId: string) {
 					SUM(pass_count)  AS passed,
 					SUM(fail_count)  AS failed
 				FROM aggregate_reports
-				WHERE account_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
+				WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
 				GROUP BY day
 				ORDER BY day ASC
 			`);
@@ -263,7 +263,7 @@ export function reportQueries(db: Db, accountId: string) {
 					GROUP_CONCAT(DISTINCT ar.org_name) AS reporters
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.account_id = ${A} AND rr.account_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.domain_id = ${domainId}
 				  AND date(datetime(ar.date_begin, 'unixepoch')) = ${date}
 				GROUP BY rr.source_ip, rr.header_from, rr.spf_domain, rr.dkim_domain, rr.disposition
@@ -278,7 +278,7 @@ export function reportQueries(db: Db, accountId: string) {
 					COALESCE(SUM(pass_count),  0) AS passed,
 					COALESCE(SUM(fail_count),  0) AS failed
 				FROM aggregate_reports
-				WHERE account_id = ${A}
+				WHERE workspace_id = ${A}
 				  AND domain_id = ${domainId}
 				  AND date(datetime(date_begin, 'unixepoch')) = ${date}
 			`);
@@ -302,8 +302,8 @@ export function reportQueries(db: Db, accountId: string) {
 					rr.count AS record_count,
 					rr.disposition
 				FROM aggregate_reports ar
-				LEFT JOIN report_records rr ON rr.report_id = ar.id AND rr.account_id = ${A}
-				WHERE ar.account_id = ${A} AND ar.domain_id = ${domainId}
+				LEFT JOIN report_records rr ON rr.report_id = ar.id AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND ar.domain_id = ${domainId}
 				ORDER BY ar.date_begin DESC, rr.count DESC
 			`);
 		},
@@ -325,10 +325,10 @@ export function reportQueries(db: Db, accountId: string) {
 					COALESCE(m.enabled, 0)           AS mta_sts_enabled,
 					m.mode                           AS mta_sts_mode
 				FROM domains d
-				LEFT JOIN aggregate_reports ar ON ar.domain_id = d.id AND ar.account_id = ${A} AND ar.date_begin >= ${since}
-				LEFT JOIN report_records rr    ON rr.report_id = ar.id AND rr.account_id = ${A}
-				LEFT JOIN mta_sts_config m     ON m.domain_id = d.id AND m.account_id = ${A}
-				WHERE d.account_id = ${A} AND d.id = ${domainId}
+				LEFT JOIN aggregate_reports ar ON ar.domain_id = d.id AND ar.workspace_id = ${A} AND ar.date_begin >= ${since}
+				LEFT JOIN report_records rr    ON rr.report_id = ar.id AND rr.workspace_id = ${A}
+				LEFT JOIN mta_sts_config m     ON m.domain_id = d.id AND m.workspace_id = ${A}
+				WHERE d.workspace_id = ${A} AND d.id = ${domainId}
 				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, m.enabled, m.mode
 			`);
 			return rows[0] ?? null;
@@ -339,7 +339,7 @@ export function reportQueries(db: Db, accountId: string) {
 		insertTls(r: NewTlsReport) {
 			return db
 				.insert(tlsReports)
-				.values({ ...r, account_id: accountId })
+				.values({ ...r, workspace_id: workspaceId })
 				.onConflictDoUpdate({
 					target: [tlsReports.domain_id, tlsReports.org_name, tlsReports.date_begin],
 					set: {
@@ -359,7 +359,7 @@ export function reportQueries(db: Db, accountId: string) {
 					COALESCE(SUM(total_failure), 0) AS total_failure,
 					COUNT(*) AS report_count
 				FROM tls_reports
-				WHERE account_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
+				WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
 			`);
 			return rows[0] ?? null;
 		},

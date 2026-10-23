@@ -114,8 +114,8 @@ describe('OAuth flow (against a mock authorization server)', () => {
       const f = await w.connectOAuth(w.A.token, { defer: true });
       // a state minted 20 minutes ago, with the matching cookie
       const crypt = TokenCrypto.fromEnv(w.env);
-      const user = w.rows('SELECT m.user_id FROM memberships m WHERE m.account_id = ? AND m.role = ?', w.A.acct, 'owner')[0].user_id;
-      const old = await signState(crypt, { accountId: w.A.acct, userId: user, nonce: 'n-old' }, newVerifier(), {}, Math.floor(Date.now() / 1000) - 1200);
+      const user = w.rows('SELECT m.user_id FROM memberships m WHERE m.workspace_id = ? AND m.role = ?', w.A.ws, 'owner')[0].user_id;
+      const old = await signState(crypt, { workspaceId: w.A.ws, userId: user, nonce: 'n-old' }, newVerifier(), {}, Math.floor(Date.now() / 1000) - 1200);
       const r = await f.callback(old, 'ia_cf_oauth=n-old');
       expect(r.status).toBe(400);
       expect((await json(r)).code).toBe('oauth_state_expired');
@@ -130,7 +130,7 @@ describe('OAuth flow (against a mock authorization server)', () => {
       expect(w.auth.tokenCalls.filter(c => c.grant === 'authorization_code')).toHaveLength(0);
     });
 
-    it('is bound to the account and user: B cannot complete A\'s flow, even with A\'s cookie', async () => {
+    it('is bound to the workspace and user: B cannot complete A\'s flow, even with A\'s cookie', async () => {
       const w = await world();
       const f = await w.connectOAuth(w.A.token, { defer: true });
       const state = f.back.searchParams.get('state')!;
@@ -183,7 +183,7 @@ describe('tokens: refresh, retry, broken, revoke', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.now() + 2 * 3600 * 1000);
     const { loadTenant } = await import('../../src/tenancy/load');
-    const tenant = await loadTenant(w.env, { accountId: w.A.acct });
+    const tenant = await loadTenant(w.env, { workspaceId: w.A.ws });
     const cf = await tenant.connections.clientFor(id);
     await Promise.all([cf.listDnsRecords(Z.a1, {}), cf.listDnsRecords(Z.a1, {}), cf.listDnsRecords(Z.a1, {})]);
     expect(w.auth.tokenCalls.filter(c => c.grant === 'refresh_token')).toHaveLength(1);
@@ -325,7 +325,7 @@ describe('zone allow-list', () => {
     const w = await world();
     const id = await oauthFor(w, [Z.a1], [1]);
     const { loadTenant } = await import('../../src/tenancy/load');
-    const tenant = await loadTenant(w.env, { accountId: w.A.acct });
+    const tenant = await loadTenant(w.env, { workspaceId: w.A.ws });
     const cf = await tenant.connections.clientFor(id);
     const { CfZoneNotAllowedError } = await import('../../src/tenancy/cf-client');
     w.cf.calls.length = 0;
@@ -356,7 +356,7 @@ describe('zone allow-list', () => {
   });
 });
 
-describe('several connections in one account', () => {
+describe('several connections in one workspace', () => {
   it('routes each domain to the token of the connection that manages its zone', async () => {
     const w = await world();
     const pasted = await w.addToken(w.A.token, 'tok-pasted-1234567890abcdef', 'Lexgo');
@@ -488,7 +488,7 @@ describe('roles', () => {
   });
 });
 
-describe('cross-account isolation', () => {
+describe('cross-workspace isolation', () => {
   it('B can neither see nor touch A\'s connections, zones or domains', async () => {
     const w = await world();
     const c = await w.addToken(w.A.token, 'tok-pasted-1234567890abcdef');
@@ -518,11 +518,11 @@ describe('cross-account isolation', () => {
     expect(w.cf.calls).toEqual([]);
   });
 
-  it('the query layer is scoped too: another account\'s id finds, changes and deletes nothing', async () => {
+  it('the query layer is scoped too: another workspace\'s id finds, changes and deletes nothing', async () => {
     const w = await world();
     const c = await w.addToken(w.A.token, 'tok-pasted-1234567890abcdef');
-    const { forAccount } = await import('@inbox-angel/db');
-    const b = forAccount(w.env.DB, w.B.acct);
+    const { forWorkspace } = await import('@inbox-angel/db');
+    const b = forWorkspace(w.env.DB, w.B.ws);
     expect(await b.connections.get(c.id)).toBeNull();
     expect(await b.connections.getSecret(c.id)).toBeNull();
     expect(await b.connections.list()).toEqual([]);
@@ -577,7 +577,7 @@ function everythingExceptCiphertext(w: World, logs: unknown[][], bodies: string[
     logs.map(l => l.map(x => (x instanceof Error ? `${x.name}: ${x.message}\n${x.stack}` : x))),
     bodies,
     w.rows('SELECT * FROM audit_log'),
-    w.rows('SELECT id, account_id, label, cf_account_id, cf_account_name, auth_type, scopes, status, status_detail, created_by FROM cloudflare_connections'),
+    w.rows('SELECT id, workspace_id, label, cf_account_id, cf_account_name, auth_type, scopes, status, status_detail, created_by FROM cloudflare_connections'),
     w.rows('SELECT * FROM cloudflare_connection_zones'),
   ]);
 }
@@ -625,11 +625,11 @@ describe('/accounts/* calls are limited to the connection\'s Cloudflare account'
   async function restricted(w: World) {
     const id = await oauthFor(w, [Z.a1]);
     const { loadTenant } = await import('../../src/tenancy/load');
-    const tenant = await loadTenant(w.env, { accountId: w.A.acct });
+    const tenant = await loadTenant(w.env, { workspaceId: w.A.ws });
     return { id, cf: await tenant.connections.clientFor(id) };
   }
 
-  it('with no recorded account (several visible), the account of the allowed zones is used', async () => {
+  it('with no recorded Cloudflare account (several visible), the Cloudflare account of the allowed zones is used', async () => {
     const w = await world();
     w.cf.accounts = [{ id: 'cf-1', name: 'One' }, { id: 'cf-2', name: 'Two' }];
     const { id, cf } = await restricted(w);
@@ -644,10 +644,10 @@ describe('/accounts/* calls are limited to the connection\'s Cloudflare account'
     await expect(cf.request('GET', '/accounts/cf-1/workers/subdomain')).rejects.toBeInstanceOf(CfNotFoundError); // reached Cloudflare (the fake has no such route)
   });
 
-  it('when no account can be determined, every /accounts call is refused', async () => {
+  it('when no Cloudflare account can be determined, every /accounts call is refused', async () => {
     const w = await world();
     w.cf.accounts = [];
-    for (const z of Object.values(w.cf.zones)) z.accountId = undefined;
+    for (const z of Object.values(w.cf.zones)) z.cfAccountId = undefined;
     const { cf } = await restricted(w);
     expect(w.rows('SELECT cf_account_id FROM cloudflare_connections')).toEqual([{ cf_account_id: null }]);
     const { CfZoneNotAllowedError } = await import('../../src/tenancy/cf-client');
@@ -660,7 +660,7 @@ describe('/accounts/* calls are limited to the connection\'s Cloudflare account'
 });
 
 describe('reconnecting must reach the same Cloudflare account', () => {
-  it('OAuth: a grant for another account is refused, revoked, and the connection is left as it was', async () => {
+  it('OAuth: a grant for another Cloudflare account is refused, revoked, and the connection is left as it was', async () => {
     const w = await world();
     const id = await oauthFor(w, [Z.a1], [1]);
     const before = envelopeOf(w, id);
@@ -677,7 +677,7 @@ describe('reconnecting must reach the same Cloudflare account', () => {
     expect(w.rows('SELECT zone_id FROM cloudflare_connection_zones')).toEqual([{ zone_id: Z.a1 }]);
   });
 
-  it('OAuth: the same account reconnects (also when only the zones identify it)', async () => {
+  it('OAuth: the same Cloudflare account reconnects (also when only the zones identify it)', async () => {
     const w = await world();
     w.cf.accounts = [{ id: 'cf-1', name: 'One' }, { id: 'cf-2', name: 'Two' }]; // no single account recorded
     const id = await oauthFor(w, [Z.a1]);
@@ -688,7 +688,7 @@ describe('reconnecting must reach the same Cloudflare account', () => {
     expect(loc(wrong).searchParams.get('cf_error')).toBe('cf_account_mismatch');
   });
 
-  it('pasted token: a token for another account is refused (409) and the stored one is untouched', async () => {
+  it('pasted token: a token for another Cloudflare account is refused (409) and the stored one is untouched', async () => {
     const w = await world();
     const c = await w.addToken(w.A.token, 'tok-pasted-1234567890abcdef');
     await w.api(w.A.token, 'PUT', `/api/cloudflare/connections/${c.id}/zones`, { zone_ids: [Z.a1] });
@@ -710,7 +710,7 @@ describe('zone id and path hardening', () => {
   async function client(w: World, zones = [Z.a1]) {
     const id = await oauthFor(w, zones);
     const { loadTenant } = await import('../../src/tenancy/load');
-    const tenant = await loadTenant(w.env, { accountId: w.A.acct });
+    const tenant = await loadTenant(w.env, { workspaceId: w.A.ws });
     return tenant.connections.clientFor(id);
   }
 
@@ -752,7 +752,7 @@ describe('a restricted client cannot discover zones', () => {
     const id = await oauthFor(w, [Z.a1]);
     const { loadTenant } = await import('../../src/tenancy/load');
     const { CfZoneNotAllowedError, CfZoneNotFoundError } = await import('../../src/tenancy/cf-client');
-    const tenant = await loadTenant(w.env, { accountId: w.A.acct });
+    const tenant = await loadTenant(w.env, { workspaceId: w.A.ws });
     const cf = await tenant.connections.clientFor(id);
     w.cf.calls.length = 0;
 
@@ -803,12 +803,12 @@ describe('OAuth state is single use', () => {
 
 describe('nested zones: a delegated child zone shadows the parent', () => {
   const C = 'c1'.repeat(16);
-  const addChild = (w: World) => { w.cf.zones['child.a-corp.com'] = { id: C, accountId: 'cf-1' }; };
+  const addChild = (w: World) => { w.cf.zones['child.a-corp.com'] = { id: C, cfAccountId: 'cf-1' }; };
   const domain = (w: World, id: number, name: string) =>
-    w.db.sqlite.prepare('INSERT INTO domains (id, account_id, domain, rua_address) VALUES (?, ?, ?, ?)').run(id, w.A.acct, name, 'rua@x');
+    w.db.sqlite.prepare('INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (?, ?, ?, ?)').run(id, w.A.ws, name, 'rua@x');
   const clientOf = async (w: World, id: string) => {
     const { loadTenant } = await import('../../src/tenancy/load');
-    return (await loadTenant(w.env, { accountId: w.A.acct })).connections.clientFor(id);
+    return (await loadTenant(w.env, { workspaceId: w.A.ws })).connections.clientFor(id);
   };
 
   it('saving the list records the visible child zones that were left off, and refuses their names (deep ones too)', async () => {

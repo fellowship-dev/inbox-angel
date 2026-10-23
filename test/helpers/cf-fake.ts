@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 
-export interface FakeZone { id: string; accountId?: string }
+export interface FakeZone { id: string; cfAccountId?: string }
 export interface FakeRecord { id: string; type: string; name: string; content: string }
 
 export interface FakeCall {
@@ -86,9 +86,9 @@ export class FakeCloudflare {
       const name = url.searchParams.get('name');
       if (name) {
         const z = this.zones[name];
-        return ok(z ? [{ id: z.id, name, account: z.accountId ? { id: z.accountId } : undefined }] : []);
+        return ok(z ? [{ id: z.id, name, account: z.cfAccountId ? { id: z.cfAccountId } : undefined }] : []);
       }
-      return ok(Object.entries(this.zones).map(([n, z]) => ({ id: z.id, name: n, status: 'active', account: z.accountId ? { id: z.accountId } : undefined })));
+      return ok(Object.entries(this.zones).map(([n, z]) => ({ id: z.id, name: n, status: 'active', account: z.cfAccountId ? { id: z.cfAccountId } : undefined })));
     }
 
     if (m) {
