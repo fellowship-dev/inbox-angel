@@ -143,6 +143,7 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_date').on(t.date_begin),
 		index('idx_agg_reports_workspace').on(t.workspace_id, t.date_begin),
 		index('idx_agg_reports_date_end').on(t.date_end),
+		index('idx_agg_reports_created').on(t.created_at),
 		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
 	],
 );
@@ -196,6 +197,7 @@ export const tlsReports = sqliteTable(
 		index('idx_tls_reports_domain').on(t.domain_id, t.date_begin),
 		index('idx_tls_reports_workspace').on(t.workspace_id),
 		index('idx_tls_reports_date_end').on(t.date_end),
+		index('idx_tls_reports_created').on(t.created_at),
 		index('idx_tls_reports_raw_json').on(t.created_at).where(sql`${t.raw_json} IS NOT NULL`),
 	],
 );

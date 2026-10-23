@@ -64,7 +64,20 @@ export async function eraseWorkspace(
     }
     deleted++;
   }
-  const cloudflare = await revokeWorkspaceConnections(tenant);
+  let cloudflare: RevokeSummary;
+  try {
+    cloudflare = await revokeWorkspaceConnections(tenant);
+  } catch (e) {
+    // Never purge past a grant we could neither revoke nor record for a retry.
+    console.error(`[lifecycle] workspace ${tenant.workspaceId}: Cloudflare access could not be revoked or recorded; nothing more was deleted:`, e instanceof Error ? e.message : e);
+    return {
+      ok: false,
+      response: err(
+        `could not revoke this workspace's Cloudflare access (${deleted} domain${deleted === 1 ? '' : 's'} already deleted); the workspace and its data are still there. Try again in a moment.`,
+        502, 'revoke_failed',
+      ),
+    };
+  }
   const members = (await tenant.scope.team.list()).map((u) => u.id);
   await workspaceLifecycle(deps.db).purge(tenant.workspaceId);
   // People who belonged only to this workspace have nowhere to sign in to any more.
@@ -167,7 +180,7 @@ export async function handleWorkspaceRoutes(
   if (m[2] === 'export' && method === 'GET') {
     if (role !== 'owner') return err('only an owner can export a workspace', 403);
     audit(id, { action: 'workspace.exported', resource_type: 'workspace', resource_id: id, resource_name: workspace.name });
-    return streamWorkspaceExport(deps.db, id, user.email);
+    return await streamWorkspaceExport(deps.db, id, user.email);
   }
 
   // POST /api/workspaces/:id/transfer-ownership { user_id } — hand ownership to another member; the caller becomes an admin.

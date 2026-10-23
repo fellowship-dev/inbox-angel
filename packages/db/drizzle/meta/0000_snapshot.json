@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2a6e2655-d6e7-4e36-bc50-6a82035e50b2",
+  "id": "cf1329b5-7bcf-45f7-8515-6af7cd0aa9e8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aggregate_reports": {
@@ -124,6 +124,13 @@
           "name": "idx_agg_reports_date_end",
           "columns": [
             "date_end"
+          ],
+          "isUnique": false
+        },
+        "idx_agg_reports_created": {
+          "name": "idx_agg_reports_created",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         },
@@ -2855,6 +2862,13 @@
           "name": "idx_tls_reports_date_end",
           "columns": [
             "date_end"
+          ],
+          "isUnique": false
+        },
+        "idx_tls_reports_created": {
+          "name": "idx_tls_reports_created",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         },

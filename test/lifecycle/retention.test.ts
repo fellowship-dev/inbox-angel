@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { retentionPolicy, rawXmlRetentionDays } from '../../src/lifecycle/config';
 import { runRetention } from '../../src/lifecycle/retention';
-import { runDataLifecycle } from '../../src/cron';
+import { LIFECYCLE_CRON, runCronForWorkspaces, runDataLifecycle } from '../../src/cron';
 import { storeReport } from '../../src/dmarc/store-report';
 import { makeTenant } from '../helpers/tenant';
 
@@ -83,7 +83,7 @@ describe('runRetention (self-host defaults)', () => {
     await runRetention({ DB: db as any }, { now: clock });
     const snapshot = JSON.stringify(s.prepare('SELECT * FROM aggregate_reports ORDER BY id').all());
     const again = await runRetention({ DB: db as any }, { now: clock });
-    expect(Object.entries(again).filter(([k, v]) => typeof v === 'number' && k !== 'failed').every(([, v]) => v === 0)).toBe(true);
+    expect(Object.entries(again).filter(([k, v]) => typeof v === 'number' && k !== 'failed' && k !== 'statements_left').every(([, v]) => v === 0)).toBe(true);
     expect(JSON.stringify(s.prepare('SELECT * FROM aggregate_reports ORDER BY id').all())).toBe(snapshot);
   });
 
@@ -103,10 +103,10 @@ describe('runRetention (self-host defaults)', () => {
     const { db, s, n } = seed();
     const rep = s.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'g', ?, ?, ?)");
     for (let i = 0; i < 10; i++) rep.run(`bulk-${i}`, ago(500), ago(499));
-    const first = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, maxBatches: 2 } });
+    const first = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 4 } });
     expect(first).toMatchObject({ aggregate_reports: 6, aggregate_reports_truncated: true });
     expect(n("SELECT COUNT(*) n FROM aggregate_reports WHERE report_id LIKE 'bulk-%'")).toBe(5);
-    const second = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, maxBatches: 2 } });
+    const second = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 4 } });
     expect(second.aggregate_reports).toBe(5); // the rest of the bulk rows
     expect(second.aggregate_reports_truncated).toBeUndefined();
     expect(n("SELECT COUNT(*) n FROM aggregate_reports WHERE report_id LIKE 'bulk-%'")).toBe(0);
@@ -178,14 +178,71 @@ describe('raw XML is not stored in hosted mode', () => {
   });
 });
 
+describe('statement budget, big reports, far-future dates', () => {
+  it('a whole run never issues more statements than its budget, and says which sweeps it did not finish', async () => {
+    const { db, s } = seed();
+    const rep = s.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'g', ?, ?, ?)");
+    for (let i = 0; i < 40; i++) rep.run(`bulk-${i}`, ago(500), ago(499));
+    let statements = 0;
+    const counted = new Proxy(db as any, { get: (t, k) => (k === 'prepare' ? (sql: string) => { statements++; return t.prepare(sql); } : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
+    const report = await runRetention({ DB: counted }, { now: clock, limits: { batch: 5, statements: 6 } });
+    expect(statements).toBeLessThanOrEqual(6);
+    expect(report.aggregate_reports_truncated).toBe(true);
+    expect(report.statements_left).toBe(0);
+    // later sweeps got nothing this run (the budget is shared), so they are reported unfinished too
+    expect(report.audit_log_truncated).toBe(true);
+    // the default budget is 300
+    statements = 0;
+    await runRetention({ DB: counted }, { now: clock });
+    expect(statements).toBeLessThanOrEqual(300);
+  });
+
+  it('a report with many records is purged a bounded number of records per statement', async () => {
+    const { db, s, n } = seed();
+    const ins = s.prepare("INSERT INTO report_records (report_id, source_ip, disposition) VALUES (1, ?, 'none')");
+    for (let i = 0; i < 25; i++) ins.run(`10.0.0.${i}`);
+    // 27 records on report 1, 10 per statement: three statements empty it, and the report itself waits for the next run
+    const first = await runRetention({ DB: db as any }, { now: clock, limits: { recordBatch: 10, statements: 3 } });
+    expect(first.aggregate_reports_truncated).toBe(true);
+    expect(n('SELECT COUNT(*) n FROM report_records WHERE report_id = 1')).toBe(0);
+    expect(n('SELECT COUNT(*) n FROM aggregate_reports WHERE id = 1')).toBe(1); // records first, then the report
+    const second = await runRetention({ DB: db as any }, { now: clock, limits: { recordBatch: 10 } });
+    expect(second.aggregate_reports).toBe(1);
+    expect(n('SELECT COUNT(*) n FROM aggregate_reports WHERE id = 1')).toBe(0);
+    expect(n('SELECT COUNT(*) n FROM report_records WHERE report_id = 1')).toBe(0);
+  });
+
+  it('a report claiming a far-future end date is still purged by when it was received', async () => {
+    const { db, s, n } = seed();
+    s.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, created_at) VALUES (99, 1, 'g', 'future', ?, ?, ?)").run(NOW, NOW + 3000 * DAY, ago(400));
+    s.prepare("INSERT INTO tls_reports (domain_id, org_name, date_begin, date_end, created_at) VALUES (1, 'future', ?, ?, ?)").run(NOW, NOW + 3000 * DAY, ago(400));
+    await runRetention({ DB: db as any }, { now: clock });
+    expect(n('SELECT COUNT(*) n FROM aggregate_reports WHERE id = 99')).toBe(0);
+    expect(n("SELECT COUNT(*) n FROM tls_reports WHERE org_name = 'future'")).toBe(0);
+  });
+});
+
 describe('cron entry', () => {
-  it('runs on the daily 8am tick only, using the fake clock', async () => {
+  it('the lifecycle trigger runs the job and nothing per-workspace; other triggers do not run it', async () => {
     const { db, n } = seed();
     vi.useFakeTimers();
     vi.setSystemTime(NOW * 1000);
-    await runDataLifecycle({ cron: '0 9 * * 1' } as any, { DB: db } as any);
+    const load = vi.fn();
+    await runCronForWorkspaces({ cron: '0 9 * * 1' } as any, { DB: db } as any, {} as any, { workspaces: [], load });
     expect(n('SELECT COUNT(*) n FROM audit_log')).toBe(2);
-    await runDataLifecycle({ cron: '0 8 * * *' } as any, { DB: db } as any);
+    await runCronForWorkspaces({ cron: LIFECYCLE_CRON } as any, { DB: db } as any, {} as any, { workspaces: ['ws_default'], load });
+    expect(load).not.toHaveBeenCalled();
     expect(n('SELECT COUNT(*) n FROM audit_log')).toBe(1);
+  });
+
+  it('revocations are retried before the sweeps', async () => {
+    const { db } = seed();
+    const order: string[] = [];
+    db.sqlite.prepare("INSERT INTO revocation_tombstones (id, deleted_workspace_id, connection_id, token_envelope) VALUES ('t', 'ws_x', 'c', 'junk')").run();
+    const prepare = db.prepare.bind(db);
+    (db as any).prepare = (sql: string) => { if (/revocation_tombstones/.test(sql)) order.push('revoke'); else if (/DELETE FROM aggregate_reports/.test(sql)) order.push('sweep'); return prepare(sql); };
+    await runDataLifecycle({ DB: db } as any);
+    expect(order.indexOf('revoke')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('revoke')).toBeLessThan(order.indexOf('sweep'));
   });
 });

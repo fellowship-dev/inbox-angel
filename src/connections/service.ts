@@ -279,15 +279,22 @@ export class ConnectionService {
   }
 
   /**
-   * disconnect() for a workspace that is being deleted: when an OAuth grant could not be confirmed revoked, the sealed
-   * grant is handed to `keep` (before the local row goes) so the revocation can be retried later.
+   * disconnect() for a workspace that is being deleted. When an OAuth grant could not be confirmed revoked, the sealed
+   * grant is handed to `keep` BEFORE the local row is deleted, so the revocation can be retried later. If `keep` throws,
+   * the row is left in place and the error propagates: a grant is never dropped without a record to retry it from.
    */
   async disconnectKeepingFailedGrant(id: string, keep: (sealed: string, row: { cf_account_id: string | null }) => Promise<void>): Promise<{ revokedRemote: boolean | null } | null> {
-    const row = await this.#host.scope.connections.getSecret(id);
+    const q = this.#host.scope.connections;
+    const row = await q.getSecret(id);
     if (!row) return null;
-    const result = await this.disconnect(id);
-    if (row.auth_type === 'oauth' && !result?.revokedRemote) await keep(row.token_envelope, { cf_account_id: row.cf_account_id });
-    return result && { revokedRemote: result.revokedRemote };
+    let revokedRemote: boolean | null = null;
+    if (row.auth_type === 'oauth') {
+      revokedRemote = await revokeSealedGrant(this.#host.env, this.crypt, this.#host.workspaceId, id, row.token_envelope, this.#fetch);
+      if (!revokedRemote) await keep(row.token_envelope, { cf_account_id: row.cf_account_id });
+    }
+    await q.delete(id);
+    this.invalidate();
+    return { revokedRemote };
   }
 
   // ── Zones ──────────────────────────────────────────────────

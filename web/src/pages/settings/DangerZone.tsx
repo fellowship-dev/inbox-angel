@@ -1,5 +1,5 @@
 import { Button, Card, CardContent, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldError, Input, toast } from '@inbox-angel/ui';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 import { Section } from '../../components/states';
@@ -58,8 +58,14 @@ function ExportCard({ workspaceId }: { workspaceId: string }) {
 	);
 }
 
+interface Preview {
+	deleted_workspaces: string[];
+	connections_left_behind: Array<{ workspace: string; label: string; cf_account_name: string | null }>;
+}
+
 function DeleteAccount({ email }: { email: string }) {
 	const [open, setOpen] = useState(false);
+	const preview = useQuery({ queryKey: ['account-deletion-preview'], queryFn: () => api<Preview>('/api/account'), enabled: open, retry: false });
 	const [typed, setTyped] = useState('');
 	const del = useMutation({
 		mutationFn: () => api('/api/account', { method: 'DELETE', body: { confirm: typed } }),
@@ -99,6 +105,25 @@ function DeleteAccount({ email }: { email: string }) {
 							<DialogTitle>Delete your account?</DialogTitle>
 							<DialogDescription>This cannot be undone. Workspaces only you belong to are deleted with their data, and their Cloudflare access is revoked.</DialogDescription>
 						</DialogHeader>
+						{preview.data?.deleted_workspaces.length ? (
+							<p className="text-sm">
+								Deleted with you: {preview.data.deleted_workspaces.map((n) => `"${n}"`).join(', ')} (every domain, report and Cloudflare connection in {preview.data.deleted_workspaces.length === 1 ? 'it' : 'them'}).
+							</p>
+						) : null}
+						{preview.data?.connections_left_behind.length ? (
+							<div className="space-y-1 text-sm" data-testid="connections-left-behind">
+								<p>These Cloudflare connections were made by you and stay active in workspaces that continue, so those workspaces keep access to the Cloudflare account:</p>
+								<ul className="list-disc pl-5">
+									{preview.data.connections_left_behind.map((c, i) => (
+										<li key={i}>
+											{c.label}
+											{c.cf_account_name ? ` (${c.cf_account_name})` : ''} in {c.workspace}
+										</li>
+									))}
+								</ul>
+								<p className="text-ink-2">Disconnect them first if they should not outlive your account.</p>
+							</div>
+						) : null}
 						<Field id="confirm-account-delete" label={`Type your email, ${email}, to confirm`}>
 							<Input id="confirm-account-delete" type="email" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
 						</Field>

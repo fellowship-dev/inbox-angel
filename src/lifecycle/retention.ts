@@ -2,9 +2,10 @@
 //
 // Global, not per workspace: it runs once per day over every table. Each sweep deletes in batches (D1 limits),
 // is idempotent, and logs one JSON line with the counts, which is also what runRetention returns. A failing
-// sweep is logged and the others still run. Expired canary tokens are purged by src/hosted/cron.ts, as before.
+// sweep is logged and the others still run. The whole run shares one statement budget (D1 caps queries per
+// invocation), so a big backlog is worked off over several days; truncated sweeps say so in the log line. Expired canary tokens are purged by src/hosted/cron.ts, as before.
 
-import { lifecycleQueries, type SweepLimits, type SweepResult } from '@inbox-angel/db';
+import { lifecycleQueries, sweepLimits, type SweepResult } from '@inbox-angel/db';
 import { retentionPolicy, type RetentionEnv } from './config';
 
 const DAY = 86400;
@@ -12,7 +13,8 @@ const DAY = 86400;
 export interface RetentionOptions {
   /** The clock, in ms. Default Date.now. */
   now?: () => number;
-  limits?: Partial<SweepLimits>;
+  /** Test knobs: rows per statement, and the run's total statement budget (default 300). */
+  limits?: { batch?: number; recordBatch?: number; statements?: number };
 }
 
 export type RetentionReport = Record<string, number | boolean | string>;
@@ -21,7 +23,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
   const now = Math.floor((opts.now ?? Date.now)() / 1000);
   const p = retentionPolicy(env);
   const q = lifecycleQueries(env.DB);
-  const limits: SweepLimits = { batch: opts.limits?.batch ?? 500, maxBatches: opts.limits?.maxBatches ?? 200 };
+  const limits = sweepLimits(opts.limits);
   const ago = (d: number) => now - d * DAY;
 
   const report: RetentionReport = {};
@@ -52,6 +54,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     }
   }
   report.failed = failed;
+  report.statements_left = Math.max(0, limits.budget.left);
   console.log(`[retention] ${JSON.stringify(report)}`);
   return report;
 }

@@ -18,6 +18,7 @@ CREATE INDEX `idx_agg_reports_domain` ON `aggregate_reports` (`domain_id`);--> s
 CREATE INDEX `idx_agg_reports_date` ON `aggregate_reports` (`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_workspace` ON `aggregate_reports` (`workspace_id`,`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_date_end` ON `aggregate_reports` (`date_end`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_created` ON `aggregate_reports` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_raw_xml` ON `aggregate_reports` (`created_at`) WHERE "aggregate_reports"."raw_xml" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
 CREATE TABLE `api_keys` (
@@ -413,6 +414,7 @@ CREATE TABLE `tls_reports` (
 CREATE INDEX `idx_tls_reports_domain` ON `tls_reports` (`domain_id`,`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_tls_reports_workspace` ON `tls_reports` (`workspace_id`);--> statement-breakpoint
 CREATE INDEX `idx_tls_reports_date_end` ON `tls_reports` (`date_end`);--> statement-breakpoint
+CREATE INDEX `idx_tls_reports_created` ON `tls_reports` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_tls_reports_raw_json` ON `tls_reports` (`created_at`) WHERE "tls_reports"."raw_json" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `tls_reports_domain_id_org_name_date_begin_unique` ON `tls_reports` (`domain_id`,`org_name`,`date_begin`);--> statement-breakpoint
 CREATE TABLE `users` (

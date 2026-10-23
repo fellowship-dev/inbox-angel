@@ -20,7 +20,7 @@ Defaults apply when the variable is unset. Values are whole days; a value that i
 | Invites | **30 days after they expire** (used or not) | `RETENTION_INVITES_DAYS` | |
 | Audit log | **12 months** (365 days) | `RETENTION_AUDIT_DAYS` | |
 | Expired canary (free-check) tokens | 1 day after they expire | | Existing rule, in the hosted daily job. |
-| Failed Cloudflare revocations of deleted workspaces | until the revocation succeeds, at most **10 attempts or 30 days** | | See below. The sealed token is deleted with the row. |
+| Failed Cloudflare revocations of deleted workspaces | retried daily until they succeed, at most **30 days** | | See below. The sealed token is deleted with the row; giving up is logged and written to the audit log. |
 
 Backups: deleted data can remain in Cloudflare D1 Time Travel restore points until they roll off. Check the retention of your D1 plan; we state
 "within 30 days" for hosted deletions.
@@ -30,9 +30,11 @@ records the privacy policy describes for the website and for sales prospecting.
 
 ## How the job works
 
-* Runs once a day, on the `0 8 * * *` cron, over the whole database (not per workspace).
-* Deletes in batches (500 rows per statement, up to 200 statements per table per run) so D1's limits hold; a large backlog is cleared over several days.
-  When a table was not finished, the log line says `<table>_truncated`.
+* Runs once a day on its own cron trigger (`0 4 * * *`, so it never shares an invocation with the per-workspace jobs), over the whole database (not per workspace).
+  Failed Cloudflare revocations are retried first, then the sweeps.
+* Deletes in bounded batches (500 rows per statement; at most 1,000 `report_records` per statement) and issues at most **300 statements per run in total**, so D1's per-invocation query limit holds.
+  A large backlog is cleared over several days. A sweep that was not finished says `<table>_truncated` in the log line.
+* Report windows count from when the report ended **or** when it was received, whichever is earlier, so a report cannot extend its own life by claiming a future end date.
 * Idempotent: running it again deletes nothing more. Safe to re-run by hand or after a failure.
 * A failing step is logged and the other steps still run.
 * Logs one line per run with the counts: `[retention] {"aggregate_reports":12,"sessions":4,…,"failed":0}`.
@@ -47,7 +49,8 @@ records the privacy policy describes for the website and for sales prospecting.
 2. Each domain is deleted through the normal delete (DNS records Inbox Angel added are removed).
 3. **Every Cloudflare connection is disconnected, which revokes OAuth grants at Cloudflare.**
    If Cloudflare does not confirm a revocation the deletion still goes ahead, the failure is logged, and a *tombstone* keeps the sealed (encrypted) token
-   so the daily job can retry. The tombstone is deleted on success, and given up after 10 attempts or 30 days.
+   so the daily job can retry; the tombstone is written *before* the connection is deleted, and if it cannot be written (or the connections cannot be listed) the deletion stops with `502 revoke_failed` and nothing more is removed.
+   The tombstone is deleted on success, and given up after 30 days (logged and recorded in the audit log under the deleted workspace's id).
    **Pasted API tokens cannot be revoked from here**: the response says how many there were (`cloudflare.pasted_tokens`) and the owner must revoke them in the Cloudflare dashboard.
 4. All workspace data is deleted, and people who belonged only to this workspace are deleted with it.
 
@@ -56,6 +59,10 @@ records the privacy policy describes for the website and for sales prospecting.
 `DELETE /api/account` with `{ "confirm": "<your email>" }` (signed-in users only, not API keys). Deletes the user, their sessions, login methods
 (password and OAuth links), tokens, API keys, memberships and invites addressed to them; their email is removed from the audit log (the entries remain, without it).
 Workspaces only they belong to are deleted as above, including the Cloudflare revocation.
+
+`GET /api/account` previews it: the workspaces that would be deleted and the Cloudflare connections the user created in workspaces that stay (those keep working after the user is gone; disconnect them first if that is not wanted). Invites the user sent that are still pending are revoked.
+
+If several workspaces are deleted and a later one fails, the error names those already deleted; the account is kept and retrying finishes the job.
 
 Refused with `409 transfer_required` while the user is the only owner of a workspace that has other members. Transfer ownership
 (`POST /api/workspaces/:id/transfer-ownership {"user_id": …}`, or Members → Make owner) or delete the workspace first.
@@ -67,6 +74,7 @@ The instance workspace of a self-hosted install is never deleted this way.
 audit log, invites, API-key metadata, Cloudflare connection metadata and per-domain configuration. It never includes password hashes, tokens, key hashes,
 sealed Cloudflare tokens, secret settings or raw report payloads. Use it to answer subject-access and portability requests.
 The dashboard has a button in Settings → Danger zone.
+Columns are listed explicitly (a new column is not exported until it is added to the list), and the file is streamed a page at a time. A workspace with more than 250,000 rows in its big tables is refused with `413 export_too_large`; a background export is a planned follow-up.
 
 ## Settings reference
 

@@ -71,16 +71,16 @@ export function workspaceLifecycle(dbLike: DbLike) {
 		},
 
 		/**
-		 * Make `toId` an owner and `fromId` an admin, in one batch. Only when `fromId` is an owner now and `toId` a member,
-		 * so a stale request changes nothing. Returns whether it applied.
+		 * Make `toId` an owner and `fromId` an admin, in one batch (both or neither). The promotion only applies when `fromId` is an
+		 * owner now and `toId` a member; the demotion only when `toId` is an owner by then, so a stale request changes nothing
+		 * and never leaves the workspace without an owner. Returns whether it applied.
 		 */
 		async transferOwnership(workspaceId: string, fromId: string, toId: string): Promise<boolean> {
-			const res = await db.run(sql`UPDATE memberships SET role = 'owner'
-				WHERE workspace_id = ${workspaceId} AND user_id = ${toId}
-				AND EXISTS (SELECT 1 FROM memberships o WHERE o.workspace_id = ${workspaceId} AND o.user_id = ${fromId} AND o.role = 'owner')`);
-			if (((res as any).meta?.changes ?? (res as any).changes ?? 0) === 0) return false;
-			await db.run(sql`UPDATE memberships SET role = 'admin' WHERE workspace_id = ${workspaceId} AND user_id = ${fromId} AND role = 'owner'`);
-			return true;
+						await db.batch([
+				db.update(memberships).set({ role: 'owner' }).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, toId), sql`EXISTS (SELECT 1 FROM memberships o WHERE o.workspace_id = ${workspaceId} AND o.user_id = ${fromId} AND o.role = 'owner')`)),
+				db.update(memberships).set({ role: 'admin' }).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, fromId), eq(memberships.role, 'owner'), sql`EXISTS (SELECT 1 FROM memberships n WHERE n.workspace_id = ${workspaceId} AND n.user_id = ${toId} AND n.role = 'owner')`)),
+			]);
+			return (await this.roleOf(toId, workspaceId)) === 'owner' && (await this.roleOf(fromId, workspaceId)) !== 'owner';
 		},
 
 		/** Delete a workspace and everything it owns (domains cascade to their reports and per-domain config). */

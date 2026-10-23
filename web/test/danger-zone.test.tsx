@@ -24,6 +24,21 @@ describe('Danger zone', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('shows what the deletion takes and what it leaves behind', async () => {
+		renderApp(<DangerZone />, {
+			role: 'owner',
+			routes: {
+				'GET /api/account': {
+					email: 'owner@example.com', blocking: [], deleted_workspaces: ['Solo'],
+					connections_left_behind: [{ workspace: 'Lexgo', label: 'Lexgo CF', cf_account_name: 'Lexgo Ltd' }],
+				},
+			},
+		});
+		await userEvent.setup().click(await screen.findByRole('button', { name: 'Delete my account' }));
+		expect(await screen.findByText(/Deleted with you: "Solo"/)).toBeInTheDocument();
+		expect(await screen.findByTestId('connections-left-behind')).toHaveTextContent('Lexgo CF (Lexgo Ltd) in Lexgo');
+	});
+
 	it('says which workspace must be handed over first', async () => {
 		renderApp(<DangerZone />, {
 			role: 'owner',
