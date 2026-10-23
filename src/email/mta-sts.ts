@@ -75,10 +75,11 @@ async function createDnsRecord(
   record: CfDnsRecordInput,
   audit?: MtaStsAuditOpts,
 ): Promise<string> {
-  const zone = await tenant.zoneFor(domain);
+  const cf = await tenant.cfFor(domain);
+  const zone = await cf.zoneFor(domain);
   let created;
   try {
-    created = await tenant.requireCf().createDnsRecord(zone.id, record);
+    created = await cf.createDnsRecord(zone.id, record);
   } catch (e) {
     throw new Error(`CF DNS create failed for ${record.name}: ${cfErrorText(e)}`);
   }
@@ -119,8 +120,8 @@ async function patchDnsRecord(
   content: string,
   audit?: { opts?: MtaStsAuditOpts; beforeContent?: string },
 ): Promise<void> {
-  const zone = await tenant.zoneFor(domain);
-  const cf = tenant.requireCf();
+  const cf = await tenant.cfFor(domain);
+  const zone = await cf.zoneFor(domain);
   try {
     try {
       await cf.patchDnsRecord(zone.id, recordId, { content });
@@ -156,8 +157,8 @@ async function deleteDnsRecord(
   recordId: string,
   audit?: MtaStsAuditOpts,
 ): Promise<void> {
-  const zone = await tenant.zoneFor(domain);
-  const cf = tenant.requireCf();
+  const cf = await tenant.cfFor(domain);
+  const zone = await cf.zoneFor(domain);
   try {
     let deleted = await cf.deleteDnsRecord(zone.id, recordId); // already gone is fine
     const legacy = deleted ? undefined : tenant.legacyZoneId(zone.id);
@@ -192,8 +193,9 @@ async function deleteDnsRecord(
 async function getWorkerRoute(tenant: TenantContext, domain: string): Promise<string> {
   const worker = tenant.workerName;
   try {
-    const zone = await tenant.zoneFor(domain);
-    const routes = await tenant.requireCf().request<{ pattern: string; script: string }[]>('GET', `/zones/${zone.id}/workers/routes`);
+    const cf = await tenant.cfFor(domain);
+    const zone = await cf.zoneFor(domain);
+    const routes = await cf.request<{ pattern: string; script: string }[]>('GET', `/zones/${zone.id}/workers/routes`);
     const route = routes?.find(r => r.script === worker);
     if (route) {
       // Extract hostname from route pattern like "worker.domain.com/*"

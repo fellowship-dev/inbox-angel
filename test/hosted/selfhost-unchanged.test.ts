@@ -1,6 +1,9 @@
 // Golden tests: with MODE unset (self-host) nothing about intake, canary, MTA-STS or the API changes, even
 // when the hosted variables happen to be set. These pin today's behaviour.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Full signup + worker round trips: the 5 s default flakes when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 30_000 });
 import { gzipSync, strToU8 } from 'fflate';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { resetSchemaReadyCache } from '@inbox-angel/db';

@@ -8,7 +8,10 @@
 
 import type { BoundEnv } from '../index';
 import { forAccount, type AccountScope } from '@inbox-angel/db';
-import { CfClient, CfNotConfiguredError, CfZoneNotFoundError, type CfZone } from './cf-client';
+import { CfClient, CfNotConfiguredError, CfZoneNotFoundError, zoneCandidates, type CfZone } from './cf-client';
+import { ConnectionService } from '../connections/service';
+import { logAudit } from '../audit/log';
+import { notifyConnectionBroken } from '../monitor/notify';
 import { getMode, type Mode } from './mode';
 import type { ResolvedAccount } from './resolver';
 
@@ -65,6 +68,10 @@ export class TenantContext {
   readonly #cfToken?: string;
   readonly #fetch?: typeof fetch;
   #cf?: CfClient;
+  #connections?: ConnectionService;
+  /** domain name -> linked connection id (null: unlinked), read once per context. */
+  #links?: Promise<Map<string, string | null>>;
+  #hasConnections = false;
   #telemetry?: Promise<boolean>;
 
   constructor(init: TenantInit) {
@@ -95,6 +102,54 @@ export class TenantContext {
     return this.#cf;
   }
 
+  /** This account's Cloudflare connections (OAuth or pasted token). */
+  get connections(): ConnectionService {
+    return (this.#connections ??= new ConnectionService({
+      accountId: this.accountId,
+      scope: this.scope,
+      env: this.env,
+      fetch: this.#fetch,
+      onBroken: info => {
+        logAudit(this, {
+          actor_type: 'system', action: 'cf_connection.broken',
+          resource_type: 'cf_connection', resource_id: info.id, resource_name: info.label,
+          after_value: { status: 'broken', detail: info.detail },
+        });
+        return notifyConnectionBroken(this, info);
+      },
+    }));
+  }
+
+  /** Remember (from loadTenant) whether the account has any connection, for the synchronous availability checks. */
+  setHasConnections(has: boolean): void { this.#hasConnections = has; }
+
+  /** Is any Cloudflare credential available: the self-host token, or a connection (whatever its status)? */
+  hasCloudflare(): boolean { return !!this.#cfToken || this.#hasConnections; }
+
+  /**
+   * The Cloudflare client that manages `domain`'s zone. The domain (or the nearest parent in this
+   * account) is linked to a connection: that connection's client, restricted to its allow-list.
+   * Not linked: the self-host token (selfhost mode only) or CfNotConfiguredError.
+   * A broken or revoked connection throws CfConnectionError.
+   */
+  async cfFor(domain: string): Promise<CfClient> {
+    const linked = await this.#connectionFor(domain);
+    if (linked) return this.connections.clientFor(linked);
+    const cf = this.cf();
+    if (cf) return cf;
+    if (this.mode === 'selfhost' || !(await this.connections.hasActive())) throw new CfNotConfiguredError();
+    throw new CfNotConfiguredError(`${domain} is not linked to a Cloudflare connection`);
+  }
+
+  async #connectionFor(domain: string): Promise<string | null> {
+    this.#links ??= this.scope.domains.list().then(rows => new Map(rows.map(r => [r.domain.toLowerCase(), r.cf_connection_id ?? null] as const)));
+    const links = await this.#links;
+    for (const name of zoneCandidates(domain)) {
+      if (links.has(name)) return links.get(name)!;
+    }
+    return null;
+  }
+
   /** Like cf(), but throws CfNotConfiguredError when there is no token. */
   requireCf(): CfClient {
     const cf = this.cf();
@@ -102,9 +157,9 @@ export class TenantContext {
     return cf;
   }
 
-  /** The Cloudflare zone this domain lives in (resolved per domain, cached for this tenant context). */
-  zoneFor(domain: string): Promise<CfZone> {
-    return this.requireCf().zoneFor(domain);
+  /** The Cloudflare zone this domain lives in (resolved per domain through its connection, cached for this tenant context). */
+  async zoneFor(domain: string): Promise<CfZone> {
+    return (await this.cfFor(domain)).zoneFor(domain);
   }
 
   /**
@@ -158,6 +213,8 @@ export class TenantContext {
   /** Forget the Cloudflare client and cached flags after settings changed. */
   invalidate(): void {
     this.#cf = undefined;
+    this.#links = undefined;
+    this.#connections?.invalidate();
     this.#telemetry = undefined;
   }
 }

@@ -63,8 +63,8 @@ export async function findSpfRecord(
   tenant: TenantContext,
   domain: string,
 ): Promise<CfDnsRecord | null> {
-  const zone = await tenant.zoneFor(domain);
-  const cf = tenant.requireCf();
+  const cf = await tenant.cfFor(domain);
+  const zone = await cf.zoneFor(domain);
   const isSpf = (r: CfDnsRecord) => r.content.replace(/^"|"$/g, '').startsWith('v=spf1');
   const found = (await cf.listDnsRecords(zone.id, { type: 'TXT', name: domain, per_page: 100 })).find(isSpf);
   if (found) return found;
@@ -84,8 +84,8 @@ export async function updateDnsRecord(
   newContent: string,
   audit?: { opts?: SpfAuditOpts; beforeContent?: string },
 ): Promise<void> {
-  const zone = await tenant.zoneFor(domain);
-  const cf = tenant.requireCf();
+  const cf = await tenant.cfFor(domain);
+  const zone = await cf.zoneFor(domain);
   try {
     try {
       await cf.patchDnsRecord(zone.id, recordId, { content: newContent });

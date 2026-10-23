@@ -106,9 +106,12 @@ export const domains = sqliteTable(
 		alerts_enabled: integer('alerts_enabled').notNull().default(1),
 		spf_lookup_count: integer('spf_lookup_count'),
 		account_id: accountId(),
+		/** The Cloudflare connection that manages this domain's zone (0015). Null: the self-host env token, or none. */
+		cf_connection_id: text('cf_connection_id').references((): any => cloudflareConnections.id, { onDelete: 'set null' }),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),
+		index('idx_domains_cf_connection').on(t.cf_connection_id),
 		index('idx_domains_parent').on(t.parent_id),
 		index('idx_domains_account').on(t.account_id),
 		// At most one default domain per account.
@@ -524,6 +527,84 @@ export const canaryTokens = sqliteTable(
 	(t) => [index('idx_canary_tokens_expires').on(t.expires_at)],
 );
 
+// ── Cloudflare connections ──────────────────────────────────
+
+export const CF_AUTH_TYPES = ['oauth', 'token'] as const;
+export const CF_CONNECTION_STATUSES = ['active', 'broken', 'revoked'] as const;
+export type CfAuthType = (typeof CF_AUTH_TYPES)[number];
+export type CfConnectionStatus = (typeof CF_CONNECTION_STATUSES)[number];
+
+/**
+ * A Cloudflare account an Inbox Angel account has connected (OAuth, or a pasted API token). One account
+ * can hold several. `token_envelope` is the AES-GCM envelope of {access, refresh, expires_at}
+ * (src/connections/crypto.ts): the plaintext token is never stored, and list queries never select the column.
+ */
+export const cloudflareConnections = sqliteTable(
+	'cloudflare_connections',
+	{
+		id: text('id').primaryKey(),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		label: text('label').notNull(),
+		cf_account_id: text('cf_account_id'),
+		cf_account_name: text('cf_account_name'),
+		auth_type: text('auth_type', { enum: CF_AUTH_TYPES }).notNull(),
+		token_envelope: text('token_envelope').notNull(),
+		scopes: text('scopes'),
+		status: text('status', { enum: CF_CONNECTION_STATUSES }).notNull().default('active'),
+		status_detail: text('status_detail'),
+		created_by: text('created_by'),
+		created_at: integer('created_at').notNull().default(now),
+		last_used_at: integer('last_used_at'),
+	},
+	(t) => [
+		index('idx_cf_connections_account').on(t.account_id),
+		check('cf_connections_auth_type_check', sql`${t.auth_type} IN ('oauth', 'token')`),
+		check('cf_connections_status_check', sql`${t.status} IN ('active', 'broken', 'revoked')`),
+	],
+);
+
+/**
+ * The zones Inbox Angel may manage through a connection. Cloudflare consent is per Cloudflare account,
+ * not per zone, so the owner picks the zones here and every call is checked against this list.
+ * A connection with no rows may touch no zone.
+ */
+export const cloudflareConnectionZones = sqliteTable(
+	'cloudflare_connection_zones',
+	{
+		connection_id: text('connection_id').notNull().references(() => cloudflareConnections.id, { onDelete: 'cascade' }),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		zone_id: text('zone_id').notNull(),
+		zone_name: text('zone_name').notNull(),
+		/** The Cloudflare account that owns the zone (from Cloudflare when the zone was allowed): what `/accounts/*` calls are checked against. */
+		cf_account_id: text('cf_account_id'),
+		created_at: integer('created_at').notNull().default(now),
+	},
+	(t) => [
+		primaryKey({ columns: [t.connection_id, t.zone_id] }),
+		index('idx_cf_connection_zones_account').on(t.account_id),
+	],
+);
+
+/**
+ * Zones that sit below an allowed zone but are NOT on the allow-list, as seen when the list was saved.
+ * A child zone is delegated, so a record written for a name inside it in the parent zone is shadowed and
+ * has no effect: such names are refused (with the blocking zone named) instead of written to the parent.
+ */
+export const cloudflareConnectionBlockedZones = sqliteTable(
+	'cloudflare_connection_blocked_zones',
+	{
+		connection_id: text('connection_id').notNull().references(() => cloudflareConnections.id, { onDelete: 'cascade' }),
+		account_id: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+		zone_id: text('zone_id').notNull(),
+		zone_name: text('zone_name').notNull(),
+		created_at: integer('created_at').notNull().default(now),
+	},
+	(t) => [
+		primaryKey({ columns: [t.connection_id, t.zone_id] }),
+		index('idx_cf_connection_blocked_account').on(t.account_id),
+	],
+);
+
 /**
  * Tables with no account_id, and why. `test/account-predicates.test.ts` uses
  * this list: anything else that is tenant data must be scoped.
@@ -558,4 +639,7 @@ export const ACCOUNT_OWNED_TABLES = [
 	'api_keys',
 	'intake_tokens',
 	'hosted_domains',
+	'cloudflare_connections',
+	'cloudflare_connection_zones',
+	'cloudflare_connection_blocked_zones',
 ] as const;

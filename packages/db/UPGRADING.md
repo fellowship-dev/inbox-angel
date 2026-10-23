@@ -79,3 +79,10 @@ and `email_verified`/`image`/`updated_at` on `users`.
 
 Migration `0014_hosted_intake.sql` adds `intake_tokens`, `hosted_domains`, `hosted_zones` and `canary_tokens`. Purely additive; self-host installs
 never write to them (they only matter with `MODE=saas`). Roll back by restoring the backup with the previous Worker.
+
+## 0015: Cloudflare connections
+
+Migration `0015_cloudflare_connections.sql` adds `cloudflare_connections` (a Cloudflare account an Inbox Angel account connected; the token is
+stored only as an AES-GCM envelope), `cloudflare_connection_zones` (the zones Inbox Angel may manage through a connection) and a nullable
+`domains.cf_connection_id`. Purely additive: self-host installs keep using `CLOUDFLARE_API_TOKEN` and never write to them. Roll back by restoring the backup
+with the previous Worker. See `docs/cloudflare-oauth.md`.

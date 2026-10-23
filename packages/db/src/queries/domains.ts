@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { unwrapDriverError, type Db } from '../client';
-import { domains } from '../schema';
+import { cloudflareConnections, domains } from '../schema';
 
 export function domainQueries(db: Db, accountId: string) {
 	const mine = eq(domains.account_id, accountId);
@@ -69,6 +69,17 @@ export function domainQueries(db: Db, accountId: string) {
 
 		updateRollout(id: number, policy: string, pct: number) {
 			return db.update(domains).set({ rollout_rec_policy: policy, rollout_rec_pct: pct, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
+		},
+
+		/** Link a domain to one of this account's Cloudflare connections (null unlinks). False: no such domain or connection. */
+		async setConnection(id: number, connectionId: string | null): Promise<boolean> {
+			if (connectionId !== null) {
+				const c = await db.select({ id: cloudflareConnections.id }).from(cloudflareConnections)
+					.where(and(eq(cloudflareConnections.account_id, accountId), eq(cloudflareConnections.id, connectionId))).get();
+				if (!c) return false;
+			}
+			const r = await db.update(domains).set({ cf_connection_id: connectionId, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
+			return (r.meta.changes ?? 0) > 0;
 		},
 
 		setAlertsEnabled(id: number, enabled: boolean) {

@@ -10,7 +10,7 @@
 // Requires: CLOUDFLARE_API_TOKEN (DNS:Edit + Email Routing Rules:Edit)
 
 import type { TenantContext } from '../tenancy/context';
-import { CfError, CfNetworkError, CfZoneNotFoundError, type CfClient } from '../tenancy/cf-client';
+import { CfError, CfNetworkError, CfNotConfiguredError, CfZoneNotFoundError, type CfClient } from '../tenancy/cf-client';
 
 /** Zone-scoped call; resolves to the `result` and throws a typed CfError on failure. */
 function zoneCall<T>(cf: CfClient, zoneId: string, method: string, path: string, body?: unknown): Promise<T> {
@@ -44,10 +44,11 @@ export async function registerEmailRoutingDestination(
   tenant: TenantContext,
   email: string,
 ): Promise<boolean> {
-  const cf = tenant.cf();
   const accountId = tenant.settings.cfAccountId;
-  if (!cf || !accountId) return false;
+  const reportsDomain = tenant.settings.reportsDomain;
+  if (!accountId || !reportsDomain || !tenant.hasCloudflare()) return false;
   try {
+    const cf = await tenant.cfFor(reportsDomain);
     await cf.request('POST', `/accounts/${accountId}/email/routing/addresses`, { body: { email } });
   } catch (e) {
     // "already exists" is fine — address just needs the user to verify if they haven't
@@ -64,17 +65,19 @@ export interface EmailRoutingResult {
 }
 
 export async function ensureEmailRouting(tenant: TenantContext): Promise<EmailRoutingResult> {
-  const cf = tenant.cf();
   const domain = tenant.settings.reportsDomain;
   const workerName = tenant.workerName;
 
-  // Email Routing for the reports domain lives in the reports domain's zone.
+  // Email Routing for the reports domain lives in the reports domain's zone, reached through the
+  // Cloudflare connection that domain is linked to.
+  let cf: CfClient | undefined;
   let zoneId: string | undefined;
-  if (cf && domain) {
+  if (domain && tenant.hasCloudflare()) {
     try {
-      zoneId = (await tenant.zoneFor(domain)).id;
+      cf = await tenant.cfFor(domain);
+      zoneId = (await cf.zoneFor(domain)).id;
     } catch (e) {
-      if (!(e instanceof CfZoneNotFoundError)) throw e;
+      if (!(e instanceof CfZoneNotFoundError || e instanceof CfNotConfiguredError)) throw e;
     }
   }
 
@@ -166,8 +169,8 @@ export async function ensureNullSenderRecords(
   tenant: TenantContext,
   rdomain: string,
 ): Promise<string[]> {
-  const cf = tenant.requireCf();
-  const zoneId = (await tenant.zoneFor(rdomain)).id;
+  const cf = await tenant.cfFor(rdomain);
+  const zoneId = (await cf.zoneFor(rdomain)).id;
   const actions: string[] = [];
 
   // --- SPF on reports subdomain ---

@@ -11,18 +11,20 @@ import { call, makeEnv } from './helpers';
 import { createApiKey } from '../../src/auth/api-keys';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from '../hosted/world';
+import { AUTH } from '../connections/mock-oauth';
+import { KEY, Z } from '../connections/world';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 
 /** Strings that exist only in B's data: none may ever appear in a response to A. */
-const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77', 'b-hosted-id-secret', 'b-intake-hash-secret'];
+const SECRETS = ['b-secret.example.com', 'B-Org-Secret', 'b-owner@example.com', 'b-member@example.com', 'b-invite-token', 'b-rua-secret', 'B-Spf-Secret', 'b-policy-id', 'b-secret-settings-value', '198.51.100.77', 'b-hosted-id-secret', 'b-intake-hash-secret', 'b-cf-label-secret', 'b-cf-envelope-secret', 'b-cf-account-secret', 'b-zone-secret.example.org', 'cfc_b_secret'];
 
 const rows = (db: any, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 
 async function world() {
   const db = createMigratedD1();
-  const env = makeEnv(db, { ...HOSTED_ENV });
+  const env = makeEnv(db, { ...HOSTED_ENV, ...AUTH, TOKEN_ENCRYPTION_KEY: `k1:${KEY}` });
   const signup = async (email: string) => {
     const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
     expect(r.status).toBe(201);
@@ -58,6 +60,9 @@ async function world() {
   db.sqlite.prepare("INSERT INTO settings (account_id, key, value) VALUES (?, 'custom_value', 'b-secret-settings-value')").run(b);
   db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, account_id, hosted_id, zone_key, dmarc_record_id) VALUES (2, ?, 'b-hosted-id-secret', 'z1', 'rec-b')").run(b);
   db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, account_id, token_hash) VALUES (2, ?, 'b-intake-hash-secret')").run(b);
+  db.sqlite.prepare("INSERT INTO cloudflare_connections (id, account_id, label, cf_account_id, cf_account_name, auth_type, token_envelope, scopes) VALUES ('cfc_b_secret', ?, 'b-cf-label-secret', 'b-cf-account-secret', 'b-cf-account-secret', 'oauth', 'ia1.k1.b-cf-envelope-secret.b-cf-envelope-secret', 'zone:read')").run(b);
+  db.sqlite.prepare("INSERT INTO cloudflare_connection_zones (connection_id, account_id, zone_id, zone_name, cf_account_id) VALUES ('cfc_b_secret', ?, ?, 'b-zone-secret.example.org', 'b-cf-account-secret')").run(b, Z.b);
+  db.sqlite.prepare("UPDATE domains SET cf_connection_id = 'cfc_b_secret' WHERE id = 2").run();
   db.sqlite.prepare("INSERT INTO users (id, email, name) VALUES ('u-b-member', 'b-member@example.com', 'B Member')").run();
   db.sqlite.prepare("INSERT INTO memberships (account_id, user_id, role) VALUES (?, 'u-b-member', 'member')").run(b);
 
@@ -125,6 +130,20 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/domains/1/analytics', kind: 'scoped' },
   { method: 'GET', path: '/api/domains/2/analytics?days=90', kind: 'denied' },
   { method: 'POST', path: '/api/domains/2/analytics', body: {}, kind: 'denied', note: 'no write verb exists; must not reach B either' },
+  // Cloudflare connections (src/connections/routes.ts): owner/admin, the caller's own account only
+  { method: 'GET', path: '/api/cloudflare/connections', kind: 'scoped' },
+  { method: 'POST', path: '/api/cloudflare/connections', body: { token: 'a-pasted-token-0123456789abcdef' }, kind: 'scoped' },
+  { method: 'GET', path: '/api/cloudflare/connections/cfc_b_secret', kind: 'denied' },
+  { method: 'DELETE', path: '/api/cloudflare/connections/cfc_b_secret', kind: 'denied' },
+  { method: 'PUT', path: '/api/cloudflare/connections/cfc_b_secret/token', body: { token: 'a-evil-token-0123456789abcdef' }, kind: 'denied' },
+  { method: 'GET', path: '/api/cloudflare/connections/cfc_b_secret/zones', kind: 'denied' },
+  { method: 'PUT', path: '/api/cloudflare/connections/cfc_b_secret/zones', body: { zone_ids: [Z.a1] }, kind: 'denied' },
+  { method: 'POST', path: '/api/cloudflare/oauth/start', body: {}, kind: 'scoped' },
+  { method: 'POST', path: '/api/cloudflare/oauth/start', body: { connection_id: 'cfc_b_secret' }, kind: 'denied', note: 'reconnecting B\'s connection' },
+  { method: 'GET', path: '/api/cloudflare/oauth/callback?code=x&state=y', kind: 'scoped', note: 'no cookie: refused, whatever the state' },
+  { method: 'PUT', path: '/api/domains/2/connection', body: { connection_id: null }, kind: 'denied', note: 'B\'s domain' },
+  { method: 'PUT', path: '/api/domains/1/connection', body: { connection_id: 'cfc_b_secret' }, kind: 'denied', note: 'A\'s domain, B\'s connection' },
+  { method: 'PUT', path: '/api/domains/1/connection', body: { connection_id: null }, kind: 'scoped' },
   { method: 'GET', path: '/api/hosted/config', kind: 'scoped' },
   { method: 'POST', path: '/api/domains/bulk-import', body: { domains: 'fresh-a.example.net' }, kind: 'scoped' },
   { method: 'GET', path: '/api/domains/ct-discover?domain=example.net', kind: 'scoped' },
@@ -253,6 +272,18 @@ describe('two hosted accounts: A cannot reach B', () => {
     const covered = ROUTES.map(r => `${r.method} ${r.path.split('?')[0]}`);
     expect(documented.filter(d => !covered.includes(d))).toEqual([]);
     expect(ROUTES.some(r => r.kind === 'denied' && r.path.startsWith('/api/domains/2/analytics'))).toBe(true);
+  });
+
+  it('table covers every route of the connections module (add new routes here)', () => {
+    const src = readFileSync(join(__dirname, '../../src/connections/routes.ts'), 'utf8');
+    const documented = [...src.matchAll(/^\/\/\s+(GET|POST|PUT|DELETE)\s+(\/api\/\S+)/gm)]
+      .map(m => `${m[1]} ${m[2].replace('/domains/:id', '/domains/2').replace('/connections/:id', '/connections/cfc_b_secret')}`);
+    expect(documented.length).toBe(10);
+    const covered = ROUTES.map(r => `${r.method} ${r.path.split('?')[0]}`);
+    expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+    // every module route that takes an id is also exercised against B's id
+    const denied = ROUTES.filter(r => r.kind === 'denied').map(r => `${r.method} ${r.path.split('?')[0]}`);
+    expect(documented.filter(d => /cfc_b_secret|domains\/2/.test(d) && !denied.includes(d))).toEqual([]);
   });
 
   it('analytics shows each account only its own senders (B sees its own, A sees none of them)', async () => {

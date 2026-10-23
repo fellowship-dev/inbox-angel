@@ -5,7 +5,7 @@
 
 import type { BoundEnv } from '../index';
 import { DEFAULT_BRAND_COLOR, TenantContext, type TenantSettings } from './context';
-import { CfError } from './cf-client';
+import { CfConnectionError, CfError, CfNotConfiguredError } from './cf-client';
 import { getMode, type Mode } from './mode';
 import type { ResolvedAccount } from './resolver';
 
@@ -46,6 +46,8 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
   tenant.invalidate();
   const q = tenant.scope;
   const raw = await q.settings.getMany([...KEYS]);
+  // Any connection, broken ones included: using a broken one must fail with its own error, not look unconfigured.
+  tenant.setHasConnections((await q.connections.list()).length > 0);
   // An empty value means "cleared" (the wizard blanks the zone when the base domain changes).
   const stored = { get: (key: string) => raw.get(key) || undefined };
   const s: TenantSettings = {
@@ -67,10 +69,10 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
   const persist: Record<string, string> = {};
   const cf = tenant.cf();
 
-  // Zone + Cloudflare account of the base domain.
+  // Zone + Cloudflare account of the base domain (through the connection the domain is linked to, if any).
   try {
-    if (cf && s.baseDomain && (!s.zoneId || !s.cfAccountId)) {
-      const zone = await cf.zoneFor(s.baseDomain);
+    if (s.baseDomain && (!s.zoneId || !s.cfAccountId) && tenant.hasCloudflare()) {
+      const zone = await (await tenant.cfFor(s.baseDomain)).zoneFor(s.baseDomain);
       s.zoneId = zone.id; s.zoneName = zone.name; s.cfAccountId = zone.accountId ?? s.cfAccountId;
       persist.zone_id = zone.id; persist.zone_name = zone.name;
       if (zone.accountId) persist.account_id = zone.accountId;
@@ -82,7 +84,10 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
   } catch (e) {
     // Best effort, as before: a Cloudflare outage or a token without Zone:Read must not take
     // the dashboard down. Features that need the zone resolve it again and report the error.
-    console.warn(`[tenant ${tenant.accountId}] Cloudflare lookup failed:`, e instanceof CfError ? e.message : e instanceof Error ? e.name : 'error');
+    // (A domain not linked to any connection yet is not worth a log line per request.)
+    if (!(e instanceof CfNotConfiguredError)) {
+      console.warn(`[tenant ${tenant.accountId}] Cloudflare lookup failed:`, e instanceof CfError || e instanceof CfConnectionError ? e.message : e instanceof Error ? e.name : 'error');
+    }
   }
 
   if (!s.reportsDomain && s.baseDomain) s.reportsDomain = `reports.${s.baseDomain}`;

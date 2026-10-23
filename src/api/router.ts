@@ -31,6 +31,7 @@
 //   GET    /api/domains/:id/anomalies         — failing sources with Active/Older split
 //   GET    /api/domains/:id/export            — CSV export
 //   GET    /api/domains/:id/dns-check         — check _dmarc TXT record in DNS
+//   *      /api/cloudflare/connections…, /api/cloudflare/oauth/…, PUT /api/domains/:id/connection — Cloudflare connections (owner/admin; src/connections/routes.ts)
 //   GET/POST/DELETE /api/domains/:id/hosted, POST …/hosted/rotate-token, …/hosted/verify — hosted records (MODE=saas; src/hosted/routes.ts)
 //   GET /api/analytics, GET /api/domains/:id/analytics — sender inventory, pass-rate trend, what to fix next, enforcement readiness (src/analytics/routes.ts)
 //   GET    /api/domains/:id/rollout-next      — current rollout step, next step, DNS preview, safety
@@ -63,6 +64,8 @@ import { handleAuthRoute } from '../auth/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
+import { handleConnectionRoutes } from '../connections/routes';
+import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
@@ -77,7 +80,7 @@ import { track } from '../telemetry';
 import { loadTenant, refreshTenant } from '../tenancy/load';
 import type { TenantContext } from '../tenancy/context';
 import { defaultResolver, type AccountResolver } from '../tenancy/resolver';
-import { CfApiError, CfAuthError, CfNotConfiguredError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
+import { CfApiError, CfAuthError, CfConnectionError, CfNotConfiguredError, CfZoneNotAllowedError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
@@ -124,6 +127,10 @@ function err(message: string, status: number): Response {
 /** HTTP status for a Cloudflare failure: config problems are the caller's, the rest is reported as given. */
 function cfFailure(e: unknown, fallbackStatus = 500): Response {
   if (e instanceof CfNotConfiguredError || e instanceof CfZoneNotFoundError) return err(e.message, 400);
+  if (e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return err('Cloudflare connections are unavailable: the server\'s encryption key is missing or does not match the stored credentials. This is for the server operator to fix.', 503);
+  // A connection that needs the owner (reconnect), or a zone the owner did not allow: not the caller's mistake to retry.
+  if (e instanceof CfConnectionError) return json({ error: e.message, code: `cf_connection_${e.code}`, connection_id: e.connectionId }, 409);
+  if (e instanceof CfZoneNotAllowedError) return json({ error: e.message, code: 'cf_zone_not_allowed', connection_id: e.connectionId }, 403);
   return err(cfErrorText(e), fallbackStatus);
 }
 
@@ -740,7 +747,7 @@ async function _handleApi(
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       if (!domain.dns_record_id) return err('domain is not CF-managed — update DNS manually', 400);
-      if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
 
       const body = await parseBody<{ policy?: string }>(request);
       const policy = body.policy;
@@ -822,9 +829,12 @@ async function _handleApi(
           const admin = await tenant.scope.team.firstAdmin();
           const admin_email = admin?.email ?? null;
           const accountId = tenant.settings.cfAccountId;
-          const cf = tenant.cf();
+          let cf: Awaited<ReturnType<typeof tenant.cfFor>> | null = null;
+          if (tenant.hasCloudflare() && rd) {
+            try { cf = await tenant.cfFor(rd); } catch (e) { destination_debug = e instanceof Error ? e.message : 'no usable Cloudflare connection'; }
+          }
           if (!cf) {
-            destination_debug = 'no CF token';
+            destination_debug ??= 'no CF token';
           } else if (!accountId) {
             destination_debug = 'account ID not resolved';
           } else if (!admin?.email) {
@@ -853,11 +863,11 @@ async function _handleApi(
         // DKIM: CF API if available (full zone scan), else DoH for common selectors
         // Scans both TXT and CNAME records — providers like Proton Mail use CNAMEs for DKIM
         (async () => {
-          const cf = tenant.cf();
-          if (cf) {
+          if (tenant.hasCloudflare()) {
             try {
               // DKIM records live in this domain's own zone.
-              const zone = await tenant.zoneFor(domain.domain);
+              const cf = await tenant.cfFor(domain.domain);
+              const zone = await cf.zoneFor(domain.domain);
               const [txtRecords, cnameRecords] = await Promise.all([
                 cf.listDnsRecords(zone.id, { type: 'TXT', per_page: 100 }),
                 cf.listDnsRecords(zone.id, { type: 'CNAME', per_page: 100 }),
@@ -910,7 +920,7 @@ async function _handleApi(
         domain_id: domain.id,
         domain: domain.domain,
         rua_address: domain.rua_address,
-        cf_available: !!tenant.cf(),
+        cf_available: tenant.hasCloudflare(),
         dmarc: { ...dmarcData, auth_record: authRecordData },
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },
         dkim: dkimData,
@@ -922,7 +932,7 @@ async function _handleApi(
 
     // POST /api/setup/email-routing — set up MX records + catch-all rule for reports domain
     if (path === '/api/setup/email-routing' && method === 'POST') {
-      if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
       const rd = tenant.settings.reportsDomain;
       if (!rd) return err('Reports domain not configured — complete the setup wizard first', 400);
 
@@ -946,7 +956,7 @@ async function _handleApi(
 
     // POST /api/settings/register-destination — register admin email as CF Email Routing destination
     if (path === '/api/settings/register-destination' && method === 'POST') {
-      if (!tenant.cf() || !tenant.settings.cfAccountId) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare() || !tenant.settings.cfAccountId) return err('Cloudflare credentials not configured', 400);
       const admin = await tenant.scope.team.firstAdmin();
       if (!admin?.email) return err('no admin email found', 400);
       const sent = await registerEmailRoutingDestination(tenant, admin.email);
@@ -960,19 +970,19 @@ async function _handleApi(
       if (isNaN(id)) return err('invalid domain id', 400);
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      const cf = tenant.cf();
-      if (!cf) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
 
       const body = await parseBody<{ record?: string }>(request);
       if (!body.record) return err('record content is required', 400);
 
       const recordName = `_dmarc.${domain.domain}`;
 
-      // The write goes to the zone this domain lives in, not to a default zone.
+      // The write goes to the zone this domain lives in, through the connection it is linked to.
       let written;
       let existingId: string | undefined;
       try {
-        const zone = await tenant.zoneFor(domain.domain);
+        const cf = await tenant.cfFor(domain.domain);
+        const zone = await cf.zoneFor(domain.domain);
         existingId = (await cf.listDnsRecords(zone.id, { type: 'TXT', name: recordName, per_page: 5 }))[0]?.id;
         written = existingId
           ? await cf.patchDnsRecord(zone.id, existingId, { content: body.record })
@@ -1030,8 +1040,7 @@ async function _handleApi(
       if (isNaN(id)) return err('invalid domain id', 400);
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      const cf = tenant.cf();
-      if (!cf) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
 
       // Block if SPF flattening is active — wizard edits would be overwritten by next cron run
       const flatConfig = await tenant.scope.spf.get(id);
@@ -1045,10 +1054,12 @@ async function _handleApi(
       const recordName = domain.domain;
 
       // Find the existing SPF TXT record in this domain's own zone
+      let cf: Awaited<ReturnType<typeof tenant.cfFor>>;
       let zoneId: string;
       let existingSpf;
       try {
-        zoneId = (await tenant.zoneFor(domain.domain)).id;
+        cf = await tenant.cfFor(domain.domain);
+        zoneId = (await cf.zoneFor(domain.domain)).id;
         existingSpf = (await cf.listDnsRecords(zoneId, { type: 'TXT', name: recordName, per_page: 100 }))
           .find(r => r.content.replace(/^"|"$/g, '').startsWith('v=spf1'));
       } catch (e) {
@@ -1083,8 +1094,7 @@ async function _handleApi(
 
     // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
-      const cf = tenant.cf();
-      if (!cf) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
       const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
@@ -1092,9 +1102,11 @@ async function _handleApi(
       const hostname = `inbox-angel.${bd}`;
 
       // The hostname is on the base domain's zone.
+      let cf: Awaited<ReturnType<typeof tenant.cfFor>>;
       let zone;
       try {
-        zone = await tenant.zoneFor(bd);
+        cf = await tenant.cfFor(bd);
+        zone = await cf.zoneFor(bd);
       } catch (e) {
         return cfFailure(e, 502);
       }
@@ -1428,7 +1440,7 @@ async function _handleApi(
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
 
-      const available = !!tenant.cf();
+      const available = tenant.hasCloudflare();
 
       // GET — return current config + availability
       if (method === 'GET') {
@@ -1568,12 +1580,12 @@ async function _handleApi(
         const config = await tenant.scope.mtaSts.get(id);
         const tlsSince = Math.floor(Date.now() / 1000) - 30 * 86400; // last 30 days
         const summary = config ? await tenant.scope.reports.tlsSummary(id, tlsSince) : null;
-        return json({ available: !!tenant.cf(), config, summary });
+        return json({ available: tenant.hasCloudflare(), config, summary });
       }
 
       if (method === 'POST') {
         // Enable MTA-STS
-        if (!tenant.cf() || !tenant.settings.reportsDomain) {
+        if (!tenant.hasCloudflare() || !tenant.settings.reportsDomain) {
           return err('Cloudflare credentials not configured', 400);
         }
         const existing = await tenant.scope.mtaSts.get(id);
@@ -1612,7 +1624,7 @@ async function _handleApi(
         // Update mode (testing → enforce) or refresh MX hosts
         const config = await tenant.scope.mtaSts.get(id);
         if (!config?.enabled) return err('MTA-STS not enabled for this domain', 404);
-        if (!tenant.cf()) return err('Cloudflare credentials not configured', 400);
+        if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
 
         const body = await parseBody<{ mode?: string; refresh_mx?: boolean }>(request);
 
@@ -1664,7 +1676,7 @@ async function _handleApi(
         const config = await tenant.scope.mtaSts.get(id);
         if (!config) return new Response(null, { status: 204 });
 
-        if (tenant.cf()) {
+        if (tenant.hasCloudflare()) {
           try {
             await deprovisionMtaSts(
               tenant,
@@ -1757,6 +1769,10 @@ async function _handleApi(
       }
     }
 
+    // /api/cloudflare/* and /api/domains/:id/connection — Cloudflare connections (owner/admin)
+    const connectionResponse = await handleConnectionRoutes(request, tenant, ctx, { role: account.role, user: userBySession });
+    if (connectionResponse) return connectionResponse;
+
     // /api/domains/:id/hosted — hosted records (MODE=saas only)
     const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
     if (hostedResponse) return hostedResponse;
@@ -1771,6 +1787,7 @@ async function _handleApi(
 
     return err('not found', 404);
   } catch (e: any) {
+    if (e instanceof CfConnectionError || e instanceof CfZoneNotAllowedError || e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return cfFailure(e);
     if (e?.status && e?.message) return err(e.message, e.status);
     console.error('API error', e);
     return err('internal server error', 500);

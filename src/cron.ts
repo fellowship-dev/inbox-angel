@@ -72,7 +72,7 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
 
   // Daily SPF flatten refresh — every day 10am UTC
   if (event.cron === '0 10 * * *') {
-    if (tenant.cf()) {
+    if (tenant.hasCloudflare()) {
       const configs = await tenant.scope.spf.allEnabled();
       console.log(`[spf-flatten] refreshing ${configs.length} flattened domains`);
       for (const config of configs) {
@@ -142,7 +142,7 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
   }
 
   // MTA-STS MX refresh — update policy_id in DNS if MX hosts changed
-  if (tenant.cf()) {
+  if (tenant.hasCloudflare()) {
     const mtaConfigs = await tenant.scope.mtaSts.allEnabled();
     for (const cfg of mtaConfigs) {
       const domain = await tenant.scope.domains.getById(cfg.domain_id);

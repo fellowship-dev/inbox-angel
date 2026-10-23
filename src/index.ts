@@ -1,5 +1,6 @@
 import { handleEmail } from './email/handler';
 import { handleApi } from './api/router';
+import { handleRelay, isRelayPath, relayEnabled } from './connections/relay';
 import { scope } from './db/scope';
 import { loadTenant } from './tenancy/load';
 import { resolveInboundAccount } from './tenancy/resolver';
@@ -27,6 +28,16 @@ export interface Env {
   GOOGLE_CLIENT_SECRET?: string;
   // Cloudflare (secrets — set via wrangler secret put)
   CLOUDFLARE_API_TOKEN?: string; // EMAIL token: email routing + DNS writes
+  // Cloudflare connections (docs/cloudflare-oauth.md)
+  TOKEN_ENCRYPTION_KEY?: string;     // secret: AES-256 key(s) for stored Cloudflare tokens, `kid:base64,…` (first seals); `openssl rand -base64 32`
+  CF_OAUTH_CLIENT_ID?: string;       // Cloudflare OAuth public client; OAuth is offered only when id + authorize + token URLs are set
+  CF_OAUTH_AUTHORIZE_URL?: string;
+  CF_OAUTH_TOKEN_URL?: string;
+  CF_OAUTH_REVOKE_URL?: string;
+  CF_OAUTH_SCOPES?: string;          // space- or comma-separated scope names
+  CF_OAUTH_REDIRECT_URI?: string;    // default: <origin>/api/cloudflare/oauth/callback
+  CF_OAUTH_RELAY_URL?: string;       // self-host: send the OAuth redirect through this relay (e.g. https://connect.inboxangel.io)
+  CF_OAUTH_RELAY_SECRET?: string;    // secret, relay deployment only: signs the relay state; setting it turns this Worker into the relay
   // Worker config (vars in wrangler.jsonc)
   WORKER_NAME?: string;          // defaults to "inbox-angel-worker"
   MODE?: string;                 // "selfhost" (default) | "saas"
@@ -48,6 +59,8 @@ export type BoundEnv = Env & { DB: D1Database };
 // HTTP API (dashboard calls, DNS provisioning)
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // OAuth relay deployment (CF_OAUTH_RELAY_SECRET set): stateless, needs no database. Inert everywhere else.
+    if (relayEnabled(env) && isRelayPath(new URL(request.url).pathname)) return handleRelay(request, env);
     if (!env.DB) return setupPage();
     try {
       await assertSchemaReady(env.DB);

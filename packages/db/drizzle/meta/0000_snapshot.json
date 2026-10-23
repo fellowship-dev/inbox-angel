@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bc9664ff-1a6b-426b-8efc-af5fd478cc5c",
+  "id": "dc4c3707-c58a-49d3-9cea-83ee101f7b4b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "accounts": {
@@ -810,6 +810,325 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "cloudflare_connection_blocked_zones": {
+      "name": "cloudflare_connection_blocked_zones",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zone_id": {
+          "name": "zone_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zone_name": {
+          "name": "zone_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_cf_connection_blocked_account": {
+          "name": "idx_cf_connection_blocked_account",
+          "columns": [
+            "account_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "cloudflare_connection_blocked_zones_connection_id_cloudflare_connections_id_fk": {
+          "name": "cloudflare_connection_blocked_zones_connection_id_cloudflare_connections_id_fk",
+          "tableFrom": "cloudflare_connection_blocked_zones",
+          "tableTo": "cloudflare_connections",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cloudflare_connection_blocked_zones_account_id_accounts_id_fk": {
+          "name": "cloudflare_connection_blocked_zones_account_id_accounts_id_fk",
+          "tableFrom": "cloudflare_connection_blocked_zones",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cloudflare_connection_blocked_zones_connection_id_zone_id_pk": {
+          "columns": [
+            "connection_id",
+            "zone_id"
+          ],
+          "name": "cloudflare_connection_blocked_zones_connection_id_zone_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "cloudflare_connection_zones": {
+      "name": "cloudflare_connection_zones",
+      "columns": {
+        "connection_id": {
+          "name": "connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zone_id": {
+          "name": "zone_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "zone_name": {
+          "name": "zone_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cf_account_id": {
+          "name": "cf_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "idx_cf_connection_zones_account": {
+          "name": "idx_cf_connection_zones_account",
+          "columns": [
+            "account_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "cloudflare_connection_zones_connection_id_cloudflare_connections_id_fk": {
+          "name": "cloudflare_connection_zones_connection_id_cloudflare_connections_id_fk",
+          "tableFrom": "cloudflare_connection_zones",
+          "tableTo": "cloudflare_connections",
+          "columnsFrom": [
+            "connection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cloudflare_connection_zones_account_id_accounts_id_fk": {
+          "name": "cloudflare_connection_zones_account_id_accounts_id_fk",
+          "tableFrom": "cloudflare_connection_zones",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cloudflare_connection_zones_connection_id_zone_id_pk": {
+          "columns": [
+            "connection_id",
+            "zone_id"
+          ],
+          "name": "cloudflare_connection_zones_connection_id_zone_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "cloudflare_connections": {
+      "name": "cloudflare_connections",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cf_account_id": {
+          "name": "cf_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cf_account_name": {
+          "name": "cf_account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "auth_type": {
+          "name": "auth_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_envelope": {
+          "name": "token_envelope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'active'"
+        },
+        "status_detail": {
+          "name": "status_detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_cf_connections_account": {
+          "name": "idx_cf_connections_account",
+          "columns": [
+            "account_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "cloudflare_connections_account_id_accounts_id_fk": {
+          "name": "cloudflare_connections_account_id_accounts_id_fk",
+          "tableFrom": "cloudflare_connections",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "cf_connections_auth_type_check": {
+          "name": "cf_connections_auth_type_check",
+          "value": "\"cloudflare_connections\".\"auth_type\" IN ('oauth', 'token')"
+        },
+        "cf_connections_status_check": {
+          "name": "cf_connections_status_check",
+          "value": "\"cloudflare_connections\".\"status\" IN ('active', 'broken', 'revoked')"
+        }
+      }
+    },
     "domains": {
       "name": "domains",
       "columns": {
@@ -937,6 +1256,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'acct_default'"
+        },
+        "cf_connection_id": {
+          "name": "cf_connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -951,6 +1277,13 @@
           "name": "idx_domains_domain",
           "columns": [
             "domain"
+          ],
+          "isUnique": false
+        },
+        "idx_domains_cf_connection": {
+          "name": "idx_domains_cf_connection",
+          "columns": [
+            "cf_connection_id"
           ],
           "isUnique": false
         },
@@ -984,6 +1317,19 @@
           "tableTo": "domains",
           "columnsFrom": [
             "parent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "domains_cf_connection_id_cloudflare_connections_id_fk": {
+          "name": "domains_cf_connection_id_cloudflare_connections_id_fk",
+          "tableFrom": "domains",
+          "tableTo": "cloudflare_connections",
+          "columnsFrom": [
+            "cf_connection_id"
           ],
           "columnsTo": [
             "id"
