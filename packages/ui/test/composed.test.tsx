@@ -4,7 +4,7 @@ import { Inbox, Settings } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AppShell, Button, CheckResult, CheckResultList, EmptyState, LevelCard, LogoMark, PageHeader, RecordBlock, Skeleton, Stat,
-	StatGroup, StatusDot, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow, Toaster, dismissToast, toast,
+	StatGroup, StatusDot, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow, Toaster, WorkspaceSwitcher, dismissToast, toast,
 } from "../src";
 import { expectNoViolations } from "./a11y";
 
@@ -250,5 +250,51 @@ describe("CheckResult", () => {
 		await userEvent.click(within(error!).getByRole("button", { name: "Try again" }));
 		expect(onRetry).toHaveBeenCalled();
 		expect(within(missing!).queryByRole("button")).toBeNull();
+	});
+});
+
+describe("WorkspaceSwitcher", () => {
+	const workspaces = [
+		{ id: "ws_a", name: "Fellowship", role: "owner" as const },
+		{ id: "ws_b", name: "Lexgo", role: "member" as const },
+	];
+
+	it("shows the current workspace, lists all with roles, selects another, and offers to create one", async () => {
+		const onSelect = vi.fn();
+		const onCreate = vi.fn();
+		render(<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={onSelect} onCreate={onCreate} />);
+		const trigger = screen.getByRole("button", { name: "Workspace: Fellowship. Switch workspace" });
+		await userEvent.click(trigger);
+		const menu = await screen.findByRole("menu");
+		expect(within(menu).getByRole("menuitem", { name: /Fellowship.*owner/ })).toHaveAttribute("aria-current", "true");
+		await userEvent.click(within(menu).getByRole("menuitem", { name: /Lexgo.*member/ }));
+		expect(onSelect).toHaveBeenCalledWith("ws_b");
+		await userEvent.click(trigger);
+		await userEvent.click(await screen.findByRole("menuitem", { name: "Create workspace" }));
+		expect(onCreate).toHaveBeenCalledTimes(1);
+	});
+
+	it("choosing the current workspace does nothing; without onCreate there is no create entry; compact keeps the name for assistive tech", async () => {
+		const onSelect = vi.fn();
+		render(<WorkspaceSwitcher compact current={workspaces[0]} workspaces={workspaces} onSelect={onSelect} />);
+		await userEvent.click(screen.getByRole("button", { name: /Workspace: Fellowship/ }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Fellowship/ }));
+		expect(onSelect).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: /Workspace: Fellowship/ }));
+		expect(screen.queryByRole("menuitem", { name: "Create workspace" })).not.toBeInTheDocument();
+	});
+
+	it("sits above the nav in the app shell's sidebar", () => {
+		render(
+			<AppShell brand={<span>Brand</span>} nav={[{ items: [{ label: "Domains", href: "/" }] }]} sidebarTop={<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={() => {}} />}>
+				<p>page</p>
+			</AppShell>,
+		);
+		expect(screen.getAllByRole("button", { name: /Workspace: Fellowship/ })).toHaveLength(1);
+	});
+
+	it("has no accessibility violations", async () => {
+		const { container } = render(<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={() => {}} onCreate={() => {}} />);
+		await expectNoViolations(container);
 	});
 });

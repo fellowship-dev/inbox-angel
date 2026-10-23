@@ -3,6 +3,8 @@
  * the Preact dashboard used, so people stay signed in across the switch. OAuth sign-ins have no token:
  * they rely on the session cookie, which `credentials: 'same-origin'` sends.
  */
+import { workspaceStore } from './workspace';
+
 export const TOKEN_KEY = 'ia_api_key';
 
 export const tokenStore = {
@@ -46,6 +48,8 @@ export interface RequestOptions {
 	signal?: AbortSignal;
 	/** The caller handles 401 itself (the session probe): don't sign out and wipe the cache. */
 	quiet401?: boolean;
+	/** Act in this workspace instead of the current one; `null` sends no X-Workspace-Id (the server picks your oldest). */
+	workspace?: string | null;
 }
 
 export async function api<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
@@ -53,6 +57,8 @@ export async function api<T = unknown>(path: string, opts: RequestOptions = {}):
 	const token = tokenStore.get();
 	if (token) headers['X-Api-Key'] = token;
 	if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+	const workspace = opts.workspace === undefined ? workspaceStore.get() : opts.workspace;
+	if (workspace && !path.startsWith('/api/invites/')) headers['X-Workspace-Id'] = workspace;
 
 	let res: Response;
 	try {

@@ -108,6 +108,11 @@ export function teamQueries(db: Db, workspaceId: string) {
 			);
 		},
 
+		/** Remove only the membership (the user keeps their login and other workspaces). */
+		removeMembership(userId: string) {
+			return db.delete(memberships).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, userId))).run();
+		},
+
 		// ── Invites ───────────────────────────────────────────────
 		getInvite(token: string) {
 			return db.select().from(invites).where(and(eq(invites.workspace_id, workspaceId), eq(invites.token, token))).get().then((r) => r ?? null);

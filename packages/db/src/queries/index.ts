@@ -21,6 +21,7 @@ export * from './team';
 export * from './api-keys';
 export type { CfConnectionInfo, CfConnectionZone } from './connections';
 export { authLookups } from './auth';
+export { workspaceLifecycle, type WorkspaceSummary } from './workspaces';
 export { intakeLookups, TOKEN_ROTATION_GRACE_SECONDS, type IntakeTarget, type HostedDomainRow, type PointerStatus } from './intake';
 export * from './heartbeat';
 export type { MtaStsMode } from './domain-config';

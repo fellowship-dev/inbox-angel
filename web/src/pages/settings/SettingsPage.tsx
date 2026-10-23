@@ -8,6 +8,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { setTheme, useTheme } from '../../lib/theme';
 import { Field } from '../auth/AuthLayout';
+import { WorkspaceSection } from './WorkspaceSection';
 
 interface VersionInfo {
 	current: string;
@@ -61,6 +62,8 @@ export function SettingsPage() {
 					</Button>
 				</div>
 			</Section>
+
+			<WorkspaceSection />
 
 			<Section title="Appearance" description="Follows your system until you choose.">
 				<div className="flex flex-wrap gap-2" role="group" aria-label="Theme">

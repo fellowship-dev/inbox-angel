@@ -6,18 +6,18 @@
 // Auth's own endpoints (OAuth, sessions, change-password) is exposed as-is under /api/auth/;
 // everything else (notably /sign-up/email, which would bypass the sign-up policy) is not.
 import type { BoundEnv as Env } from '../index';
-import { authLookups, forWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { authLookups, forWorkspace, globalQueries, workspaceLifecycle, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 import { logAudit, type AuditEntry } from '../audit/log';
 import { track } from '../telemetry';
 import { TenantContext } from '../tenancy/context';
 import { AUTH_BASE_PATH, createAuth, type Auth } from './index';
 import { baseUrl, enabledOAuthProviders, isSaas } from './config';
 import type { SignupIntent } from './signup-policy';
-import { passesCsrfCheck } from './session';
+import { currentUser, passesCsrfCheck } from './session';
 import { verifyTurnstile } from './turnstile';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
-const err = (message: string, status: number) => json({ error: message }, status);
+const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
 
 /** Set-Cookie values (workers-types predates Headers.getSetCookie). */
 const setCookies = (h: Headers): string[] => (h as Headers & { getSetCookie(): string[] }).getSetCookie();
@@ -303,13 +303,41 @@ export async function handleAuthRoute(
     if (!invite || invite.used_at || invite.expires_at < Math.floor(Date.now() / 1000)) {
       return err('invite not found or expired', 404);
     }
-    if (method === 'GET') return json({ email: invite.email, invited_by: invite.invited_by, role: invite.role });
+    const existingUser = await globalQueries(env.DB).users.byEmail(invite.email);
+    const workspaceName = (await workspaceLifecycle(env.DB).get(invite.workspace_id))?.name ?? null;
+    if (method === 'GET') {
+      // Lets the page offer "sign in to accept" instead of a password form. The token holder is the invitee.
+      const me = existingUser ? await currentUser(request, env, ctx).catch(() => null) : null;
+      return json({
+        email: invite.email, invited_by: invite.invited_by, role: invite.role,
+        workspace_id: invite.workspace_id, workspace_name: workspaceName,
+        user_exists: !!existingUser,
+        signed_in_as: me?.email ?? null,
+      });
+    }
+
+    // An invite to an email that already has a login: add a membership, never a second user.
+    if (existingUser) {
+      if (await limited(env, request)) return err('Too many requests — try again later', 429);
+      const me = await currentUser(request, env, ctx).catch(() => null);
+      if (!me) return err('sign in as ' + invite.email + ' to accept this invite', 401);
+      if (me.email.toLowerCase() !== invite.email) return err(`this invite is for ${invite.email}, but you are signed in as ${me.email} — sign out and sign in as ${invite.email} to accept it`, 403, 'wrong_user');
+      const team = forWorkspace(env.DB, invite.workspace_id).team;
+      await team.addMember(me.id, invite.role === 'admin' ? 'admin' : 'member');
+      await team.markInviteUsed(invite.token);
+      auditUser(env, ctx, me.id, {
+        actor_id: me.id, actor_email: me.email, actor_type: 'user',
+        action: 'auth.invite_accepted',
+        resource_type: 'user', resource_id: me.id, resource_name: me.email,
+        after_value: { email: me.email, role: invite.role, invited_by: invite.invited_by, existing_user: true },
+      }, invite.workspace_id);
+      return json({ ok: true, workspace_id: invite.workspace_id, workspace_name: workspaceName }, 200);
+    }
 
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
     const body = await readJson<{ name?: string; password?: string }>(request);
     if (!body.name || !body.password) return err('name and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
-    if (await globalQueries(env.DB).users.byEmail(invite.email)) return err('an account with this email already exists', 409);
 
     const { res, user } = await signUp(env, request, ctx, { kind: 'invite', token: invite.token }, {
       name: body.name.trim(), email: invite.email, password: body.password,

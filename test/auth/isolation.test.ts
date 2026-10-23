@@ -74,6 +74,7 @@ function snapshotOf(db: any, workspaceId: string) {
   const tables = [...WORKSPACE_OWNED_TABLES].filter(t => t !== 'memberships' || true);
   const out: Record<string, unknown> = {};
   for (const t of tables) out[t] = rows(db, `SELECT * FROM ${t} WHERE workspace_id = ? ORDER BY 1, 2`, workspaceId);
+  out.workspace = rows(db, 'SELECT * FROM workspaces WHERE id = ?', workspaceId);
   out.users = rows(db, 'SELECT id, email FROM users WHERE id IN (SELECT user_id FROM memberships WHERE workspace_id = ?) ORDER BY id', workspaceId);
   return JSON.stringify(out);
 }
@@ -159,6 +160,12 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/setup/custom-domain', body: { domain: 'x.example.net' }, kind: 'scoped' },
   { method: 'GET', path: '/api/zones', kind: 'scoped' },
   { method: 'POST', path: '/api/spf-lookup-count', body: { record: 'v=spf1 -all' }, kind: 'scoped' },
+  // workspaces (src/workspaces/routes.ts): the caller's own memberships only; B's id is a 404, never a 403
+  { method: 'GET', path: '/api/workspaces', kind: 'scoped' },
+  { method: 'POST', path: '/api/workspaces', body: { name: 'A second workspace' }, kind: 'scoped' },
+  { method: 'PATCH', path: '/api/workspaces/__B_WS__', body: { name: 'pwned' }, kind: 'denied' },
+  { method: 'POST', path: '/api/workspaces/__B_WS__/leave', body: {}, kind: 'denied' },
+  { method: 'DELETE', path: '/api/workspaces/__B_WS__?confirm=pwned', kind: 'denied' },
   // team, audit, keys
   { method: 'GET', path: '/api/team', kind: 'scoped' },
   { method: 'POST', path: '/api/team/invite', body: { email: 'new-for-a@example.com' }, kind: 'scoped' },
@@ -185,7 +192,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
         const failures: string[] = [];
 
         for (const r of ROUTES) {
-          const path = r.path.replace('__B_KEY__', w.keyB.id);
+          const path = r.path.replace('__B_KEY__', w.keyB.id).replace('__B_WS__', w.B.workspaceId);
           const res = await call(w.env, r.method, path, { key, body: r.body });
           const text = await res.text();
           const leaked = SECRETS.filter(s => text.includes(s));
@@ -311,7 +318,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
       const label = m[1].replace(/\\\//g, '/');
       return { method: '*', label, pattern: new RegExp('^' + label.replace(/\(\[\^\/\]\+\)|\(\\d\+\)/g, '[^/]+') + '$') };
     });
-    const concrete = ROUTES.map(r => ({ method: r.method, path: r.path.split('?')[0].replace('__B_KEY__', 'k') }));
+    const concrete = ROUTES.map(r => ({ method: r.method, path: r.path.split('?')[0].replace('__B_KEY__', 'k').replace('__B_WS__', 'w') }));
     expect(literal.length + regex.length).toBeGreaterThan(40); // the scan itself works
     const uncovered: string[] = [];
     for (const r of [...literal, ...regex]) {

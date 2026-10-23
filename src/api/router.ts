@@ -49,6 +49,11 @@
 //   GET    /api/reports/:id                   — single report with per-IP records
 //   GET    /api/check-results                 — recent free check results (last 20)
 //   GET/POST /api/keys, POST /api/keys/revoke-all, DELETE /api/keys/:id — per-user API keys
+//   GET    /api/workspaces                    — the caller's workspaces (role, member count)
+//   POST   /api/workspaces                    — create a workspace (caller becomes owner)
+//   PATCH  /api/workspaces/:id                — rename (owner)
+//   POST   /api/workspaces/:id/leave          — leave (never the last owner / only workspace)
+//   DELETE /api/workspaces/:id                — delete (owner; ?confirm=<name> when it has domains)
 //   GET    /api/team                          — list users (admin only)
 //   POST   /api/team/invite                   — send invite link (admin only)
 //   DELETE /api/team/:id                      — remove team member (admin only)
@@ -66,6 +71,7 @@ import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
+import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
 import { issueCanary } from '../hosted/canary';
@@ -247,7 +253,14 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
   }, 201);
 }
 
-async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { id?: string; email?: string }, ctx?: ExecutionContext): Promise<Response> {
+/** The same request, minus X-Workspace-Id (for routes about the user's workspaces rather than one of them). */
+function withoutWorkspaceHeader(request: Request): Request {
+  const headers = new Headers(request.headers);
+  headers.delete('x-workspace-id');
+  return new Request(request.url, { method: request.method, headers });
+}
+
+export async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { id?: string; email?: string }, ctx?: ExecutionContext): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
@@ -554,7 +567,8 @@ async function _handleApi(
   // tenancy: every data access, audit entry, invite and Cloudflare call below uses tenant.workspaceId.
   let workspace: Awaited<ReturnType<WorkspaceResolver>>;
   try {
-    workspace = await resolver(request, env);
+    // /api/workspaces* act on the user, so a stale X-Workspace-Id (a workspace they have left) must not lock them out of listing their own.
+    workspace = await resolver(isWorkspaceRoute(path) ? withoutWorkspaceHeader(request) : request, env);
   } catch (e) {
     if (e instanceof AuthError) return err(e.message, e.status);
     return err('authentication error', 401);
@@ -565,6 +579,14 @@ async function _handleApi(
   const actorRow = workspace.userId ? await globals(env.DB).users.byId(workspace.userId) : null;
   const userBySession = actorRow ? { id: actorRow.id, email: actorRow.email, name: actorRow.name } : null;
   const isAdmin = workspace.role === 'owner' || workspace.role === 'admin';
+  if (isWorkspaceRoute(path)) {
+    const res = await handleWorkspaceRoutes(request, ctx, { kind: (workspace as AuthedWorkspace).kind, user: userBySession }, {
+      db: env.DB as D1Database,
+      tenantFor: (workspaceId) => loadTenant(env, { workspaceId }),
+      deleteDomain,
+    });
+    if (res) return res;
+  }
   // Members are read-only. POST /api/spf-lookup-count only computes; managing your own API keys is self-service.
   if (!(method === 'GET' || method === 'HEAD') && !isAdmin && !isKeyRoute(path) && path !== '/api/spf-lookup-count') {
     return err('admin required', 403);
@@ -1372,8 +1394,9 @@ async function _handleApi(
       const body = await parseBody<{ email?: string; role?: string }>(request);
       if (!body.email) return err('email is required', 400);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return err('invalid email', 400);
+      // Someone who already has a login is invited too: accepting adds a membership, never a second user.
       const existing = await globals(env.DB).users.byEmail(body.email.toLowerCase().trim());
-      if (existing) return err('a user with this email already exists', 409);
+      if (existing && (await tenant.scope.team.roleOf(existing.id))) return err('this person is already a member of the workspace', 409);
 
       const token = crypto.randomUUID();
       const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 3600; // 7 days

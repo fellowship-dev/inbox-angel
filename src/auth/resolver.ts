@@ -2,8 +2,7 @@
 //
 // This is the resolver the router uses by default (see defaultResolver in src/tenancy/resolver.ts),
 // so every request's TenantContext is built from it:
-//   self-host  — the caller always resolves to ws_default (the only workspace that exists);
-//   MODE=saas  — to their own workspace (X-Workspace-Id picks among several memberships).
+//   the caller acts in the workspace named by X-Workspace-Id (a membership is required), else their oldest one.
 // It goes through requireAuth, so the CSRF check for cookie sessions applies, and a missing or
 // invalid credential is `null` (unauthenticated), never a default workspace.
 import type { Env } from '../index';

@@ -9,7 +9,7 @@ import { authLookups, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole 
 import { resolveApiKey, looksLikeApiKey } from './api-keys';
 import { createAuth } from './index';
 import type { AuthEnv } from './config';
-import { isSaas, trustedOrigins } from './config';
+import { trustedOrigins } from './config';
 
 export class AuthError extends Error {
   constructor(
@@ -71,12 +71,13 @@ export function passesCsrfCheck(request: Request, env: AuthEnv, opts: { allowNon
   return site === 'same-origin' || site === 'none';
 }
 
-async function fromSession(
+/** The signed-in user behind a session token or cookie, whatever workspaces they belong to; null if none. */
+async function sessionUser(
   env: AuthEnv,
   request: Request,
   token: string | null,
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
-): Promise<Principal | null> {
+): Promise<{ id: string; email: string; name: string } | null> {
   const headers = new Headers();
   if (token) headers.set('authorization', `Bearer ${token}`);
   else {
@@ -86,11 +87,26 @@ async function fromSession(
   }
   const auth = await createAuth(env, request, { ctx });
   const session = await auth.api.getSession({ headers }).catch(() => null);
-  if (!session) return null;
+  return session ? { id: session.user.id, email: session.user.email, name: session.user.name } : null;
+}
 
-  let memberships = await authLookups(env.DB as D1Database).membershipsOf(session.user.id);
-  // Self-host has exactly one workspace: whatever else the table holds, the caller acts in it.
-  if (!isSaas(env)) memberships = memberships.filter(m => m.workspace_id === IMPLICIT_WORKSPACE_ID);
+/** Who is signed in (session only, no API keys), for routes that care about the person rather than a workspace. */
+export async function currentUser(request: Request, env: AuthEnv, ctx?: Pick<ExecutionContext, 'waitUntil'>) {
+  const presented = presentedCredential(request);
+  if (presented && (looksLikeApiKey(presented) || (env.API_KEY && (await safeEqual(presented, env.API_KEY))))) return null;
+  return sessionUser(env, request, presented || null, ctx);
+}
+
+async function fromSession(
+  env: AuthEnv,
+  request: Request,
+  token: string | null,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<Principal | null> {
+  const user = await sessionUser(env, request, token, ctx);
+  if (!user) return null;
+
+  const memberships = await authLookups(env.DB as D1Database).membershipsOf(user.id);
   if (memberships.length === 0) throw new AuthError('this user is not a member of any workspace', 403);
   // A user in several workspaces picks one with X-Workspace-Id; otherwise their oldest membership.
   const wanted = request.headers.get('x-workspace-id');
@@ -100,7 +116,7 @@ async function fromSession(
   return {
     kind: 'session',
     viaCookie: !token,
-    user: { id: session.user.id, email: session.user.email, name: session.user.name },
+    user,
     workspaceId: chosen.workspace_id,
     role: chosen.role,
   };
@@ -121,7 +137,7 @@ export async function authenticate(
 
   if (presented && looksLikeApiKey(presented)) {
     const key = await resolveApiKey(env.DB, presented);
-    if (!key || (!isSaas(env) && key.workspaceId !== IMPLICIT_WORKSPACE_ID)) return null;
+    if (!key ) return null;
     const user = await globalQueries(env.DB).users.byId(key.userId);
     if (!user) return null;
     return {

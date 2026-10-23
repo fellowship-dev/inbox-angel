@@ -148,12 +148,12 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		expect(scan(walk(join(ROOT, 'src'))).found).toEqual([]);
 	});
 
-	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, five in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id)', () => {
+	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, three in workspaces.ts: a user own workspaces and routing by reports domain / hostname, five in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id)', () => {
 		const files = walk(join(ROOT, 'packages/db/src/queries')).filter((f) => !f.endsWith('global.ts'));
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(10);
+		expect(exemptions).toBe(13);
 	});
 
 	it('global.ts only touches allow-listed global tables', () => {

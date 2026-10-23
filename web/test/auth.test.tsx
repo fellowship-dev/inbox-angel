@@ -179,4 +179,53 @@ describe('invite', () => {
 		expect(await screen.findByRole('heading', { name: 'Could not load the invite' }, { timeout: 4000 })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
 	});
+
+	describe('for an email that already has a login', () => {
+		const info = (extra = {}) => ({ email: 'sam@example.com', invited_by: 'max@example.com', role: 'member', workspace_id: 'ws_lexgo', workspace_name: 'Lexgo', user_exists: true, signed_in_as: null, ...extra });
+
+		it('names the workspace and asks for a password only to sign in, never a new account', async () => {
+			let loggedIn = false;
+			const { calls } = renderApp(route, {
+				role: null,
+				route: '/invite/tok9',
+				routes: { 'GET /api/invites/tok9': () => info(loggedIn ? { signed_in_as: 'sam@example.com' } : {}), 'POST /api/auth/login': () => ((loggedIn = true), { token: 'tok-sam' }), 'GET /api/me': () => (loggedIn ? me('member') : fail(401)), 'GET /api/workspaces': { workspaces: [] } },
+			});
+			expect(await screen.findByText('Lexgo')).toBeInTheDocument();
+			expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
+			expect(screen.queryByLabelText('Confirm password')).not.toBeInTheDocument();
+			const user = userEvent.setup();
+			await user.type(screen.getByLabelText('Password'), 'sams-password');
+			await user.click(screen.getByRole('button', { name: 'Sign in to accept' }));
+			await waitFor(() => expect(tokenStore.get()).toBe('tok-sam'));
+			expect(calls.find((c) => c.path === '/api/auth/login')?.body).toEqual({ email: 'sam@example.com', password: 'sams-password' });
+			// now signed in as the invited address, the page offers the one-click accept
+			expect(await screen.findByRole('button', { name: 'Accept invite' })).toBeInTheDocument();
+		});
+
+		it('signed in as that email: one click accepts and opens the workspace', async () => {
+			let accepted = false;
+			const { calls } = renderApp(route, {
+				role: 'member',
+				route: '/invite/tok9',
+				routes: {
+					'GET /api/invites/tok9': info({ signed_in_as: 'sam@example.com' }),
+					'POST /api/invites/tok9': () => ((accepted = true), { ok: true, workspace_id: 'ws_lexgo', workspace_name: 'Lexgo' }),
+					'GET /api/workspaces': { workspaces: [] },
+				},
+			});
+			const user = userEvent.setup();
+			await user.click(await screen.findByRole('button', { name: 'Accept invite' }));
+			await waitFor(() => expect(accepted).toBe(true));
+			expect(calls.find((c) => c.method === 'POST' && c.path === '/api/invites/tok9')?.body).toEqual({});
+			await waitFor(() => expect(window.location.hash).toBe('#/w/ws_lexgo/'));
+		});
+
+		it('signed in as someone else: says so, names both addresses, offers sign out, and does not accept', async () => {
+			const { calls } = renderApp(route, { role: 'owner', route: '/invite/tok9', routes: { 'GET /api/invites/tok9': info({ signed_in_as: 'owner@example.com' }) } });
+			expect(await screen.findByText(/This invite is for sam@example.com, but you are signed in as owner@example.com/)).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Accept invite' })).not.toBeInTheDocument();
+			expect(calls.some((c) => c.method === 'POST' && c.path.startsWith('/api/invites/'))).toBe(false);
+		});
+	});
 });
