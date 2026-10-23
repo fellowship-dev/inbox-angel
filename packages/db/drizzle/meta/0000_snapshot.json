@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1b7df8f5-e8ff-4184-b1a2-7941ae653189",
+  "id": "dea104f9-5e10-4640-968f-969e37955aef",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aggregate_reports": {
@@ -2466,7 +2466,16 @@
           "default": "(unixepoch())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_settings_reports_domain": {
+          "name": "idx_settings_reports_domain",
+          "columns": [
+            "value"
+          ],
+          "isUnique": true,
+          "where": "\"settings\".\"key\" = 'reports_domain' AND \"settings\".\"value\" <> ''"
+        }
+      },
       "foreignKeys": {
         "settings_workspace_id_workspaces_id_fk": {
           "name": "settings_workspace_id_workspaces_id_fk",

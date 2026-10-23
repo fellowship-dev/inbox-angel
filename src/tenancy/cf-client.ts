@@ -36,7 +36,9 @@ export class CfNotFoundError extends CfError {}
 export class CfApiError extends CfError {}
 /** No API token is available for this tenant. */
 export class CfNotConfiguredError extends Error {
-  constructor(message = 'Cloudflare credentials not configured') {
+  /** Stable code for clients: the workspace has to connect Cloudflare (a token or OAuth) first. */
+  readonly code = 'cloudflare_not_connected';
+  constructor(message = 'Cloudflare is not configured for this workspace: connect Cloudflare first') {
     super(message);
     this.name = 'CfNotConfiguredError';
   }

@@ -23,8 +23,11 @@ export interface WorkspaceCaller {
 
 export interface WorkspaceDeps {
   db: D1Database;
+  mode: 'selfhost' | 'saas';
   /** A tenant for any workspace, to clean up its domains (DNS, hosted records) before it is deleted. */
   tenantFor: (workspaceId: string) => Promise<TenantContext>;
+  /** Before anything is deleted: can Cloudflare (and the hosted-records zone) be reached for every domain? A message when not. */
+  preflight: (tenant: TenantContext, domains: Array<{ id: number; domain: string }>) => Promise<string | null>;
   deleteDomain: (tenant: TenantContext, domainId: string, actor: { id?: string; email?: string }, ctx?: ExecutionContext) => Promise<Response>;
 }
 
@@ -58,8 +61,13 @@ export async function handleWorkspaceRoutes(
     return json({ workspaces: await lifecycle.listForUser(user.id) });
   }
 
-  // POST /api/workspaces { name } — create one; the caller becomes its owner. Allowed in every mode.
+  // POST /api/workspaces { name } — create one; the caller becomes its owner.
+  // Hosted: any user. Self-host: only the instance owner (owner of ws_default). A new workspace's owner can connect Cloudflare
+  // accounts and add domains, and every other workspace member would otherwise be one invite away from doing so.
   if (path === '/api/workspaces' && method === 'POST') {
+    if (deps.mode === 'selfhost' && (await lifecycle.roleOf(user.id, IMPLICIT_WORKSPACE_ID)) !== 'owner') {
+      return err('only the owner of this instance can create workspaces', 403, 'instance_owner_required');
+    }
     const name = await readName(request);
     if (name instanceof Response) return name;
     const id = `ws_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -104,10 +112,20 @@ export async function handleWorkspaceRoutes(
     if (domains.length > 0 && url.searchParams.get('confirm') !== workspace.name) {
       return err(`this workspace has ${domains.length} domain${domains.length === 1 ? '' : 's'}; repeat the request with confirm=<workspace name> to delete it and all of its data`, 409, 'confirm_required');
     }
-    // Domains go through the normal delete, so DNS records and hosted records are cleaned up first.
+    // Domains are deleted one at a time through the normal delete (DNS records and hosted records first), and each
+    // delete is final. So find out first whether Cloudflare can be reached for all of them; refuse before deleting any if not.
+    const blocked = await deps.preflight(tenant, domains.map(d => ({ id: d.id, domain: d.domain })));
+    if (blocked) return err(`Cloudflare cannot be reached for ${blocked}; nothing was deleted. Fix that (or reconnect Cloudflare) and try again.`, 502, 'cloudflare_preflight_failed');
+    let deleted = 0;
     for (const d of domains) {
       const res = await deps.deleteDomain(tenant, String(d.id), { id: user.id, email: user.email }, ctx);
-      if (!res.ok) return err(`could not delete domain ${d.domain}; nothing else was deleted`, 502, 'domain_cleanup_failed');
+      if (!res.ok) {
+        return err(
+          `could not delete domain ${d.domain}. ${deleted} of ${domains.length} domain${domains.length === 1 ? ' was' : 's were'} already deleted (with their DNS records) and cannot be restored; the workspace and its remaining data are still there. Try again once it is fixed.`,
+          502, 'domain_cleanup_failed',
+        );
+      }
+      deleted++;
     }
     const members = (await tenant.scope.team.list()).map((u) => u.id);
     await lifecycle.purge(id);

@@ -358,6 +358,7 @@ CREATE TABLE `settings` (
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `idx_settings_reports_domain` ON `settings` (`value`) WHERE "settings"."key" = 'reports_domain' AND "settings"."value" <> '';--> statement-breakpoint
 CREATE TABLE `spf_flatten_config` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
 	`enabled` integer DEFAULT 1 NOT NULL,

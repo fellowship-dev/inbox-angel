@@ -1,4 +1,4 @@
-import { and, eq, inArray, notExists, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { invites, memberships, users, type MembershipRole } from '../schema';
 
@@ -120,6 +120,17 @@ export function teamQueries(db: Db, workspaceId: string) {
 
 		insertInvite(inv: { token: string; email: string; role: string; invited_by: string; expires_at: number }) {
 			return db.insert(invites).values({ ...inv, workspace_id: workspaceId }).run();
+		},
+
+		/** Spend an unused invite: one conditional update, so of two simultaneous accepts exactly one wins. */
+		async claimInvite(token: string): Promise<boolean> {
+			const res = await db
+				.update(invites)
+				.set({ used_at: sql`unixepoch()` as any })
+				.where(and(eq(invites.workspace_id, workspaceId), eq(invites.token, token), isNull(invites.used_at), gt(invites.expires_at, sql`unixepoch()`)))
+				.returning({ token: invites.token })
+				.all();
+			return res.length > 0;
 		},
 
 		markInviteUsed(token: string) {

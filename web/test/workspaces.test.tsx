@@ -138,6 +138,24 @@ describe('workspace switcher', () => {
 		expect(await screen.findByRole('button', { name: /Workspace: Fellowship/ })).toBeInTheDocument();
 	});
 
+	it('self-host: only the instance owner is offered "Create workspace"; a member or admin of the default workspace is not', async () => {
+		server([{ ...FELLOWSHIP, role: 'member' }, { ...LEXGO, role: 'owner' }]);
+		boot('#/w/ws_lexgo/');
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole('button', { name: /Workspace: Lexgo/ }));
+		const menu = await screen.findByRole('menu');
+		expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+		expect(within(menu).queryByRole('menuitem', { name: 'Create workspace' })).not.toBeInTheDocument();
+	});
+
+	it('hosted: anyone may create a workspace', async () => {
+		server([{ ...FELLOWSHIP, role: 'member' }], { 'GET /api/auth/status': { ...STATUS, mode: 'saas' } });
+		boot('#/w/ws_default/');
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole('button', { name: /Workspace: Fellowship/ }));
+		expect(await screen.findByRole('menuitem', { name: 'Create workspace' })).toBeInTheDocument();
+	});
+
 	it('creates a workspace and opens it at its empty state, not at the setup wizard', async () => {
 		const created = { id: 'ws_new', name: 'Acme', role: 'owner' as Role, member_count: 1, created_at: 3 };
 		let list = [FELLOWSHIP, LEXGO];

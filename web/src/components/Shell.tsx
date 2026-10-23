@@ -30,13 +30,15 @@ function isCurrent(path: string, item: string): boolean {
 
 export function Shell() {
 	const { pathname } = useLocation();
-	const { me, role, signOut } = useSession();
+	const { me, role, signOut, status } = useSession();
 	const { theme, toggle } = useTheme();
 	const [creating, setCreating] = useState(false);
 	// The instance API key belongs to no user and so to no list of workspaces.
 	const workspaces = useWorkspaces(!!me?.user);
 	const list = workspaces.data ?? [];
 	const current = list.find((w) => w.id === me?.workspace_id) ?? null;
+	// Hosted: anyone may start a workspace. Self-host: only the instance owner (owner of the default workspace).
+	const canCreate = status?.mode === 'saas' || list.some((w) => w.id === 'ws_default' && w.role === 'owner');
 	const items = [
 		{ label: 'Domains', href: '/', icon: <Globe /> },
 		{ label: 'Analytics', href: '/analytics', icon: <BarChart3 /> },
@@ -62,7 +64,7 @@ export function Shell() {
 						current={current}
 						workspaces={list}
 						onSelect={(id) => switchToWorkspace(id)}
-						onCreate={() => setCreating(true)}
+						onCreate={canCreate ? () => setCreating(true) : undefined}
 					/>
 				) : null
 			}

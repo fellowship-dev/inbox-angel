@@ -137,7 +137,7 @@ export async function authenticate(
 
   if (presented && looksLikeApiKey(presented)) {
     const key = await resolveApiKey(env.DB, presented);
-    if (!key ) return null;
+    if (!key) return null;
     const user = await globalQueries(env.DB).users.byId(key.userId);
     if (!user) return null;
     return {

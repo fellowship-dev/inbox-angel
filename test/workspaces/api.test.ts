@@ -23,6 +23,14 @@ async function create(env: any, key: string, name: string) {
   return (await json(res)).id as string;
 }
 
+/** A workspace owned by an existing user, made behind the API's back (self-host: only the instance owner may create them). */
+function grant(db: any, email: string, name: string) {
+	const id = `ws_${name.toLowerCase().replace(/\W/g, '')}`;
+	db.sqlite.prepare('INSERT INTO workspaces (id, name) VALUES (?, ?)').run(id, name);
+	db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, (SELECT id FROM users WHERE email = ?), 'owner')").run(id, email);
+	return id;
+}
+
 const addDomain = (db: any, workspaceId: string, domain: string) =>
   db.sqlite.prepare('INSERT INTO domains (domain, rua_address, workspace_id) VALUES (?, ?, ?)').run(domain, `rua@reports.${domain}`, workspaceId);
 
@@ -40,11 +48,25 @@ describe('GET/POST /api/workspaces', () => {
       { id: 'ws_default', role: 'owner', member_count: 2 },
       { id: lexgo, name: 'Lexgo', role: 'owner', member_count: 1 },
     ]);
-    // the member is read-only in ws_default, may still create a workspace of their own, and sees only the ones they belong to
-    expect((await json(await call(env, 'GET', '/api/workspaces', { key: member }))).workspaces.map((w: any) => w.id)).toEqual(['ws_default']);
-    const own = await create(env, member, 'Mine');
-    expect((await json(await call(env, 'GET', '/api/workspaces', { key: member }))).workspaces.map((w: any) => [w.id, w.role])).toEqual([['ws_default', 'member'], [own, 'owner']]);
+    // the member is read-only in ws_default and sees only the workspaces they belong to (not Lexgo)
+    expect((await json(await call(env, 'GET', '/api/workspaces', { key: member }))).workspaces.map((w: any) => [w.id, w.role])).toEqual([['ws_default', 'member']]);
     expect(rows(db, 'SELECT action FROM audit_log WHERE workspace_id = ?', lexgo)).toEqual([{ action: 'workspace.created' }]);
+  });
+
+  it('self-host: only the instance owner (owner of ws_default) creates workspaces; admins and members get 403', async () => {
+    const { env, owner, db } = await selfHost();
+    const admin = await inviteAndAccept(env, owner, 'a@example.com', 'admin');
+    const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
+    for (const key of [admin, member]) {
+      const res = await call(env, 'POST', '/api/workspaces', { key, body: { name: 'Mine' } });
+      expect(res.status).toBe(403);
+      expect((await json(res)).code).toBe('instance_owner_required');
+    }
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 1 }]);
+    // someone who owns some *other* workspace (made some other way) is still not the instance owner
+    grant(db, 'm@example.com', 'Elsewhere');
+    expect((await call(env, 'POST', '/api/workspaces', { key: member, body: { name: 'Mine' } })).status).toBe(403);
+    expect((await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Lexgo' } })).status).toBe(201);
   });
 
   it('validates the name', async () => {
@@ -93,10 +115,10 @@ describe('GET/POST /api/workspaces', () => {
 
 describe('rename', () => {
   it('only an owner may rename; non-members get 404', async () => {
-    const { env, owner } = await selfHost();
+    const { env, owner, db } = await selfHost();
     const admin = await inviteAndAccept(env, owner, 'a@example.com', 'admin');
     const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
-    const stranger = await create(env, member, 'Elsewhere'); // member's own workspace, unrelated to ws_default
+    const stranger = grant(db, 'm@example.com', 'Elsewhere'); // member's own workspace, unrelated to ws_default
     expect((await call(env, 'PATCH', '/api/workspaces/ws_default', { key: member, body: { name: 'x' } })).status).toBe(403);
     expect((await call(env, 'PATCH', '/api/workspaces/ws_default', { key: admin, body: { name: 'x' } })).status).toBe(403);
     expect((await call(env, 'PATCH', `/api/workspaces/${stranger}`, { key: admin, body: { name: 'x' } })).status).toBe(404);
@@ -124,7 +146,7 @@ describe('leave', () => {
     expect((await json(only)).code).toBe('only_workspace');
 
     // once they have another one, leaving works and keeps their login
-    await create(env, member, 'Mine');
+    grant(db, 'm@example.com', 'Mine');
     expect((await call(env, 'POST', '/api/workspaces/ws_default/leave', { key: member, body: {} })).status).toBe(200);
     expect(rows(db, "SELECT COUNT(*) n FROM memberships WHERE workspace_id = 'ws_default'")).toEqual([{ n: 1 }]);
     expect(rows(db, "SELECT COUNT(*) n FROM users WHERE email = 'm@example.com'")).toEqual([{ n: 1 }]);
@@ -146,14 +168,14 @@ describe('leave', () => {
 
 describe('delete', () => {
   it('owners only; never the default workspace; never your only workspace', async () => {
-    const { env, owner } = await selfHost();
+    const { env, owner, db } = await selfHost();
     const admin = await inviteAndAccept(env, owner, 'a@example.com', 'admin');
     expect((await call(env, 'DELETE', '/api/workspaces/ws_default', { key: admin })).status).toBe(403);
     expect((await json(await call(env, 'DELETE', '/api/workspaces/ws_default', { key: owner }))).code).toBe('default_workspace');
     const lexgo = await create(env, owner, 'Lexgo');
     // not a member → 404
     expect((await call(env, 'DELETE', `/api/workspaces/${lexgo}`, { key: admin })).status).toBe(404);
-    const solo = await create(env, admin, 'Solo');
+    const solo = grant(db, 'a@example.com', 'Solo');
     expect((await call(env, 'DELETE', `/api/workspaces/${solo}`, { key: admin })).status).toBe(200); // admin still has ws_default
     const only = await json(await call(env, 'DELETE', `/api/workspaces/${lexgo}`, { key: owner }));
     expect(only).toEqual({ ok: true }); // owner has ws_default too
@@ -235,7 +257,7 @@ describe('selection: X-Workspace-Id', () => {
   it('roles are per workspace: owner in one, read-only member in the other', async () => {
     const { env, owner, db } = await selfHost();
     const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
-    const mine = await create(env, member, 'Mine');
+    const mine = grant(db, 'm@example.com', 'Mine');
     addDomain(db, 'ws_default', 'fellowship.example.com');
     expect((await json(await call(env, 'GET', '/api/me', { key: member, headers: ws('ws_default') }))).role).toBe('member');
     expect((await json(await call(env, 'GET', '/api/me', { key: member, headers: ws(mine) }))).role).toBe('owner');

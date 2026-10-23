@@ -8,15 +8,20 @@ import { DEFAULT_BRAND_COLOR, TenantContext, type TenantSettings } from './conte
 import { CfConnectionError, CfError, CfNotConfiguredError } from './cf-client';
 import { getMode, type Mode } from './mode';
 import type { ResolvedWorkspace } from './resolver';
+import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 
 const KEYS: readonly string[] = [
   'base_domain', 'zone_id', 'zone_name', 'cf_account_id', 'reports_domain', 'from_email', 'workers_subdomain',
   'brand_logo_url', 'brand_color',
 ];
 
-/** The tenant's Cloudflare token. Self-host: the Worker secret. Saas: per-workspace credentials (none stored yet). */
-function cfTokenFor(env: BoundEnv, mode: Mode): string | undefined {
-  return mode === 'selfhost' ? env.CLOUDFLARE_API_TOKEN || undefined : undefined;
+/**
+ * The tenant's ambient Cloudflare token. Self-host: the Worker secret, for the instance's own workspace only
+ * (it can reach every zone of the operator's account, so no other workspace may borrow it). Every other
+ * workspace, and every saas workspace, reaches Cloudflare through its own connections.
+ */
+function cfTokenFor(env: BoundEnv, mode: Mode, workspaceId: string): string | undefined {
+  return mode === 'selfhost' && workspaceId === IMPLICIT_WORKSPACE_ID ? env.CLOUDFLARE_API_TOKEN || undefined : undefined;
 }
 
 export interface LoadOptions {
@@ -34,7 +39,7 @@ export async function loadTenant(env: BoundEnv, workspace: ResolvedWorkspace, op
     userId: workspace.userId,
     role: workspace.role,
     mode,
-    cfToken: opts.cfToken ?? cfTokenFor(env, mode),
+    cfToken: opts.cfToken ?? cfTokenFor(env, mode, workspace.workspaceId),
     fetch: opts.fetch,
   });
   await refreshTenant(tenant);

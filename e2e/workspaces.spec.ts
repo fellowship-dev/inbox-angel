@@ -95,6 +95,8 @@ test('the coworker accepts, logs in, and sees only Lexgo — read-only', async (
 	const menu = await openSwitcher(page);
 	await expect(menu.getByRole('menuitem', { name: /Lexgo/ })).toBeVisible();
 	await expect(menu.getByRole('menuitem', { name: /Default|Fellowship/ })).toHaveCount(0);
+	// self-host: only the instance owner can create workspaces, so the coworker is not offered it
+	await expect(menu.getByRole('menuitem', { name: 'Create workspace' })).toHaveCount(0);
 	await page.keyboard.press('Escape');
 
 	// pointing the dashboard at Fellowship gets the coworker nowhere: a notice, and back to Lexgo

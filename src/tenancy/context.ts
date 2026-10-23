@@ -129,7 +129,7 @@ export class TenantContext {
   /**
    * The Cloudflare client that manages `domain`'s zone. The domain (or the nearest parent in this
    * workspace) is linked to a connection: that connection's client, restricted to its allow-list.
-   * Not linked: the self-host token (selfhost mode only) or CfNotConfiguredError.
+   * Not linked: the self-host token (the instance's own workspace only) or CfNotConfiguredError.
    * A broken or revoked connection throws CfConnectionError.
    */
   async cfFor(domain: string): Promise<CfClient> {
@@ -137,7 +137,7 @@ export class TenantContext {
     if (linked) return this.connections.clientFor(linked);
     const cf = this.cf();
     if (cf) return cf;
-    if (this.mode === 'selfhost' || !(await this.connections.hasActive())) throw new CfNotConfiguredError();
+    if (!(await this.connections.hasActive())) throw new CfNotConfiguredError();
     throw new CfNotConfiguredError(`${domain} is not linked to a Cloudflare connection`);
   }
 

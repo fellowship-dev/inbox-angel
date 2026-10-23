@@ -89,15 +89,26 @@ describe('two concurrent requests for different workspaces in one isolate', () =
       expect(b.domains.domains.map((d: any) => d.domain)).toEqual(['b-corp.org']);
     }
 
-    // Writes land in the zone of the requesting workspace's domain, and one workspace cannot reach the other's domain.
+    // Self-host: the server's token belongs to the instance's own workspace (ws_default) alone. Neither of these
+    // workspaces may write through it, and one cannot reach the other's domain either.
     const writes = await Promise.all([
       handleApi(request('POST', '/api/domains/1/apply-dmarc', { record: 'v=DMARC1; p=none' }), env, ctx, as('ws_a')),
       handleApi(request('POST', '/api/domains/2/apply-dmarc', { record: 'v=DMARC1; p=reject' }), env, ctx, as('ws_b')),
       handleApi(request('POST', '/api/domains/2/apply-dmarc', { record: 'v=DMARC1; p=none' }), env, ctx, as('ws_a')),
     ]);
-    expect(writes.map(r => r.status)).toEqual([200, 200, 404]);
-    expect(cf.records.get('zone-a')).toEqual([expect.objectContaining({ name: '_dmarc.a-corp.com', content: 'v=DMARC1; p=none' })]);
-    expect(cf.records.get('zone-b')).toEqual([expect.objectContaining({ name: '_dmarc.b-corp.org', content: 'v=DMARC1; p=reject' })]);
+    expect(writes.map(r => r.status)).toEqual([400, 400, 404]);
+    expect((await writes[0].json() as any).code).toBe('cloudflare_not_connected');
+    expect(cf.records.get('zone-a') ?? []).toEqual([]);
+    expect(cf.records.get('zone-b') ?? []).toEqual([]);
+  });
+
+  it('the instance’s own workspace still writes through the server token, in the zone of the domain', async () => {
+    const { db, env } = twoWorkspaceEnv();
+    db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_default', 'home.example', 'rua@reports.home.example')").run();
+    const cf = stubCloudflare(new FakeCloudflare({ 'home.example': { id: 'zone-home', cfAccountId: 'cf-home' } }));
+    const res = await handleApi(request('POST', '/api/domains/3/apply-dmarc', { record: 'v=DMARC1; p=none' }), env, ctx, as('ws_default'));
+    expect(res.status).toBe(200);
+    expect(cf.records.get('zone-home')).toEqual([expect.objectContaining({ name: '_dmarc.home.example' })]);
   });
 
   it('keeps branding, from-address and telemetry opt-in per workspace', async () => {

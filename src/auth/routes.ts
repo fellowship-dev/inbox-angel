@@ -323,8 +323,8 @@ export async function handleAuthRoute(
       if (!me) return err('sign in as ' + invite.email + ' to accept this invite', 401);
       if (me.email.toLowerCase() !== invite.email) return err(`this invite is for ${invite.email}, but you are signed in as ${me.email} — sign out and sign in as ${invite.email} to accept it`, 403, 'wrong_user');
       const team = forWorkspace(env.DB, invite.workspace_id).team;
+      if (!(await team.claimInvite(invite.token))) return err('invite not found or expired', 404);
       await team.addMember(me.id, invite.role === 'admin' ? 'admin' : 'member');
-      await team.markInviteUsed(invite.token);
       auditUser(env, ctx, me.id, {
         actor_id: me.id, actor_email: me.email, actor_type: 'user',
         action: 'auth.invite_accepted',

@@ -3,6 +3,7 @@ import { IMPLICIT_WORKSPACE_ID } from '../schema';
 import { apiKeyQueries } from './api-keys';
 import { analyticsQueries } from './analytics';
 import { auditQueries } from './audit';
+import { baseDomainQueries } from './base-domain';
 import { connectionQueries } from './connections';
 import { domainQueries } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
@@ -43,6 +44,7 @@ export function forWorkspace(db: DbLike, workspaceId: string) {
 		analytics: analyticsQueries(d, workspaceId),
 		monitor: monitorQueries(d, workspaceId),
 		settings: settingsQueries(d, workspaceId),
+		baseDomain: baseDomainQueries(d, workspaceId),
 		spf: spfFlattenQueries(d, workspaceId),
 		mtaSts: mtaStsQueries(d, workspaceId),
 		audit: auditQueries(d, workspaceId),

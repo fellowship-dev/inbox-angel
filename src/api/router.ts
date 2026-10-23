@@ -74,9 +74,10 @@ import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
 import { disableHosted, HostedError, removeHostedMtaSts, updateHostedMtaSts } from '../hosted/service';
 import { hostedConfig, hostedEnabled } from '../hosted/config';
+import { openHostedZone } from '../hosted/records';
 import { issueCanary } from '../hosted/canary';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, workspaceLifecycle } from '@inbox-angel/db';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
@@ -132,7 +133,8 @@ function err(message: string, status: number): Response {
 
 /** HTTP status for a Cloudflare failure: config problems are the caller's, the rest is reported as given. */
 function cfFailure(e: unknown, fallbackStatus = 500): Response {
-  if (e instanceof CfNotConfiguredError || e instanceof CfZoneNotFoundError) return err(e.message, 400);
+  if (e instanceof CfNotConfiguredError) return json({ error: e.message, code: e.code }, 400);
+  if (e instanceof CfZoneNotFoundError) return err(e.message, 400);
   if (e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return err('Cloudflare connections are unavailable: the server\'s encryption key is missing or does not match the stored credentials. This is for the server operator to fix.', 503);
   // A connection that needs the owner (reconnect), or a zone the owner did not allow: not the caller's mistake to retry.
   if (e instanceof CfConnectionError) return json({ error: e.message, code: `cf_connection_${e.code}`, connection_id: e.connectionId }, 409);
@@ -258,6 +260,26 @@ function withoutWorkspaceHeader(request: Request): Request {
   const headers = new Headers(request.headers);
   headers.delete('x-workspace-id');
   return new Request(request.url, { method: request.method, headers });
+}
+
+/** Can Cloudflare be reached, with permission, for each domain (and the hosted zone for hosted ones)? The first problem, or null. */
+async function cloudflarePreflight(tenant: TenantContext, domains: Array<{ id: number; domain: string }>): Promise<string | null> {
+  for (const d of domains) {
+    try {
+      await tenant.zoneFor(d.domain);
+    } catch (e) {
+      if (e instanceof CfNotConfiguredError || e instanceof CfZoneNotFoundError) continue; // nothing of ours to clean up there
+      return `${d.domain} (${e instanceof Error ? cfErrorText(e) : 'unknown error'})`;
+    }
+    if (hostedEnabled(tenant.env) && (await tenant.scope.hosted.get(d.id))) {
+      try {
+        await openHostedZone(tenant.env, hostedConfig(tenant.env).recordsZone ?? '');
+      } catch (e) {
+        return `${d.domain} (hosted records zone: ${e instanceof Error ? cfErrorText(e) : 'unreachable'})`;
+      }
+    }
+  }
+  return null;
 }
 
 export async function deleteDomain(tenant: TenantContext, domainId: string, actor?: { id?: string; email?: string }, ctx?: ExecutionContext): Promise<Response> {
@@ -582,6 +604,8 @@ async function _handleApi(
   if (isWorkspaceRoute(path)) {
     const res = await handleWorkspaceRoutes(request, ctx, { kind: (workspace as AuthedWorkspace).kind, user: userBySession }, {
       db: env.DB as D1Database,
+      mode: getMode(env),
+      preflight: cloudflarePreflight,
       tenantFor: (workspaceId) => loadTenant(env, { workspaceId }),
       deleteDomain,
     });
@@ -615,28 +639,34 @@ async function _handleApi(
       const rd = `reports.${domain}`;
       const fe = `noreply@${rd}`;
       const ruaAddress = `rua@${rd}`;
-      await tenant.scope.settings.setMany({
-        base_domain: domain,
-        reports_domain: rd,
-        from_email: fe,
-      });
+
+      // Inbound mail is routed by reports domain and a hostname is monitored by one workspace only:
+      // refuse what another workspace already owns before anything is written.
+      const lifecycle = workspaceLifecycle(env.DB as D1Database);
+      const hostOwner = await lifecycle.byDomain(domain);
+      const reportsOwner = await lifecycle.byReportsDomain(rd);
+      if ((hostOwner && hostOwner !== tenant.workspaceId) || (reportsOwner && reportsOwner !== tenant.workspaceId)) {
+        return err('this domain is already registered in another workspace', 409);
+      }
 
       // A different base domain may live in a different zone: forget the stored one so it is re-resolved.
-      if (tenant.settings.baseDomain !== domain) {
-        await tenant.scope.settings.setMany({ zone_id: '', zone_name: '', cf_account_id: '' });
+      const forgetZone: Record<string, string> = tenant.settings.baseDomain !== domain ? { zone_id: '', zone_name: '', cf_account_id: '' } : {};
+      // The domain row and the derived settings go in one batch: all of it, or none.
+      let domainId: number | undefined;
+      let created: number | null;
+      try {
+        created = await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, settings: { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } });
+      } catch (e: any) {
+        if (e?.message?.includes('UNIQUE')) return err('this domain is already registered in another workspace', 409);
+        throw e;
       }
       await refreshTenant(tenant);
       const zoneId = tenant.settings.zoneId;
       const cfAccountId = tenant.settings.cfAccountId;
 
-      // Create the domain row if it doesn't exist yet, then mark it as default.
-      // This is the first domain configured — it becomes the infrastructure hub.
-      const existing = await tenant.scope.domains.list();
-      const alreadyHas = existing.some(d => d.domain === domain);
-      let domainId: number | undefined;
-      if (!alreadyHas) {
-        const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress });
-        domainId = result.meta.last_row_id as number;
+      // The first domain configured becomes the infrastructure hub.
+      if (created !== null) {
+        domainId = created;
         track(tenant, { event: 'domain.add' });
         logAudit(tenant, {
           actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
@@ -645,7 +675,7 @@ async function _handleApi(
           after_value: { domain, rua_address: ruaAddress, source: 'wizard' },
         }, ctx);
       } else {
-        domainId = existing.find(d => d.domain === domain)?.id;
+        domainId = (await tenant.scope.domains.list()).find(d => d.domain === domain)?.id;
       }
 
       // Atomically designate this domain as the default (clears any existing default first)
@@ -665,8 +695,14 @@ async function _handleApi(
 
     // GET /api/zones — list CF account zones for zone picker (requires CLOUDFLARE_API_TOKEN)
     if (path === '/api/zones' && method === 'GET') {
+      // Only the instance's own workspace has the ambient token; every other workspace lists through no one's account but its own.
       const cf = tenant.cf();
-      if (!cf) return err('Cloudflare API token not configured', 400);
+      if (!cf) {
+        // No ambient token: offer the zones this workspace's own active connections were allowed to manage, if any.
+        const allowed = (await tenant.connections.list()).filter(c => c.status === 'active').flatMap(c => c.zones.map(z => ({ id: z.id, name: z.name, status: 'active' })));
+        if (allowed.length === 0) return cfFailure(new CfNotConfiguredError());
+        return json({ zones: [...new Map(allowed.map(z => [z.id, z])).values()] });
+      }
       try {
         const zones = (await cf.listZones()).map(z => ({ id: z.id, name: z.name, status: z.status }));
         return json({ zones });
@@ -769,7 +805,7 @@ async function _handleApi(
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
       if (!domain.dns_record_id) return err('domain is not CF-managed — update DNS manually', 400);
-      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
 
       const body = await parseBody<{ policy?: string }>(request);
       const policy = body.policy;
@@ -954,7 +990,7 @@ async function _handleApi(
 
     // POST /api/setup/email-routing — set up MX records + catch-all rule for reports domain
     if (path === '/api/setup/email-routing' && method === 'POST') {
-      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
       const rd = tenant.settings.reportsDomain;
       if (!rd) return err('Reports domain not configured — complete the setup wizard first', 400);
 
@@ -978,7 +1014,7 @@ async function _handleApi(
 
     // POST /api/settings/register-destination — register admin email as CF Email Routing destination
     if (path === '/api/settings/register-destination' && method === 'POST') {
-      if (!tenant.hasCloudflare() || !tenant.settings.cfAccountId) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare() || !tenant.settings.cfAccountId) return cfFailure(new CfNotConfiguredError());
       const admin = await tenant.scope.team.firstAdmin();
       if (!admin?.email) return err('no admin email found', 400);
       const sent = await registerEmailRoutingDestination(tenant, admin.email);
@@ -992,7 +1028,7 @@ async function _handleApi(
       if (isNaN(id)) return err('invalid domain id', 400);
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
 
       const body = await parseBody<{ record?: string }>(request);
       if (!body.record) return err('record content is required', 400);
@@ -1062,7 +1098,7 @@ async function _handleApi(
       if (isNaN(id)) return err('invalid domain id', 400);
       const domain = await tenant.scope.domains.getById(id);
       if (!domain) return err('domain not found', 404);
-      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
 
       // Block if SPF flattening is active — wizard edits would be overwritten by next cron run
       const flatConfig = await tenant.scope.spf.get(id);
@@ -1116,7 +1152,7 @@ async function _handleApi(
 
     // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
-      if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+      if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
       const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
@@ -1609,7 +1645,7 @@ async function _handleApi(
       if (method === 'POST') {
         // Enable MTA-STS
         if (!tenant.hasCloudflare() || !tenant.settings.reportsDomain) {
-          return err('Cloudflare credentials not configured', 400);
+          return cfFailure(new CfNotConfiguredError());
         }
         const existing = await tenant.scope.mtaSts.get(id);
         if (existing?.enabled) return err('MTA-STS already enabled for this domain', 409);
@@ -1647,7 +1683,7 @@ async function _handleApi(
         // Update mode (testing → enforce) or refresh MX hosts
         const config = await tenant.scope.mtaSts.get(id);
         if (!config?.enabled) return err('MTA-STS not enabled for this domain', 404);
-        if (!tenant.hasCloudflare()) return err('Cloudflare credentials not configured', 400);
+        if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
 
         const body = await parseBody<{ mode?: string; refresh_mx?: boolean }>(request);
 

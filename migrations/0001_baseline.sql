@@ -249,6 +249,9 @@ CREATE TABLE settings (
   PRIMARY KEY (workspace_id, key)
 );
 
+-- A reports domain belongs to one workspace: inbound mail is routed by it.
+CREATE UNIQUE INDEX idx_settings_reports_domain ON settings(value) WHERE key = 'reports_domain' AND value <> '';
+
 CREATE TABLE monitor_subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL,

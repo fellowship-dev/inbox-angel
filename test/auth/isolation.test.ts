@@ -329,3 +329,75 @@ describe('two hosted workspaces: A cannot reach B', () => {
     expect(uncovered).toEqual([]);
   });
 });
+
+// Self-host: the server's CLOUDFLARE_API_TOKEN can reach every zone of the operator's account. It belongs to the
+// instance's own workspace (ws_default) only: no other workspace — however it came to exist — may borrow it.
+describe('self-host: the shared Cloudflare token stays with the instance owner', () => {
+  async function shared() {
+    const db = createMigratedD1();
+    const env = makeEnv(db, { CLOUDFLARE_API_TOKEN: 'operator-token' });
+    const setup = await call(env, 'POST', '/api/auth/setup', { body: { email: 'owner@example.com', password: 'password-123' } });
+    const owner = (await setup.json() as any).token as string;
+    const inv = await call(env, 'POST', '/api/team/invite', { key: owner, body: { email: 'member@example.com', role: 'member' } });
+    const acc = await call(env, 'POST', `/api/invites/${(await inv.json() as any).token}`, { body: { name: 'm', password: 'password-123' } });
+    const member = (await acc.json() as any).token as string;
+    const cf = new FakeCloudflare({ 'operator-zone.example': { id: 'zone-op', cfAccountId: 'cf-op' } });
+    stubCloudflare(cf);
+    return { db, env, owner, member, cf };
+  }
+
+  it('a member cannot create a workspace to get a token of their own: 403, nothing created', async () => {
+    const { db, env, member, cf } = await shared();
+    const res = await call(env, 'POST', '/api/workspaces', { key: member, body: { name: 'Mine' } });
+    expect(res.status).toBe(403);
+    expect(rows(db, 'SELECT COUNT(*) n FROM workspaces')).toEqual([{ n: 1 }]);
+    expect(cf.calls).toEqual([]);
+  });
+
+  it('a workspace the owner creates never reaches Cloudflare through the server token', async () => {
+    const { db, env, owner, member, cf } = await shared();
+    const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
+    // the owner makes a member of B (so the member could act in B), as an invite would
+    db.sqlite.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, (SELECT id FROM users WHERE email = 'member@example.com'), 'admin')").run(b);
+    db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (50, ?, 'operator-zone.example', 'rua@x')").run(b);
+    const h = { 'x-workspace-id': b };
+    for (const key of [owner, member]) {
+      const zones = await call(env, 'GET', '/api/zones', { key, headers: h });
+      expect(zones.status).toBe(400);
+      expect((await zones.json() as any).code).toBe('cloudflare_not_connected');
+      for (const [method, path, body] of [
+        ['POST', '/api/domains/50/apply-dmarc', { record: 'v=DMARC1; p=none' }],
+        ['POST', '/api/domains/50/apply-spf', { record: 'v=spf1 -all' }],
+        ['POST', '/api/domains/50/mta-sts', { mode: 'enforce' }],
+        ['POST', '/api/domains/50/spf-flatten', {}],
+        ['POST', '/api/setup/email-routing', {}],
+        ['POST', '/api/settings/register-destination', { email: 'a@example.com' }],
+      ] as const) {
+        const res = await call(env, method, path, { key, headers: h, body });
+        expect(res.status, `${method} ${path}`).toBeGreaterThanOrEqual(400);
+        expect(res.status, `${method} ${path}`).toBeLessThan(500);
+      }
+      // the connections page does not present the server token as B's connection
+      const conns = await (await call(env, 'GET', '/api/cloudflare/connections', { key, headers: h })).json() as any;
+      expect(conns.connections.filter((c: any) => c.implicit)).toEqual([]);
+    }
+    expect(cf.calls).toEqual([]);
+    expect(cf.records.size).toBe(0);
+  });
+
+  it('adding the base domain in such a workspace asks Cloudflare nothing', async () => {
+    const { env, owner, cf } = await shared();
+    const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
+    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example' } });
+    expect(res.status).toBe(201);
+    expect((await res.json() as any).zone_id).toBeNull();
+    expect(cf.calls).toEqual([]);
+  });
+
+  it('the instance’s own workspace keeps working through the server token', async () => {
+    const { env, owner } = await shared();
+    const zones = await call(env, 'GET', '/api/zones', { key: owner });
+    expect(zones.status).toBe(200);
+    expect((await zones.json() as any).zones.map((z: any) => z.name)).toEqual(['operator-zone.example']);
+  });
+});
