@@ -89,9 +89,14 @@ describe('sign-up policy for OAuth (external) sign-ups', () => {
     await expect(assertMaySignUp(env as any, { kind: 'external' }, 'stranger@example.com')).rejects.toThrow(/closed/);
 
     await call(env, 'POST', '/api/team/invite', { key: owner, body: { email: 'friend@example.com', role: 'admin' } });
-    await assertMaySignUp(env as any, { kind: 'external' }, 'friend@example.com');
+    // The provider has not verified this address: knowing the invitee's email is not enough to take their seat.
+    await expect(assertMaySignUp(env as any, { kind: 'external' }, 'friend@example.com', false)).rejects.toThrow(/closed/);
+    await assertMaySignUp(env as any, { kind: 'external' }, 'friend@example.com', true);
     insertUser(db, 'u9', 'friend@example.com');
-    expect(await provisionUser(env as any, { kind: 'external' }, user('u9', 'friend@example.com'))).toEqual({ workspaceId: 'ws_default', role: 'admin' });
+    await expect(provisionUser(env as any, { kind: 'external' }, { ...user('u9', 'friend@example.com'), emailVerified: false })).rejects.toThrow();
+    expect(rows(db, 'SELECT used_at FROM invites')[0].used_at).toBeNull();
+    insertUser(db, 'u11', 'friend@example.com');
+    expect(await provisionUser(env as any, { kind: 'external' }, { ...user('u11', 'friend@example.com'), emailVerified: true })).toEqual({ workspaceId: 'ws_default', role: 'admin' });
     expect(rows(db, 'SELECT used_at FROM invites')[0].used_at).not.toBeNull();
   });
 

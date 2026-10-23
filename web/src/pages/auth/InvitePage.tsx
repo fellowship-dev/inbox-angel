@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { hashFor, workspaceStore } from '../../lib/workspace';
+import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 
 interface InviteInfo {
@@ -28,6 +29,7 @@ export function InvitePage() {
 	const [confirm, setConfirm] = useState('');
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
+	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	async function submit(e: FormEvent) {
 		e.preventDefault();
@@ -36,8 +38,12 @@ export function InvitePage() {
 		if (password !== confirm) return setError('Passwords do not match.');
 		setBusy(true);
 		try {
-			const res = await api<{ token: string | null }>(`/api/invites/${token}`, { method: 'POST', body: { name: name.trim(), password } });
-			await signedIn(res.token);
+			const res = await api<{ verification_required?: boolean }>(`/api/invites/${token}`, { method: 'POST', body: { name: name.trim(), password } });
+			if (res.verification_required) {
+				setVerifyFor(invite.data?.email ?? '');
+				return;
+			}
+			await signedIn();
 			// The new login's first workspace is the one they were invited to.
 			workspaceStore.forget();
 			navigate('/', { replace: true });
@@ -47,6 +53,8 @@ export function InvitePage() {
 			setBusy(false);
 		}
 	}
+
+	if (verifyFor) return <CheckEmail email={verifyFor} note="Confirm your email address and choose your password from the link we sent. Then open this invite link again, signed in, to join the workspace." />;
 
 	if (invite.isPending) {
 		return (
@@ -170,9 +178,9 @@ function InlineSignIn({ email, token }: { email: string; token: string }) {
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState('');
 	const login = useMutation({
-		mutationFn: () => api<{ token: string | null }>('/api/auth/login', { method: 'POST', body: { email, password } }),
-		onSuccess: async (res) => {
-			await signedIn(res.token);
+		mutationFn: () => api('/api/auth/login', { method: 'POST', body: { email, password } }),
+		onSuccess: async () => {
+			await signedIn();
 			await qc.invalidateQueries({ queryKey: ['invite', token] });
 		},
 		onError: (e) => setError(errorMessage(e)),

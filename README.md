@@ -166,11 +166,13 @@ The deployable Worker stays at the repo root so the Deploy to Cloudflare button 
 npm install             # installs the root app and all workspaces (including web/)
 npm run dev:dashboard   # web/ Vite dev server on :5173 (proxies /api to :8787)
 npm run test:web        # dashboard component + route tests
-npm run dev             # Worker on :8787 (wrangler dev)
+npm run dev             # Worker on :8787 (wrangler dev); applies local migrations first
 npm test                # unit tests: test/ and packages/*/test
 npm run typecheck       # tsc --noEmit (app) + tsc -p packages/dns-checks
 npm run test:e2e        # Playwright against http://127.0.0.1:8787 (start `npm run dev` first)
 ```
+
+`npm run dev` builds the dashboard first (`npm install` must have installed the `web/` workspace deps) and applies `migrate:local`; until the local D1 is migrated `/health` answers 503. A local database created before the migration history was squashed (`.wrangler/state`) must be deleted and recreated.
 
 `test:e2e` targets local `wrangler dev` by default; set `E2E_BASE_URL` to point elsewhere. It is not part of CI. There is no Workers-runtime (`@cloudflare/vitest-pool-workers`) suite yet — the old `test:workers` script just re-ran the node tests, so it was removed. Add a pool-workers config alongside the first real Worker integration test.
 

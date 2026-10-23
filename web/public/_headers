@@ -1,5 +1,14 @@
 # Workers Static Assets reads this file from the assets directory (web/dist).
 # Hashed build output never changes under the same name; the HTML shell must always be revalidated.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=()
+  Strict-Transport-Security: max-age=63072000
+  Cross-Origin-Opener-Policy: same-origin
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 

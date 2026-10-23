@@ -1,7 +1,7 @@
 // /api/workspaces: list, create, rename, leave, delete — and what switching between workspaces does to what a user sees.
 import { describe, it, expect, vi } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { call, makeEnv, setupOwner, inviteAndAccept } from '../auth/helpers';
+import { call, makeEnv, setupOwner, inviteAndAccept, signupVerified } from '../auth/helpers';
 import { HOSTED_ENV } from '../hosted/world';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -80,7 +80,7 @@ describe('GET/POST /api/workspaces', () => {
   it('works in saas mode too, and a user is not placed in anyone else’s workspace', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, HOSTED_ENV);
-    const signup = async (email: string) => (await json(await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } }))).token as string;
+    const signup = (email: string) => signupVerified(env, email);
     const a = await signup('a@example.com');
     const b = await signup('b@example.com');
     const second = await create(env, a, 'Second');

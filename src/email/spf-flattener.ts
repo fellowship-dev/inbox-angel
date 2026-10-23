@@ -88,7 +88,7 @@ export async function updateDnsRecord(
   const zone = await cf.zoneFor(domain);
   try {
     try {
-      await cf.patchDnsRecord(zone.id, recordId, { content: newContent });
+      await cf.patchDnsRecord(zone.id, recordId, { content: newContent }, { allowedApexes: [domain] });
     } catch (e) {
       // Records written before per-domain zones live in the base zone.
       const legacy = e instanceof CfNotFoundError ? tenant.legacyZoneId(zone.id) : undefined;

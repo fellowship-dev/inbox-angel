@@ -22,9 +22,10 @@ export function ResetPage() {
 		if (password !== confirm) return setError('Passwords do not match.');
 		setBusy(true);
 		try {
-			const res = await api<{ token: string | null }>('/api/auth/reset', { method: 'POST', body: { token, password } });
-			await signedIn(res.token);
-			navigate(res.token ? '/' : '/login', { replace: true });
+			await api('/api/auth/reset', { method: 'POST', body: { token, password } });
+			// The reset opens a session (cookie); if it did not, the refetch finds nobody and the sign-in screen shows.
+			await signedIn();
+			navigate('/', { replace: true });
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 400) setExpired(true);
 			else setError(errorMessage(err));

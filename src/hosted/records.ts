@@ -4,7 +4,8 @@
 // the zone belongs to the operator. Three layers keep it that way:
 //   1. the token (HOSTED_RECORDS_TOKEN) should be scoped to DNS:Edit on this one zone;
 //   2. `assertHostedName` refuses any record name outside `*.<label>.<zone>`, for create, update and delete;
-//   3. update and delete read the record first and refuse it unless it sits at the name the caller expects,
+//   3. (CfClient) every DNS write is re-checked at the client: TXT/AAAA/CNAME only, strictly below `<label>.<zone>`, in this zone only;
+//   4. update and delete read the record first and refuse it unless it sits at the name the caller expects,
 //      so a stale or wrong record id can't touch another record.
 //
 // Layout, with <id> an opaque id that is never derived from the customer's domain:
@@ -14,6 +15,7 @@
 //   mta-sts.<id>.h.<zone>       TXT   v=STSv1; id=…     and a proxied AAAA so the Worker serves the policy
 
 import { CfClient, CfNotConfiguredError, type CfDnsRecord, type CfDnsRecordInput, type CfZone } from '../tenancy/cf-client';
+import { assertHostedDnsWrite } from '../dns/write-policy';
 import { hostedApex, hostedConfig, type HostedConfig, type HostedEnv } from './config';
 import { intakeAddress } from './tokens';
 
@@ -132,9 +134,11 @@ export class HostedRecordWriter {
 /** Open the hosted zone with HOSTED_RECORDS_TOKEN, which is separate from every tenant credential. */
 export async function openHostedZone(env: HostedEnv, zoneName: string, opts: { fetch?: typeof fetch } = {}): Promise<HostedRecordWriter> {
   if (!env.HOSTED_RECORDS_TOKEN) throw new CfNotConfiguredError();
-  const cf = new CfClient(env.HOSTED_RECORDS_TOKEN, { fetch: opts.fetch });
+  const cfg = hostedConfig(env);
+  // Layer 4: the client itself refuses any DNS write that is not TXT/AAAA/CNAME under *.<label>.<zone> of this zone.
+  const cf = new CfClient(env.HOSTED_RECORDS_TOKEN, { fetch: opts.fetch, mode: 'saas', dnsWritePolicy: w => assertHostedDnsWrite(w, cfg) });
   const zone = await cf.zoneFor(zoneName);
-  return new HostedRecordWriter(cf, zone, hostedConfig(env));
+  return new HostedRecordWriter(cf, zone, cfg);
 }
 
 export { hostedApex };

@@ -5,7 +5,6 @@ import { MemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { createQueryClient } from '../src/lib/query';
 import { SessionProvider, useSession } from '../src/lib/session';
-import { tokenStore } from '../src/lib/api';
 import type { AuthStatus, Me } from '../src/lib/types';
 
 export const STATUS: AuthStatus = {
@@ -64,8 +63,6 @@ export function renderApp(
 	opts: { route?: string; role?: Me['role'] | null; status?: Partial<AuthStatus>; routes?: Record<string, unknown | Handler> } = {},
 ) {
 	const role = opts.role === undefined ? 'owner' : opts.role;
-	if (role) tokenStore.set('test-token');
-	else tokenStore.clear();
 	const api = mockApi({
 		'GET /api/auth/status': { ...STATUS, ...opts.status },
 		'GET /api/me': role ? me(role) : fail(401),

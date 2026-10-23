@@ -140,6 +140,6 @@ describe('DomainSettingsPage', () => {
 		await userEvent.click(screen.getByRole('button', { name: /Download CSV/ }));
 		await waitFor(() => expect(seen).toBeDefined());
 		expect(seen?.url).toBe('/api/domains/1/export');
-		expect(seen?.headers['X-Api-Key']).toBe('test-token');
+		expect(seen?.headers?.['X-Api-Key']).toBeUndefined();
 	});
 });

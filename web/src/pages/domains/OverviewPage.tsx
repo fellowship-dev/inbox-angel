@@ -3,12 +3,13 @@ import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Download, Globe, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { ClaimCard } from '../../components/domain/ClaimCard';
 import { DomainLevelCard } from '../../components/domain/DomainLevelCard';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
 import { errorMessage } from '../../lib/api';
 import { computeStatus, sumStats } from '../../lib/dmarc';
 import { domainKeys, fetchStats, fetchSummary } from '../../lib/domain-queries';
-import { useDomains } from '../../lib/queries';
+import { useDomainClaims, useDomains } from '../../lib/queries';
 import { useSession } from '../../lib/session';
 import type { DailyStat, Domain } from '../../lib/types';
 
@@ -44,6 +45,7 @@ export function OverviewPage() {
 	const { canWrite } = useSession();
 	const list = useDomains();
 	const domains = list.data ?? [];
+	const claims = useDomainClaims().data ?? [];
 	const [exporting, setExporting] = useState(false);
 
 	// Same keys as the cards use, so each request is made once.
@@ -102,7 +104,7 @@ export function OverviewPage() {
 				<ListSkeleton rows={3} label="Loading domains" />
 			) : list.isError ? (
 				<LoadError error={list.error} onRetry={() => void list.refetch()} title="Could not load your domains" />
-			) : domains.length === 0 ? (
+			) : domains.length === 0 && claims.length === 0 ? (
 				<EmptyState
 					icon={<Globe />}
 					title="No domains yet"
@@ -126,7 +128,23 @@ export function OverviewPage() {
 						) : undefined
 					}
 				/>
-			) : (
+			) : null}
+
+			{!list.isPending && !list.isError && claims.length > 0 ? (
+				<section aria-labelledby="waiting-heading" className="space-y-4">
+					<div className="space-y-1">
+						<h2 id="waiting-heading" className="text-lg font-semibold tracking-tight">
+							Waiting for verification
+						</h2>
+						<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
+					</div>
+					{claims.map((c) => (
+						<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
+					))}
+				</section>
+			) : null}
+
+			{!list.isPending && !list.isError && domains.length > 0 ? (
 				<>
 					<StatGroup className="sm:grid-cols-4" aria-label="Summary">
 						<Stat label={domains.length === 1 ? 'Domain' : 'Domains'} value={domains.length} />
@@ -149,7 +167,7 @@ export function OverviewPage() {
 						))}
 					</div>
 				</>
-			)}
+			) : null}
 		</div>
 	);
 }

@@ -2,7 +2,6 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/app';
-import { tokenStore } from '../src/lib/api';
 import { createQueryClient } from '../src/lib/query';
 import { hashFor, LAST_WORKSPACE_KEY, parseHash, workspaceStore } from '../src/lib/workspace';
 import { fail, mockApi, STATUS, type Handler } from './render';
@@ -54,7 +53,6 @@ beforeEach(() => {
 	sessionStorage.clear();
 	window.location.hash = '';
 	workspaceStore.reload();
-	tokenStore.set('t');
 });
 
 describe('workspace URLs', () => {
@@ -191,7 +189,6 @@ describe('workspace switcher', () => {
 
 	it('signed out, the sign-in screen shows at a workspace link without changing it', async () => {
 		server(undefined, { 'GET /api/me': fail(401) });
-		tokenStore.clear();
 		boot('#/w/ws_lexgo/keys');
 		expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
 		expect(window.location.hash).toBe('#/w/ws_lexgo/keys');

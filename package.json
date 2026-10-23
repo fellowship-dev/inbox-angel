@@ -5,7 +5,7 @@
   "scripts": {
     "deploy": "npm run build:dashboard && npm run migrate && wrangler deploy",
     "migrate": "node packages/db/scripts/migrate.mjs --remote",
-    "dev": "wrangler dev",
+    "dev": "npm run migrate:local && wrangler dev",
     "dev:dashboard": "npm --prefix web run dev",
     "build:dashboard": "npm run build -w @inbox-angel/ui && npm run build -w @inbox-angel/web",
     "start": "wrangler dev",

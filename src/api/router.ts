@@ -61,7 +61,11 @@
 //   POST   /api/workspaces/:id/transfer-ownership — hand ownership to another member (owner)
 //   DELETE /api/account                       — delete your own account ({confirm: <your email>})
 //   GET    /api/team                          — list users (admin only)
-//   POST   /api/team/invite                   — send invite link (admin only)
+//   POST   /api/team/invite                   — send invite link (admin only; only an owner can invite an admin)
+//   GET    /api/team/invites                  — pending invites (admin only)
+//   DELETE /api/team/invites/:id              — revoke a pending invite (admin only)
+//   POST   /api/domains/claims/:id/verify     — verify a pending domain claim (SaaS)
+//   DELETE /api/domains/claims/:id            — drop a pending domain claim (SaaS)
 //   DELETE /api/team/:id                      — remove team member (admin only)
 //
 // Self-hosted lazy init: if base domain is configured (via wizard/D1) and no domain exists yet,
@@ -92,13 +96,14 @@ import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
+import { admitDomain, claimView, listClaims, settleClaims, verifyClaim, type VerifiedVia } from '../domains/ownership';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
 import { track } from '../telemetry';
 import { loadTenant, refreshTenant } from '../tenancy/load';
 import type { TenantContext } from '../tenancy/context';
 import { defaultResolver, type WorkspaceResolver } from '../tenancy/resolver';
-import { CfApiError, CfAuthError, CfConnectionError, CfNotConfiguredError, CfZoneNotAllowedError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
+import { CfApiError, CfAuthError, CfConnectionError, CfNotConfiguredError, CfRecordNotAllowedError, CfZoneNotAllowedError, CfZoneNotFoundError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
@@ -121,17 +126,30 @@ const CHECK_SESSION_WINDOW_MS = 3600_000;
 
 // ── Helpers ───────────────────────────────────────────────────
 
+/**
+ * Endpoints that act on the operator's own Cloudflare account (Email Routing, Workers custom domains) with the
+ * instance token. On the hosted service they would run with a customer's connection token, widening what a
+ * stolen session can do in that account, and no hosted customer needs them.
+ */
+const SELF_HOST_ONLY: ReadonlySet<string> = new Set([
+  'POST /api/setup/email-routing',
+  'POST /api/setup/custom-domain',
+  'POST /api/settings/register-destination',
+]);
+
 const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'geolocation=(), camera=(), microphone=()',
-  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+  // includeSubDomains is added on the hosted service only: a self-hosted dashboard may share its domain with other sites.
+  'Strict-Transport-Security': 'max-age=63072000',
 };
 
-function withSecurityHeaders(response: Response): Response {
+function withSecurityHeaders(response: Response, saas = false): Response {
   const headers = new Headers(response.headers);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  if (saas) headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -154,6 +172,7 @@ function cfFailure(e: unknown, fallbackStatus = 500): Response {
   // A connection that needs the owner (reconnect), or a zone the owner did not allow: not the caller's mistake to retry.
   if (e instanceof CfConnectionError) return json({ error: e.message, code: `cf_connection_${e.code}`, connection_id: e.connectionId }, 409);
   if (e instanceof CfZoneNotAllowedError) return json({ error: e.message, code: 'cf_zone_not_allowed', connection_id: e.connectionId }, 403);
+  if (e instanceof CfRecordNotAllowedError) return json({ error: e.message, code: 'cf_record_not_allowed' }, 403);
   return err(cfErrorText(e), fallbackStatus);
 }
 
@@ -169,7 +188,8 @@ async function parseBody<T>(request: Request): Promise<T> {
 
 async function getDomainsHandler(tenant: TenantContext): Promise<Response> {
   const results = await tenant.scope.domains.list();
-  return json({ domains: results });
+  // `domains` are verified; `pending_claims` are domains this workspace has asked for but not yet proven (SaaS).
+  return json({ domains: results, pending_claims: await listClaims(tenant) });
 }
 
 async function addDomain(request: Request, tenant: TenantContext, userEmail?: string, ctx?: ExecutionContext, actorId?: string): Promise<Response> {
@@ -183,6 +203,18 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
     return err('invalid domain format', 400);
   }
 
+  // SaaS: a domain is only a claim until its owner is proven (see src/domains/ownership.ts); nothing else happens meanwhile.
+  const admission = await admitDomain(tenant, domain);
+  if (admission.kind === 'taken') return err('domain already registered in another workspace', 409);
+  if (admission.kind === 'limit') return err('too many unverified domains — verify or remove some first', 429);
+  if (admission.kind === 'pending') {
+    return json({ pending: true, claim: claimView(admission.claim), domain: null }, 202);
+  }
+  return createVerifiedDomain(tenant, domain, admission.via, userEmail, ctx, actorId);
+}
+
+/** Inserts a domain whose ownership is established, with the side effects of adding one. */
+async function createVerifiedDomain(tenant: TenantContext, domain: string, via: VerifiedVia, userEmail?: string, ctx?: ExecutionContext, actorId?: string): Promise<Response> {
   const rdomain = tenant.settings.reportsDomain;
   if (!rdomain) return err('Reports domain not configured — complete the setup wizard first', 500);
 
@@ -195,12 +227,13 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
   // Insert domain row — no DNS writes here; all DNS changes require explicit user action
   let domainId: number;
   try {
-    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress });
+    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via });
     domainId = result.meta.last_row_id as number;
   } catch (e: any) {
     if (e?.message?.includes('UNIQUE')) return err('domain already registered', 409);
     throw e;
   }
+  await settleClaims(tenant, domain);
 
   track(tenant, { event: 'domain.add' }); // fire-and-forget, non-blocking
 
@@ -269,6 +302,12 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
     dns_instructions: `Add this TXT record to authorize DMARC reports:\n  ${authRecordName}  TXT  "v=DMARC1;"`,
     ...(parent_context !== null ? { parent_context } : {}),
   }, 201);
+}
+
+/** Public handle of an invite for listing and revoking: the token itself stays with whoever was given the link. */
+async function inviteId(token: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+  return [...digest.slice(0, 8)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** The same request, minus X-Workspace-Id (for routes about the user's workspaces rather than one of them). */
@@ -362,13 +401,14 @@ async function getReport(tenant: TenantContext, reportId: string): Promise<Respo
 }
 
 async function getCheckResults(tenant: TenantContext): Promise<Response> {
-  // Return the last 20 results for monitored domains
+  // Free-check results are public-facing data written by strangers: a workspace sees only the domain-level outcome
+  // for domains it has verified (the `domains` table holds verified domains only), never who ran the check.
   const domains = await tenant.scope.domains.list();
   const domainNames = domains.map(d => d.domain);
 
   if (domainNames.length === 0) return json({ results: [] });
 
-  const results = await globals(tenant.db).checkResults.latestForDomains(domainNames, 20);
+  const results = await globals(tenant.db).checkResults.latestPerDomain(domainNames, 20);
 
   return json({ results });
 }
@@ -476,7 +516,7 @@ export async function handleApi(
     return withSecurityHeaders(withCors(request, envRaw, await _handleApi(request, envRaw, ctx, resolver)));
   }
   const res = await _handleApi(request, envRaw, ctx, resolver);
-  return withSecurityHeaders(res);
+  return withSecurityHeaders(res, getMode(envRaw) === 'saas');
 }
 
 async function _handleApi(
@@ -652,6 +692,8 @@ async function _handleApi(
     return err('admin required', 403);
   }
 
+  if (getMode(env) === 'saas' && SELF_HOST_ONLY.has(`${method} ${path}`)) return err('not available on the hosted service', 404);
+
   // GET /api/me — who the caller is in this workspace (the dashboard gates controls on `role`)
   const instanceOwner = isInstanceOwner(env, { kind: (workspace as AuthedWorkspace).kind, email: userBySession?.email, role: workspace.role, workspaceId: workspace.workspaceId });
   if (path === '/api/me' && method === 'GET') {
@@ -676,6 +718,12 @@ async function _handleApi(
       const domain = body.domain.toLowerCase().trim();
       if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return err('invalid domain format', 400);
 
+      // SaaS: the hub domain is a claim like any other until its owner is proven.
+      const admission = await admitDomain(tenant, domain);
+      if (admission.kind === 'taken') return err('this domain is already registered in another workspace', 409);
+      if (admission.kind === 'limit') return err('too many unverified domains — verify or remove some first', 429);
+      if (admission.kind === 'pending') return json({ ok: false, pending: true, claim: claimView(admission.claim), domain }, 202);
+
       // Persist base domain + derived values to D1
       const rd = `reports.${domain}`;
       const fe = `noreply@${rd}`;
@@ -696,11 +744,12 @@ async function _handleApi(
       let domainId: number | undefined;
       let created: number | null;
       try {
-        created = await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, settings: { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } });
+        created = await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, verified_via: admission.via, settings: { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } });
       } catch (e: any) {
         if (e?.message?.includes('UNIQUE')) return err('this domain is already registered in another workspace', 409);
         throw e;
       }
+      if (created !== null) await settleClaims(tenant, domain);
       await refreshTenant(tenant);
       const zoneId = tenant.settings.zoneId;
       const cfAccountId = tenant.settings.cfAccountId;
@@ -756,6 +805,24 @@ async function _handleApi(
     // GET /api/domains
     if (path === '/api/domains' && method === 'GET') {
       return await getDomainsHandler(tenant);
+    }
+    // POST /api/domains/claims/:id/verify — the "Verify" button: re-check the proofs of a pending claim
+    const claimVerifyMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/verify$/);
+    if (claimVerifyMatch && method === 'POST') {
+      const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
+      if (!claim) return err('claim not found', 404);
+      const outcome = await verifyClaim(tenant, claim);
+      if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
+      if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
+      return createVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
+    }
+    // DELETE /api/domains/claims/:id — give up a pending claim
+    const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
+    if (claimDeleteMatch && method === 'DELETE') {
+      const claim = await tenant.scope.claims.getById(parseInt(claimDeleteMatch[1], 10));
+      if (!claim) return err('claim not found', 404);
+      await tenant.scope.claims.delete(claim.id);
+      return json({ ok: true });
     }
     // POST /api/domains
     if (path === '/api/domains' && method === 'POST') {
@@ -1174,8 +1241,8 @@ async function _handleApi(
       let written;
       try {
         written = existingId
-          ? await cf.patchDnsRecord(zoneId, existingId, { content: body.record })
-          : await cf.createDnsRecord(zoneId, { type: 'TXT', name: recordName, content: body.record, ttl: 3600 });
+          ? await cf.patchDnsRecord(zoneId, existingId, { content: body.record }, { allowedApexes: [recordName] })
+          : await cf.createDnsRecord(zoneId, { type: 'TXT', name: recordName, content: body.record, ttl: 3600 }, { allowedApexes: [recordName] });
       } catch (e) {
         return cfFailure(e);
       }
@@ -1478,6 +1545,9 @@ async function _handleApi(
       const token = crypto.randomUUID();
       const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 3600; // 7 days
       const inviteEmail = body.email.toLowerCase().trim();
+      // Only an owner can hand out admin; owner itself cannot be granted by invite.
+      if ((body.role === 'admin' || body.role === 'owner') && workspace.role !== 'owner') return err('only an owner can invite an admin or an owner', 403);
+      if (body.role === 'owner') return err('ownership cannot be granted by invite', 400);
       const inviteRole = body.role === 'admin' ? 'admin' : 'member';
       await tenant.scope.team.insertInvite({
         token,
@@ -1495,6 +1565,31 @@ async function _handleApi(
       return json({ token }, 201);
     }
 
+    // GET /api/team/invites — pending invites (owner and admin). The token itself is not listed: `id` identifies one for revoking.
+    if (path === '/api/team/invites' && method === 'GET') {
+      if (!isAdmin) return err('admin required', 403);
+      const pending = await tenant.scope.team.listPendingInvites();
+      return json({ invites: await Promise.all(pending.map(async i => ({
+        id: await inviteId(i.token), email: i.email, role: i.role, invited_by: i.invited_by, created_at: i.created_at, expires_at: i.expires_at,
+      }))) });
+    }
+    // DELETE /api/team/invites/:id — revoke a pending invite (owner and admin)
+    const inviteRevokeMatch = path.match(/^\/api\/team\/invites\/([^/]+)$/);
+    if (inviteRevokeMatch && method === 'DELETE') {
+      if (!isAdmin) return err('admin required', 403);
+      const pending = await tenant.scope.team.listPendingInvites();
+      let target: (typeof pending)[number] | undefined;
+      for (const i of pending) if ((await inviteId(i.token)) === inviteRevokeMatch[1]) target = i;
+      if (!target || !(await tenant.scope.team.revokeInvite(target.token))) return err('invite not found', 404);
+      logAudit(tenant, {
+        actor_id: userBySession?.id ?? null, actor_email: userBySession?.email ?? null, actor_type: 'user',
+        action: 'auth.invite_revoked',
+        resource_type: 'user', resource_name: target.email,
+        before_value: { email: target.email, role: target.role, invited_by: target.invited_by },
+      }, ctx);
+      return json({ ok: true });
+    }
+
     // DELETE /api/team/:id — remove a team member (admin only, can't remove self)
     const teamMemberMatch = path.match(/^\/api\/team\/([^/]+)$/);
     if (teamMemberMatch && method === 'DELETE') {
@@ -1507,6 +1602,8 @@ async function _handleApi(
       if (removed?.role === 'owner') return err('the owner cannot be removed', 403);
       if (removed?.role === 'admin' && workspace.role !== 'owner') return err('only the owner can remove an admin', 403);
       await tenant.scope.team.removeUser(teamMemberMatch[1]);
+      // Invites they sent stop working with them.
+      await tenant.scope.team.revokeInvitesBy(removed.email);
       logAudit(tenant, {
           actor_id: actor.id, actor_email: actor.email, actor_type: 'user',
         action: 'team.member_removed',

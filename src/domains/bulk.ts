@@ -5,11 +5,12 @@
 import type { TenantContext } from '../tenancy/context';
 import { provisionDomain } from '../dns/provision';
 import { logAudit } from '../audit/log';
+import { admitDomain, claimView, settleClaims, type ClaimView } from './ownership';
 
 const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 const BATCH_LIMIT = 50;
 
-export type BulkImportStatus = 'imported' | 'duplicate' | 'invalid' | 'error';
+export type BulkImportStatus = 'imported' | 'duplicate' | 'invalid' | 'error' | 'pending';
 
 export interface BulkImportResult {
   domain: string;
@@ -17,6 +18,8 @@ export interface BulkImportResult {
   error?: string;
   dns_record_id?: string | null;
   manual_dns?: boolean;
+  /** status 'pending' (SaaS): the TXT record that proves ownership. Nothing else is done for the domain until it is verified. */
+  claim?: ClaimView;
 }
 
 export function validateDomain(domain: string): boolean {
@@ -69,11 +72,16 @@ export async function bulkInsertDomains(
       continue;
     }
 
+    const admission = await admitDomain(tenant, domain);
+    if (admission.kind === 'taken') { results.push({ domain, status: 'duplicate', error: 'already registered in another workspace' }); continue; }
+    if (admission.kind === 'limit') { results.push({ domain, status: 'error', error: 'too many unverified domains — verify or remove some first' }); continue; }
+    if (admission.kind === 'pending') { results.push({ domain, status: 'pending', claim: claimView(admission.claim) }); continue; }
+
     const ruaAddress = rdomain ? `rua@${rdomain}` : `rua@reports.inboxangel.io`;
 
     let domainId: number;
     try {
-      const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress });
+      const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: admission.via });
       domainId = result.meta.last_row_id as number;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -86,6 +94,7 @@ export async function bulkInsertDomains(
       continue;
     }
 
+    await settleClaims(tenant, domain);
     logAudit(tenant, {
       actor_id: audit.actorId ?? null,
       actor_email: audit.actorEmail ?? null,

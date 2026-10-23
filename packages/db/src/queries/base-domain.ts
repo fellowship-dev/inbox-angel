@@ -21,7 +21,7 @@ export function baseDomainQueries(db: Db, workspaceId: string) {
 
 	return {
 		/** Returns the new domain's id, or null when the workspace already had the domain. */
-		async apply(d: { domain: string; rua_address: string; settings: Record<string, string> }): Promise<number | null> {
+		async apply(d: { domain: string; rua_address: string; verified_via?: string; settings: Record<string, string> }): Promise<number | null> {
 			const existing = await db.select({ id: domains.id }).from(domains).where(and(eq(domains.workspace_id, workspaceId), eq(domains.domain, d.domain))).get();
 			const parts = d.domain.split('.');
 			let parentId: number | null = null;
@@ -34,7 +34,7 @@ export function baseDomainQueries(db: Db, workspaceId: string) {
 				parentId = parent?.id ?? null;
 			}
 			const stmts = [
-				...(existing ? [] : [db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId })]),
+				...(existing ? [] : [db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId, verified_via: d.verified_via })]),
 				...Object.entries(d.settings).map(([k, v]) => upsert(k, v)),
 			];
 			try {

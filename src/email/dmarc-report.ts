@@ -10,16 +10,27 @@ import { extractAttachmentBytes, MimeExtractError } from './mime-extract';
 import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
 import { coversDomain, type TokenDomain } from '../hosted/scope';
+import { MAX_REPORT_BYTES } from '../hosted/config';
+import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
+import { reporterAuth } from '../dmarc/reporter-auth';
+import { readAuthHeaders, type AuthHeaders } from './sender-proof';
 
 export interface ReportOptions {
-  /** Hosted intake: cap on the decompressed report. Self-host passes nothing and keeps its unlimited behaviour. */
+  /** Cap on the decompressed report (default MAX_REPORT_BYTES, which also bounds zip/gzip bombs in self-host). */
   maxBytes?: number;
+  /** Hosted intake: refuse reports with more records than this, before any per-record lookup. */
+  maxRecords?: number;
+  /** Hosted intake: uncached source IPs enriched per report. */
+  maxNewIps?: number;
   /**
-   * Hosted intake: the domain the recipient's token belongs to. The report must be for that domain or a subdomain
-   * and is filed under it; any other domain is rejected, even one the same workspace owns.
+   * Hosted intake: the domain the recipient's token belongs to. The report's policy_published domain must be that
+   * domain or a subdomain of it; it is filed under the token's domain, or under the subdomain's own row when the same
+   * workspace has it as a verified domain. Anything else is rejected.
    */
   token?: TokenDomain;
+  /** The topmost results headers, when the caller has already read them (hosted intake does, to pick the allowance). */
+  authHeaders?: AuthHeaders;
 }
 
 export async function handleDmarcReport(
@@ -27,10 +38,17 @@ export async function handleDmarcReport(
   tenant: TenantContext,
   opts: ReportOptions = {},
 ): Promise<{ failure_count: number }> {
-  // 1. Extract attachment bytes from raw MIME stream
+  // 1. Extract attachment bytes from raw MIME stream (the headers are read from a second branch of it)
   let bytes: Uint8Array;
+  let authHeaders = opts.authHeaders;
   try {
-    bytes = await extractAttachmentBytes(message.raw);
+    let raw = message.raw;
+    if (!authHeaders) {
+      const [forHeaders, rest] = message.raw.tee();
+      raw = rest;
+      authHeaders = await readAuthHeaders(forHeaders);
+    }
+    bytes = await extractAttachmentBytes(raw);
   } catch (err) {
     const reason = err instanceof MimeExtractError
       ? `Could not extract attachment: ${err.message}`
@@ -44,9 +62,11 @@ export async function handleDmarcReport(
   let report;
   let rawXml: string | null = null;
   try {
-    report = opts.maxBytes === undefined
-      ? await parseDmarcEmail(bytes, false, tenant.db)
-      : await parseDmarcEmail(bytes, false, tenant.db, { maxBytes: opts.maxBytes });
+    report = await parseDmarcEmail(bytes, false, tenant.db, {
+      maxBytes: opts.maxBytes ?? MAX_REPORT_BYTES,
+      ...(opts.maxRecords !== undefined && { maxRecords: opts.maxRecords }),
+      ...(opts.maxNewIps !== undefined && { maxNewIps: opts.maxNewIps }),
+    });
 
     // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
     try {
@@ -70,8 +90,12 @@ export async function handleDmarcReport(
   const policyDomain = report.policy_published.domain;
   let domain;
   if (opts.token) {
-    // Hosted: the token's own domain (or a subdomain of it), filed under the token's domain.
-    domain = coversDomain(opts.token.domain, policyDomain) ? await tenant.scope.domains.getById(opts.token.id) : null;
+    // Hosted: the token's domain or a subdomain of it. Filed under the token's domain, unless the subdomain is itself
+    // a verified domain of the same workspace (the scoped lookup never sees another workspace's domains).
+    const p = normalizeDomain(policyDomain);
+    if (!coversDomain(opts.token.domain, p)) domain = null;
+    else if (p === normalizeDomain(opts.token.domain)) domain = await tenant.scope.domains.getById(opts.token.id);
+    else domain = (await tenant.scope.domains.getByName(p)) ?? (await tenant.scope.domains.getById(opts.token.id));
   } else {
     domain = await resolveDomain(tenant, policyDomain);
   }
@@ -85,7 +109,7 @@ export async function handleDmarcReport(
 
   // 4. Store in D1 (dedup handled by INSERT OR IGNORE inside storeReport)
   try {
-    const result = await storeReport(tenant, domain.id, report, rawXml, true);
+    const result = await storeReport(tenant, domain.id, report, rawXml, true, reporterAuth(authHeaders, report.report_metadata, tenant.env));
     if (result.stored) {
       console.log(
         `dmarc-report: stored report ${report.report_metadata.report_id} ` +

@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/app';
-import { tokenStore } from '../src/lib/api';
 import { createQueryClient } from '../src/lib/query';
 import { fail, me, mockApi, STATUS } from './render';
 
@@ -35,7 +34,6 @@ describe('app', () => {
 	});
 
 	it('renders the sidebar and the page for a signed-in user, marking the current section', async () => {
-		tokenStore.set('t');
 		boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': { keys: [] } });
 		const nav = await screen.findByRole('navigation', { name: 'Main' });
 		expect(within(nav).getByRole('link', { name: 'API keys' })).toHaveAttribute('aria-current', 'page');
@@ -44,27 +42,22 @@ describe('app', () => {
 	});
 
 	it('sends a signed-in owner of an empty instance to the setup wizard, but not a member', async () => {
-		tokenStore.set('t');
 		boot('/', { 'GET /api/auth/status': { ...STATUS, has_domain: false }, 'GET /api/me': me('owner') });
 		await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument());
 	});
 
 	it('returns to sign-in when a request comes back 401 mid-session', async () => {
-		tokenStore.set('t');
 		boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': fail(401, 'expired') });
 		expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
-		expect(tokenStore.get()).toBe('');
 	});
 
 	it('signs out from the workspace menu', async () => {
-		tokenStore.set('t');
 		const api = boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': { keys: [] }, 'POST /api/auth/logout': { ok: true } });
 		const user = userEvent.setup();
 		await user.click(await screen.findByRole('button', { name: 'Account menu' }));
 		await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
 		expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
 		expect(api.calls.some((c) => c.path === '/api/auth/logout')).toBe(true);
-		expect(tokenStore.get()).toBe('');
 	});
 
 	it('says the server is unreachable (not "not signed in") when /api/auth/status fails', async () => {
@@ -75,7 +68,6 @@ describe('app', () => {
 
 describe('setup redirect', () => {
 	it('stops sending an owner to the wizard once a write has created the first domain', async () => {
-		tokenStore.set('t');
 		let hasDomain = false;
 		const api = boot('/add', {
 			'GET /api/auth/status': () => ({ ...STATUS, has_domain: hasDomain }),

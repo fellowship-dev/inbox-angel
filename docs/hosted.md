@@ -38,6 +38,19 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 | `CANARY_DOMAIN` | `canary.inboxangel.io` | |
 | `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
+| `INTAKE_MAX_REPORTS_PER_DAY` | `50` | optional: reports accepted per intake token **per authenticated reporter domain** per UTC day (over-cap mail is rejected, nothing ingested). A message is attributed to a reporter by an aligned-looking `dkim`/`spf`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
+| `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | optional: raw message bytes per token per authenticated reporter domain per UTC day (50 MiB) |
+| `INTAKE_MAX_REPORTERS_PER_DAY` | `20` | optional: distinct authenticated reporter domains accepted per token per UTC day |
+| `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `200` | optional: messages the receiver did not prove, per claimed sender domain (SMTP envelope sender) per token per UTC day. Unproven mail never uses a proven reporter's allowance |
+| `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `1073741824` | optional: raw bytes of one such bucket (1 GiB) |
+| `INTAKE_MAX_UNAUTH_SENDERS_PER_DAY` | `50` | optional: claimed sender domains with their own bucket per token per day; the rest share one overflow bucket (never refused outright) |
+| `AUTHSERV_ID`, `AUTHSERV_HEADER` | unset | the receiver's authserv-id and header kind (`ar`/`arc`), see docs/email-funnel.md. **Until both are set nothing is proven**: reports are still accepted, flagged `none` and charged to the unproven buckets above. The defaults are deliberately generous (genuine reporters send 1–2 reports a day) so a spoofed envelope sender needs ~200 messages a day to starve one reporter; setting the two variables removes that weakness |
+| `INTAKE_MAX_RECORDS_PER_REPORT` | `20000` | optional: records in one aggregate report; checked before any per-record IP lookup |
+| `INTAKE_MAX_NEW_IPS_PER_REPORT` | `50` | optional: uncached source IPs enriched (DNS/geo lookups) per report; further records are stored without enrichment |
+| `HOSTED_MAX_DOMAINS_PER_WORKSPACE` | `10` | optional: domains per workspace that may use hosted records (enabling more answers 429) |
+
+A report's `policy_published` domain must be the token's domain or a subdomain of it; it is filed under the token's domain, or under the subdomain's own row if the same workspace has that subdomain as a verified domain. Each stored report also records whether its
+email passed DMARC-aligned authentication for the reporting organisation (`reporter_auth`: `pass`, `fail` or `none`).
 
 Secret: `wrangler secret put HOSTED_RECORDS_TOKEN` (see [token scopes](#3-the-records-token)).
 
@@ -106,6 +119,37 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 Returning a second `{ key, name }` makes new domains fill it once the first is full; the writer, quota logic and existing domains do not change. What a second zone still needs:
 the pointer instructions name `h.<zone>` from config, so they must read the domain's own zone (`zoneSlot(env, zone_key)`), and `HOSTED_RECORDS_TOKEN` must cover it.
 
+## Trust model: who can do what
+
+**Email verification.** A hosted account has no session until its email is verified, and API keys of unverified users are refused. Sign-up sends a
+link; login before verifying answers `403 email_not_verified` (and sends a fresh link). Verifying never signs anyone in: the password chosen
+before the address was proven is discarded, every session of that user ends, and the person who clicked the link sets their own password (so
+registering someone else's address gains nothing). An invite link alone does not grant membership: the invitee signs up (or in), verifies, and accepts while
+signed in as the invited address. First OAuth link ends the user's other sessions.
+
+**Bot check (required).** Hosted sign-up fails closed (503) unless `TURNSTILE_SECRET_KEY` is set; `TURNSTILE_SITE_KEY` is the public key served to the sign-up page. OAuth logins link to an
+existing account only when both the local account's email and the provider's are verified, and an OAuth sign-up matches a
+pending invite only on a provider-verified email. Verification mail uses the platform sender (`from_email` setting of the
+default workspace) over `SEND_EMAIL`; without it the link is written to the Worker log. Self-host is unchanged: the owner
+is marked verified at setup.
+
+**Domain ownership.** A domain a workspace adds is a *claim* (`domain_claims`) until proven; it is not in `domains`, so
+it has no reports, stats, check results, hosted records or DNS writes, and it never blocks another workspace. It is
+verified by any of: (a) its zone is on the allow-list of one of the workspace's active Cloudflare connections, (b) the
+workspace already verified a parent domain, (c) the TXT record `_inboxangel.<domain>` holds `inboxangel-verify=<token>`
+(the "Verify" button re-checks). The first workspace to verify owns the name; other pending claims on it become `lost`.
+A workspace may hold 25 pending claims. Domains that existed before this feature are `verified_via=legacy`: they keep working for their holder, but never block a verified claim — a successful TXT, Cloudflare or parent proof evicts the legacy holder (audit-logged as `domain.evicted`), and a legacy domain proves nothing about its subdomains. The Cloudflare proof re-checks the zone with Cloudflare at verify time (must still be active and have the same name).
+
+**Roles.** Owners and admins manage; members are read-only. Only owners can invite admins. Owners and admins list
+(`GET /api/team/invites`) and revoke (`DELETE /api/team/invites/:id`) pending invites; removing a member revokes the
+invites they sent.
+
+**Browser session.** The dashboard authenticates with an HttpOnly, SameSite=Lax (Secure on https) cookie; browsers are never
+sent the session token. Scripts and API keys use bearer tokens (`X-Api-Key`).
+
+**Not available when hosted:** `POST /api/setup/email-routing`, `/api/setup/custom-domain`, `/api/settings/register-destination`
+(they act on a whole Cloudflare account and are self-host setup steps).
+
 ## Customer setup
 
 Enable hosted records for a domain (dashboard, or `POST /api/domains/:id/hosted`). The response shows the intake addresses **once**; they are already
@@ -135,7 +179,7 @@ Notes for the customer:
 
 1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to workspace + domain. The `TenantContext` is built for that workspace. **There is no default-workspace fallback in `saas`**: `resolveInboundWorkspace` throws.
 2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed. Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read.
-3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain. Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**. Subdomains need no registration of their own.
+3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain (or under the subdomain's own row when the same workspace has it verified). Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**. Subdomains need no registration of their own.
 4. `check+` at `CANARY_DOMAIN`: see below.
 
 | Outcome | Behaviour |

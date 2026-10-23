@@ -95,7 +95,7 @@ export class TenantContext {
   cf(): CfClient | null {
     if (!this.#cfToken) return null;
     if (!this.#cf) {
-      this.#cf = new CfClient(this.#cfToken, { fetch: this.#fetch });
+      this.#cf = new CfClient(this.#cfToken, { fetch: this.#fetch, mode: this.mode });
       const { zoneId, zoneName, cfAccountId } = this.settings;
       if (zoneId && zoneName) this.#cf.seedZone({ id: zoneId, name: zoneName, cfAccountId });
     }

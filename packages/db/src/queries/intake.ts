@@ -4,10 +4,10 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, eq, gt, or, sql } from 'drizzle-orm';
+import { and, count, eq, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
-import { domains, hostedDomains, intakeTokens } from '../schema';
+import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
@@ -15,6 +15,7 @@ export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
 export function intakeQueries(db: Db, workspaceId: string) {
 	const mine = eq(intakeTokens.workspace_id, workspaceId);
 	const forDomain = (id: number) => and(mine, eq(intakeTokens.domain_id, id));
+	const mine_usage = () => eq(intakeUsage.workspace_id, workspaceId);
 
 	return {
 		get(domainId: number) {
@@ -43,6 +44,39 @@ export function intakeQueries(db: Db, workspaceId: string) {
 				.run();
 		},
 
+		/**
+		 * Atomically count one report of `bytes` against the allowance of (domain, `day` (YYYY-MM-DD, UTC), `reporter`).
+		 * `reporter` is a proven reporter's organisational domain, or `~<claimed sender domain>` for an unproven message ('~' alone: the overflow bucket). Returns false, and counts nothing, when it would exceed
+		 * `maxReports` or `maxBytes`, or when a new proven reporter would be more than `maxDistinct` distinct
+		 * ones for the domain that day (an unproven sender past `maxDistinct` falls into the overflow bucket instead) (best-effort bound: the check and the insert are separate statements).
+		 */
+		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 20): Promise<boolean> {
+			if (maxReports < 1 || bytes > maxBytes) return false;
+			// '~…' keys are unproven senders (by the sender domain they claim), everything else is a proven reporter domain:
+			// the two kinds are counted and bounded separately, and never share an allowance.
+			const unproven = reporter.startsWith('~');
+			const dayRows = and(mine_usage(), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day));
+			const kind = unproven ? sql`${intakeUsage.reporter} LIKE '~%'` : sql`${intakeUsage.reporter} NOT LIKE '~%'`;
+			const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
+			if (!seen?.n) {
+				const distinct = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, kind)).get();
+				if ((distinct?.n ?? 0) >= maxDistinct) {
+					if (!unproven) return false;
+					reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
+				}
+			}
+			const res = await db
+				.insert(intakeUsage)
+				.values({ domain_id: domainId, workspace_id: workspaceId, day, reporter, reports: 1, bytes })
+				.onConflictDoUpdate({
+					target: [intakeUsage.domain_id, intakeUsage.day, intakeUsage.reporter],
+					setWhere: and(eq(intakeUsage.workspace_id, workspaceId), lt(intakeUsage.reports, maxReports), sql`${intakeUsage.bytes} + ${bytes} <= ${maxBytes}`),
+					set: { reports: sql`${intakeUsage.reports} + 1`, bytes: sql`${intakeUsage.bytes} + ${bytes}` },
+				})
+				.run();
+			return (res.meta?.changes ?? 0) > 0;
+		},
+
 		delete(domainId: number) {
 			return db.delete(intakeTokens).where(forDomain(domainId)).run();
 		},
@@ -63,6 +97,11 @@ export function hostedQueries(db: Db, workspaceId: string) {
 
 		list() {
 			return db.select().from(hostedDomains).where(mine).all();
+		},
+
+		/** How many domains of this workspace use hosted records. */
+		count() {
+			return db.select({ n: count() }).from(hostedDomains).where(mine).get().then((r) => r?.n ?? 0);
 		},
 
 		insert(h: { domain_id: number; hosted_id: string; zone_key: string; spf_source?: string | null }) {

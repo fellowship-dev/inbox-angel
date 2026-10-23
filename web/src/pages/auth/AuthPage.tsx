@@ -1,8 +1,9 @@
 import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/ui';
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { api, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
+import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
 
@@ -27,6 +28,8 @@ export function AuthPage() {
 	const [telemetry, setTelemetry] = useState(status?.telemetry_default ?? false);
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
+	/** Set when the server wants the address verified before it opens a session. */
+	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
 	const mode: Mode = !status.configured ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
@@ -46,13 +49,18 @@ export function AuthPage() {
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
-			const res = await api<{ token: string | null; has_domain?: boolean }>(endpoint, { method: 'POST', body });
-			await signedIn(res.token);
+			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body });
+			if (res.verification_required) {
+				setVerifyFor(email);
+				return;
+			}
+			await signedIn();
 			// A new owner with no domain yet goes straight to the setup wizard.
 			if (registering && res.has_domain === false) navigate('/setup', { replace: true });
 			else navigate('/', { replace: true });
 		} catch (err) {
-			setError(errorMessage(err));
+			if (err instanceof ApiError && err.status === 403 && (err.body as { code?: string } | undefined)?.code === 'email_not_verified') setVerifyFor(email);
+			else setError(errorMessage(err));
 		} finally {
 			setBusy(false);
 		}
@@ -68,6 +76,8 @@ export function AuthPage() {
 			setError(errorMessage(err));
 		}
 	}
+
+	if (verifyFor) return <CheckEmail email={verifyFor} onBack={() => setVerifyFor(null)} />;
 
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =

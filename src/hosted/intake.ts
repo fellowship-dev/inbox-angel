@@ -12,12 +12,14 @@
 // A database that isn't migrated yet throws instead (index.ts), so the sender retries later.
 
 import type { BoundEnv } from '../index';
-import { intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, intakeLookups } from '@inbox-angel/db';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
-import { hostedConfig, hostedEnabled, MAX_REPORT_BYTES } from './config';
+import { claimedSender, provenReporter } from '../dmarc/reporter-auth';
+import { readAuthHeaders } from '../email/sender-proof';
+import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 
@@ -68,13 +70,36 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
 
   const fields = { ...base, kind, workspace: target.workspace_id, domain_id: target.domain_id };
   const guarded = withRejectLog(message, fields);
+
+  // Allowance per token and UTC day, counted atomically before any parsing or enrichment. What the receiver proved about
+  // the message comes first (its own topmost results header, never the joined headers: src/email/sender-proof.ts): a
+  // proven reporter is charged to its own domain's allowance. Everything else is charged to the sender domain it CLAIMS,
+  // in a generous bucket of its own, so junk cannot use up a proven reporter's allowance. Until AUTHSERV_ID and
+  // AUTHSERV_HEADER are set nothing is proven and every report is accepted, flagged and charged this way.
+  const limits = intakeLimits(env);
+  const day = new Date().toISOString().slice(0, 10);
+  const [forHeaders, rest] = message.raw.tee();
+  const authHeaders = await readAuthHeaders(forHeaders);
+  const reporter = provenReporter(authHeaders, env);
+  const intake = forWorkspace(env.DB, target.workspace_id).intake;
+  const ok = reporter
+    ? await intake.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay)
+    : await intake.tryConsume(target.domain_id, day, claimedSender(message.from), message.rawSize, limits.unauthReportsPerDay, limits.unauthBytesPerDay, limits.unauthSendersPerDay);
+  if (!ok) {
+    return reject(message, { ...fields, limit: 'daily' }, 'Daily intake limit for this address reached; try again tomorrow');
+  }
+  const body = new Proxy(guarded, { get: (t, p) => (p === 'raw' ? rest : Reflect.get(t, p, t) instanceof Function ? (Reflect.get(t, p, t) as Function).bind(t) : Reflect.get(t, p, t)) });
   const tenant = await loadTenant(env, { workspaceId: target.workspace_id });
 
   if (kind === 'rua') {
-    const { failure_count } = await handleDmarcReport(guarded, tenant, { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } });
+    const { failure_count } = await handleDmarcReport(body, tenant, {
+      authHeaders,
+      maxBytes: MAX_REPORT_BYTES, maxRecords: limits.recordsPerReport, maxNewIps: limits.newIpsPerReport,
+      token: { id: target.domain_id, domain: target.domain },
+    });
     track(tenant, { event: 'report.received', failure_count });
   } else {
-    const { failure_count } = await handleTlsRptReport(guarded, tenant, { hosted: { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } } });
+    const { failure_count } = await handleTlsRptReport(body, tenant, { hosted: { maxBytes: MAX_REPORT_BYTES, token: { id: target.domain_id, domain: target.domain } } });
     track(tenant, { event: 'tls-rpt.received', failure_count });
   }
 }

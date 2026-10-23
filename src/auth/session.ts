@@ -9,7 +9,7 @@ import { authLookups, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole 
 import { resolveApiKey, looksLikeApiKey } from './api-keys';
 import { createAuth } from './index';
 import type { AuthEnv } from './config';
-import { trustedOrigins } from './config';
+import { isSaas, trustedOrigins } from './config';
 
 export class AuthError extends Error {
   constructor(
@@ -77,7 +77,7 @@ async function sessionUser(
   request: Request,
   token: string | null,
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
-): Promise<{ id: string; email: string; name: string } | null> {
+): Promise<{ id: string; email: string; name: string; emailVerified: boolean } | null> {
   const headers = new Headers();
   if (token) headers.set('authorization', `Bearer ${token}`);
   else {
@@ -87,7 +87,7 @@ async function sessionUser(
   }
   const auth = await createAuth(env, request, { ctx });
   const session = await auth.api.getSession({ headers }).catch(() => null);
-  return session ? { id: session.user.id, email: session.user.email, name: session.user.name } : null;
+  return session ? { id: session.user.id, email: session.user.email, name: session.user.name, emailVerified: session.user.emailVerified === true } : null;
 }
 
 /** Who is signed in (session only, no API keys), for routes that care about the person rather than a workspace. */
@@ -105,6 +105,8 @@ async function fromSession(
 ): Promise<Principal | null> {
   const user = await sessionUser(env, request, token, ctx);
   if (!user) return null;
+  // Hosted: an address nobody has proven (e.g. an OAuth provider that reports it unverified) gets no access at all.
+  if (isSaas(env) && !user.emailVerified) throw new AuthError('verify your email address first', 403);
 
   const memberships = await authLookups(env.DB as D1Database).membershipsOf(user.id);
   if (memberships.length === 0) throw new AuthError('this user is not a member of any workspace', 403);
@@ -116,7 +118,7 @@ async function fromSession(
   return {
     kind: 'session',
     viaCookie: !token,
-    user,
+    user: { id: user.id, email: user.email, name: user.name },
     workspaceId: chosen.workspace_id,
     role: chosen.role,
   };
@@ -140,6 +142,8 @@ export async function authenticate(
     if (!key) return null;
     const user = await globalQueries(env.DB).users.byId(key.userId);
     if (!user) return null;
+    // Hosted: a key is as good as its owner's proven address.
+    if (isSaas(env) && !user.email_verified) throw new AuthError('verify your email address first', 403);
     return {
       kind: 'api_key',
       viaCookie: false,

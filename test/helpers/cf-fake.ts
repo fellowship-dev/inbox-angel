@@ -105,7 +105,7 @@ export class FakeCloudflare {
         return ok(matching.slice((page - 1) * per, page * per));
       }
       if (rest === '/dns_records' && method === 'POST') {
-        const r = { id: `rec-${this.#nextId++}`, type: body.type, name: body.name, content: body.content };
+        const r = { id: String(this.#nextId++).padStart(32, "0"), type: body.type, name: body.name, content: body.content };
         this.records.set(zoneId, [...list, r]);
         return ok(r);
       }

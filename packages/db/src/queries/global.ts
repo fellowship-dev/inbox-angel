@@ -5,7 +5,7 @@
  */
 import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
-import { workspaces, authRateLimits, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
+import { workspaces, authAccounts, authRateLimits, sessions, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
@@ -25,13 +25,28 @@ export function globalQueries(dbLike: DbLike) {
 			/** Keep the legacy users.role column in step with the membership role (admin = owner or admin). */
 			setLegacyRole: (userId: string, role: 'admin' | 'member') => db.update(users).set({ role }).where(eq(users.id, userId)).run(),
 			delete: (userId: string) => db.delete(users).where(eq(users.id, userId)).run(),
+			/** Does this user have a password login (as opposed to OAuth only)? */
+			hasPassword: (userId: string) =>
+				db.select({ id: authAccounts.id }).from(authAccounts).where(and(eq(authAccounts.userId, userId), eq(authAccounts.providerId, 'credential'), sql`${authAccounts.password} IS NOT NULL AND ${authAccounts.password} <> '!'`)).get().then((r) => !!r),
+			/** Make the stored password unusable ('!' never matches a hash): used when a password was chosen before the email was proven. */
+			discardPassword: (userId: string) =>
+				db.update(authAccounts).set({ password: '!' }).where(and(eq(authAccounts.userId, userId), eq(authAccounts.providerId, 'credential'))).run(),
+			markEmailVerified: (userId: string) => db.update(users).set({ email_verified: 1 }).where(eq(users.id, userId)).run(),
 			/** Delete a user who belongs to no workspace any more (their sessions and keys go with them). */
 			deleteIfOrphan: (userId: string) =>
 				db.run(sql`DELETE FROM users WHERE id = ${userId} AND NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = ${userId})`),
 		},
 
+		sessions: {
+			/** Sign a user out everywhere. */
+			revokeAll: (userId: string) => db.delete(sessions).where(eq(sessions.userId, userId)).run(),
+		},
+
 		/** Who a password-reset token (as emailed) belongs to, if it is still valid. */
 		verifications: {
+			/** A one-hour password-reset token, as the reset email would carry (used to turn email verification into a set-password step). */
+			createResetToken: (userId: string, token: string, nowSeconds: number) =>
+				db.insert(verifications).values({ id: crypto.randomUUID(), identifier: `reset-password:${token}`, value: userId, expiresAt: new Date((nowSeconds + 3600) * 1000) }).run(),
 			resetTokenUser: (token: string, nowSeconds: number) =>
 				db
 					.select({ userId: verifications.value })
@@ -68,11 +83,36 @@ export function globalQueries(dbLike: DbLike) {
 			insert: (r: Omit<NewCheckResult, 'session_token' | 'spf_lookup_count'> & { session_token?: string | null; spf_lookup_count?: number | null }) =>
 				db.insert(checkResults).values({ ...r, session_token: r.session_token ?? null, spf_lookup_count: r.spf_lookup_count ?? null }).run(),
 			byToken: (token: string) => db.select().from(checkResults).where(eq(checkResults.session_token, token)).get().then((r) => r ?? null),
-			/** Latest results for the given sender domains. Callers pass only their own workspace's domains. */
-			latestForDomains: (domains: string[], limit = 20) =>
-				domains.length === 0
-					? Promise.resolve([])
-					: db.select().from(checkResults).where(inArray(checkResults.from_domain, domains)).orderBy(sql`${checkResults.created_at} DESC`).limit(limit).all(),
+			/**
+			 * The newest check for each of the given domains, at the domain level only: who ran the check (from_email,
+			 * session_token) is never part of it. Callers pass only domains their workspace has verified.
+			 */
+			async latestPerDomain(domains: string[], limit = 20) {
+				if (domains.length === 0) return [];
+				const rows = await db
+					.select({
+						id: checkResults.id,
+						from_domain: checkResults.from_domain,
+						spf_result: checkResults.spf_result,
+						spf_domain: checkResults.spf_domain,
+						spf_record: checkResults.spf_record,
+						dkim_result: checkResults.dkim_result,
+						dkim_domain: checkResults.dkim_domain,
+						dmarc_result: checkResults.dmarc_result,
+						dmarc_policy: checkResults.dmarc_policy,
+						dmarc_record: checkResults.dmarc_record,
+						overall_status: checkResults.overall_status,
+						spf_lookup_count: checkResults.spf_lookup_count,
+						created_at: checkResults.created_at,
+					})
+					.from(checkResults)
+					.where(inArray(checkResults.from_domain, domains))
+					.orderBy(sql`${checkResults.created_at} DESC`, sql`${checkResults.id} DESC`)
+					.limit(500)
+					.all();
+				const seen = new Set<string>();
+				return rows.filter((r) => (seen.has(r.from_domain) ? false : (seen.add(r.from_domain), true))).slice(0, limit);
+			},
 		},
 
 		/** Record counts of the operator's hosted-records zone(s). */

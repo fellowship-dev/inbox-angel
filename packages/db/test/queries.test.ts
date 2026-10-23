@@ -265,8 +265,8 @@ describe('global queries', () => {
 
 		await g.checkResults.insert({ from_email: 'a@b.c', from_domain: 'b.c', overall_status: 'exposed', report_sent: 0, session_token: 'tk' });
 		expect(await g.checkResults.byToken('tk')).toMatchObject({ from_domain: 'b.c', spf_lookup_count: null });
-		expect(await g.checkResults.latestForDomains(['b.c'])).toHaveLength(1);
-		expect(await g.checkResults.latestForDomains([])).toEqual([]);
+		expect(await g.checkResults.latestPerDomain(['b.c'])).toHaveLength(1);
+		expect(await g.checkResults.latestPerDomain([])).toEqual([]);
 
 		await g.ipInfo.upsert({ ip: '1.1.1.1', reverse_dns: 'one', base_domain: null, country_code: 'AU', org: null, asn: null });
 		await g.ipInfo.upsert({ ip: '1.1.1.1', reverse_dns: 'uno', base_domain: null, country_code: 'AU', org: 'Cloudflare', asn: 'AS13335' });

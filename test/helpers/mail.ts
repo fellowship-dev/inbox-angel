@@ -47,8 +47,13 @@ export const tlsRptMime = (json: string, gz = false) => gz
 
 export interface FakeMessage extends ForwardableEmailMessage { setReject: ReturnType<typeof vi.fn>; reply: ReturnType<typeof vi.fn> }
 
-export function fakeMessage(to: string, rawMime: string, o: { from?: string; headers?: Record<string, string>; rawSize?: number } = {}): FakeMessage {
-  const bytes = new TextEncoder().encode(rawMime);
+/**
+ * An inbound message. `headers` are also written into the raw MIME as header lines (topmost first, as a receiver prepends
+ * its own) unless the MIME already carries that header, and set on `message.headers`.
+ */
+export function fakeMessage(to: string, rawMime: string, o: { from?: string; headers?: Record<string, string>; rawSize?: number; rawHeaderLines?: string[] } = {}): FakeMessage {
+  const lines = [...(o.rawHeaderLines ?? []), ...Object.entries(o.headers ?? {}).filter(([k]) => !new RegExp(`^${k}:`, 'im').test(rawMime.split(/\r?\n\r?\n/)[0])).map(([k, v]) => `${k}: ${v}`)];
+  const bytes = new TextEncoder().encode(lines.length ? lines.join('\r\n') + '\r\n' + rawMime : rawMime);
   return {
     from: o.from ?? 'noreply-dmarc-support@google.com',
     to,

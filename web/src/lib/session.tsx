@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
-import { api, ApiError, onUnauthorized, tokenStore } from './api';
+import { api, ApiError, onUnauthorized } from './api';
 import type { AuthStatus, Me, Role } from './types';
 import { workspaceStore } from './workspace';
 
@@ -17,7 +17,8 @@ export interface Session {
 	role: Role | null;
 	/** Owners and admins write; members are read-only (the API enforces it; this only shapes the UI). */
 	canWrite: boolean;
-	signedIn: (token: string | null) => Promise<void>;
+	/** Refetch the session after a login/signup/setup/invite/reset: the cookie is already set. */
+	signedIn: () => Promise<void>;
 	signOut: () => Promise<void>;
 	retry: () => void;
 }
@@ -44,11 +45,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 				return await api<Me>('/api/me', { quiet401: true });
 			} catch (e) {
 				if (e instanceof ApiError && e.status === 401) {
-					tokenStore.clear();
 					return null;
 				}
 				// A workspace the person no longer belongs to (left, removed, deleted, or a link from someone else):
 				// forget it and let the server pick their oldest. The router then rewrites the URL to match.
+				// A cookie for a SaaS account that has not verified its email yet: treat as signed out (sign-in explains).
+				if (e instanceof ApiError && e.status === 403 && /verify your email/i.test(e.message)) return null;
 				if (e instanceof ApiError && e.status === 403 && workspaceId) {
 					workspaceStore.forget();
 					return await api<Me>('/api/me', { quiet401: true, workspace: null });
@@ -62,8 +64,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 	});
 
 	const signedIn = useCallback(
-		async (token: string | null) => {
-			if (token) tokenStore.set(token);
+		async () => {
 			await qc.invalidateQueries({ queryKey: ['auth-status'] });
 			await qc.invalidateQueries({ queryKey: ['me'] });
 			await qc.invalidateQueries({ queryKey: ['workspaces'] });
@@ -72,7 +73,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 	);
 
 	const clearSession = useCallback(() => {
-		tokenStore.clear();
 		// Forget everything a signed-in user could see, but keep the session queries mounted: they now answer "nobody".
 		qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'me' && q.queryKey[0] !== 'auth-status' });
 		qc.setQueryData(['me', workspaceId], null);

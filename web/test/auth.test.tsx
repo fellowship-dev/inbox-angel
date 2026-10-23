@@ -2,7 +2,6 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { tokenStore } from '../src/lib/api';
 import { AuthPage } from '../src/pages/auth/AuthPage';
 import { ForgotPage } from '../src/pages/auth/ForgotPage';
 import { InvitePage } from '../src/pages/auth/InvitePage';
@@ -11,15 +10,18 @@ import { fail, me, renderApp } from './render';
 
 beforeEach(() => localStorage.clear());
 
+/** The session probe ran again after sign-in (the cookie, not a stored token, carries the session). */
+const meFetches = (calls: Array<{ path: string }>) => calls.filter((c) => c.path === '/api/me').length;
+
 describe('sign in', () => {
-	it('signs in with email and password, stores the token and fetches the session', async () => {
+	it('signs in with email and password, refetches the session (cookie only, no token stored)', async () => {
 		let signedIn = false;
 		const { calls } = renderApp(<AuthPage />, {
 			role: null,
 			routes: {
 				'POST /api/auth/login': () => {
 					signedIn = true;
-					return { token: 'tok-1' };
+					return { ok: true };
 				},
 				'GET /api/me': () => (signedIn ? me('owner') : fail(401)),
 			},
@@ -29,11 +31,12 @@ describe('sign in', () => {
 		await user.type(screen.getByLabelText('Password'), 'correct-horse');
 		await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-		await waitFor(() => expect(tokenStore.get()).toBe('tok-1'));
+		await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
+		expect(localStorage.getItem('ia_api_key')).toBeNull();
 		expect(calls.find((c) => c.path === '/api/auth/login')?.body).toEqual({ email: 'a@example.com', password: 'correct-horse' });
 	});
 
-	it('shows the server message for a wrong password and keeps no token', async () => {
+	it('shows the server message for a wrong password and stays signed out', async () => {
 		renderApp(<AuthPage />, { role: null, routes: { 'POST /api/auth/login': fail(401, 'invalid credentials') } });
 		const user = userEvent.setup();
 		await user.type(await screen.findByLabelText('Email'), 'a@example.com');
@@ -41,7 +44,6 @@ describe('sign in', () => {
 		await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
 		expect(await screen.findByRole('alert')).toHaveTextContent('invalid credentials');
-		expect(tokenStore.get()).toBe('');
 	});
 
 	it('offers OAuth buttons only for configured providers', async () => {
@@ -79,7 +81,7 @@ describe('first-run setup', () => {
 			role: null,
 			status: { configured: false, has_domain: false },
 			routes: {
-				'POST /api/auth/setup': () => ((done = true), { token: 'tok-owner', has_domain: false }),
+				'POST /api/auth/setup': () => ((done = true), { ok: true, has_domain: false }),
 				'GET /api/me': () => (done ? me('owner') : fail(401)),
 			},
 		});
@@ -90,7 +92,8 @@ describe('first-run setup', () => {
 		await user.click(screen.getByRole('checkbox'));
 		await user.click(screen.getByRole('button', { name: 'Create account' }));
 
-		await waitFor(() => expect(tokenStore.get()).toBe('tok-owner'));
+		await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
+		expect(localStorage.getItem('ia_api_key')).toBeNull();
 		expect(calls.find((c) => c.path === '/api/auth/setup')?.body).toMatchObject({ email: 'owner@example.com', telemetry: true });
 	});
 });
@@ -153,7 +156,7 @@ describe('invite', () => {
 			route: '/invite/tok123',
 			routes: {
 				'GET /api/invites/tok123': { email: 'new@example.com', invited_by: 'boss@example.com', role: 'member' },
-				'POST /api/invites/tok123': () => ((accepted = true), { token: 'tok-new' }),
+				'POST /api/invites/tok123': () => ((accepted = true), { ok: true }),
 				'GET /api/me': () => (accepted ? me('member') : fail(401)),
 			},
 		});
@@ -164,7 +167,8 @@ describe('invite', () => {
 		await user.type(screen.getByLabelText('Password'), 'long-enough-1');
 		await user.type(screen.getByLabelText('Confirm password'), 'long-enough-1');
 		await user.click(screen.getByRole('button', { name: 'Accept invite' }));
-		await waitFor(() => expect(tokenStore.get()).toBe('tok-new'));
+		await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
+		expect(localStorage.getItem('ia_api_key')).toBeNull();
 		expect(calls.find((c) => c.method === 'POST' && c.path === '/api/invites/tok123')?.body).toEqual({ name: 'New Person', password: 'long-enough-1' });
 	});
 
@@ -188,7 +192,7 @@ describe('invite', () => {
 			const { calls } = renderApp(route, {
 				role: null,
 				route: '/invite/tok9',
-				routes: { 'GET /api/invites/tok9': () => info(loggedIn ? { signed_in_as: 'sam@example.com' } : {}), 'POST /api/auth/login': () => ((loggedIn = true), { token: 'tok-sam' }), 'GET /api/me': () => (loggedIn ? me('member') : fail(401)), 'GET /api/workspaces': { workspaces: [] } },
+				routes: { 'GET /api/invites/tok9': () => info(loggedIn ? { signed_in_as: 'sam@example.com' } : {}), 'POST /api/auth/login': () => ((loggedIn = true), { ok: true }), 'GET /api/me': () => (loggedIn ? me('member') : fail(401)), 'GET /api/workspaces': { workspaces: [] } },
 			});
 			expect(await screen.findByText('Lexgo')).toBeInTheDocument();
 			expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
@@ -196,7 +200,8 @@ describe('invite', () => {
 			const user = userEvent.setup();
 			await user.type(screen.getByLabelText('Password'), 'sams-password');
 			await user.click(screen.getByRole('button', { name: 'Sign in to accept' }));
-			await waitFor(() => expect(tokenStore.get()).toBe('tok-sam'));
+			await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
+		expect(localStorage.getItem('ia_api_key')).toBeNull();
 			expect(calls.find((c) => c.path === '/api/auth/login')?.body).toEqual({ email: 'sam@example.com', password: 'sams-password' });
 			// now signed in as the invited address, the page offers the one-click accept
 			expect(await screen.findByRole('button', { name: 'Accept invite' })).toBeInTheDocument();

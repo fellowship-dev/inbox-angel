@@ -1,7 +1,7 @@
 // Shared setup: a saas D1 with two workspaces (A has two domains), a fake Cloudflare, and the mock OAuth server.
 import { vi } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { call, inviteAndAccept, makeEnv } from '../auth/helpers';
+import { call, inviteAndAccept, makeEnv, signupVerified } from '../auth/helpers';
 import { FakeCloudflare } from '../helpers/cf-fake';
 import { seedSettings } from '../helpers/tenant';
 import { AUTH, MockAuthServer } from './mock-oauth';
@@ -15,9 +15,7 @@ export async function world(extraEnv: Record<string, unknown> = {}) {
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 
   const signup = async (email: string) => {
-    const r = await call(env, 'POST', '/api/auth/signup', { body: { name: email, email, password: 'password-123' } });
-    if (r.status !== 201) throw new Error(`signup ${r.status} ${await r.text()}`);
-    const { token } = await r.json() as { token: string };
+    const token = await signupVerified(env, email);
     const ws = rows('SELECT m.workspace_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0].workspace_id as string;
     return { token, ws, email };
   };
@@ -68,6 +66,8 @@ export async function world(extraEnv: Record<string, unknown> = {}) {
     };
     return { authorizeUrl: authorize_url, cookie, back, callback, res: opts.defer ? (undefined as unknown as Response) : await callback() };
   };
+
+  send.mockClear(); // the verification emails of sign-up are not what these tests count
 
   const connectionId = (res: Response) => new URL(res.headers.get('location')!, 'https://x').searchParams.get('cf_connection')!;
   const dmarc = (token: string, id: number, record = 'v=DMARC1; p=none') => api(token, 'POST', `/api/domains/${id}/apply-dmarc`, { record });

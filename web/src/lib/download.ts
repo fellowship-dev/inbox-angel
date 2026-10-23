@@ -1,13 +1,10 @@
-import { ApiError, tokenStore } from './api';
+import { ApiError } from './api';
 
-/** Authenticated file download: the key travels in a header, never in the URL. */
+/** Authenticated file download: the session cookie authenticates it, nothing goes in the URL. */
 export async function downloadFile(path: string, filename: string): Promise<void> {
-	const headers: Record<string, string> = {};
-	const token = tokenStore.get();
-	if (token) headers['X-Api-Key'] = token;
 	let res: Response;
 	try {
-		res = await fetch(path, { headers, credentials: 'same-origin' });
+		res = await fetch(path, { credentials: 'same-origin' });
 	} catch {
 		throw new ApiError(0, 'Could not reach the server. Check your connection and try again.');
 	}

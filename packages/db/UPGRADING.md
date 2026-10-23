@@ -17,7 +17,7 @@ from "account" to **workspace** in the same change (`workspaces`, `workspace_id`
 to carry forward, so there is no upgrade path from the pre-release schemas and no adoption/repair machinery: a database
 created before the reset must be recreated (`wrangler d1 export` a backup if you need its rows, then migrate an empty database).
 
-`migrations/0001_baseline.sql` creates the complete current schema and the implicit workspace `ws_default`.
+`migrations/0001_baseline.sql` creates the complete original schema (later files are additive; see each file) and the implicit workspace `ws_default`.
 
 ## How it works
 
