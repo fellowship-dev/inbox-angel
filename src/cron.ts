@@ -15,6 +15,8 @@ import { logAudit } from './audit/log';
 import { track } from './telemetry';
 import { flattenSpf } from './email/spf-flattener';
 import { lookupSpf } from './email/dns-check';
+import { runRetention } from './lifecycle/retention';
+import { retryRevocations } from './lifecycle/revoke';
 import { discoverMxHosts, generatePolicyId, updateMtaStsTxtRecord } from './email/mta-sts';
 
 const SPF_REFRESH_CONCURRENCY = 5;
@@ -39,6 +41,8 @@ export async function runCronForWorkspaces(
   ctx: ExecutionContext,
   opts: CronOptions = {},
 ): Promise<void> {
+  // Its own trigger, its own invocation: the sweeps must not eat the query budget of the per-workspace jobs.
+  if (event.cron === LIFECYCLE_CRON) return runDataLifecycle(env);
   const load = opts.load ?? loadTenant;
   const workspaces = opts.workspaces ?? await listCronWorkspaces(env);
   for (const workspaceId of workspaces) {
@@ -49,6 +53,15 @@ export async function runCronForWorkspaces(
       console.error(`[cron ${event.cron}] workspace ${workspaceId} failed:`, e instanceof Error ? `${e.name}: ${e.message}` : 'unknown error');
     }
   }
+}
+
+/** Daily at 04:00 UTC, once for the whole database (not per workspace): retry failed Cloudflare revocations, then the retention sweeps. */
+export const LIFECYCLE_CRON = '0 4 * * *';
+
+export async function runDataLifecycle(env: BoundEnv): Promise<void> {
+  // Revocations first: they are few, and leaving a grant live matters more than a late sweep.
+  try { await retryRevocations(env); } catch (e) { console.error('[lifecycle] revocation retry failed:', e); }
+  try { await runRetention(env); } catch (e) { console.error('[retention] failed:', e); }
 }
 
 /** One cron tick for one workspace. */

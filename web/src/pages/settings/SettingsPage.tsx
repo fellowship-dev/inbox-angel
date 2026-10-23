@@ -8,6 +8,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { setTheme, useTheme } from '../../lib/theme';
 import { Field } from '../auth/AuthLayout';
+import { DangerZone } from './DangerZone';
 import { WorkspaceSection } from './WorkspaceSection';
 
 interface VersionInfo {
@@ -127,6 +128,8 @@ export function SettingsPage() {
 					Need to script something? <Link to="/keys" className="text-brand-ink underline underline-offset-4">Create an API key</Link>.
 				</p>
 			</Section>
+
+			<DangerZone />
 		</div>
 	);
 }

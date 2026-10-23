@@ -5,6 +5,7 @@
 import { AggregateReport, ReportRecord as ParserRecord } from './types';
 import type { TenantContext } from '../tenancy/context';
 import { ReportRecord as DbRecord } from '../db/types';
+import { rawXmlRetentionDays } from '../lifecycle/config';
 import { sendFirstReportNotification } from '../notifications/first-report';
 
 export interface StoreReportResult {
@@ -92,7 +93,8 @@ export async function storeReport(
     total_count: total,
     pass_count:  pass,
     fail_count:  fail,
-    raw_xml:     rawXml,
+    // RAW_XML_RETENTION_DAYS=0 (the hosted default): the parsed rows are kept, the original XML is not
+    raw_xml:     rawXmlRetentionDays(tenant.env) > 0 ? rawXml : null,
   });
 
   // ON CONFLICT DO NOTHING — no row written means this report was already delivered

@@ -17,6 +17,9 @@ CREATE TABLE `aggregate_reports` (
 CREATE INDEX `idx_agg_reports_domain` ON `aggregate_reports` (`domain_id`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_date` ON `aggregate_reports` (`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_workspace` ON `aggregate_reports` (`workspace_id`,`date_begin`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_date_end` ON `aggregate_reports` (`date_end`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_created` ON `aggregate_reports` (`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_raw_xml` ON `aggregate_reports` (`created_at`) WHERE "aggregate_reports"."raw_xml" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
 CREATE TABLE `api_keys` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -112,6 +115,7 @@ CREATE TABLE `check_results` (
 --> statement-breakpoint
 CREATE INDEX `idx_check_results_domain` ON `check_results` (`from_domain`);--> statement-breakpoint
 CREATE INDEX `idx_check_results_token` ON `check_results` (`session_token`);--> statement-breakpoint
+CREATE INDEX `idx_check_results_created` ON `check_results` (`created_at`);--> statement-breakpoint
 CREATE TABLE `cloudflare_connection_blocked_zones` (
 	`connection_id` text NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -245,6 +249,7 @@ CREATE TABLE `invites` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_invites_workspace` ON `invites` (`workspace_id`);--> statement-breakpoint
+CREATE INDEX `idx_invites_expires` ON `invites` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `ip_info` (
 	`ip` text PRIMARY KEY NOT NULL,
 	`reverse_dns` text,
@@ -255,6 +260,7 @@ CREATE TABLE `ip_info` (
 	`fetched_at` integer DEFAULT (unixepoch()) NOT NULL
 );
 --> statement-breakpoint
+CREATE INDEX `idx_ip_info_fetched` ON `ip_info` (`fetched_at`);--> statement-breakpoint
 CREATE TABLE `memberships` (
 	`workspace_id` text NOT NULL,
 	`user_id` text NOT NULL,
@@ -335,6 +341,19 @@ CREATE TABLE `report_records` (
 CREATE INDEX `idx_records_report` ON `report_records` (`report_id`);--> statement-breakpoint
 CREATE INDEX `idx_records_ip` ON `report_records` (`source_ip`);--> statement-breakpoint
 CREATE INDEX `idx_records_workspace` ON `report_records` (`workspace_id`);--> statement-breakpoint
+CREATE TABLE `revocation_tombstones` (
+	`id` text PRIMARY KEY NOT NULL,
+	`deleted_workspace_id` text NOT NULL,
+	`connection_id` text NOT NULL,
+	`cf_account_id` text,
+	`token_envelope` text NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	`last_attempt_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `idx_revocation_tombstones_created` ON `revocation_tombstones` (`created_at`);--> statement-breakpoint
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -349,6 +368,7 @@ CREATE TABLE `sessions` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `sessions_token_unique` ON `sessions` (`token`);--> statement-breakpoint
 CREATE INDEX `idx_sessions_user` ON `sessions` (`user_id`);--> statement-breakpoint
+CREATE INDEX `idx_sessions_expires` ON `sessions` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `settings` (
 	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`key` text NOT NULL,
@@ -393,6 +413,9 @@ CREATE TABLE `tls_reports` (
 --> statement-breakpoint
 CREATE INDEX `idx_tls_reports_domain` ON `tls_reports` (`domain_id`,`date_begin`);--> statement-breakpoint
 CREATE INDEX `idx_tls_reports_workspace` ON `tls_reports` (`workspace_id`);--> statement-breakpoint
+CREATE INDEX `idx_tls_reports_date_end` ON `tls_reports` (`date_end`);--> statement-breakpoint
+CREATE INDEX `idx_tls_reports_created` ON `tls_reports` (`created_at`);--> statement-breakpoint
+CREATE INDEX `idx_tls_reports_raw_json` ON `tls_reports` (`created_at`) WHERE "tls_reports"."raw_json" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `tls_reports_domain_id_org_name_date_begin_unique` ON `tls_reports` (`domain_id`,`org_name`,`date_begin`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,

@@ -269,23 +269,32 @@ export class ConnectionService {
     const q = this.#host.scope.connections;
     const row = await q.getSecret(id);
     if (!row) return null;
-    let revokedRemote: boolean | null = null;
-    const cfg = row.auth_type === 'oauth' ? safeOauthConfig(this.#host.env) : null;
-    if (row.auth_type === 'oauth') {
-      revokedRemote = false;
-      if (cfg) {
-        try {
-          const m = await this.crypt.open(row.token_envelope, envelopeAad(this.#host.workspaceId, id));
-          const first = m.refresh() ? await revokeToken(cfg, m.refresh()!, 'refresh_token', this.#fetch) : false;
-          const second = await revokeToken(cfg, m.access(), 'access_token', this.#fetch);
-          revokedRemote = first || second;
-        } catch { /* no key, or an envelope that does not open: nothing to revoke with */ }
-      }
-    }
+    const revokedRemote = row.auth_type === 'oauth'
+      ? await revokeSealedGrant(this.#host.env, this.crypt, this.#host.workspaceId, id, row.token_envelope, this.#fetch)
+      : null;
     const unlinkedDomains = await q.linkedDomainCount(id);
     await q.delete(id);
     this.invalidate();
     return { revokedRemote, unlinkedDomains };
+  }
+
+  /**
+   * disconnect() for a workspace that is being deleted. When an OAuth grant could not be confirmed revoked, the sealed
+   * grant is handed to `keep` BEFORE the local row is deleted, so the revocation can be retried later. If `keep` throws,
+   * the row is left in place and the error propagates: a grant is never dropped without a record to retry it from.
+   */
+  async disconnectKeepingFailedGrant(id: string, keep: (sealed: string, row: { cf_account_id: string | null }) => Promise<void>): Promise<{ revokedRemote: boolean | null } | null> {
+    const q = this.#host.scope.connections;
+    const row = await q.getSecret(id);
+    if (!row) return null;
+    let revokedRemote: boolean | null = null;
+    if (row.auth_type === 'oauth') {
+      revokedRemote = await revokeSealedGrant(this.#host.env, this.crypt, this.#host.workspaceId, id, row.token_envelope, this.#fetch);
+      if (!revokedRemote) await keep(row.token_envelope, { cf_account_id: row.cf_account_id });
+    }
+    await q.delete(id);
+    this.invalidate();
+    return { revokedRemote };
   }
 
   // ── Zones ──────────────────────────────────────────────────
@@ -479,6 +488,24 @@ export class ConnectionService {
 function cleanLabel(label: unknown): string | undefined {
   const s = typeof label === 'string' ? label.trim().slice(0, 80) : '';
   return s || undefined;
+}
+
+/**
+ * Revoke an OAuth grant at Cloudflare from its sealed envelope. True when Cloudflare accepted a revocation;
+ * false when it did not, or the envelope cannot be opened (no key, wrong AAD): there is nothing to revoke with.
+ * Used by disconnect() and by the cron that retries revocations left behind by a deleted workspace.
+ */
+export async function revokeSealedGrant(env: OAuthEnv & CryptoEnv, crypt: TokenCrypto, workspaceId: string, connectionId: string, envelope: string, doFetch: typeof fetch = (i, init) => globalThis.fetch(i, init)): Promise<boolean> {
+  const cfg = safeOauthConfig(env);
+  if (!cfg) return false;
+  try {
+    const m = await crypt.open(envelope, envelopeAad(workspaceId, connectionId));
+    const first = m.refresh() ? await revokeToken(cfg, m.refresh()!, 'refresh_token', doFetch) : false;
+    const second = await revokeToken(cfg, m.access(), 'access_token', doFetch);
+    return first || second;
+  } catch {
+    return false;
+  }
 }
 
 function safeOauthConfig(env: OAuthEnv) {

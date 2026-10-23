@@ -16,6 +16,14 @@ export interface Env {
   DB: D1Database | undefined;
   ASSETS: Fetcher;
   API_KEY?: string;              // DEPRECATED self-host "instance admin" key. Prefer per-user keys (Settings → API keys).
+  // Data retention, whole days (docs/data-retention.md). Defaults are the published windows.
+  RAW_XML_RETENTION_DAYS?: string;      // raw report XML / TLS-RPT JSON: default 30 (self-host), 0 = never store (hosted)
+  RETENTION_REPORTS_DAYS?: string;      // aggregate report rows and records: default 395 (13 months)
+  RETENTION_TLS_DAYS?: string;          // TLS-RPT reports: default 395
+  RETENTION_IP_INFO_DAYS?: string;      // IP enrichment cache: default 30
+  RETENTION_CHECK_RESULTS_DAYS?: string; // free-check results: default 30
+  RETENTION_INVITES_DAYS?: string;      // days after expiry: default 30
+  RETENTION_AUDIT_DAYS?: string;        // audit log: default 365
   // Auth (all optional)
   SAAS_ENABLED?: string;         // "1" to allow MODE=saas (hosted mode is not launched yet; explicit opt-in)
   OWNER_EMAIL?: string;          // self-host: only this email may claim first ownership (password or OAuth)

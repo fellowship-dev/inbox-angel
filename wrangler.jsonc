@@ -70,8 +70,9 @@
 	//   0 9 * * 1  — weekly DMARC digest email (Mondays 9am UTC)
 	//   0 10 * * * — daily SPF flatten refresh
 	//   0 11 * * * — daily telemetry heartbeat (opt-in)
+	//   0 4 * * *  — daily data lifecycle: retry Cloudflare revocations, then retention sweeps (own invocation: src/cron.ts)
 	"triggers": {
-		"crons": ["0 8 * * *", "0 9 * * 1", "0 10 * * *", "0 11 * * *"]
+		"crons": ["0 8 * * *", "0 9 * * 1", "0 10 * * *", "0 11 * * *", "0 4 * * *"]
 	},
 
 	// Hosted service only (MODE=saas + SAAS_ENABLED=1, see docs/hosted.md): INTAKE_DOMAIN, CANARY_DOMAIN,

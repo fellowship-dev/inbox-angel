@@ -48,6 +48,7 @@ Keyed on `event.cron` (the expression string from `wrangler.jsonc`):
 | `0 11 * * *` | 11am UTC daily | `instance.heartbeat` telemetry event |
 | `0 9 * * 1` | 9am UTC Monday | Weekly digest emails via `sendWeeklyDigests()` |
 | `0 10 * * *` | 10am UTC daily | SPF flatten refresh — re-flattens all enabled domains via CF DNS |
+| `0 4 * * *` | 4am UTC daily | Data lifecycle: retry failed Cloudflare revocations, then retention sweeps (own invocation) |
 | `0 8 * * *` | 8am UTC daily (default) | Monitor check + SPF lookup count refresh + rollback regression check + MTA-STS MX refresh |
 
 All handlers run `assertSchemaReady(env.DB)` (from `@inbox-angel/db`) before business logic: the Worker no longer changes the schema, it only checks that `npm run migrate` has been run. Schema, migrations and queries live in `packages/db`.
