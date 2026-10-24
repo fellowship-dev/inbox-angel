@@ -3,7 +3,7 @@ import { runOnboardingSequence, readiness } from '../../src/funnel/sequence';
 import { stepCopy } from '../../src/funnel/copy';
 import { buildLetterText } from '../../src/email/html-templates';
 import { stopLead, unsubscribeEmail } from '../../src/funnel/enroll';
-import { SEQUENCE_DAYS } from '../../src/funnel/copy';
+import { SEQUENCE_DAYS, DISCLOSURE } from '../../src/funnel/copy';
 import { DAY, T0, fakeMailer, funnelWorld, quietLogs, summary } from './world';
 
 beforeEach(quietLogs);
@@ -241,10 +241,25 @@ describe('copy', () => {
     expect(t).toMatch(/Apple Mail needs a VMC/);
     expect(t).toMatch(/mailbox provider's decision/);
     const d = buildLetterText(stepCopy(3, { domain: 'acme.com', summary: null, bookingUrl: null, prices: {} }).blocks);
-    expect(d).toMatch(/can show where it is supported/);
+    expect(d).toMatch(/Whether a logo is shown is always the mailbox provider's decision/);
     expect(d).not.toMatch(/shows in Gmail and Apple Mail/);
     const all = [0, 1, 2, 3, 4].map(i => buildLetterText(stepCopy(i, { domain: 'acme.com', summary: summary({ dmarcPolicy: 'none' }), bookingUrl: 'https://c.example', prices: {} }).blocks)).join('\n');
     expect(all).not.toMatch(/criminal|protects no one/i);
+  });
+
+  it('offer v2: trigger framing, stays-fixed argument, bundled BIMI certificate, three offers', () => {
+    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $1,500', keepFixed: '$79/month per domain', bimi: '$299/month per brand' } };
+    const t = (i: number) => buildLetterText(stepCopy(i, ctx).blocks);
+    expect(t(0)).toMatch(/Shopify, Klaviyo or Google/);
+    expect(t(0)).toMatch(/am I done\?/);
+    expect(t(1)).toMatch(/fails silently/);
+    expect(t(2)).toMatch(/no upfront certificate fee/);
+    expect(t(2)).toMatch(/12 months/);
+    expect(t(2)).not.toMatch(/over a thousand/);
+    const d = t(3);
+    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $1,500.', 'Price: $79/month per domain.', 'Price: $299/month per brand.', 'written confirmation']) expect(d).toContain(x);
+    expect(d).not.toMatch(/Assessment|Retainer/);
+    expect(DISCLOSURE).toMatch(/keeping it fixed/);
   });
 
   it('day 14 is from "Max at Inbox Angel" and signed that way', async () => {
@@ -346,12 +361,13 @@ describe('what goes out', () => {
     await withPrices.enroll('a@acme.com');
     for (const d of SEQUENCE_DAYS.slice(0, 4)) await run(withPrices, T0 + d * DAY);
     const t = withPrices.mailer.sent[3].text;
-    for (const p of ['$ASSESS', '$ENFORCE', '$BIMI', '$RETAIN/mo']) expect(t).toContain(p);
+    for (const p of ['$FIX', '$KEEP/mo', '$BIMI/mo']) expect(t).toContain(p);
+    expect(t).toContain('Fix it is quoted after a short look');
 
     const none = funnelWorld({ SERVICE_PRICES: undefined });
     await none.enroll('a@acme.com');
     for (const d of SEQUENCE_DAYS.slice(0, 4)) await run(none, T0 + d * DAY);
-    expect(none.mailer.sent[3].text).not.toMatch(/\$|Prices start/);
+    expect(none.mailer.sent[3].text).not.toMatch(/\$|priced per domain/);
     expect(readiness(none.env).warnings.join(' ')).toMatch(/SERVICE_PRICES/);
   });
 

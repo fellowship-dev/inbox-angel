@@ -78,7 +78,7 @@ export interface Env {
   AUTHSERV_HEADER?: string;      // "ar" (Authentication-Results) or "arc" (ARC-Authentication-Results): the one header kind the receiver adds; REQUIRED for enrolment
   POSTAL_ADDRESS?: string;       // postal address shown in the footer of non-transactional mail
   BOOKING_URL?: string;          // booking link in the day-14 note; that step is held until it is set
-  SERVICE_PRICES?: string;       // JSON {"assessment":"$…","enforcement":"$…","bimi":"$…","retainer":"$…/mo"}: the "from" prices in the day-10 email
+  SERVICE_PRICES?: string;       // JSON {"fix":"$…","keepFixed":"$…/mo","bimi":"$…/mo"}: the prices in the day-10 email
   ONBOARDING_SEQUENCE_ENABLED?: string; // "1" turns the onboarding sequence on for self-host; hosted: on unless "0"
   SITE_ORIGINS?: string;         // comma-separated origins allowed to call the free-check endpoints from a browser (CORS)
   // Bindings
