@@ -198,6 +198,8 @@ CREATE TABLE `domains` (
 	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`cf_connection_id` text,
 	`verified_via` text DEFAULT 'legacy' NOT NULL,
+	`evicted_at` integer,
+	`evicted_name` text,
 	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`cf_connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE set null
 );
@@ -206,6 +208,7 @@ CREATE UNIQUE INDEX `domains_domain_unique` ON `domains` (`domain`);--> statemen
 CREATE INDEX `idx_domains_domain` ON `domains` (`domain`);--> statement-breakpoint
 CREATE INDEX `idx_domains_cf_connection` ON `domains` (`cf_connection_id`);--> statement-breakpoint
 CREATE INDEX `idx_domains_parent` ON `domains` (`parent_id`);--> statement-breakpoint
+CREATE INDEX `idx_domains_evicted` ON `domains` (`evicted_at`) WHERE "domains"."evicted_at" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `idx_domains_workspace` ON `domains` (`workspace_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`workspace_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint
 CREATE TABLE `hosted_domains` (

@@ -11,11 +11,12 @@ import { setupSeenKey } from './lib/workspace';
 import { AuthPage } from './pages/auth/AuthPage';
 import { ForgotPage } from './pages/auth/ForgotPage';
 import { InvitePage } from './pages/auth/InvitePage';
+import { NoWorkspacePage } from './pages/auth/NoWorkspacePage';
 import { ResetPage } from './pages/auth/ResetPage';
 
 /** Waits for the session, then shows the app, the sign-in screen (deep link preserved) or a "server unreachable" state. */
 function Gate({ children }: { children: ReactNode }) {
-	const { state, retry } = useSession();
+	const { state, retry, me } = useSession();
 	if (state === 'loading') return <div className="mx-auto max-w-2xl p-8"><PageSkeleton label="Starting up" /></div>;
 	if (state === 'unreachable') {
 		return (
@@ -29,6 +30,7 @@ function Gate({ children }: { children: ReactNode }) {
 		);
 	}
 	if (state === 'anon') return <AuthPage />;
+	if (me && me.workspace_id == null) return <NoWorkspacePage />;
 	return <>{children}</>;
 }
 

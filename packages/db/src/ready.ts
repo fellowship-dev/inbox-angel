@@ -5,7 +5,7 @@
  */
 
 /** The newest migration this build of the code depends on. Bump with every new migration. */
-export const REQUIRED_MIGRATION = '0004_trust_hardening.sql';
+export const REQUIRED_MIGRATION = '0005_trust_followups.sql';
 
 export class SchemaNotReadyError extends Error {
 	constructor(detail: string) {

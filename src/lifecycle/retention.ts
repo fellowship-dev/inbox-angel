@@ -39,6 +39,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     ['verifications', () => q.purgeVerifications(now, limits)],
     ['password_reset_tokens', () => q.purgeResetTokens(now, limits)],
     ['invites', () => q.purgeInvites(ago(p.invitesDays), limits)],
+    ['evicted_domains', () => q.purgeEvictedDomains(ago(p.evictedDays), limits)],
     ['audit_log', () => q.purgeAudit(ago(p.auditDays), limits)],
   ];
   let failed = 0;

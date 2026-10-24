@@ -16,7 +16,10 @@ export type SignupIntent =
   | { kind: 'external' }
   | { kind: 'setup' }
   | { kind: 'signup' }
-  | { kind: 'invite'; token: string };
+  | { kind: 'invite'; token: string }
+  /** Hosted: someone signing up to accept an invite. Holding the link proves nothing, so the invite is not claimed here and
+   *  no workspace is made for them: they get an ordinary login, and accept the invite signed in as the verified address. */
+  | { kind: 'invitee'; token: string };
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -36,6 +39,11 @@ export async function assertMaySignUp(env: AuthEnv, intent: SignupIntent, email:
   const db = env.DB as D1Database;
   const reject = (message: string) => { throw new APIError('FORBIDDEN', { message }); };
 
+  if (intent.kind === 'invitee') {
+    const invite = await authLookups(db).inviteByToken(intent.token);
+    if (!isSaas(env) || !invite || invite.used_at || invite.expires_at < now() || invite.email !== email) reject('invite not found or expired');
+    return;
+  }
   if (intent.kind === 'invite') {
     if (!(await inviteFor(db, intent, email, emailVerified))) reject('invite not found or expired');
     return;
@@ -70,6 +78,11 @@ export async function provisionUser(
   };
 
   let placed: { workspaceId: string; role: MembershipRole } | null = null;
+
+  if (intent.kind === 'invitee') {
+    await globalQueries(db).users.setLegacyRole(user.id, 'member');
+    return { workspaceId: '', role: 'member' };
+  }
 
   const invite = await inviteFor(db, intent, user.email, user.emailVerified === true);
   if (invite) {

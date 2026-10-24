@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { purgeLegacyToken } from '../src/lib/api';
 import { AuthPage } from '../src/pages/auth/AuthPage';
 import { InvitePage } from '../src/pages/auth/InvitePage';
+import { NoWorkspacePage } from '../src/pages/auth/NoWorkspacePage';
 import { fail, me, renderApp } from './render';
 
 beforeEach(() => localStorage.clear());
@@ -91,5 +92,20 @@ describe('email verification', () => {
 		renderApp(<AuthPage />, { role: null, routes: { 'GET /api/me': fail(403, 'verify your email address first') } });
 		expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
 		await waitFor(() => expect(screen.queryByText('Waiting for the server')).not.toBeInTheDocument());
+	});
+});
+
+describe('signed in with no workspace (signed up through an invite)', () => {
+	it('lists the waiting invitations and accepts one', async () => {
+		const pending = { token: 'inv-tok', role: 'member', invited_by: 'owner@example.com', workspace_id: 'ws_a', workspace_name: 'Acme' };
+		const { calls } = renderApp(<NoWorkspacePage />, {
+			routes: {
+				'GET /api/me': { user: { id: 'u1', email: 'friend@example.com', name: 'F' }, role: null, workspace_id: null, kind: 'session', pending_invites: [pending] },
+				'POST /api/invites/inv-tok': { ok: true },
+			},
+		});
+		expect(await screen.findByText('Acme')).toBeInTheDocument();
+		await userEvent.setup().click(screen.getByRole('button', { name: 'Accept' }));
+		await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/invites/inv-tok')).toBe(true));
 	});
 });

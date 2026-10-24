@@ -391,10 +391,10 @@ export async function handleAuthRoute(
     if (!body.name || !body.password) return err('name and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
 
-    // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary account (which must be
-    // verified, and sets its password at verification) and then accepts while signed in as that verified address.
+    // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary login with no workspace of its
+    // own (it must be verified, and sets its password at verification) and then accepts while signed in as that verified address.
     if (isSaas(env)) {
-      const created = await signUp(env, request, ctx, { kind: 'signup' }, { name: body.name.trim(), email: invite.email, password: body.password });
+      const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: body.name.trim(), email: invite.email, password: body.password });
       if (!created.res.ok) return authError(created.res, 'could not create account');
       return sessionResponse(request, created.res, { verification_required: true, invite_pending: true }, 201);
     }

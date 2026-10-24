@@ -2,9 +2,9 @@
  * Domain ownership claims. A claim is a workspace saying "this domain is ours" before proving it; `domains` only ever
  * holds verified domains, so several workspaces can have a pending claim on the same name while at most one can own it.
  */
-import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { getDb, type Db, type DbLike } from '../client';
-import { domainClaims, domains } from '../schema';
+import { domainClaims, domains, intakeTokens } from '../schema';
 
 export type DomainClaimRow = typeof domainClaims.$inferSelect;
 
@@ -53,15 +53,22 @@ export function claimLookups(dbLike: DbLike) {
 				.where(and(eq(domains.domain, domain), ne(domains.workspace_id, workspaceId), ne(domains.verified_via, 'legacy'))).get().then((r) => !!r);
 		},
 		/**
-		 * A workspace has just proven it controls `domain`: remove the unproven (`legacy`) holder in another workspace, if any,
-		 * so the proven owner can take the name. Returns the evicted workspace id (for its audit log).
+		 * The unproven (`legacy`) holder of `domain` in another workspace, if any: what a proven claim evicts.
 		 */
-		async evictLegacyHolder(domain: string, winnerWorkspaceId: string): Promise<{ workspaceId: string; domainId: number } | null> {
-			const holder = await db.select({ id: domains.id, workspace_id: domains.workspace_id }).from(domains /* workspace-scope-exempt: evicting an unproven holder of a name someone else just proved */)
-				.where(and(eq(domains.domain, domain), ne(domains.workspace_id, winnerWorkspaceId), eq(domains.verified_via, 'legacy'))).get();
-			if (!holder) return null;
-			await db.delete(domains /* workspace-scope-exempt: same row, by id */).where(eq(domains.id, holder.id)).run();
-			return { workspaceId: holder.workspace_id, domainId: holder.id };
+		findLegacyHolder(domain: string, winnerWorkspaceId: string): Promise<{ domainId: number; workspaceId: string } | null> {
+			return db.select({ id: domains.id, workspace_id: domains.workspace_id }).from(domains /* workspace-scope-exempt: finding the unproven holder of a name someone else just proved */)
+				.where(and(eq(domains.domain, domain), ne(domains.workspace_id, winnerWorkspaceId), eq(domains.verified_via, 'legacy'), isNull(domains.evicted_at))).get()
+				.then((r) => (r ? { domainId: r.id, workspaceId: r.workspace_id } : null));
+		},
+		/**
+		 * Detach (not delete) an evicted domain: the name is freed, the row is hidden, and its reports stay for export until
+		 * the retention job purges it. Its intake token stops working and its alerts stop.
+		 */
+		async detach(domainId: number, nowSeconds: number): Promise<void> {
+			await db.update(domains /* workspace-scope-exempt: same row, by id */)
+				.set({ evicted_at: nowSeconds, evicted_name: sql`${domains.domain}`, domain: sql`'evicted-' || ${domains.id} || '.invalid'`, is_default: 0, alerts_enabled: 0, cf_connection_id: null, dns_record_id: null })
+				.where(eq(domains.id, domainId)).run();
+			await db.delete(intakeTokens /* workspace-scope-exempt: same domain, by id */).where(eq(intakeTokens.domain_id, domainId)).run();
 		},
 		/** A workspace verified `domain`: every other workspace's pending claim on it is now lost. */
 		markLost(domain: string, winnerWorkspaceId: string) {

@@ -14,6 +14,7 @@ export interface RetentionEnv {
   RETENTION_CHECK_RESULTS_DAYS?: string;
   RETENTION_INVITES_DAYS?: string;
   RETENTION_AUDIT_DAYS?: string;
+  RETENTION_EVICTED_DAYS?: string;
 }
 
 export interface RetentionPolicy {
@@ -24,6 +25,8 @@ export interface RetentionPolicy {
   checkResultsDays: number;
   invitesDays: number;
   auditDays: number;
+  /** How long a domain evicted from its unproven holder keeps its report history (for export). */
+  evictedDays: number;
 }
 
 /** 13 months, as days (365 + 30). */
@@ -50,5 +53,6 @@ export function retentionPolicy(env: RetentionEnv): RetentionPolicy {
     checkResultsDays: days(env.RETENTION_CHECK_RESULTS_DAYS, 30),
     invitesDays: days(env.RETENTION_INVITES_DAYS, 30),
     auditDays: days(env.RETENTION_AUDIT_DAYS, 365),
+    evictedDays: days(env.RETENTION_EVICTED_DAYS, 30),
   };
 }

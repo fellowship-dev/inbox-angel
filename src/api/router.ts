@@ -91,11 +91,13 @@ import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle } from '@inbox-angel/db';
+import { currentUser } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
+import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim, type VerifiedVia } from '../domains/ownership';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -345,13 +347,11 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
   if (!domain) return err('domain not found', 404);
 
   // Hosted records (and their quota) go first. If the DNS cleanup fails the domain is kept, so nothing is orphaned.
-  if (hostedEnabled(tenant.env) && await tenant.scope.hosted.get(id)) {
-    try {
-      await disableHosted(tenant, domain, {}, actor, ctx);
-    } catch (e) {
-      if (e instanceof HostedError) return err(`Could not remove the hosted records, domain not deleted: ${e.message}`, e.status);
-      throw e;
-    }
+  try {
+    await removeHostedRecords(tenant, domain, actor, ctx);
+  } catch (e) {
+    if (e instanceof HostedError) return err(`Could not remove the hosted records, domain not deleted: ${e.message}`, e.status);
+    throw e;
   }
 
   await tenant.scope.domains.delete(id);
@@ -363,20 +363,7 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
     before_value: { domain: domain.domain, rua_address: domain.rua_address },
   }, ctx);
 
-  // Best-effort cleanup of the CF DNS record (non-fatal if it fails)
-  if (domain.dns_record_id) {
-    const rdomain = tenant.settings.reportsDomain;
-    const recordName = rdomain ? `${domain.domain}._report._dmarc.${rdomain}` : domain.dns_record_id;
-    logAudit(tenant, {
-      actor_id: actor?.id ?? null, actor_email: actor?.email ?? null, actor_type: 'user',
-      action: 'dns.delete',
-      resource_type: 'dns_record', resource_id: domain.dns_record_id, resource_name: recordName,
-      before_value: { type: 'TXT', name: recordName, content: 'v=DMARC1;', ttl: 3600 },
-    }, ctx);
-    await deprovisionDomain(tenant, domain.dns_record_id).catch(e =>
-      console.warn(`deprovisionDomain failed for domain ${id}:`, e)
-    );
-  }
+  await removeAuthRecord(tenant, domain, actor, ctx);
 
   return new Response(null, { status: 204 });
 }
@@ -666,6 +653,14 @@ async function _handleApi(
     // /api/workspaces* act on the user, so a stale X-Workspace-Id (a workspace they have left) must not lock them out of listing their own.
     workspace = await resolver(isWorkspaceRoute(path) || isAccountRoute(path) ? withoutWorkspaceHeader(request) : request, env);
   } catch (e) {
+    if (e instanceof AuthError && e.code === 'no_workspace' && path === '/api/me') {
+      // Signed in and verified, but in no workspace yet: offer the invitations addressed to this address.
+      const me = await currentUser(request, env, ctx).catch(() => null);
+      if (me) {
+        const pending = await authLookups(env.DB).pendingInvitesForEmail(me.email.toLowerCase(), Math.floor(Date.now() / 1000));
+        return json({ user: { id: me.id, email: me.email, name: me.name }, role: null, workspace_id: null, kind: 'session', pending_invites: pending });
+      }
+    }
     if (e instanceof AuthError) return err(e.message, e.status);
     return err('authentication error', 401);
   }

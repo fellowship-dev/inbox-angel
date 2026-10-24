@@ -15,6 +15,8 @@ export class AuthError extends Error {
   constructor(
     message: string,
     public readonly status: 401 | 403 = 401,
+    /** `no_workspace`: a verified person who belongs to no workspace yet (an invitee who has not accepted). */
+    public readonly code?: 'no_workspace',
   ) {
     super(message);
     this.name = 'AuthError';
@@ -109,7 +111,7 @@ async function fromSession(
   if (isSaas(env) && !user.emailVerified) throw new AuthError('verify your email address first', 403);
 
   const memberships = await authLookups(env.DB as D1Database).membershipsOf(user.id);
-  if (memberships.length === 0) throw new AuthError('this user is not a member of any workspace', 403);
+  if (memberships.length === 0) throw new AuthError('this user is not a member of any workspace', 403, 'no_workspace');
   // A user in several workspaces picks one with X-Workspace-Id; otherwise their oldest membership.
   const wanted = request.headers.get('x-workspace-id');
   const chosen = (wanted && memberships.find(m => m.workspace_id === wanted)) || (!wanted ? memberships[0] : null);

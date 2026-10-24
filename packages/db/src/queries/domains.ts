@@ -1,31 +1,35 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { unwrapDriverError, type Db } from '../client';
 import { cloudflareConnections, domains } from '../schema';
 
+export type DomainRow = typeof domains.$inferSelect;
+
 export function domainQueries(db: Db, workspaceId: string) {
 	const mine = eq(domains.workspace_id, workspaceId);
+	// Evicted (detached) domains keep their reports for export but are not domains any more: reads skip them.
+	const live = isNull(domains.evicted_at);
 	const touch = sql`unixepoch()`;
 
 	return {
 		getByName(domain: string) {
-			return db.select().from(domains).where(and(mine, eq(domains.domain, domain))).get().then((r) => r ?? null);
+			return db.select().from(domains).where(and(mine, live, eq(domains.domain, domain))).get().then((r) => r ?? null);
 		},
 
 		getById(id: number) {
-			return db.select().from(domains).where(and(mine, eq(domains.id, id))).get().then((r) => r ?? null);
+			return db.select().from(domains).where(and(mine, live, eq(domains.id, id))).get().then((r) => r ?? null);
 		},
 
 		list() {
-			return db.select().from(domains).where(mine).orderBy(asc(domains.id)).all();
+			return db.select().from(domains).where(and(mine, live)).orderBy(asc(domains.id)).all();
 		},
 
 		subdomains(parentId: number) {
-			return db.select().from(domains).where(and(mine, eq(domains.parent_id, parentId))).orderBy(asc(domains.domain)).all();
+			return db.select().from(domains).where(and(mine, live, eq(domains.parent_id, parentId))).orderBy(asc(domains.domain)).all();
 		},
 
 		/** The workspace's default ("home base") domain, if one is set. */
 		getDefault() {
-			return db.select().from(domains).where(and(mine, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
+			return db.select().from(domains).where(and(mine, live, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
 		},
 
 		async insert(d: { domain: string; rua_address: string; verified_via?: string }) {

@@ -7,6 +7,7 @@ import { baseDomainQueries } from './base-domain';
 import { claimQueries } from './claims';
 import { connectionQueries } from './connections';
 import { domainQueries } from './domains';
+export type { DomainRow } from './domains';
 import { mtaStsQueries, spfFlattenQueries } from './domain-config';
 import { heartbeatStats } from './heartbeat';
 import { hostedQueries, intakeQueries } from './intake';

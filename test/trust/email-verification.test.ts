@@ -161,8 +161,9 @@ describe('invites are accepted only by a verified, matching email', () => {
     expect(res.status).toBe(201);
     expect(await json(res)).toMatchObject({ token: null, verification_required: true, invite_pending: true });
     expect(w.rows('SELECT used_at FROM invites')).toEqual([{ used_at: null }]);
-    const ws = w.rows("SELECT workspace_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = 'friend@example.com'");
-    expect(ws).toHaveLength(1); // their own workspace only
+    // and no workspace of their own either: signing up through an invite does not leave an empty personal workspace behind
+    expect(w.rows("SELECT workspace_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = 'friend@example.com'")).toEqual([]);
+    expect(w.rows("SELECT COUNT(*) n FROM workspaces WHERE id != 'ws_default'")).toEqual([{ n: 1 }]); // the owner's
     expect((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'friend@example.com', password: 'password-123' } })).status).toBe(403);
   });
 

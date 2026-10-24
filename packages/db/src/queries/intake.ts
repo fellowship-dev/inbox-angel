@@ -4,7 +4,7 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
 import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
@@ -47,22 +47,30 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		/**
 		 * Atomically count one report of `bytes` against the allowance of (domain, `day` (YYYY-MM-DD, UTC), `reporter`).
 		 * `reporter` is a proven reporter's organisational domain, or `~<claimed sender domain>` for an unproven message ('~' alone: the overflow bucket). Returns false, and counts nothing, when it would exceed
-		 * `maxReports` or `maxBytes`, or when a new proven reporter would be more than `maxDistinct` distinct
-		 * ones for the domain that day (an unproven sender past `maxDistinct` falls into the overflow bucket instead) (best-effort bound: the check and the insert are separate statements).
+		 * `maxReports` or `maxBytes`, or (a proven reporter that is not `wellKnown`) when it is out of its own cap. Past `maxDistinct`
+		 * unknown proven reporters a day the least-used one is dropped to make room; an unproven sender falls into the overflow bucket instead. (best-effort bound: the check and the insert are separate statements).
 		 */
-		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 20): Promise<boolean> {
+		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 100, wellKnown: readonly string[] = []): Promise<boolean> {
 			if (maxReports < 1 || bytes > maxBytes) return false;
 			// '~…' keys are unproven senders (by the sender domain they claim), everything else is a proven reporter domain:
 			// the two kinds are counted and bounded separately, and never share an allowance.
 			const unproven = reporter.startsWith('~');
 			const dayRows = and(mine_usage(), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day));
 			const kind = unproven ? sql`${intakeUsage.reporter} LIKE '~%'` : sql`${intakeUsage.reporter} NOT LIKE '~%'`;
+			const known = !unproven && wellKnown.includes(reporter);
 			const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
-			if (!seen?.n) {
-				const distinct = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, kind)).get();
+			if (!seen?.n && !known) {
+				// Slots are for reporters we know nothing about; well-known ones neither use nor need one.
+				const unknown = and(dayRows, kind, wellKnown.length ? notInArray(intakeUsage.reporter, [...wellKnown]) : undefined);
+				const distinct = await db.select({ n: count() }).from(intakeUsage).where(unknown).get();
 				if ((distinct?.n ?? 0) >= maxDistinct) {
-					if (!unproven) return false;
-					reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
+					if (unproven) reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
+					else {
+						// All slots taken: the least-used unknown reporter makes way, so a new one is never refused and junk
+						// domains cannot lock genuine ones out for the day.
+						const victim = await db.select({ r: intakeUsage.reporter }).from(intakeUsage).where(unknown).orderBy(intakeUsage.reports, intakeUsage.bytes).limit(1).get();
+						if (victim) await db.delete(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, victim.r))).run();
+					}
 				}
 			}
 			const res = await db

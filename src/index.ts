@@ -59,7 +59,7 @@ export interface Env {
   INTAKE_MAX_REPORTS_PER_DAY?: string; // per intake token and authenticated reporter domain (default 50)
   INTAKE_MAX_RECORDS_PER_REPORT?: string; // default 20000
   INTAKE_MAX_BYTES_PER_DAY?: string; // raw message bytes per token and authenticated reporter domain per UTC day (default 50 MiB)
-  INTAKE_MAX_REPORTERS_PER_DAY?: string; // distinct authenticated reporter domains per token per UTC day (default 20)
+  INTAKE_MAX_REPORTERS_PER_DAY?: string; // distinct authenticated reporter domains per token per UTC day (default 100)
   INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string; // messages not proven by the receiver, per claimed sender domain per token per UTC day (default 200)
   INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string; // raw bytes of that bucket (default 1 GiB)
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string; // distinct claimed sender domains with their own bucket per token per day; the rest share one (default 50)
