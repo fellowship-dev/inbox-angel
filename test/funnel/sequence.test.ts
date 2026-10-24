@@ -247,20 +247,21 @@ describe('copy', () => {
     expect(all).not.toMatch(/criminal|protects no one/i);
   });
 
-  it('offer v2: trigger framing, stays-fixed argument, one-off BIMI with the first certificate year, three offers', () => {
-    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $1,500', keepFixed: '$79/month per domain', bimi: 'from $2,900' } };
+  it('offer v2: trigger framing, stays-fixed argument, yearly all-in BIMI, monthly or yearly, three offers', () => {
+    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $990', keepFixed: '$49/month per domain', bimi: '$1,990/year or $199/month' } };
     const t = (i: number) => buildLetterText(stepCopy(i, ctx).blocks);
     expect(t(0)).toMatch(/Shopify, Klaviyo or Google/);
     expect(t(0)).toMatch(/am I done\?/);
     expect(t(1)).toMatch(/fails silently/);
-    expect(t(2)).toMatch(/one-off job/);
-    expect(t(2)).toMatch(/first year of the certificate/);
-    expect(t(2)).toMatch(/billed yearly in advance at the certificate cost/);
-    expect(t(2)).toMatch(/two milestones: the certificate and setup when you order, the rest when the logo is verified/);
-    for (const i of [2, 3]) expect(t(i)).not.toMatch(/12-month|12 months|upfront|remaining certificate|per brand|monthly price|instalment|installment|pay over time|Klarna|Affirm|Afterpay/i);
+    expect(t(2)).toMatch(/yearly plan that includes the enforcement work \(Fix it\)/);
+    expect(t(2)).toMatch(/every year \(the yearly price covers the renewal\)/);
+    for (const i of [2, 3]) expect(t(i)).toMatch(/Not included, because it depends on each brand: trademark registration and any lawyer's work, and research into whether (your|the) logo qualifies/);
+    expect(t(2)).toMatch(/yearly up front at a discount, or monthly on a 12-month term/);
+    expect(t(2)).toMatch(/paying the remaining months/);
+    for (const i of [2, 3]) expect(t(i)).not.toMatch(/one-off job|milestone|remaining certificate|no upfront|requires Fix it|only plan|instalment|installment|pay over time|Klarna|Affirm|Afterpay/i);
     expect(t(2)).not.toMatch(/over a thousand/);
     const d = t(3);
-    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $1,500.', 'Price: $79/month per domain.', 'Price: from $2,900.', 'Keep it fixed ongoing', 'two milestones', 'written confirmation']) expect(d).toContain(x);
+    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $990.', 'Price: $49/month per domain.', 'Price: $1,990/year or $199/month.', 'which includes it', 'Keep it fixed, the logo', 'monthly on a 12-month term', 'written confirmation']) expect(d).toContain(x);
     expect(d).not.toMatch(/Assessment|Retainer/);
     expect(DISCLOSURE).toMatch(/keeping it fixed/);
   });

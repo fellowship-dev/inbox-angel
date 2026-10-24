@@ -93,5 +93,5 @@ The request stores an **unconfirmed** subscription (`confirmed_at` null) and ema
 | `PUBLIC_BASE_URL` | public HTTPS origin for unsubscribe and confirmation links (falls back to `BETTER_AUTH_URL`) |
 | `POSTAL_ADDRESS` | footer address |
 | `BOOKING_URL` | day-14 booking link |
-| `SERVICE_PRICES` | JSON `{"fix","keepFixed","bimi"}` strings (e.g. `"from $1,500"`, `"$79/month per domain"`, `"from $2,900"`), the prices in the day-10 email |
+| `SERVICE_PRICES` | JSON `{"fix","keepFixed","bimi"}` strings (e.g. `"from $990"`, `"$49/month per domain"`, `"$1,990/year or $199/month"`), the prices in the day-10 email |
 | `SITE_ORIGINS` | comma-separated origins for CORS |
