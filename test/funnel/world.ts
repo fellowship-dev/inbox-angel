@@ -22,7 +22,7 @@ export const FUNNEL_ENV = {
   PUBLIC_BASE_URL: 'https://app.inboxangel.io',
   POSTAL_ADDRESS: '1 Example Street\nWilmington, DE 19801, USA',
   BOOKING_URL: 'https://cal.example.com/max/30min',
-  SERVICE_PRICES: JSON.stringify({ assessment: '$ASSESS', enforcement: '$ENFORCE', bimi: '$BIMI', retainer: '$RETAIN/mo' }),
+  SERVICE_PRICES: JSON.stringify({ fix: '$FIX', keepFixed: '$KEEP/mo', bimi: '$BIMI/mo' }),
 } as const;
 
 export const summary = (over: Partial<CheckSummary> = {}): CheckSummary => ({

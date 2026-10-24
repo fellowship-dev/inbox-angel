@@ -7,7 +7,7 @@
 // Facts to verify before the first real send (nothing here is shown to a lead; tests fail if the word VERIFY or a TODO
 // reaches the copy):
 //   - the current CMC requirements, and what each mailbox provider displays for a CMC versus a VMC;
-//   - certificate cost and timing (the day-6 email gives only a broad range);
+//   - certificate cost and timing (it is bundled into the monthly BIMI price; the 12-month term must cover it);
 //   - a trademark registration takes months.
 
 import type { LetterBlock } from '../email/html-templates';
@@ -37,7 +37,7 @@ export interface StepCopy {
 const SIGN_OFF = 'Inbox Angel';
 
 /** One plain line in the free-check reply, next to the unsubscribe link. Must stay true to what the sequence does. */
-export const DISCLOSURE = "You will also get a few short emails from us on fixing this and getting your logo into the inbox (BIMI).";
+export const DISCLOSURE = "You will also get a few short emails from us on fixing it, keeping it fixed, and getting your logo into the inbox (BIMI).";
 
 // ── Step 1: what the result means, and the one fix that matters ─────────────
 
@@ -65,7 +65,7 @@ export function readResult(domain: string, s: Partial<CheckSummary> | null): { m
   }
   if (!s.dmarcPolicy) {
     return {
-      meaning: `${domain} has no DMARC record. Anyone can send email that claims to be from you, and receiving servers have no instruction to refuse it.`,
+      meaning: `${domain} has no DMARC record. If Shopify, Klaviyo or Google asked you to add one, this is the record they mean. Anyone can send email that claims to be from you, and receiving servers have no instruction to refuse it.`,
       fix: 'Publish a DMARC record at the monitoring level (p=none) with a reporting address. It blocks nothing, and it starts showing you every system that sends email as your domain. Every later step depends on that list.',
     };
   }
@@ -89,7 +89,7 @@ export function readResult(domain: string, s: Partial<CheckSummary> | null): { m
   }
   return {
     meaning: `${domain} is enforcing DMARC at p=reject, and this email passed. That is the strongest setting and the hard part is done.`,
-    fix: 'Keep it working: new tools and vendors that send as you will fail silently unless someone checks. The next step up is BIMI, which puts your logo next to your messages (day 6).',
+    fix: 'Keep it working: a new tool that sends as you will fail silently unless someone sets it up. The next step up is BIMI, which puts your logo next to your messages (day 6).',
   };
 }
 
@@ -103,12 +103,12 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
       return {
         subject: `What your email check for ${d} means`,
         blocks: [
-          `You sent us an email from ${d} to check how it is protected. Here is what the result means, without the acronyms.`,
+          `You sent us an email from ${d} to check how it is protected. Here is what the result means, without the acronyms. If Shopify, Klaviyo or Google told you to add DMARC, this is what they are asking for, and the question behind it is: am I done?`,
           { heading: 'What we found' },
           meaning,
           { heading: 'The one thing to do first' },
           fix,
-          'Over the next two weeks we will send a few short emails on where this leads: enforcement, and then BIMI. If you would rather have it done for you, reply to this email.',
+          'Over the next two weeks we will send a few short emails on where this leads: enforcement, keeping it fixed, and then BIMI. If you would rather have it done for you, with a written confirmation at the end that you are done, reply to this email.',
           SIGN_OFF,
         ],
       };
@@ -132,6 +132,8 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
             'We move to quarantine on a small percentage, watch the reports, and widen it.',
             'We go to reject only when the reports show nothing legitimate failing, and we can roll back at each step.',
           ] },
+          { heading: 'Why it has to stay fixed' },
+          'Once you are at reject, a new tool that sends as you (a newsletter service, a CRM, a helpdesk, invoicing) fails silently: its mail just does not arrive, and nothing tells you. Someone has to set each new sender up before it goes live, and rotate keys when they expire. That is why a fixed setup needs looking after, and it is what we call Keep it fixed.',
           'It is not complicated, but it takes patience and attention to the reports. That is the part we do for you.',
           SIGN_OFF,
         ],
@@ -149,27 +151,26 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
             'A BIMI DNS record that points to the logo and the certificate.',
           ] },
           { heading: 'What it costs and how long it takes' },
-          'The certificate is bought from an authorised certificate authority and renewed yearly; expect a few hundred dollars up to over a thousand per year, depending on type and authority; we will give you the current figure for your case. A trademark registration, if you need one for a VMC, takes months and is outside our work. Once enforcement is in place, the logo conversion, the certificate and the DNS record take days.',
+          'We include the certificate in a monthly plan, so there is no upfront certificate fee. We buy it from an authorised certificate authority and renew it for you. The term is 12 months, and leaving earlier means paying the remaining certificate cost. A trademark registration, if you need one for a VMC, takes months and is outside our work. Once enforcement is in place, the logo conversion, the certificate and the DNS record take days.',
           'So the order matters: enforcement first, then BIMI. If you want your logo showing, the work starts with step one.',
           SIGN_OFF,
         ],
       };
     case 3: {
       const p = c.prices;
-      const priced = (label: string, price?: string) => (price ? `${label} Prices start from ${price}.` : label);
+      const priced = (label: string, price?: string) => (price ? `${label} Price: ${price}.` : label);
       const anyPrice = Object.keys(p).length > 0;
       return {
         subject: 'How we work',
         blocks: [
-          'We do this as a done-for-you service, in four stages. You can stop after any of them.',
+          'We do this as a done-for-you service, with three offers. Start with the first; the other two are optional.',
           { list: [
-            priced('1. Assessment. We read your DNS and your DMARC reports, list every system that sends as you, and tell you exactly what is wrong and in what order to fix it.', p.assessment),
-            priced('2. Enforcement. We authenticate each legitimate sender and move you from p=none to quarantine to reject in steps, watching the reports and ready to roll back.', p.enforcement),
-            priced('3. BIMI. We prepare the logo in the required format, help you get the certificate, and publish the record, so your logo can show where it is supported.', p.bimi),
-            priced('4. Retainer. Monthly monitoring and maintenance: new senders, changed records, expiring certificates, so it stays working after we leave.', p.retainer),
+            priced('Fix it. A screen-share session where we inventory every system that sends as you and fix SPF and DKIM. Then we move DMARC from none to quarantine to reject over about 90 days, watching the reports the whole time, which is included. It ends with a written confirmation that you are done.', p.fix),
+            priced('Keep it fixed. Offered at day 90, and easy to decline. We stay silent while everything is fine and send a short quarterly note saying so. We alert you only when something needs action, together with the fix. New sending tools are set up, keys are rotated, and there is a human to call.', p.keepFixed),
+            priced("BIMI, your logo in the inbox. Requires Fix it first. We convert the logo to the required format, buy and renew the certificate (included in the monthly price, no upfront certificate fee), publish the record and verify it. It includes Keep it fixed. 12-month term; leaving earlier pays the remaining certificate cost. Whether a logo is shown is always the mailbox provider's decision.", p.bimi),
           ] },
           anyPrice ? 'Prices are starting points; the final figure depends on how many domains and sending systems you have.' : 'We quote each job after a short look at your setup, so there is no price list to misread.',
-          'If one of these stages is what you need, reply to this email and say which.',
+          'Not sure which you need? Take a free 30-minute call and we will look at your domain together. Or reply to this email and say which offer you want.',
           SIGN_OFF,
         ],
       };

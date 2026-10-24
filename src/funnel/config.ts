@@ -24,14 +24,14 @@ export function publicBaseUrl(env: FunnelEnv): string | null {
 export const postalAddress = (env: FunnelEnv): string | null => env.POSTAL_ADDRESS?.trim() || null;
 export const bookingUrl = (env: FunnelEnv): string | null => (/^https?:\/\//i.test(env.BOOKING_URL?.trim() ?? '') ? env.BOOKING_URL!.trim() : null);
 
-export interface ServicePrices { assessment?: string; enforcement?: string; bimi?: string; retainer?: string }
+export interface ServicePrices { fix?: string; keepFixed?: string; bimi?: string }
 
 /** The "from" prices, as configured. Nothing is hardcoded: an unset or malformed value means "no prices yet". */
 export function servicePrices(env: FunnelEnv): ServicePrices {
   try {
     const raw = JSON.parse(env.SERVICE_PRICES ?? '{}') as Record<string, unknown>;
     const out: ServicePrices = {};
-    for (const k of ['assessment', 'enforcement', 'bimi', 'retainer'] as const) if (typeof raw[k] === 'string' && raw[k]) out[k] = raw[k] as string;
+    for (const k of ['fix', 'keepFixed', 'bimi'] as const) if (typeof raw[k] === 'string' && raw[k]) out[k] = raw[k] as string;
     return out;
   } catch {
     return {};
