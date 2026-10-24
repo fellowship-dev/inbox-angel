@@ -19,7 +19,7 @@ import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
 import { claimedSender, provenReporter } from '../dmarc/reporter-auth';
 import { readAuthHeaders } from '../email/sender-proof';
-import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES } from './config';
+import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES, WELL_KNOWN_REPORTERS } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 
@@ -83,7 +83,7 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   const reporter = provenReporter(authHeaders, env);
   const intake = forWorkspace(env.DB, target.workspace_id).intake;
   const ok = reporter
-    ? await intake.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay)
+    ? await intake.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay, WELL_KNOWN_REPORTERS, { reports: limits.totalReportsPerDay, bytes: limits.totalBytesPerDay })
     : await intake.tryConsume(target.domain_id, day, claimedSender(message.from), message.rawSize, limits.unauthReportsPerDay, limits.unauthBytesPerDay, limits.unauthSendersPerDay);
   if (!ok) {
     return reject(message, { ...fields, limit: 'daily' }, 'Daily intake limit for this address reached; try again tomorrow');

@@ -6,7 +6,7 @@
  */
 import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
-import { apiKeys, invites, memberships } from '../schema';
+import { apiKeys, invites, memberships, workspaces } from '../schema';
 
 export function authLookups(dbLike: DbLike) {
 	const db = getDb(dbLike);
@@ -48,6 +48,16 @@ export function authLookups(dbLike: DbLike) {
 				.limit(1)
 				.get()
 				.then((r) => r ?? null),
+
+		/** Every unused, unexpired invite addressed to an email, with its workspace's name: what a signed-in, verified person with no workspace yet is offered. */
+		pendingInvitesForEmail: (email: string, nowSeconds: number) =>
+			db
+				.select({ token: invites.token, role: invites.role, invited_by: invites.invited_by, workspace_id: invites.workspace_id, workspace_name: workspaces.name })
+				.from(invites)
+				.innerJoin(workspaces, eq(workspaces.id, invites.workspace_id))
+				.where(/* workspace-scope-exempt: the invites addressed to the caller's own verified email, across workspaces */ and(eq(invites.email, email), isNull(invites.used_at), gt(invites.expires_at, nowSeconds)))
+				.orderBy(asc(invites.created_at))
+				.all(),
 
 		/** Record use, at most once per `minGapSeconds` so authenticated reads do not each cost a write. */
 		touchApiKey: (id: string, nowSeconds: number, minGapSeconds = 60) =>

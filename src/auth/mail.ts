@@ -49,3 +49,21 @@ export async function sendVerificationEmail(
     console.log(`[auth] verification link for ${user.email}: ${verifyUrl}`);
   }
 }
+
+/** Tells a workspace's owners that a domain was taken from it because another workspace proved it controls the domain. */
+export async function sendEvictionNotice(env: AuthEnv, to: string[], domain: string, keepDays: number): Promise<void> {
+  if (to.length === 0) return;
+  const text = `Hi,\n\n${domain} was registered in your InboxAngel workspace before domain ownership was verified. Another workspace has now proven that it controls ${domain} (by a DNS record or through its Cloudflare zone), so ${domain} has been removed from yours: monitoring, hosted records and alerts for it have stopped.\n\nYour report history for ${domain} stays available to export for ${keepDays} days, then it is deleted.\n\nIf ${domain} really is yours, add it again and publish the TXT record InboxAngel shows you at _inboxangel.${domain}; if you believe this is a mistake, reply to this email.\n\nInboxAngel`;
+  const from = await senderAddress(env);
+  if (env.SEND_EMAIL && from) {
+    for (const address of to) {
+      try {
+        await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [address], subject: `${domain} was removed from your InboxAngel workspace`, text });
+      } catch (e) {
+        console.error('[auth] eviction notice send failed:', e);
+      }
+    }
+  } else {
+    console.log(`[auth] eviction notice for ${domain} to ${to.join(', ')}`);
+  }
+}

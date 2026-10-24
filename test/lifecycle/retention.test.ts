@@ -132,7 +132,7 @@ describe('runRetention (self-host defaults)', () => {
 
 describe('windows from the environment', () => {
   it('defaults are the published ones', () => {
-    expect(retentionPolicy({})).toEqual({ reportsDays: 395, tlsDays: 395, rawDays: 30, ipInfoDays: 30, checkResultsDays: 30, invitesDays: 30, auditDays: 365 });
+    expect(retentionPolicy({})).toEqual({ reportsDays: 395, tlsDays: 395, rawDays: 30, ipInfoDays: 30, checkResultsDays: 30, invitesDays: 30, auditDays: 365, evictedDays: 30 });
   });
 
   it('overrides apply; garbage falls back to the default instead of disabling a window', () => {

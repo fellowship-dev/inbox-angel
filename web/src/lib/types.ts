@@ -258,9 +258,12 @@ export type Role = 'owner' | 'admin' | 'member';
 /** GET /api/me */
 export interface Me {
   user: { id: string; email: string; name: string } | null;
-  role: Role;
-  workspace_id: string;
+  /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
+  role: Role | null;
+  workspace_id: string | null;
   kind: 'instance' | 'api_key' | 'session';
+  /** Set (with `workspace_id: null`) for a verified login that belongs to no workspace yet: the invitations waiting for its email. */
+  pending_invites?: Array<{ token: string; role: string; invited_by: string; workspace_id: string; workspace_name: string | null }>;
   /** Runs this instance (OWNER_EMAIL, or the self-host owner): sees the leads page. */
   instance_owner?: boolean;
 }

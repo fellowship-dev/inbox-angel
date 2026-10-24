@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { domains, mtaStsConfig, spfFlattenConfig } from '../schema';
 
@@ -71,7 +71,7 @@ export function mtaStsQueries(db: Db, workspaceId: string) {
 			return db
 				.select({ m: mtaStsConfig })
 				.from(mtaStsConfig)
-				.innerJoin(domains, and(eq(domains.id, mtaStsConfig.domain_id), eq(domains.workspace_id, workspaceId)))
+				.innerJoin(domains, and(eq(domains.id, mtaStsConfig.domain_id), eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at)))
 				.where(and(mine, eq(domains.domain, domain), eq(mtaStsConfig.enabled, 1)))
 				.get()
 				.then((r) => r?.m ?? null);

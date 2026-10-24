@@ -110,11 +110,15 @@ export const domains = sqliteTable(
 		cf_connection_id: text('cf_connection_id').references((): any => cloudflareConnections.id, { onDelete: 'set null' }),
 		/** How ownership was proven: selfhost | cloudflare | txt | parent | legacy (rows from before 0002). Every row here is verified. */
 		verified_via: text('verified_via').notNull().default('legacy'),
+		/** Set when a legacy holder lost the name to a proven claim: the row is detached (renamed, hidden) and purged after 30 days (0005). */
+		evicted_at: integer('evicted_at'),
+		evicted_name: text('evicted_name'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),
 		index('idx_domains_cf_connection').on(t.cf_connection_id),
 		index('idx_domains_parent').on(t.parent_id),
+		index('idx_domains_evicted').on(t.evicted_at).where(sql`${t.evicted_at} IS NOT NULL`),
 		index('idx_domains_workspace').on(t.workspace_id),
 		// At most one default domain per workspace.
 		uniqueIndex('idx_domains_is_default').on(t.workspace_id).where(sql`${t.is_default} = 1`),

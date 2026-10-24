@@ -120,7 +120,7 @@ describe('per-token caps', () => {
 describe('the intake allowance: junk cannot exhaust genuine reports', () => {
   const MS = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=microsoft.com header.s=s1' } };
   const GRPT = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, o: Parameters<typeof fakeMessage>[2] = GOOGLE) => send(w, dmarcXml('a-corp.com', id), o);
-  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter');
+  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows("SELECT reporter, reports FROM intake_usage WHERE reporter <> '*' ORDER BY reporter");
 
   it('junk fills its own bucket (reports), then a proven google.com report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' });
@@ -150,11 +150,31 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect(usage(w)).toEqual([{ reporter: 'google.com', reports: 2 }, { reporter: 'microsoft.com', reports: 1 }]);
   });
 
-  it('bounds the distinct proven reporters per token per day', async () => {
+  it('slots for unknown proven reporters: when full, the least-used one makes room instead of a new one being refused', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '2' });
+    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+    const org = (d: string, id: string) => send(w, dmarcXml('a-corp.com', id, d), dkim(d));
+    await org('busy.example', 'b1'); await org('busy.example', 'b2'); await org('busy.example', 'b3');
+    await org('quiet.example', 'q1');
+    expect((await org('newcomer.example', 'n1')).setReject).not.toHaveBeenCalled(); // not refused
+    expect(usage(w)).toEqual([{ reporter: 'busy.example', reports: 3 }, { reporter: 'newcomer.example', reports: 1 }]); // quiet.example (least used) made room
+  });
+
+  it('well-known reporters are never refused for want of a slot, and do not use one', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '1' });
-    expect((await GRPT(w, 'g1')).setReject).not.toHaveBeenCalled();
-    expect((await GRPT(w, 'm1', MS)).setReject).toHaveBeenCalledOnce();
-    expect((await GRPT(w, 'g2')).setReject).not.toHaveBeenCalled(); // an already-known reporter keeps going
+    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+    await send(w, dmarcXml('a-corp.com', 'u1', 'cheap1.example'), dkim('cheap1.example'));
+    for (const d of ['google.com', 'yahoo.com', 'microsoft.com', 'outlook.com']) expect((await send(w, dmarcXml('a-corp.com', 'k-' + d, d), dkim(d))).setReject, d).not.toHaveBeenCalled();
+    expect(usage(w).map(r => r.reporter)).toEqual(['cheap1.example', 'google.com', 'microsoft.com', 'outlook.com', 'yahoo.com']);
+  });
+
+  it('an attacker with many cheap DKIM-signing domains cannot lock genuine reporters out', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '3' });
+    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+    for (let i = 0; i < 12; i++) await send(w, dmarcXml('a-corp.com', 'junk' + i, `cheap${i}.example`), dkim(`cheap${i}.example`));
+    expect((await send(w, dmarcXml('a-corp.com', 'g1', 'google.com'), dkim('google.com'))).setReject).not.toHaveBeenCalled(); // well known
+    expect((await send(w, dmarcXml('a-corp.com', 'small1', 'smallorg.example'), dkim('smallorg.example'))).setReject).not.toHaveBeenCalled(); // unknown but genuine
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE report_id IN ('g1', 'small1') ORDER BY id").length).toBe(2);
   });
 
   it('unproven senders past the slot limit share one overflow bucket instead of being refused', async () => {
@@ -164,7 +184,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
   });
 
   it('defaults are generous for unproven senders (per claimed sender domain), tight for nobody who is proven', () => {
-    expect(intakeLimits({})).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 20, unauthReportsPerDay: 200, unauthBytesPerDay: 1024 * 1024 * 1024, unauthSendersPerDay: 50 });
+    expect(intakeLimits({})).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 100, unauthReportsPerDay: 200, unauthBytesPerDay: 1024 * 1024 * 1024, unauthSendersPerDay: 50 });
   });
 });
 
@@ -174,7 +194,7 @@ describe('AUTHSERV_* not set yet: nothing is proven, nothing is starved', () => 
     expect((await send(w, dmarcXml('a-corp.com', 'u1'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'u2'), { from: 'noreply@microsoft.com' })).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT reporter_auth FROM aggregate_reports ORDER BY id')).toEqual([{ reporter_auth: 'none' }, { reporter_auth: 'none' }]);
-    expect(w.rows('SELECT reporter FROM intake_usage ORDER BY reporter')).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
+    expect(w.rows("SELECT reporter FROM intake_usage WHERE reporter <> '*' ORDER BY reporter")).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
   });
 
   it('junk claiming to be one sender (200 messages needed at the default) leaves other senders’ genuine reports alone', async () => {
@@ -342,5 +362,41 @@ describe('self-host decompression bombs', () => {
     await worker.email(m, s.env, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
     expect(s.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'ok-1' }]);
+  });
+});
+
+describe('a token’s daily total survives reporters coming and going', () => {
+  const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+
+  it('evicting a reporter from its slot frees the slot only: its use still counts, so many cheap domains cannot each bring a fresh allowance', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '2', INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '5', INTAKE_MAX_REPORTS_PER_DAY: '10' });
+    const sendFrom = (d: string, id: string) => send(w, dmarcXml('a-corp.com', id, d), dkim(d));
+    const accepted: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const m = await sendFrom(`cheap${i % 4}.example`, `r${i}`);
+      if (!m.setReject.mock.calls.length) accepted.push(`r${i}`);
+    }
+    expect(accepted).toHaveLength(5); // the total, not 12 messages × fresh allowances
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 5 }]);
+    expect(w.rows('SELECT COUNT(*) n FROM aggregate_reports')).toEqual([{ n: 5 }]);
+  });
+
+  it('the total is by bytes too, and a rejected message gives back what it counted for its reporter', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_BYTES_PER_DAY: '1000' });
+    expect((await send(w, dmarcXml('a-corp.com', 'b1', 'one.example'), { ...dkim('one.example'), rawSize: 800 })).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('a-corp.com', 'b2', 'two.example'), { ...dkim('two.example'), rawSize: 800 })).setReject).toHaveBeenCalledOnce();
+    expect(w.rows("SELECT reporter, reports, bytes FROM intake_usage WHERE reporter = 'two.example'")).toEqual([{ reporter: 'two.example', reports: 0, bytes: 0 }]);
+    expect(w.rows("SELECT bytes FROM intake_usage WHERE reporter = '*'")).toEqual([{ bytes: 800 }]);
+  });
+
+  it('well-known reporters are outside the total: junk reporters exhausting it cannot block google.com', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '2' });
+    for (let i = 0; i < 4; i++) await send(w, dmarcXml('a-corp.com', 'j' + i, `cheap${i}.example`), dkim(`cheap${i}.example`));
+    expect((await send(w, dmarcXml('a-corp.com', 'g1', 'google.com'), dkim('google.com'))).setReject).not.toHaveBeenCalled();
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 2 }]);
+  });
+
+  it('defaults', () => {
+    expect(intakeLimits({})).toMatchObject({ totalReportsPerDay: 1000, totalBytesPerDay: 1024 * 1024 * 1024 });
   });
 });

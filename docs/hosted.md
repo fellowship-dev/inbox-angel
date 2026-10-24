@@ -40,7 +40,8 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
 | `INTAKE_MAX_REPORTS_PER_DAY` | `50` | optional: reports accepted per intake token **per authenticated reporter domain** per UTC day (over-cap mail is rejected, nothing ingested). A message is attributed to a reporter by an aligned-looking `dkim`/`spf`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
 | `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | optional: raw message bytes per token per authenticated reporter domain per UTC day (50 MiB) |
-| `INTAKE_MAX_REPORTERS_PER_DAY` | `20` | optional: distinct authenticated reporter domains accepted per token per UTC day |
+| `INTAKE_MAX_REPORTERS_PER_DAY` | `100` | optional: distinct authenticated reporter domains with their own slot per token per UTC day. Well-known reporters (google.com, yahoo.com, microsoft.com…) never use a slot; when the slots are full the least-used unknown reporter makes room instead of the new one being refused |
+| `INTAKE_MAX_TOTAL_REPORTS_PER_DAY`, `INTAKE_MAX_TOTAL_BYTES_PER_DAY` | `1000`, 1 GiB | optional: a token's daily total across proven reporters that are not well known, so reporters coming and going through the slots cannot each bring a fresh allowance. Well-known reporters are outside it |
 | `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `200` | optional: messages the receiver did not prove, per claimed sender domain (SMTP envelope sender) per token per UTC day. Unproven mail never uses a proven reporter's allowance |
 | `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `1073741824` | optional: raw bytes of one such bucket (1 GiB) |
 | `INTAKE_MAX_UNAUTH_SENDERS_PER_DAY` | `50` | optional: claimed sender domains with their own bucket per token per day; the rest share one overflow bucket (never refused outright) |

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6b4e101a-0e43-45bb-812d-1044bf9ff28d",
+  "id": "0e5515e0-ff34-4c2e-baf8-dd4e490b40d1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aggregate_reports": {
@@ -1385,6 +1385,20 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'legacy'"
+        },
+        "evicted_at": {
+          "name": "evicted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "evicted_name": {
+          "name": "evicted_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1415,6 +1429,14 @@
             "parent_id"
           ],
           "isUnique": false
+        },
+        "idx_domains_evicted": {
+          "name": "idx_domains_evicted",
+          "columns": [
+            "evicted_at"
+          ],
+          "isUnique": false,
+          "where": "\"domains\".\"evicted_at\" IS NOT NULL"
         },
         "idx_domains_workspace": {
           "name": "idx_domains_workspace",

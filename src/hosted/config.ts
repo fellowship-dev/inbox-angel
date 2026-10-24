@@ -19,6 +19,8 @@ export interface HostedEnv {
   INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string;
+  INTAKE_MAX_TOTAL_REPORTS_PER_DAY?: string;
+  INTAKE_MAX_TOTAL_BYTES_PER_DAY?: string;
   AUTHSERV_ID?: string;
   AUTHSERV_HEADER?: string;
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string;
@@ -65,11 +67,26 @@ export const DEFAULT_MAX_RECORDS_PER_REPORT = 20_000;
 export const DEFAULT_MAX_BYTES_PER_DAY = 50 * 1024 * 1024;
 export const DEFAULT_MAX_NEW_IPS_PER_REPORT = 50;
 /** Distinct authenticated reporter domains accepted per token per day. */
-export const DEFAULT_MAX_REPORTERS_PER_DAY = 20;
+export const DEFAULT_MAX_REPORTERS_PER_DAY = 100;
+
+/**
+ * Organisations that send DMARC aggregate reports in volume. A proven report from one of these is never refused for want of
+ * a reporter slot, and does not use one: an attacker with many cheap DKIM-signing domains can fill the slots of unknown
+ * reporters, but not take these.
+ */
+export const WELL_KNOWN_REPORTERS: readonly string[] = [
+  'google.com', 'yahoo.com', 'yahoo.co.jp', 'microsoft.com', 'outlook.com', 'hotmail.com', 'live.com', 'apple.com', 'icloud.com',
+  'amazon.com', 'amazonses.com', 'aol.com', 'comcast.net', 'verizon.net', 'att.net', 'mail.ru', 'yandex.ru', 'yandex.net',
+  'zoho.com', 'fastmail.com', 'gmx.net', 'gmx.de', 'web.de', 'seznam.cz', 'qq.com', '163.com', 'naver.com', 'linkedin.com',
+  'proofpoint.com', 'mimecast.com', 'cisco.com', 'barracuda.com', 'protonmail.com', 'proton.me',
+];
 /** The one shared bucket for messages without an aligned authentication pass; never touches authenticated allowance. */
 export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 200;
 export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 1024 * 1024 * 1024;
 export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 50;
+/** Per token and day, across every proven reporter that is not well known (slots coming and going do not reset it). */
+export const DEFAULT_MAX_TOTAL_REPORTS_PER_DAY = 1000;
+export const DEFAULT_MAX_TOTAL_BYTES_PER_DAY = 1024 * 1024 * 1024;
 export const DEFAULT_MAX_HOSTED_DOMAINS_PER_WORKSPACE = 10;
 
 const positive = (v: string | undefined, dflt: number): number => {
@@ -87,6 +104,8 @@ export interface IntakeLimits {
   unauthReportsPerDay: number;
   unauthBytesPerDay: number;
   unauthSendersPerDay: number;
+  totalReportsPerDay: number;
+  totalBytesPerDay: number;
 }
 
 export function intakeLimits(env: HostedEnv): IntakeLimits {
@@ -99,6 +118,8 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     unauthReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY),
     unauthBytesPerDay: positive(env.INTAKE_MAX_UNAUTH_BYTES_PER_DAY, DEFAULT_MAX_UNAUTH_BYTES_PER_DAY),
     unauthSendersPerDay: positive(env.INTAKE_MAX_UNAUTH_SENDERS_PER_DAY, DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY),
+    totalReportsPerDay: positive(env.INTAKE_MAX_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_TOTAL_REPORTS_PER_DAY),
+    totalBytesPerDay: positive(env.INTAKE_MAX_TOTAL_BYTES_PER_DAY, DEFAULT_MAX_TOTAL_BYTES_PER_DAY),
   };
 }
 

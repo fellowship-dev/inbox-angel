@@ -117,6 +117,10 @@ export function lifecycleQueries(dbLike: DbLike) {
 		purgeInvites: (cutoff: number, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM invites WHERE token IN (SELECT token FROM invites WHERE expires_at < ${cutoff} LIMIT ${limits.batch})`)),
 
+		/** Domains evicted before `cutoff` (30 days): their reports go with them (cascade). */
+		purgeEvictedDomains: (cutoff: number, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM domains WHERE id IN (SELECT id FROM domains WHERE evicted_at IS NOT NULL AND evicted_at < ${cutoff} LIMIT ${limits.batch})`)),
+
 		purgeAudit: (cutoff: number, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log WHERE created_at < ${cutoff} LIMIT ${limits.batch})`)),
 

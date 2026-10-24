@@ -67,7 +67,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					MAX(rr.country_code) AS country_code
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
 				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
 				  AND ar.date_begin >= ${horizon} ${scope(domainId)}
 				GROUP BY rr.source_ip, d.id, rr.header_from, rr.spf_domain, rr.spf_result, rr.dkim_domain, rr.dkim_result
@@ -85,7 +85,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					SUM(ar.pass_count)  AS passed,
 					SUM(ar.fail_count)  AS failed
 				FROM aggregate_reports ar
-				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
 				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${since} ${scope(domainId)}
 				GROUP BY day
 				ORDER BY day ASC
@@ -98,7 +98,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 			const rows = await db.all<{ first: number | null }>(sql`
 				SELECT MIN(ar.date_begin) AS first
 				FROM aggregate_reports ar
-				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A}
+				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
 				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${horizon} ${scope(domainId)}
 			`);
 			return rows[0]?.first ?? null;
@@ -119,7 +119,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					COUNT(DISTINCT date(datetime(r.date_begin, 'unixepoch'))) AS days_with_reports
 				FROM domains d
 				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
-				WHERE d.workspace_id = ${A}
+				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL
 				GROUP BY d.id, d.domain, d.dmarc_policy, d.dmarc_pct, d.spf_record, d.spf_lookup_count
 				ORDER BY d.domain
 			`);

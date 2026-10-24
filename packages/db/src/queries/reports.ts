@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { aggregateReports, domains, reportRecords, tlsReports } from '../schema';
 
@@ -114,7 +114,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 			return db
 				.select({ r: aggregateReports, domain: domains.domain })
 				.from(aggregateReports)
-				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId)))
+				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at)))
 				.where(eq(aggregateReports.workspace_id, workspaceId))
 				.orderBy(desc(aggregateReports.date_begin))
 				.limit(limit)
@@ -127,7 +127,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 			return db
 				.select({ r: aggregateReports, domain: domains.domain })
 				.from(aggregateReports)
-				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId)))
+				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at)))
 				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.id, id)))
 				.get()
 				.then((x) => (x ? { ...x.r, domain: x.domain } : null));
@@ -165,7 +165,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					COUNT(r.id) AS report_count
 				FROM domains d
 				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
-				WHERE d.workspace_id = ${A}
+				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL
 				GROUP BY d.id, d.domain, d.dmarc_policy
 				ORDER BY d.domain
 			`);

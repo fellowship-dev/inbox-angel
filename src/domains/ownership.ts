@@ -13,6 +13,9 @@
 import { claimLookups, type DomainClaimRow } from '@inbox-angel/db';
 import { createResolver, normalizeName, type Resolver } from '@inbox-angel/dns-checks';
 import { logAudit } from '../audit/log';
+import { sendEvictionNotice } from '../auth/mail';
+import { loadTenant } from '../tenancy/load';
+import { removeAuthRecord, removeHostedRecords } from './remove';
 import type { TenantContext } from '../tenancy/context';
 import { getMode } from '../tenancy/mode';
 
@@ -102,14 +105,51 @@ export async function provenByTxt(claim: DomainClaimRow, resolver: Resolver): Pr
   return found ? { ok: true } : { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
 }
 
-/** Proof established: an unproven (legacy) holder of the name in another workspace is evicted, and told in its audit log. */
+/** How long an evicted workspace can still export the report history of the domain it lost. */
+export const EVICTED_KEEP_DAYS = 30;
+
+/**
+ * Proof established: an unproven (legacy) holder of the name in another workspace loses it. That goes through the normal
+ * removal path (hosted records and their quota, the authorisation record), then the domain is detached rather than
+ * deleted: its reports stay for 30 days for export and the retention job purges them. The workspace's owners are emailed and the
+ * eviction is audit-logged in their workspace.
+ */
 async function evictLegacyHolder(tenant: TenantContext, domain: string, via: VerifiedVia): Promise<void> {
-  const evicted = await claimLookups(tenant.db).evictLegacyHolder(domain, tenant.workspaceId);
-  if (!evicted) return;
-  logAudit({ db: tenant.db, workspaceId: evicted.workspaceId }, {
-    actor_type: 'system', action: 'domain.evicted', resource_type: 'domain', resource_id: String(evicted.domainId), resource_name: domain,
-    meta: { reason: 'another workspace proved ownership', via, winner: tenant.workspaceId },
-  });
+  const lookups = claimLookups(tenant.db);
+  const holder = await lookups.findLegacyHolder(domain, tenant.workspaceId);
+  if (!holder) return;
+  const evicted = await loadTenant(tenant.env, { workspaceId: holder.workspaceId });
+  const root = await evicted.scope.domains.getById(holder.domainId);
+
+  // The domain and everything below it that this workspace had under it (its subdomains hang off it by parent_id):
+  // deepest first, so no live child is left pointing at a detached parent.
+  const tree: Array<NonNullable<typeof root>> = [];
+  const walk = async (row: NonNullable<typeof root>) => {
+    for (const child of await evicted.scope.domains.subdomains(row.id)) await walk(child);
+    tree.push(row);
+  };
+  if (root) await walk(root);
+
+  for (const row of tree) {
+    let cleanup: 'removed' | 'none' | 'failed' = 'none';
+    try {
+      if (await removeHostedRecords(evicted, row)) cleanup = 'removed';
+    } catch (e) {
+      // The rightful owner must not stay blocked by a Cloudflare outage: carry on, and say so in the audit entry. The
+      // hosted cron's diff flags any record left behind.
+      cleanup = 'failed';
+      console.warn(`[eviction] hosted cleanup failed for domain ${row.id}:`, e instanceof Error ? e.message : e);
+    }
+    await removeAuthRecord(evicted, row);
+    await lookups.detach(row.id, Math.floor(Date.now() / 1000));
+    logAudit({ db: tenant.db, workspaceId: holder.workspaceId }, {
+      actor_type: 'system', action: 'domain.evicted', resource_type: 'domain', resource_id: String(row.id), resource_name: row.domain,
+      meta: { reason: row.id === holder.domainId ? 'another workspace proved ownership' : `subdomain of ${domain}, evicted with it`, via, hosted_cleanup: cleanup, history_kept_days: EVICTED_KEEP_DAYS },
+    });
+  }
+  if (!root) await lookups.detach(holder.domainId, Math.floor(Date.now() / 1000));
+  const owners = (await evicted.scope.team.list()).filter(m => m.role === 'owner').map(m => m.email);
+  await sendEvictionNotice(tenant.env, owners, domain, EVICTED_KEEP_DAYS);
 }
 
 /**

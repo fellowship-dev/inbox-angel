@@ -20,7 +20,7 @@ export function DangerZone() {
 	if (!me?.user) return null;
 	return (
 		<Section title="Danger zone" description="Take your data with you, or delete your account.">
-			{role === 'owner' ? <ExportCard workspaceId={me.workspace_id} /> : null}
+			{role === 'owner' && me.workspace_id ? <ExportCard workspaceId={me.workspace_id} /> : null}
 			<Card>
 				<CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
 					<div className="min-w-0 max-w-xl">
