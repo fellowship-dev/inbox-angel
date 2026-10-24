@@ -247,17 +247,20 @@ describe('copy', () => {
     expect(all).not.toMatch(/criminal|protects no one/i);
   });
 
-  it('offer v2: trigger framing, stays-fixed argument, bundled BIMI certificate, three offers', () => {
-    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $1,500', keepFixed: '$79/month per domain', bimi: '$299/month per brand' } };
+  it('offer v2: trigger framing, stays-fixed argument, one-off BIMI with the first certificate year, three offers', () => {
+    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $1,500', keepFixed: '$79/month per domain', bimi: 'from $2,900' } };
     const t = (i: number) => buildLetterText(stepCopy(i, ctx).blocks);
     expect(t(0)).toMatch(/Shopify, Klaviyo or Google/);
     expect(t(0)).toMatch(/am I done\?/);
     expect(t(1)).toMatch(/fails silently/);
-    expect(t(2)).toMatch(/no upfront certificate fee/);
-    expect(t(2)).toMatch(/12 months/);
+    expect(t(2)).toMatch(/one-off job/);
+    expect(t(2)).toMatch(/first year of the certificate/);
+    expect(t(2)).toMatch(/billed yearly in advance at the certificate cost/);
+    expect(t(2)).toMatch(/two milestones: the certificate and setup when you order, the rest when the logo is verified/);
+    for (const i of [2, 3]) expect(t(i)).not.toMatch(/12-month|12 months|upfront|remaining certificate|per brand|monthly price|instalment|installment|pay over time|Klarna|Affirm|Afterpay/i);
     expect(t(2)).not.toMatch(/over a thousand/);
     const d = t(3);
-    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $1,500.', 'Price: $79/month per domain.', 'Price: $299/month per brand.', 'written confirmation']) expect(d).toContain(x);
+    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $1,500.', 'Price: $79/month per domain.', 'Price: from $2,900.', 'Keep it fixed ongoing', 'two milestones', 'written confirmation']) expect(d).toContain(x);
     expect(d).not.toMatch(/Assessment|Retainer/);
     expect(DISCLOSURE).toMatch(/keeping it fixed/);
   });
@@ -361,7 +364,7 @@ describe('what goes out', () => {
     await withPrices.enroll('a@acme.com');
     for (const d of SEQUENCE_DAYS.slice(0, 4)) await run(withPrices, T0 + d * DAY);
     const t = withPrices.mailer.sent[3].text;
-    for (const p of ['$FIX', '$KEEP/mo', '$BIMI/mo']) expect(t).toContain(p);
+    for (const p of ['$FIX', '$KEEP/mo', '$BIMI']) expect(t).toContain(p);
     expect(t).toContain('Fix it is quoted after a short look');
 
     const none = funnelWorld({ SERVICE_PRICES: undefined });
