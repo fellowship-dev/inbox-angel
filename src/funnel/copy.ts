@@ -7,7 +7,8 @@
 // Facts to verify before the first real send (nothing here is shown to a lead; tests fail if the word VERIFY or a TODO
 // reaches the copy):
 //   - the current CMC requirements, and what each mailbox provider displays for a CMC versus a VMC;
-//   - certificate cost and timing (it is bundled into the monthly BIMI price; the 12-month term must cover it);
+//   - certificate cost and timing (the first year is in the one-off BIMI price; renewal is billed yearly in advance at
+//     the certificate cost);
 //   - a trademark registration takes months.
 
 import type { LetterBlock } from '../email/html-templates';
@@ -151,8 +152,8 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
             'A BIMI DNS record that points to the logo and the certificate.',
           ] },
           { heading: 'What it costs and how long it takes' },
-          'We include the certificate in a monthly plan, so there is no upfront certificate fee. We buy it from an authorised certificate authority and renew it for you. The term is 12 months, and leaving earlier means paying the remaining certificate cost. A trademark registration, if you need one for a VMC, takes months and is outside our work. Once enforcement is in place, the logo conversion, the certificate and the DNS record take days.',
-          'So the order matters: enforcement first, then BIMI. If you want your logo showing, the work starts with step one.',
+          'BIMI is a one-off job, and the price includes the first year of the certificate. We buy it from an authorised certificate authority. It is paid up front by card or bank transfer, and can be split into two milestones: the certificate and setup when you order, the rest when the logo is verified. After that, the certificate renewal is billed yearly in advance at the certificate cost. A trademark registration, if you need one for a VMC, takes months and is outside our work. Once enforcement is in place, the logo conversion, the certificate and the DNS record take days.',
+          'So the order matters: enforcement first, then BIMI, with Keep it fixed in place so enforcement stays intact. If you want your logo showing, the work starts with step one.',
           SIGN_OFF,
         ],
       };
@@ -165,11 +166,11 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
         blocks: [
           'We do this as a done-for-you service, with three offers. Start with the first; the other two are optional.',
           { list: [
-            priced('Fix it. A screen-share session where we inventory every system that sends as you and fix SPF and DKIM. Then we move DMARC from none to quarantine to reject over about 90 days, watching the reports the whole time, which is included. It ends with a written confirmation that you are done.', p.fix),
+            priced('Fix it. A screen-share session where we inventory every system that sends as you and fix SPF and DKIM. Then we move DMARC from none to quarantine to reject over about 90 days, watching the reports the whole time, which is included. It ends with a written confirmation that you are done. Paid up front, or split into two milestones: at the start and at "you\'re done".', p.fix),
             priced('Keep it fixed. Offered at day 90, and easy to decline. We stay silent while everything is fine and send a short quarterly note saying so. We alert you only when something needs action, together with the fix. New sending tools are set up, keys are rotated, and there is a human to call.', p.keepFixed),
-            priced("BIMI, your logo in the inbox. Requires Fix it first. We convert the logo to the required format, buy and renew the certificate (included in the monthly price, no upfront certificate fee), publish the record and verify it. It includes Keep it fixed. 12-month term; leaving earlier pays the remaining certificate cost. Whether a logo is shown is always the mailbox provider's decision.", p.bimi),
+            priced("BIMI, your logo in the inbox. A one-off job that requires Fix it first and Keep it fixed ongoing. We convert the logo to the required format, buy the certificate (the first year is included), publish the record and verify it. Paid up front, or split into two milestones: the certificate and setup when you order, the rest when the logo is verified. The certificate renewal is billed yearly in advance at the certificate cost. Whether a logo is shown is always the mailbox provider's decision.", p.bimi),
           ] },
-          anyPrice ? 'Fix it is quoted after a short look at your setup; the monthly plans are priced per domain or per brand.' : 'We quote each job after a short look at your setup, so there is no price list to misread.',
+          anyPrice ? 'Fix it is quoted after a short look at your setup, and so is BIMI; Keep it fixed is priced per domain.' : 'We quote each job after a short look at your setup, so there is no price list to misread.',
           'Not sure which you need? Take a free 30-minute call and we will look at your domain together. Or reply to this email and say which offer you want.',
           ...(c.bookingUrl ? [{ cta: { label: 'Book the free call', url: c.bookingUrl } }] : []),
           SIGN_OFF,
