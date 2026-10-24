@@ -26,12 +26,12 @@ export const bookingUrl = (env: FunnelEnv): string | null => (/^https?:\/\//i.te
 
 export interface ServicePrices { fix?: string; keepFixed?: string; bimi?: string }
 
-/** The "from" prices, as configured. Nothing is hardcoded: an unset or malformed value means "no prices yet". */
+/** The offer prices, as configured. Nothing is hardcoded: an unset or malformed value means "no prices yet". */
 export function servicePrices(env: FunnelEnv): ServicePrices {
   try {
     const raw = JSON.parse(env.SERVICE_PRICES ?? '{}') as Record<string, unknown>;
     const out: ServicePrices = {};
-    for (const k of ['fix', 'keepFixed', 'bimi'] as const) if (typeof raw[k] === 'string' && raw[k]) out[k] = raw[k] as string;
+    for (const k of ['fix', 'keepFixed', 'bimi'] as const) if (typeof raw[k] === 'string' && (raw[k] as string).trim()) out[k] = (raw[k] as string).trim();
     return out;
   } catch {
     return {};

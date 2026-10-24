@@ -362,11 +362,12 @@ describe('what goes out', () => {
     for (const d of SEQUENCE_DAYS.slice(0, 4)) await run(withPrices, T0 + d * DAY);
     const t = withPrices.mailer.sent[3].text;
     for (const p of ['$FIX', '$KEEP/mo', '$BIMI/mo']) expect(t).toContain(p);
+    expect(t).toContain('Fix it is quoted after a short look');
 
     const none = funnelWorld({ SERVICE_PRICES: undefined });
     await none.enroll('a@acme.com');
     for (const d of SEQUENCE_DAYS.slice(0, 4)) await run(none, T0 + d * DAY);
-    expect(none.mailer.sent[3].text).not.toMatch(/\$|Prices are starting/);
+    expect(none.mailer.sent[3].text).not.toMatch(/\$|priced per domain/);
     expect(readiness(none.env).warnings.join(' ')).toMatch(/SERVICE_PRICES/);
   });
 

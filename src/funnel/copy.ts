@@ -169,8 +169,9 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
             priced('Keep it fixed. Offered at day 90, and easy to decline. We stay silent while everything is fine and send a short quarterly note saying so. We alert you only when something needs action, together with the fix. New sending tools are set up, keys are rotated, and there is a human to call.', p.keepFixed),
             priced("BIMI, your logo in the inbox. Requires Fix it first. We convert the logo to the required format, buy and renew the certificate (included in the monthly price, no upfront certificate fee), publish the record and verify it. It includes Keep it fixed. 12-month term; leaving earlier pays the remaining certificate cost. Whether a logo is shown is always the mailbox provider's decision.", p.bimi),
           ] },
-          anyPrice ? 'Prices are starting points; the final figure depends on how many domains and sending systems you have.' : 'We quote each job after a short look at your setup, so there is no price list to misread.',
+          anyPrice ? 'Fix it is quoted after a short look at your setup; the monthly plans are priced per domain or per brand.' : 'We quote each job after a short look at your setup, so there is no price list to misread.',
           'Not sure which you need? Take a free 30-minute call and we will look at your domain together. Or reply to this email and say which offer you want.',
+          ...(c.bookingUrl ? [{ cta: { label: 'Book the free call', url: c.bookingUrl } }] : []),
           SIGN_OFF,
         ],
       };
