@@ -4,13 +4,16 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, notInArray, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, isNull, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
 import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
+
+/** The usage row that totals, per token and day, what reporters with no standing (not well known) have used. */
+export const TOTAL_ROW = '*';
 
 export function intakeQueries(db: Db, workspaceId: string) {
 	const mine = eq(intakeTokens.workspace_id, workspaceId);
@@ -50,7 +53,7 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		 * `maxReports` or `maxBytes`, or (a proven reporter that is not `wellKnown`) when it is out of its own cap. Past `maxDistinct`
 		 * unknown proven reporters a day the least-used one is dropped to make room; an unproven sender falls into the overflow bucket instead. (best-effort bound: the check and the insert are separate statements).
 		 */
-		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 100, wellKnown: readonly string[] = []): Promise<boolean> {
+		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 100, wellKnown: readonly string[] = [], totals?: { reports: number; bytes: number }): Promise<boolean> {
 			if (maxReports < 1 || bytes > maxBytes) return false;
 			// '~…' keys are unproven senders (by the sender domain they claim), everything else is a proven reporter domain:
 			// the two kinds are counted and bounded separately, and never share an allowance.
@@ -61,7 +64,7 @@ export function intakeQueries(db: Db, workspaceId: string) {
 			const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
 			if (!seen?.n && !known) {
 				// Slots are for reporters we know nothing about; well-known ones neither use nor need one.
-				const unknown = and(dayRows, kind, wellKnown.length ? notInArray(intakeUsage.reporter, [...wellKnown]) : undefined);
+				const unknown = and(dayRows, kind, ne(intakeUsage.reporter, TOTAL_ROW), wellKnown.length ? notInArray(intakeUsage.reporter, [...wellKnown]) : undefined);
 				const distinct = await db.select({ n: count() }).from(intakeUsage).where(unknown).get();
 				if ((distinct?.n ?? 0) >= maxDistinct) {
 					if (unproven) reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
@@ -69,6 +72,7 @@ export function intakeQueries(db: Db, workspaceId: string) {
 						// All slots taken: the least-used unknown reporter makes way, so a new one is never refused and junk
 						// domains cannot lock genuine ones out for the day.
 						const victim = await db.select({ r: intakeUsage.reporter }).from(intakeUsage).where(unknown).orderBy(intakeUsage.reports, intakeUsage.bytes).limit(1).get();
+						// Only the slot is freed: what the evicted reporter used stays counted in the token's daily total (below).
 						if (victim) await db.delete(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, victim.r))).run();
 					}
 				}
@@ -82,7 +86,28 @@ export function intakeQueries(db: Db, workspaceId: string) {
 					set: { reports: sql`${intakeUsage.reports} + 1`, bytes: sql`${intakeUsage.bytes} + ${bytes}` },
 				})
 				.run();
-			return (res.meta?.changes ?? 0) > 0;
+			if ((res.meta?.changes ?? 0) === 0) return false;
+			// A token's day is also capped in total for reporters we know nothing about, whatever their slots do: reporters
+			// that come and go cannot each bring a fresh allowance. Well-known reporters are outside it (their own caps apply),
+			// so a flood of cheap domains cannot use up what Google or Microsoft need.
+			if (totals && !unproven && !known) {
+				const t = await db
+					.insert(intakeUsage)
+					.values({ domain_id: domainId, workspace_id: workspaceId, day, reporter: TOTAL_ROW, reports: 1, bytes })
+					.onConflictDoUpdate({
+						target: [intakeUsage.domain_id, intakeUsage.day, intakeUsage.reporter],
+						setWhere: and(eq(intakeUsage.workspace_id, workspaceId), lt(intakeUsage.reports, totals.reports), sql`${intakeUsage.bytes} + ${bytes} <= ${totals.bytes}`),
+						set: { reports: sql`${intakeUsage.reports} + 1`, bytes: sql`${intakeUsage.bytes} + ${bytes}` },
+					})
+					.run();
+				if ((t.meta?.changes ?? 0) === 0) {
+					// Over the total: give back what was just counted for the reporter.
+					await db.update(intakeUsage).set({ reports: sql`MAX(0, ${intakeUsage.reports} - 1)`, bytes: sql`MAX(0, ${intakeUsage.bytes} - ${bytes})` })
+						.where(and(dayRows, eq(intakeUsage.reporter, reporter))).run();
+					return false;
+				}
+			}
+			return true;
 		},
 
 		delete(domainId: number) {
@@ -140,7 +165,7 @@ export function intakeLookups(dbLike: DbLike) {
 			db
 				.select({ workspace_id: intakeTokens.workspace_id, domain_id: intakeTokens.domain_id, domain: domains.domain })
 				.from(intakeTokens)
-				.innerJoin(domains, eq(domains.id, intakeTokens.domain_id))
+				.innerJoin(domains, and(eq(domains.id, intakeTokens.domain_id), isNull(domains.evicted_at)))
 				.where(
 					/* workspace-scope-exempt: the token hash identifies the workspace */
 					or(eq(intakeTokens.token_hash, tokenHash), and(eq(intakeTokens.prev_token_hash, tokenHash), gt(intakeTokens.prev_expires_at, nowSeconds))),
@@ -153,7 +178,7 @@ export function intakeLookups(dbLike: DbLike) {
 			db
 				.select({ workspace_id: hostedDomains.workspace_id, domain_id: hostedDomains.domain_id, domain: domains.domain })
 				.from(hostedDomains)
-				.innerJoin(domains, eq(domains.id, hostedDomains.domain_id))
+				.innerJoin(domains, and(eq(domains.id, hostedDomains.domain_id), isNull(domains.evicted_at)))
 				.where(/* workspace-scope-exempt: the hosted id identifies the workspace */ eq(hostedDomains.hosted_id, hostedId))
 				.get()
 				.then((r) => r ?? null),
@@ -163,7 +188,7 @@ export function intakeLookups(dbLike: DbLike) {
 			db
 				.select({ workspace_id: hostedDomains.workspace_id, domain_id: hostedDomains.domain_id, domain: domains.domain })
 				.from(hostedDomains)
-				.innerJoin(domains, eq(domains.id, hostedDomains.domain_id))
+				.innerJoin(domains, and(eq(domains.id, hostedDomains.domain_id), isNull(domains.evicted_at)))
 				.where(/* workspace-scope-exempt: domains.domain is globally unique and identifies the workspace */ eq(domains.domain, domain))
 				.get()
 				.then((r) => r ?? null),

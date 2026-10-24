@@ -21,7 +21,7 @@ export async function heartbeatStats(db: Db, workspaceId: string): Promise<Heart
 	const one = async <T>(q: ReturnType<typeof sql>) => (await db.all<T>(q))[0];
 
 	const [d, s, m, r, t, u, a] = await Promise.all([
-		one<{ n: number; verified: number }>(sql`SELECT COUNT(*) AS n, SUM(CASE WHEN auth_record_provisioned = 1 THEN 1 ELSE 0 END) AS verified FROM domains WHERE workspace_id = ${A}`),
+		one<{ n: number; verified: number }>(sql`SELECT COUNT(*) AS n, SUM(CASE WHEN auth_record_provisioned = 1 THEN 1 ELSE 0 END) AS verified FROM domains WHERE workspace_id = ${A} AND evicted_at IS NULL`),
 		one<{ n: number }>(sql`SELECT COUNT(*) AS n FROM spf_flatten_config WHERE workspace_id = ${A} AND enabled = 1`),
 		one<{ testing: number; enforce: number }>(sql`SELECT SUM(CASE WHEN mode = 'testing' THEN 1 ELSE 0 END) AS testing, SUM(CASE WHEN mode = 'enforce' THEN 1 ELSE 0 END) AS enforce FROM mta_sts_config WHERE workspace_id = ${A} AND enabled = 1`),
 		one<{ n: number }>(sql`SELECT COUNT(*) AS n FROM aggregate_reports WHERE workspace_id = ${A} AND created_at > ${since30d}`),

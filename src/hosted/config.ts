@@ -19,6 +19,8 @@ export interface HostedEnv {
   INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string;
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string;
+  INTAKE_MAX_TOTAL_REPORTS_PER_DAY?: string;
+  INTAKE_MAX_TOTAL_BYTES_PER_DAY?: string;
   AUTHSERV_ID?: string;
   AUTHSERV_HEADER?: string;
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string;
@@ -82,6 +84,9 @@ export const WELL_KNOWN_REPORTERS: readonly string[] = [
 export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 200;
 export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 1024 * 1024 * 1024;
 export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 50;
+/** Per token and day, across every proven reporter that is not well known (slots coming and going do not reset it). */
+export const DEFAULT_MAX_TOTAL_REPORTS_PER_DAY = 1000;
+export const DEFAULT_MAX_TOTAL_BYTES_PER_DAY = 1024 * 1024 * 1024;
 export const DEFAULT_MAX_HOSTED_DOMAINS_PER_WORKSPACE = 10;
 
 const positive = (v: string | undefined, dflt: number): number => {
@@ -99,6 +104,8 @@ export interface IntakeLimits {
   unauthReportsPerDay: number;
   unauthBytesPerDay: number;
   unauthSendersPerDay: number;
+  totalReportsPerDay: number;
+  totalBytesPerDay: number;
 }
 
 export function intakeLimits(env: HostedEnv): IntakeLimits {
@@ -111,6 +118,8 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     unauthReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY),
     unauthBytesPerDay: positive(env.INTAKE_MAX_UNAUTH_BYTES_PER_DAY, DEFAULT_MAX_UNAUTH_BYTES_PER_DAY),
     unauthSendersPerDay: positive(env.INTAKE_MAX_UNAUTH_SENDERS_PER_DAY, DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY),
+    totalReportsPerDay: positive(env.INTAKE_MAX_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_TOTAL_REPORTS_PER_DAY),
+    totalBytesPerDay: positive(env.INTAKE_MAX_TOTAL_BYTES_PER_DAY, DEFAULT_MAX_TOTAL_BYTES_PER_DAY),
   };
 }
 

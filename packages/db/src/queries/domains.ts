@@ -40,7 +40,7 @@ export function domainQueries(db: Db, workspaceId: string) {
 				const parent = await db
 					.select({ id: domains.id })
 					.from(domains)
-					.where(and(mine, eq(domains.domain, parts.slice(1).join('.'))))
+					.where(and(mine, live, eq(domains.domain, parts.slice(1).join('.'))))
 					.get();
 				if (parent) parentId = parent.id;
 			}

@@ -20,7 +20,7 @@ export const STATUS: AuthStatus = {
 	has_domain: true,
 };
 
-export const me = (role: Me['role'] = 'owner'): Me => ({ user: { id: 'u1', email: `${role}@example.com`, name: role }, role, workspace_id: 'ws_default', kind: 'session' });
+export const me = (role: NonNullable<Me['role']> = 'owner'): Me => ({ user: { id: 'u1', email: `${role}@example.com`, name: role }, role, workspace_id: 'ws_default', kind: 'session' });
 
 export type Handler = (req: { method: string; path: string; body: any; headers: Record<string, string> }) => unknown | Response | undefined;
 

@@ -120,7 +120,7 @@ describe('per-token caps', () => {
 describe('the intake allowance: junk cannot exhaust genuine reports', () => {
   const MS = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=microsoft.com header.s=s1' } };
   const GRPT = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, o: Parameters<typeof fakeMessage>[2] = GOOGLE) => send(w, dmarcXml('a-corp.com', id), o);
-  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter');
+  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows("SELECT reporter, reports FROM intake_usage WHERE reporter <> '*' ORDER BY reporter");
 
   it('junk fills its own bucket (reports), then a proven google.com report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' });
@@ -194,7 +194,7 @@ describe('AUTHSERV_* not set yet: nothing is proven, nothing is starved', () => 
     expect((await send(w, dmarcXml('a-corp.com', 'u1'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'u2'), { from: 'noreply@microsoft.com' })).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT reporter_auth FROM aggregate_reports ORDER BY id')).toEqual([{ reporter_auth: 'none' }, { reporter_auth: 'none' }]);
-    expect(w.rows('SELECT reporter FROM intake_usage ORDER BY reporter')).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
+    expect(w.rows("SELECT reporter FROM intake_usage WHERE reporter <> '*' ORDER BY reporter")).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
   });
 
   it('junk claiming to be one sender (200 messages needed at the default) leaves other senders’ genuine reports alone', async () => {
@@ -362,5 +362,41 @@ describe('self-host decompression bombs', () => {
     await worker.email(m, s.env, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
     expect(s.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'ok-1' }]);
+  });
+});
+
+describe('a token’s daily total survives reporters coming and going', () => {
+  const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+
+  it('evicting a reporter from its slot frees the slot only: its use still counts, so many cheap domains cannot each bring a fresh allowance', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '2', INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '5', INTAKE_MAX_REPORTS_PER_DAY: '10' });
+    const sendFrom = (d: string, id: string) => send(w, dmarcXml('a-corp.com', id, d), dkim(d));
+    const accepted: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const m = await sendFrom(`cheap${i % 4}.example`, `r${i}`);
+      if (!m.setReject.mock.calls.length) accepted.push(`r${i}`);
+    }
+    expect(accepted).toHaveLength(5); // the total, not 12 messages × fresh allowances
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 5 }]);
+    expect(w.rows('SELECT COUNT(*) n FROM aggregate_reports')).toEqual([{ n: 5 }]);
+  });
+
+  it('the total is by bytes too, and a rejected message gives back what it counted for its reporter', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_BYTES_PER_DAY: '1000' });
+    expect((await send(w, dmarcXml('a-corp.com', 'b1', 'one.example'), { ...dkim('one.example'), rawSize: 800 })).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('a-corp.com', 'b2', 'two.example'), { ...dkim('two.example'), rawSize: 800 })).setReject).toHaveBeenCalledOnce();
+    expect(w.rows("SELECT reporter, reports, bytes FROM intake_usage WHERE reporter = 'two.example'")).toEqual([{ reporter: 'two.example', reports: 0, bytes: 0 }]);
+    expect(w.rows("SELECT bytes FROM intake_usage WHERE reporter = '*'")).toEqual([{ bytes: 800 }]);
+  });
+
+  it('well-known reporters are outside the total: junk reporters exhausting it cannot block google.com', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '2' });
+    for (let i = 0; i < 4; i++) await send(w, dmarcXml('a-corp.com', 'j' + i, `cheap${i}.example`), dkim(`cheap${i}.example`));
+    expect((await send(w, dmarcXml('a-corp.com', 'g1', 'google.com'), dkim('google.com'))).setReject).not.toHaveBeenCalled();
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 2 }]);
+  });
+
+  it('defaults', () => {
+    expect(intakeLimits({})).toMatchObject({ totalReportsPerDay: 1000, totalBytesPerDay: 1024 * 1024 * 1024 });
   });
 });

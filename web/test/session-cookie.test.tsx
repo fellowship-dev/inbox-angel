@@ -109,3 +109,19 @@ describe('signed in with no workspace (signed up through an invite)', () => {
 		await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/invites/inv-tok')).toBe(true));
 	});
 });
+
+describe('a login whose invitations are gone', () => {
+	it('can create a workspace of its own', async () => {
+		const { calls } = renderApp(<NoWorkspacePage />, {
+			routes: {
+				'GET /api/me': { user: { id: 'u1', email: 'friend@example.com', name: 'F' }, role: null, workspace_id: null, kind: 'session', pending_invites: [] },
+				'POST /api/workspaces': { id: 'ws_new', name: 'Friend Co', role: 'owner', member_count: 1 },
+			},
+		});
+		expect(await screen.findByText(/create a workspace of your own below/i)).toBeInTheDocument();
+		const user = userEvent.setup();
+		await user.type(screen.getByLabelText(/start a workspace of your own/i), 'Friend Co');
+		await user.click(screen.getByRole('button', { name: 'Create workspace' }));
+		await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/workspaces')?.body).toEqual({ name: 'Friend Co' }));
+	});
+});

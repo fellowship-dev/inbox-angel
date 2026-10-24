@@ -92,7 +92,7 @@ import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../f
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
 import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle } from '@inbox-angel/db';
-import { currentUser } from '../auth/session';
+import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
@@ -653,6 +653,17 @@ async function _handleApi(
     // /api/workspaces* act on the user, so a stale X-Workspace-Id (a workspace they have left) must not lock them out of listing their own.
     workspace = await resolver(isWorkspaceRoute(path) || isAccountRoute(path) ? withoutWorkspaceHeader(request) : request, env);
   } catch (e) {
+    if (e instanceof AuthError && e.code === 'no_workspace' && path === '/api/workspaces' && method === 'POST') {
+      // A verified login with no workspace (an invitee whose invite is gone) can make one of its own.
+      const viaCookie = !request.headers.get('x-api-key') && !request.headers.get('authorization');
+      if (viaCookie && !passesCsrfCheck(request, env)) return err('cross-origin request rejected', 403);
+      const me = await currentUser(request, env, ctx).catch(() => null);
+      if (me) {
+        const deps = { db: env.DB as D1Database, mode: getMode(env), preflight: cloudflarePreflight, tenantFor: (workspaceId: string) => loadTenant(env, { workspaceId }), deleteDomain };
+        const res = await handleWorkspaceRoutes(request, ctx, { kind: 'session', user: { id: me.id, email: me.email, name: me.name } }, deps);
+        if (res) return res;
+      }
+    }
     if (e instanceof AuthError && e.code === 'no_workspace' && path === '/api/me') {
       // Signed in and verified, but in no workspace yet: offer the invitations addressed to this address.
       const me = await currentUser(request, env, ctx).catch(() => null);

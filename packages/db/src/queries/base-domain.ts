@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { unwrapDriverError, type Db } from '../client';
 import { domains, settings } from '../schema';
 import { sql } from 'drizzle-orm';
@@ -22,14 +22,14 @@ export function baseDomainQueries(db: Db, workspaceId: string) {
 	return {
 		/** Returns the new domain's id, or null when the workspace already had the domain. */
 		async apply(d: { domain: string; rua_address: string; verified_via?: string; settings: Record<string, string> }): Promise<number | null> {
-			const existing = await db.select({ id: domains.id }).from(domains).where(and(eq(domains.workspace_id, workspaceId), eq(domains.domain, d.domain))).get();
+			const existing = await db.select({ id: domains.id }).from(domains).where(and(eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at), eq(domains.domain, d.domain))).get();
 			const parts = d.domain.split('.');
 			let parentId: number | null = null;
 			if (!existing && parts.length > 2) {
 				const parent = await db
 					.select({ id: domains.id })
 					.from(domains)
-					.where(and(eq(domains.workspace_id, workspaceId), eq(domains.domain, parts.slice(1).join('.'))))
+					.where(and(eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at), eq(domains.domain, parts.slice(1).join('.'))))
 					.get();
 				parentId = parent?.id ?? null;
 			}
