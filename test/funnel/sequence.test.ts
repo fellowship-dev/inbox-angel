@@ -248,7 +248,7 @@ describe('copy', () => {
   });
 
   it('offer v2: trigger framing, stays-fixed argument, yearly all-in BIMI, monthly or yearly, three offers', () => {
-    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $1,500', keepFixed: '$79/month per domain', bimi: '$3,900/year or $390/month' } };
+    const ctx = { domain: 'acme.com', summary: summary({ dmarcPolicy: null }), bookingUrl: null, prices: { fix: 'from $990', keepFixed: '$49/month per domain', bimi: '$1,990/year or $199/month' } };
     const t = (i: number) => buildLetterText(stepCopy(i, ctx).blocks);
     expect(t(0)).toMatch(/Shopify, Klaviyo or Google/);
     expect(t(0)).toMatch(/am I done\?/);
@@ -261,7 +261,7 @@ describe('copy', () => {
     for (const i of [2, 3]) expect(t(i)).not.toMatch(/one-off job|milestone|remaining certificate|no upfront|requires Fix it|only plan|instalment|installment|pay over time|Klarna|Affirm|Afterpay/i);
     expect(t(2)).not.toMatch(/over a thousand/);
     const d = t(3);
-    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $1,500.', 'Price: $79/month per domain.', 'Price: $3,900/year or $390/month.', 'which includes it', 'Keep it fixed, the logo', 'monthly on a 12-month term', 'written confirmation']) expect(d).toContain(x);
+    for (const x of ['Fix it.', 'Keep it fixed.', 'BIMI, your logo', 'free 30-minute call', 'Price: from $990.', 'Price: $49/month per domain.', 'Price: $1,990/year or $199/month.', 'which includes it', 'Keep it fixed, the logo', 'monthly on a 12-month term', 'written confirmation']) expect(d).toContain(x);
     expect(d).not.toMatch(/Assessment|Retainer/);
     expect(DISCLOSURE).toMatch(/keeping it fixed/);
   });
