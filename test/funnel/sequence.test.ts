@@ -253,8 +253,9 @@ describe('copy', () => {
     expect(t(0)).toMatch(/Shopify, Klaviyo or Google/);
     expect(t(0)).toMatch(/am I done\?/);
     expect(t(1)).toMatch(/fails silently/);
-    expect(t(2)).toMatch(/yearly plan that includes everything/);
-    expect(t(2)).toMatch(/buy from an authorised certificate authority and renew/);
+    expect(t(2)).toMatch(/yearly plan that includes the enforcement work \(Fix it\)/);
+    expect(t(2)).toMatch(/every year \(the yearly price covers the renewal\)/);
+    for (const i of [2, 3]) expect(t(i)).toMatch(/Not included, because it depends on each brand: trademark registration and any lawyer's work, and research into whether (your|the) logo qualifies/);
     expect(t(2)).toMatch(/yearly up front at a discount, or monthly on a 12-month term/);
     expect(t(2)).toMatch(/paying the remaining months/);
     for (const i of [2, 3]) expect(t(i)).not.toMatch(/one-off job|milestone|remaining certificate|no upfront|requires Fix it|only plan|instalment|installment|pay over time|Klarna|Affirm|Afterpay/i);
