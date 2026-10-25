@@ -74,12 +74,12 @@ describe('sign-up policy for OAuth (external) sign-ups', () => {
   const insertUser = (db: ReturnType<typeof createMigratedD1>, id: string, email: string) =>
     db.sqlite.prepare('INSERT INTO users (id, email, name) VALUES (?, ?, ?)').run(id, email, email);
 
-  it('self-host: first user is allowed and becomes owner', async () => {
+  it('self-host: external login cannot claim first ownership', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db);
-    await assertMaySignUp(env as any, { kind: 'external' }, 'first@example.com');
+    await expect(assertMaySignUp(env as any, { kind: 'external' }, 'first@example.com')).rejects.toThrow(/installer proof/);
     insertUser(db, 'u1', 'first@example.com');
-    expect(await provisionUser(env as any, { kind: 'external' }, user('u1', 'first@example.com'))).toEqual({ workspaceId: 'ws_default', role: 'owner' });
+    await expect(provisionUser(env as any, { kind: 'external' }, user('u1', 'first@example.com'))).rejects.toThrow(/installer proof/);
   });
 
   it('self-host: closed to strangers once an owner exists, open to invited emails', async () => {

@@ -113,7 +113,7 @@ describe('OWNER_EMAIL reserves first ownership', () => {
     const { assertMaySignUp } = await import('../../src/auth/signup-policy');
     const env = makeEnv(createMigratedD1(), { OWNER_EMAIL: 'me@example.com' }) as any;
     await expect(assertMaySignUp(env, { kind: 'external' }, 'squatter@example.com')).rejects.toThrow(/reserved/);
-    await assertMaySignUp(env, { kind: 'external' }, 'ME@example.com');
+    await expect(assertMaySignUp(env, { kind: 'external' }, 'ME@example.com')).rejects.toThrow(/installer proof/);
   });
 
   it('has no effect once an owner exists (invites still work)', async () => {

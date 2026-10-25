@@ -14,6 +14,7 @@ import { AUTH_BASE_PATH, createAuth, type Auth } from './index';
 import { baseUrl, enabledOAuthProviders, isSaas } from './config';
 import type { SignupIntent } from './signup-policy';
 import { currentUser, passesCsrfCheck } from './session';
+import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -201,6 +202,8 @@ export async function handleAuthRoute(
     if (!isSetup && !isSaas(env)) return err('sign-up is closed — ask an owner for an invite', 403);
     if (isSetup && (await platform(env).team.hasOwner())) return err('already configured — use /api/auth/login', 409);
 
+    const bootstrapProof = request.headers.get('x-inbox-angel-bootstrap') ?? '';
+    if (isSetup && !(await verifyBootstrapProof(env, bootstrapProof))) return err('installer proof required', 403);
     const body = await readJson<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
@@ -208,7 +211,7 @@ export async function handleAuthRoute(
     { const bot = await botCheck(env, request, body.cf_turnstile_token); if (bot) return bot; }
 
     const email = body.email.toLowerCase().trim();
-    const { res, user } = await signUp(env, request, ctx, { kind: isSetup ? 'setup' : 'signup' }, {
+    const { res, user } = await signUp(env, request, ctx, isSetup ? { kind: 'setup', bootstrapProof } : { kind: 'signup' }, {
       name: body.name?.trim() || email, email, password: body.password,
     });
     if (!res.ok || !user) return authError(res, 'sign-up failed');

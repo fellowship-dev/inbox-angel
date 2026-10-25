@@ -13,7 +13,7 @@ export function makeEnv(db: TestDb = createMigratedD1(), extra: Record<string, u
   db.sqlite.prepare("INSERT OR IGNORE INTO settings (workspace_id, key, value) VALUES ('ws_default', 'from_email', 'noreply@reports.example.com')").run();
   // Hosted sign-up is closed without a Turnstile secret; tests send the token 'ok' (see test/setup-files/turnstile.ts).
   const turnstile = extra.MODE === 'saas' ? { TURNSTILE_SECRET_KEY: 'test-turnstile-secret' } : {};
-  return { DB: db as unknown as D1Database, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '', ...turnstile, ...extra } as unknown as Env;
+  return { BOOTSTRAP_SECRET: 'test-only-installer-proof-32-characters-minimum', DB: db as unknown as D1Database, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '', ...turnstile, ...extra } as unknown as Env;
 }
 
 let ipCounter = 0;
@@ -22,6 +22,7 @@ export const freshIp = () => `10.0.${Math.floor(++ipCounter / 250)}.${ipCounter 
 
 export function req(method: string, path: string, opts: { key?: string; body?: unknown; headers?: Record<string, string>; ip?: string } = {}) {
   const headers: Record<string, string> = { 'cf-connecting-ip': opts.ip ?? freshIp(), ...opts.headers };
+  if (path === '/api/auth/setup' && !Object.hasOwn(headers, 'x-inbox-angel-bootstrap')) headers['x-inbox-angel-bootstrap'] = 'test-only-installer-proof-32-characters-minimum';
   if (opts.key) headers['x-api-key'] = opts.key;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
   let body = opts.body;

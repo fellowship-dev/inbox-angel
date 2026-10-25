@@ -22,10 +22,15 @@
 		"not_found_handling": "single-page-application"
 	},
 	"compatibility_date": "2025-03-01",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"observability": {
 		"enabled": true
 	},
+
+	// Create an installation-owned namespace; substitute its ID before deployment.
+	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_INSTALLATION_OAUTH_KV_ID" }],
+	// Before first owner setup: wrangler secret put BOOTSTRAP_SECRET (random >=32 characters).
+	// Set BETTER_AUTH_URL to this installation HTTPS origin. Never reuse another instance namespace.
 
 	// D1 database binding
 	"d1_databases": [

@@ -26,7 +26,10 @@ export interface Env {
   RETENTION_AUDIT_DAYS?: string;        // audit log: default 365
   // Auth (all optional)
   SAAS_ENABLED?: string;         // "1" to allow MODE=saas (hosted mode is not launched yet; explicit opt-in)
-  OWNER_EMAIL?: string;          // self-host: only this email may claim first ownership (password or OAuth)
+  BOOTSTRAP_SECRET?: string;     // installer-held random one-use capability (at least 32 characters)
+  OAUTH_KV?: KVNamespace;        // instance-owned agent OAuth storage
+  MCP_DCR_ENABLED?: string;     // explicit legacy client compatibility option; DCR off by default
+  OWNER_EMAIL?: string;          // optional owner email restriction; never an ownership proof
   BETTER_AUTH_SECRET?: string;   // session signing secret; generated and kept in D1 if unset
   TURNSTILE_SECRET_KEY?: string; // hosted (MODE=saas): Cloudflare Turnstile secret. REQUIRED for sign-up: without it sign-up fails closed (503)
   TURNSTILE_SITE_KEY?: string;   // hosted: the matching public site key, served to the sign-up page
@@ -92,7 +95,7 @@ export interface Env {
 export type BoundEnv = Env & { DB: D1Database };
 
 // HTTP API (dashboard calls, DNS provisioning)
-export default {
+export const coreWorker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // OAuth relay deployment (CF_OAUTH_RELAY_SECRET set): stateless, needs no database. Inert everywhere else.
     if (relayEnabled(env) && isRelayPath(new URL(request.url).pathname)) return handleRelay(request, env);
@@ -161,6 +164,8 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+
+export default coreWorker;
 
 function setupPage(): Response {
   const html = `<!DOCTYPE html>
