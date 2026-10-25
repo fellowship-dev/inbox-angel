@@ -112,8 +112,12 @@ export function proveSender(headers: AuthHeaders, addressDomain: string, authser
 export function spfPassesFor(trusted: string | null, envelopeDomain: string): boolean {
   if (!trusted) return false;
   const body = trusted.slice(trusted.indexOf(';') + 1).replace(/\([^)]*\)/g, '');
-  const clause = body.split(';').map(c => c.trim()).find(c => /^spf\s*=/i.test(c));
-  if (!clause || !/^spf\s*=\s*pass\b/i.test(clause)) return false;
+  // Fail closed unless there is exactly one spf result: a second one can only come from a sender-controlled value the
+  // receiver echoed (e.g. a domain-literal header.from), and the first clause would otherwise win.
+  const clauses = body.split(';').map(c => c.trim()).filter(c => /^spf\s*=/i.test(c));
+  if (clauses.length !== 1 || (body.match(/(?:^|;)\s*spf\s*=/gi)?.length ?? 0) !== 1) return false;
+  const clause = clauses[0];
+  if (!/^spf\s*=\s*pass\b/i.test(clause)) return false;
   const mailfrom = clause.match(/(?:^|\s)smtp\.mailfrom=([^\s;]+)/i)?.[1];
   return !!mailfrom && norm(mailfrom.split('@').pop() ?? '') === norm(envelopeDomain);
 }

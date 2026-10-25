@@ -172,7 +172,7 @@ export async function handleFreeCheck(
   if (!resolvedFrom) throw new Error('FROM_EMAIL not configured — complete the setup wizard first');
   const subject = `Email security check — ${domain}`;
   const messageId = message.headers.get('message-id')?.trim() ?? null;
-  const inReplyTo = messageId && /^<[^<>\s]+>$/.test(messageId) ? messageId : null;
+  const inReplyTo = messageId && messageId.length <= 998 && /^<[^<>\s]+>$/.test(messageId) ? messageId : null;
   const listHeaders: Record<string, string> = disclosure
     ? { 'List-Unsubscribe': `<${disclosure.unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
     : {};
