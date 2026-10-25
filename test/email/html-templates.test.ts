@@ -175,9 +175,34 @@ describe('buildFreeCheckHtml', () => {
     expect(html).toContain('v=DMARC1');
   });
 
-  it('shows CTA for non-protected status', () => {
+  it('shows CTA for non-protected status, linking the configured site', () => {
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, siteUrl: 'https://inboxangel.io' });
+    expect(html).toContain('href="https://inboxangel.io"');
+  });
+
+  it('no site URL: no marketing link and never inboxangel.com', () => {
     const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL });
-    expect(html).toContain('inboxangel.com');
+    expect(html).not.toContain('<a ');
+    expect(html).not.toContain('inboxangel.com');
+    expect(html).not.toContain('No data about your domain is stored');
+  });
+
+  const bodyText = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const LAYOUT_FOOTER = 'InboxAngel — automated email security monitoring';
+
+  it('the body ends with the help line, after the disclosure', () => {
+    for (const status of ['protected', 'at_risk', 'exposed'] as const) {
+      const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary(status), auth: null, dns: DNS_FULL, disclosure: { text: 'We will send you 5 short emails.', unsubscribeUrl: 'https://w.example/u' } });
+      expect(bodyText(html).endsWith(`Need help? Any doubts? Reply. ${LAYOUT_FOOTER}`)).toBe(true);
+      expect(html.indexOf('Need help?')).toBeGreaterThan(html.indexOf('We will send you 5 short emails.'));
+    }
+  });
+
+  it('states retention: configured days when not enrolled, until unsubscribe when enrolled', () => {
+    const plain = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, retentionDays: 14 });
+    expect(bodyText(plain)).toContain('We keep your address and this result for 14 days, then delete them.');
+    const enrolled = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, disclosure: { text: 'x', unsubscribeUrl: 'https://w.example/u' } });
+    expect(bodyText(enrolled)).toContain('while you receive our follow-up emails, and delete them when you unsubscribe.');
   });
 
   it('omits CTA for protected status', () => {

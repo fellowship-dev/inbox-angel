@@ -173,6 +173,18 @@ describe('admin view (instance owner only)', () => {
     expect(body.delivery.blockers.join(' ')).toMatch(/No mail provider/);
   });
 
+  it('warns that MAIL_REPLY_TO is unset even when the onboarding sequence is off', async () => {
+    const s = selfHost();
+    const owner = await setupOwner(s.env);
+    const body = await (await call(s.env, 'GET', '/api/leads', { key: owner })).json() as any;
+    expect(body.delivery.enabled).toBe(false);
+    expect(body.delivery.warnings.join(' ')).toMatch(/MAIL_REPLY_TO is not set/);
+    const set = selfHost({ MAIL_REPLY_TO: 'hello@inboxangel.io' });
+    const owner2 = await setupOwner(set.env);
+    const body2 = await (await call(set.env, 'GET', '/api/leads', { key: owner2 })).json() as any;
+    expect(body2.delivery.warnings.join(' ')).not.toMatch(/MAIL_REPLY_TO/);
+  });
+
   it('is closed to members, admins who are not the instance owner, and the signed-out', async () => {
     const s = selfHost();
     const owner = await setupOwner(s.env, 'owner@example.com');

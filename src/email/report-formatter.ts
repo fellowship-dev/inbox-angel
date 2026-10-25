@@ -3,6 +3,7 @@
 
 import { AuthResultsHeader } from './parse-headers';
 import { DnsCheckResult } from './dns-check';
+import { retentionPolicy } from '../lifecycle/config';
 
 export type OverallStatus = 'protected' | 'at_risk' | 'exposed';
 
@@ -99,7 +100,28 @@ function dmarcLine(s: CheckSummary): string {
   return '❌ DMARC — No policy set. Nothing stops scammers from impersonating your domain.';
 }
 
-function whatToDoSection(s: CheckSummary): string {
+// ── Closing (shared with the HTML version) ────────────────────
+
+/** The last line of every free-check email. */
+export const HELP_LINE = 'Need help? Any doubts? Reply.';
+
+export interface CheckReportOptions {
+  /** The marketing site (SITE_URL), https only. No marketing link when null or unset. */
+  siteUrl?: string | null;
+  /** How long check results are kept (the lifecycle setting that purges check_results). Defaults to that setting's default. */
+  retentionDays?: number;
+  /** Set when the sender was enrolled in the follow-up emails: the disclosure line and its unsubscribe link. */
+  enrolled?: { text: string; unsubscribeUrl: string };
+}
+
+/** What we keep about the sender, truthfully: enrolled leads stay until they unsubscribe; otherwise the check-result window. */
+export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 'enrolled'>): string {
+  if (o.enrolled) return 'We keep your address and this result while you receive our follow-up emails, and delete them when you unsubscribe.';
+  const days = o.retentionDays ?? retentionPolicy({}).checkResultsDays;
+  return `We keep your address and this result for ${days} days, then delete them.`;
+}
+
+function whatToDoSection(s: CheckSummary, siteUrl: string | null): string {
   if (s.status === 'protected') {
     if (s.dmarcPolicy === 'none') {
       return `
@@ -124,12 +146,13 @@ Nothing urgent. Keep your DNS records as-is and monitor your DMARC reports regul
   else if (!s.dmarcPolicy) steps.push(`${steps.length + 1}. Add a DMARC record starting with p=none to begin monitoring.`);
   else if (s.dmarcPolicy === 'none') steps.push(`${steps.length + 1}. Upgrade your DMARC policy from p=none to p=quarantine, then p=reject.`);
 
+  const cta = siteUrl ? ` Start at ${siteUrl}` : '';
   return `
 What to do next:
 ${steps.join('\n')}
 
 InboxAngel can walk you through each fix and monitor your domain 24/7 so you know the
-moment anything breaks. Start your free monitoring at https://inboxangel.com`;
+moment anything breaks.${cta}`;
 }
 
 /**
@@ -140,6 +163,7 @@ export function formatCheckReport(
   summary: CheckSummary,
   auth: AuthResultsHeader | null,
   dns: DnsCheckResult,
+  opts: CheckReportOptions = {},
 ): string {
   const domain = summary.domain;
   const lines: string[] = [
@@ -181,12 +205,15 @@ export function formatCheckReport(
     lines.push('DKIM key:     (no selector in this email — could not verify)');
   }
 
-  lines.push(whatToDoSection(summary));
+  lines.push(whatToDoSection(summary, opts.siteUrl ?? null));
+  if (opts.enrolled) lines.push('', opts.enrolled.text, `Unsubscribe: ${opts.enrolled.unsubscribeUrl}`);
   lines.push('');
   lines.push('─'.repeat(48));
   lines.push('This report was generated automatically by InboxAngel.');
   lines.push('You received it because you sent an email to our check address.');
-  lines.push('No data about your domain is stored. https://inboxangel.com');
+  lines.push(retentionSentence(opts));
+  if (opts.siteUrl) lines.push(opts.siteUrl);
+  lines.push('', HELP_LINE);
 
   return lines.join('\n');
 }

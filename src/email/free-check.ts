@@ -9,7 +9,7 @@
 // Email Service), which reaches any recipient once the sending domain is onboarded. See docs/email-funnel.md.
 
 import { EmailMessage } from 'cloudflare:email';
-import { createMimeMessage } from 'mimetext/browser';
+import { createMimeMessage, Mailbox } from 'mimetext/browser';
 import type { TenantContext } from '../tenancy/context';
 import { extractAuthResults } from './parse-headers';
 import { checkDomain } from './dns-check';
@@ -21,6 +21,8 @@ import { enrollLead } from '../funnel/enroll';
 import { DISCLOSURE } from '../funnel/copy';
 import { unsubscribeUrl } from '../mail/compliance';
 import { ownerMailer } from '../mail/mailer';
+import { replyTo as replyToAddress, siteUrl } from '../funnel/config';
+import { retentionPolicy } from '../lifecycle/config';
 
 function extractDomain(email: string): string {
   const at = email.lastIndexOf('@');
@@ -36,11 +38,13 @@ export function buildReplyRaw(
   html: string,
   inReplyTo?: string | null,
   extraHeaders: Record<string, string> = {},
+  replyTo?: string | null,
 ): string {
   const msg = createMimeMessage();
   msg.setSender(from);
   msg.setRecipient(to);
   msg.setSubject(subject);
+  if (replyTo) msg.setHeader('Reply-To', new Mailbox(replyTo));
   if (inReplyTo) {
     msg.setHeader('In-Reply-To', inReplyTo);
     msg.setHeader('References', inReplyTo);
@@ -90,13 +94,15 @@ interface Report {
   html: string;
   inReplyTo: string | null;
   headers: Record<string, string>;
+  /** MAIL_REPLY_TO; no Reply-To when null. */
+  replyTo: string | null;
 }
 
 /** Deliver the report; true when reply() or the outbound send accepted it. Never throws: the check result is stored either way. */
 async function deliverReport(message: ForwardableEmailMessage, tenant: TenantContext, r: Report): Promise<boolean> {
   const sender = { name: 'InboxAngel', addr: r.from };
   try {
-    const raw = buildReplyRaw(sender, r.to, r.subject, r.text, r.html, r.inReplyTo, r.headers);
+    const raw = buildReplyRaw(sender, r.to, r.subject, r.text, r.html, r.inReplyTo, r.headers, r.replyTo);
     await message.reply(new EmailMessage(r.from, r.to, raw));
     return true;
   } catch (err) {
@@ -110,7 +116,7 @@ async function deliverReport(message: ForwardableEmailMessage, tenant: TenantCon
   const threading: Record<string, string> = r.inReplyTo ? { 'In-Reply-To': r.inReplyTo, References: r.inReplyTo } : {};
   const res = await mailer.send({
     from: { name: sender.name, email: r.from }, to: r.to, subject: r.subject, text: r.text, html: r.html,
-    headers: { ...threading, ...r.headers },
+    headers: { ...threading, ...r.headers }, ...(r.replyTo ? { replyTo: r.replyTo } : {}),
   });
   if (!res.ok) console.error(`free-check: report not delivered: reply() was refused and SEND_EMAIL failed (${res.error})`);
   return res.ok;
@@ -133,14 +139,16 @@ export async function handleFreeCheck(
   // 3. Live DNS lookup — SPF, DKIM (if selector known), DMARC
   const dns = await checkDomain(domain, dkimSelector);
 
-  // 4. Build structured summary and format plain-English report
+  // 4. Build structured summary, then enrol the sender in the onboarding sequence (hosted by default; self-host only
+  //    when switched on), so the report can say so and state retention truthfully.
   const summary = buildSummary(domain, auth, dns);
-  let reportText = formatCheckReport(fromEmail, summary, auth, dns);
-
-  // 4b. Onboarding sequence: enrol the sender (hosted by default; self-host only when switched on) and say so in the reply.
   const disclosure = await enrollAndDisclose(message, tenant, fromEmail, domain, summary);
-  if (disclosure) reportText += `\n\n${disclosure.text}\nUnsubscribe: ${disclosure.unsubscribeUrl}\n`;
-  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand, disclosure: disclosure ?? undefined });
+
+  // 4b. Plain-English report: links use the marketing site (SITE_URL, never the Worker's origin); the closing states what
+  //     is kept and for how long, and ends with the help line.
+  const opts = { siteUrl: siteUrl(tenant.env), retentionDays: retentionPolicy(tenant.env).checkResultsDays, enrolled: disclosure ?? undefined };
+  const reportText = formatCheckReport(fromEmail, summary, auth, dns, opts);
+  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand, disclosure: opts.enrolled, siteUrl: opts.siteUrl, retentionDays: opts.retentionDays });
 
   // 5. Send the report: reply() first, a new email through SEND_EMAIL when reply() is refused.
   const resolvedFrom = tenant.settings.fromEmail;
@@ -152,6 +160,7 @@ export async function handleFreeCheck(
     : {};
   const sent = await deliverReport(message, tenant, {
     from: resolvedFrom, to: fromEmail, subject, text: reportText, html: reportHtml, inReplyTo, headers: listHeaders,
+    replyTo: replyToAddress(tenant.env),
   });
 
   // 6. Store result in D1 (best-effort — don't let DB failure break the email flow)

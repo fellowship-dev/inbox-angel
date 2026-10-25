@@ -111,6 +111,12 @@ Reports from receiving mail servers worldwide will start arriving within 24 hour
 
 A visitor emails their `check+<token>@<reports domain>` address and gets the report back. The Worker first answers with Cloudflare's `message.reply()`, which Cloudflare only allows when the incoming email has a valid DMARC result, so a sender whose domain has no DMARC (exactly who the check is for) is refused there. The report then goes out as a new email through the `SEND_EMAIL` binding. For that to reach strangers, **onboard your reports domain as a sending domain in Cloudflare Email Service** (Workers Paid): before onboarding, the binding only reaches verified destination addresses. If both paths fail, the error is logged and the result is stored with `report_sent = 0`. Details: [docs/email-funnel.md](docs/email-funnel.md#free-check-delivery).
 
+| Variable | Free check |
+|---|---|
+| `MAIL_REPLY_TO` | **Required for replies.** The report ends with "Need help? Any doubts? Reply." and carries this Reply-To (a mailbox someone reads, e.g. routed with Email Routing). Unset: no Reply-To, and the Leads page (`GET /api/leads` → `delivery.warnings`) flags it even when the onboarding sequence is off. |
+| `SITE_URL` | Your public marketing site (`https://…`), linked from the report. Unset: no marketing link. `PUBLIC_BASE_URL` stays the Worker's own origin, for unsubscribe and confirmation links. |
+| `RETENTION_CHECK_RESULTS_DAYS` | How long check results are kept (default 30); the report states it. A sender enrolled in the follow-up emails is told their address is kept until they unsubscribe. |
+
 ---
 
 ## Authentication

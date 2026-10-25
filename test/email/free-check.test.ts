@@ -310,6 +310,60 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
   });
 });
 
+describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+
+  function run(env: Record<string, unknown>, replyFails = false) {
+    const sent: Array<{ replyTo?: string; text: string; html?: string }> = [];
+    const SEND_EMAIL = { send: vi.fn(async (m: { replyTo?: string; text: string; html?: string }) => { sent.push(m); return { messageId: 'm' }; }) };
+    const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...env } as never, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
+    const message = makeMessage({ authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com' });
+    if (replyFails) (message.reply as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not repliable'));
+    return { done: handleFreeCheck(message, tenant, 'tok'), message, sent };
+  }
+  const raw = (m: ForwardableEmailMessage) => ((m.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as { raw: string }).raw;
+
+  it('MAIL_REPLY_TO set: the reply carries that Reply-To, and so does the outbound fallback', async () => {
+    mockDohEmpty();
+    const a = run({ MAIL_REPLY_TO: 'hello@inboxangel.io' });
+    await a.done;
+    expect(raw(a.message)).toMatch(/^Reply-To: <?hello@inboxangel\.io>?\r?$/m);
+    mockDohEmpty();
+    const b = run({ MAIL_REPLY_TO: 'hello@inboxangel.io' }, true);
+    await b.done;
+    expect(b.sent[0].replyTo).toBe('hello@inboxangel.io');
+  });
+
+  it('MAIL_REPLY_TO unset: no Reply-To on either path', async () => {
+    mockDohEmpty();
+    const a = run({});
+    await a.done;
+    expect(raw(a.message)).not.toMatch(/^Reply-To:/im);
+    mockDohEmpty();
+    const b = run({}, true);
+    await b.done;
+    expect(b.sent[0].replyTo).toBeUndefined();
+  });
+
+  it('SITE_URL unset (even with BETTER_AUTH_URL set): no marketing link to the worker', async () => {
+    mockDohEmpty();
+    const b = run({ BETTER_AUTH_URL: 'https://app.worker.example' }, true);
+    await b.done;
+    expect(b.sent[0].text).not.toContain('app.worker.example');
+    expect(b.sent[0].html).not.toContain('app.worker.example');
+    expect(b.sent[0].text).not.toMatch(/https?:\/\//);
+  });
+
+  it('SITE_URL set: the marketing link points there', async () => {
+    mockDohEmpty();
+    const b = run({ SITE_URL: 'https://inboxangel.io/' }, true);
+    await b.done;
+    expect(b.sent[0].text).toContain('https://inboxangel.io');
+    expect(b.sent[0].html).toContain('href="https://inboxangel.io"');
+  });
+});
+
 describe('buildReplyRaw', () => {
   it('omits In-Reply-To when the original had no Message-ID', () => {
     const raw = buildReplyRaw({ name: 'InboxAngel', addr: 'check@reports.inboxangel.io' }, 'a@b.co', 'Hi', 'text', '<p>html</p>', null);

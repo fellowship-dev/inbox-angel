@@ -3,7 +3,7 @@
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
-import { CheckSummary, OverallStatus } from './report-formatter';
+import { CheckSummary, HELP_LINE, OverallStatus, retentionSentence } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
 import { AuthResultsHeader } from './parse-headers';
@@ -201,6 +201,10 @@ export interface FreeCheckHtmlParams {
   brand?: Brand;
   /** The line telling the sender about the follow-up emails, with its unsubscribe link. */
   disclosure?: { text: string; unsubscribeUrl: string };
+  /** The marketing site (SITE_URL); no marketing link when unset. */
+  siteUrl?: string | null;
+  /** Days check results are kept, for the retention line when the sender is not enrolled. */
+  retentionDays?: number;
 }
 
 export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
@@ -249,15 +253,18 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
   body += '</table>';
 
   if (summary.status !== 'protected') {
+    const link = p.siteUrl ? `\n<a href="${esc(p.siteUrl)}" style="color:${esc((p.brand ?? DEFAULT_BRAND).color)};">Start free monitoring →</a>` : '';
     body += `<p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-InboxAngel can walk you through each fix and monitor your domain 24/7.
-<a href="https://inboxangel.com" style="color:${esc((p.brand ?? DEFAULT_BRAND).color)};">Start free monitoring →</a>
+InboxAngel can walk you through each fix and monitor your domain 24/7.${link}
 </p>`;
   }
 
   if (p.disclosure) {
     body += `<p style="margin:16px 0 0;font-size:13px;color:#374151;">${esc(p.disclosure.text)} <a href="${esc(p.disclosure.unsubscribeUrl)}" style="color:#374151;">Unsubscribe</a></p>`;
   }
+
+  body += `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">${esc(retentionSentence({ retentionDays: p.retentionDays, enrolled: p.disclosure }))}</p>
+<p style="margin:16px 0 0;font-size:15px;font-weight:600;">${esc(HELP_LINE)}</p>`;
 
   return htmlLayout(`Email Security Check — ${summary.domain}`, body, p.brand ?? DEFAULT_BRAND);
 }

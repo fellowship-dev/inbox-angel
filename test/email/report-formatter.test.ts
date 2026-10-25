@@ -208,14 +208,6 @@ describe('formatCheckReport', () => {
     expect(report.toLowerCase()).toContain('what to do next');
   });
 
-  it('mentions inboxangel.com in the footer', () => {
-    const auth = makeAuth();
-    const dns = makeDns();
-    const summary = buildSummary('example.com', auth, dns);
-    const report = formatCheckReport('user@example.com', summary, auth, dns);
-    expect(report).toContain('inboxangel.com');
-  });
-
   it('DKIM line mentions "no signing key" when dkim DNS record is missing and no selector', () => {
     const auth: AuthResultsHeader = { spf: null, dkim: null, dmarc: null, raw: '' };
     const dns: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
@@ -274,5 +266,52 @@ describe('broken (permerror) records are not described as lookup failures', () =
     expect(text).toContain('Your SPF record is broken: x publishes 2 SPF records');
     expect(text).toContain('Fix your SPF record: publish exactly one');
     expect(text).not.toContain('could not look up your SPF');
+  });
+});
+
+describe('closing: help line, truthful retention, configured site link', () => {
+  const HELP = 'Need help? Any doubts? Reply.';
+  const exposedDns: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
+  const cases = () => [
+    { auth: makeAuth(), dns: makeDns() },
+    { auth: null, dns: exposedDns },
+    { auth: makeAuth({ dmarcResult: 'fail' }), dns: makeDns({ dmarcPolicy: 'quarantine' }) },
+  ];
+
+  it('ends with the help line, enrolled or not, in every status', () => {
+    for (const { auth, dns } of cases()) {
+      const summary = buildSummary('example.com', auth, dns);
+      expect(formatCheckReport('a@example.com', summary, auth, dns).trimEnd().endsWith(HELP)).toBe(true);
+      const enrolled = formatCheckReport('a@example.com', summary, auth, dns, { enrolled: { text: 'We will send you 5 short emails.', unsubscribeUrl: 'https://w.example/u?t=1' } });
+      expect(enrolled.trimEnd().endsWith(HELP)).toBe(true);
+      expect(enrolled).toContain('Unsubscribe: https://w.example/u?t=1');
+    }
+  });
+
+  it('never claims nothing is stored and never links inboxangel.com', () => {
+    for (const { auth, dns } of cases()) {
+      const text = formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns);
+      expect(text).not.toContain('No data about your domain is stored');
+      expect(text).not.toContain('inboxangel.com');
+    }
+  });
+
+  it('not enrolled: states the configured check-result retention (default 30 days)', () => {
+    const summary = buildSummary('example.com', null, exposedDns);
+    expect(formatCheckReport('a@example.com', summary, null, exposedDns)).toContain('We keep your address and this result for 30 days, then delete them.');
+    expect(formatCheckReport('a@example.com', summary, null, exposedDns, { retentionDays: 7 })).toContain('for 7 days, then delete them.');
+  });
+
+  it('enrolled: says the address is kept while follow-ups run and deleted on unsubscribe', () => {
+    const summary = buildSummary('example.com', null, exposedDns);
+    const text = formatCheckReport('a@example.com', summary, null, exposedDns, { enrolled: { text: 'x', unsubscribeUrl: 'https://w.example/u' } });
+    expect(text).toContain('We keep your address and this result while you receive our follow-up emails, and delete them when you unsubscribe.');
+    expect(text).not.toContain('for 30 days');
+  });
+
+  it('links the configured site URL, and no site at all when it is unset', () => {
+    const summary = buildSummary('example.com', null, exposedDns);
+    expect(formatCheckReport('a@example.com', summary, null, exposedDns, { siteUrl: 'https://inboxangel.io' })).toContain('https://inboxangel.io');
+    expect(formatCheckReport('a@example.com', summary, null, exposedDns)).not.toMatch(/https?:\/\//);
   });
 });

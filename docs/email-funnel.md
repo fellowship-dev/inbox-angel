@@ -37,6 +37,8 @@ The report goes back to the sender in two steps (`src/email/free-check.ts`):
 1. **`message.reply()`**, threaded under the original. Cloudflare's Email Workers rules (checked 2026-10-24, <https://developers.cloudflare.com/email-routing/email-workers/reply-email-workers/>): "The incoming email must have a valid DMARC result", "An email can only be replied to once per `EmailMessage` event", "The recipient in the reply must match the sender of the incoming email", "The outgoing sender domain must match the domain that received the email", and more than 100 `References` entries is rejected; "otherwise `reply()` throws an exception". A sender with no DMARC, or one that fails it, is therefore refused.
 2. **When `reply()` throws**, the same subject, text and HTML go out as a new email through the `SEND_EMAIL` binding, from the same address, with `In-Reply-To`/`References` (allowlisted threading headers) and, for enrolled leads, the same `List-Unsubscribe` headers. Email Service: "Before you onboard a sending domain, you can send emails only to verified destination addresses in your account"; after onboarding "you can send to any recipient immediately" (<https://developers.cloudflare.com/email-service/platform/limits/>); "Arbitrary-recipient sending requires Workers Paid" (<https://developers.cloudflare.com/email-service/>); the sender must be on an onboarded domain (<https://developers.cloudflare.com/email-service/configuration/send-bindings/>). **Ops step: onboard the reports domain in Email Service**, or strangers without DMARC get nothing.
 
+Every report ends with "Need help? Any doubts? Reply." and carries `MAIL_REPLY_TO` as Reply-To on both paths. Its closing states retention truthfully: not enrolled, "kept for N days" from `RETENTION_CHECK_RESULTS_DAYS` (default 30, the setting that purges `check_results`); enrolled, kept while they receive follow-ups and deleted on unsubscribe (the `leads` behaviour below).
+
 If both fail (or there is no binding), the error is logged as `free-check: report not delivered: …` and the check result is still stored, with `report_sent = 0`. Resend is not used as a third path: the report's sender is the reports domain, which is not verified at Resend.
 
 ## Sending provider
@@ -99,7 +101,9 @@ The request stores an **unconfirmed** subscription (`confirmed_at` null) and ema
 | `RESEND_API_KEY` | Resend, for the sequence (and the confirmation when there is no binding) |
 | `AUTHSERV_ID` | **required for enrolment**: the receiver's authserv-id, see the ops step above |
 | `AUTHSERV_HEADER` | **required for enrolment**: `ar` or `arc`, the one header kind the receiver adds |
-| `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`), and where replies go |
+| `MAIL_FROM`, `MAIL_FROM_NAME` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`) |
+| `MAIL_REPLY_TO` | **required for replies**: Reply-To of sequence mail **and of the free-check report**. No fallback (falling back to `OWNER_EMAIL` would publish the admin login to every sender); unset means no Reply-To, and `GET /api/leads` warns even when the sequence is off |
+| `SITE_URL` | public marketing site (`https://` only), for links in the free-check report; unset means no marketing link (never the Worker's own origin) |
 | `PUBLIC_BASE_URL` | public HTTPS origin for unsubscribe and confirmation links (falls back to `BETTER_AUTH_URL`) |
 | `POSTAL_ADDRESS` | footer address |
 | `BOOKING_URL` | day-14 booking link |
