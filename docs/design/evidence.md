@@ -24,3 +24,7 @@ The script captures each route at 375, 768 and 1440 px (light and dark; long fix
 ## Gaps
 
 The worker sandbox cannot run Chromium (missing system libraries, no root), so browser screenshots, the in-browser axe contrast run and the overflow/keyboard/drawer/copy checks were not executed by the author. The "before" gallery build is preserved at `/tmp/design-evidence/before-gallery` and the "after" gallery is served on port 8787 for host-side capture.
+
+## Integration receipt (rebased onto main 86e308d)
+
+Rebased cleanly (no conflicts) onto `86e308da4881b1866370ab31bc1816ca64576942`; `npm ci` exit 0; manifests and lockfile identical to main. Then: `npm run test:ui` 147 passed (exit 0), `npm run test:web` 294 passed (exit 0), `npm run build:dashboard` exit 0, `npm run typecheck` exit 0, `npm run typecheck -w @inbox-angel/ui` exit 0, `npm run build:gallery -w @inbox-angel/ui` exit 0 with bundle `index-CaA5zCQk.js` / `index-q6fYaaUy.css`, identical to the pre-rebase build.
