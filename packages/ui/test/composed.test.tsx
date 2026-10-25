@@ -130,6 +130,22 @@ describe("AppShell", () => {
 		expect(within(dlg).getByRole("link", { name: "Settings" })).toBeInTheDocument();
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus();
+	});
+	it("moves focus into the drawer on open and back to the trigger on Escape and on explicit close", async () => {
+		render(shell());
+		const trigger = screen.getByRole("button", { name: "Open navigation" });
+		await userEvent.click(trigger);
+		await screen.findByRole("dialog", { name: "Navigation" });
+		expect(screen.getByRole("button", { name: "Close navigation" })).toHaveFocus();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		await waitFor(() => expect(trigger).toHaveFocus());
+
+		await userEvent.click(trigger);
+		await userEvent.click(await screen.findByRole("button", { name: "Close navigation" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+		await waitFor(() => expect(trigger).toHaveFocus());
 	});
 	it("supports a custom link renderer", () => {
 		render(<AppShell brand="x" nav={nav} renderLink={(p) => <a data-router {...p} />}>y</AppShell>);

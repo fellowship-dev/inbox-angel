@@ -128,6 +128,8 @@ export function AppShell({
 }: AppShellProps) {
 	const [collapsedState, setCollapsedState] = React.useState(defaultCollapsed);
 	const [mobileState, setMobileState] = React.useState(false);
+	// The open button sits outside the Radix Root, so Radix cannot restore focus to it on its own.
+	const menuButtonRef = React.useRef<HTMLButtonElement>(null);
 	const collapsed = collapsedProp ?? collapsedState;
 	const mobileOpen = mobileOpenProp ?? mobileState;
 	const setCollapsed = (v: boolean) => {
@@ -180,6 +182,10 @@ export function AppShell({
 						<DialogPrimitive.Overlay className="ia-fade-in fixed inset-0 z-40 bg-ink-1/50 md:hidden" />
 						<DialogPrimitive.Content
 							aria-describedby={undefined}
+							onCloseAutoFocus={(e) => {
+								e.preventDefault();
+								menuButtonRef.current?.focus();
+							}}
 							className="ia-slide-left fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-line bg-surface-1 text-ink-1 shadow-float md:hidden"
 						>
 							<DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
@@ -200,7 +206,7 @@ export function AppShell({
 
 				<div className="flex min-w-0 flex-1 flex-col">
 					<header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-surface-1 px-4 sm:px-6">
-						<IconButton className="md:hidden" label="Open navigation" aria-haspopup="dialog" onClick={() => setMobileOpen(true)}>
+						<IconButton ref={menuButtonRef} className="md:hidden" label="Open navigation" aria-haspopup="dialog" onClick={() => setMobileOpen(true)}>
 							<Menu aria-hidden />
 						</IconButton>
 						<div className="flex min-w-0 flex-1 items-center gap-2">{topbarStart}</div>
