@@ -66,7 +66,7 @@ export function enforcedDmarc(raw: string | null, domain: string): string {
   // an existing sp=none (or any non-enforcing sp) would keep BIMI blocked: drop it so subdomains follow p
   const keep = parts.filter(p => !['v', 'p', 'pct'].includes(tagKey(p))
     && !(tagKey(p) === 'sp' && !['quarantine', 'reject'].includes(tagValue(p).toLowerCase())));
-  if (!keep.some(p => tagKey(p) === 'rua')) keep.push(`rua=mailto:YOU@${domain}`);
+  if (!keep.some(p => tagKey(p) === 'rua')) keep.push(`rua=mailto:dmarc@${domain}`);
   return ['v=DMARC1', `p=${chosen}`, 'pct=100', ...keep].join('; ');
 }
 
@@ -92,7 +92,7 @@ export function derived(findingId: string, facts: Facts): Values {
     v.spf_value = ['v=spf1', ...terms, strict ? '-all' : '~all'].join(' ');
   }
   if (findingId === 'dmarc-multiple' && dmarc.raws.length) v.dmarc_value = dmarc.raws[0];
-  if (findingId === 'dmarc-p-none-no-rua' && dmarc.raw) v.dmarc_value = dmarc.raw.replace(/[; ]+$/, '') + `; rua=mailto:YOU@${facts.domain}`;
+  if (findingId === 'dmarc-p-none-no-rua' && dmarc.raw) v.dmarc_value = dmarc.raw.replace(/[; ]+$/, '') + `; rua=mailto:dmarc@${facts.domain}`;
   // no record yet: start with dmarc-missing, never publish enforcement from scratch
   if ((findingId === 'bimi-blocked-by-dmarc-none' || findingId === 'bimi-blocked-by-dmarc-pct') && dmarc.raw) v.dmarc_enforce_value = enforcedDmarc(dmarc.raw, facts.domain);
   if (findingId === 'spf-permerror' || findingId === 'spf-over-10-lookups') {

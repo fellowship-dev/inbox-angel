@@ -3,3 +3,7 @@ export * from './fixes';
 export * from './bimi-readiness';
 export * from './consensus';
 export * from './catalog/index';
+export * from './model';
+export * from './render-html';
+export * from './render-md';
+export * from './tokens';

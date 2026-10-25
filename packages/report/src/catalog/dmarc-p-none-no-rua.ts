@@ -1,4 +1,5 @@
-// Ported verbatim from unzip-inboxangel outreach-tools/catalog/dmarc-p-none-no-rua.json.
+// Ported from unzip-inboxangel outreach-tools/catalog/dmarc-p-none-no-rua.json.
+// Deviation from the Z JSON (plan KTD6): the derived value carries rua=mailto:dmarc@{domain}; the note follows.
 import type { CatalogFile } from './types';
 
 export const dmarcPNoneNoRua: CatalogFile = {
@@ -15,7 +16,7 @@ export const dmarcPNoneNoRua: CatalogFile = {
           "name": "_dmarc.{domain}",
           "type": "TXT",
           "value": "{dmarc_value}",
-          "note": "Replace YOU@{domain} with a mailbox you read."
+          "note": "rua= sends the daily DMARC summaries to dmarc@{domain}: create that mailbox or alias first, or change the address to one you read."
         }
       ],
       "steps": [
