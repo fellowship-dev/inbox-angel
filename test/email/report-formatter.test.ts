@@ -315,3 +315,54 @@ describe('closing: help line, truthful retention, configured site link', () => {
     expect(formatCheckReport('a@example.com', summary, null, exposedDns)).not.toMatch(/https?:\/\//);
   });
 });
+
+describe('actionable findings: the exact record or setting to change, then "or we do it for you"', () => {
+  const NO_RECORDS: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
+  const report = (auth: AuthResultsHeader | null, dns: DnsCheckResult, opts = {}) =>
+    formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns, opts);
+
+  it('no DMARC record: the exact _dmarc TXT record and the "mailbox you read" note', () => {
+    const text = report(null, NO_RECORDS);
+    expect(text).toContain('_dmarc.example.com');
+    expect(text).toContain('v=DMARC1; p=none; rua=mailto:dmarc@example.com');
+    expect(text).toMatch(/use a mailbox you read/);
+  });
+
+  it('DMARC p=none: names p=quarantine as the next step', () => {
+    const text = report(makeAuth({ dmarcPolicy: 'none' }), makeDns({ dmarcPolicy: 'none' }));
+    expect(text).toMatch(/_dmarc\.example\.com from p=none to p=quarantine/);
+  });
+
+  it('DMARC p=reject and everything passing: no fix block, only the help line', () => {
+    const text = report(makeAuth(), makeDns());
+    expect(text).not.toContain('What to do next');
+    expect(text).not.toMatch(/or we do it/i);
+    expect(text.trimEnd().endsWith('Need help? Any doubts? Reply.')).toBe(true);
+  });
+
+  it('DKIM fail: names the signing domain and selector seen, and the record to check', () => {
+    const auth: AuthResultsHeader = { ...makeAuth({ dkimResult: 'fail', dmarcResult: 'fail' }), dkim: { result: 'fail', domain: 'mailer.example.net', selector: 's2024' } };
+    const text = report(auth, makeDns({ dmarcPolicy: 'quarantine' }));
+    expect(text).toContain('d=mailer.example.net');
+    expect(text).toContain('s=s2024');
+    expect(text).toContain('s2024._domainkey.mailer.example.net');
+  });
+
+  it('SPF fail: names the envelope domain and says to add the sender at the provider, without inventing an include', () => {
+    const auth: AuthResultsHeader = { ...makeAuth({ spfResult: 'fail', dmarcResult: 'fail', dkimResult: 'fail' }), spf: { result: 'fail', domain: 'bounce.example.com' } };
+    const text = report(auth, makeDns({ dmarcPolicy: 'quarantine' }));
+    const step = text.split('\n').find(l => l.includes('SPF failed'))!;
+    expect(step).toContain('bounce.example.com');
+    expect(step).toMatch(/provider/);
+    expect(text).not.toMatch(/include:/);
+  });
+
+  it('"or we do it for you": BOOKING_URL, else SITE_URL/pricing, else plain text', () => {
+    expect(report(null, NO_RECORDS, { bookingUrl: 'https://cal.example/max', siteUrl: 'https://inboxangel.io' })).toContain('Or we do it for you: https://cal.example/max');
+    expect(report(null, NO_RECORDS, { siteUrl: 'https://inboxangel.io' })).toContain('Or we do it for you: https://inboxangel.io/pricing');
+    const plain = report(null, NO_RECORDS);
+    const line = plain.split('\n').find(l => l.startsWith('Or we do it for you'))!;
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/https?:/);
+  });
+});

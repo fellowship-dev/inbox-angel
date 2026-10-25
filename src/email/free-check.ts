@@ -21,7 +21,7 @@ import { enrollLead } from '../funnel/enroll';
 import { DISCLOSURE } from '../funnel/copy';
 import { unsubscribeUrl } from '../mail/compliance';
 import { ownerMailer } from '../mail/mailer';
-import { replyTo as replyToAddress, siteUrl } from '../funnel/config';
+import { bookingUrl, replyTo as replyToAddress, siteUrl } from '../funnel/config';
 import { retentionPolicy } from '../lifecycle/config';
 
 function extractDomain(email: string): string {
@@ -146,9 +146,12 @@ export async function handleFreeCheck(
 
   // 4b. Plain-English report: links use the marketing site (SITE_URL, never the Worker's origin); the closing states what
   //     is kept and for how long, and ends with the help line.
-  const opts = { siteUrl: siteUrl(tenant.env), retentionDays: retentionPolicy(tenant.env).checkResultsDays, enrolled: disclosure ?? undefined };
+  const opts = {
+    siteUrl: siteUrl(tenant.env), bookingUrl: bookingUrl(tenant.env),
+    retentionDays: retentionPolicy(tenant.env).checkResultsDays, enrolled: disclosure ?? undefined,
+  };
   const reportText = formatCheckReport(fromEmail, summary, auth, dns, opts);
-  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand, disclosure: opts.enrolled, siteUrl: opts.siteUrl, retentionDays: opts.retentionDays });
+  const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand, disclosure: opts.enrolled, siteUrl: opts.siteUrl, bookingUrl: opts.bookingUrl, retentionDays: opts.retentionDays });
 
   // 5. Send the report: reply() first, a new email through SEND_EMAIL when reply() is refused.
   const resolvedFrom = tenant.settings.fromEmail;

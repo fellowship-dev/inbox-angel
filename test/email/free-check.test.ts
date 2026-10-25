@@ -362,6 +362,14 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
     expect(b.sent[0].text).toContain('https://inboxangel.io');
     expect(b.sent[0].html).toContain('href="https://inboxangel.io"');
   });
+
+  it('BOOKING_URL set: "or we do it for you" points there in both bodies', async () => {
+    mockDohEmpty();
+    const b = run({ BOOKING_URL: 'https://cal.example/max/30min', SITE_URL: 'https://inboxangel.io' }, true);
+    await b.done;
+    expect(b.sent[0].text).toContain('Or we do it for you: https://cal.example/max/30min');
+    expect(b.sent[0].html).toContain('href="https://cal.example/max/30min"');
+  });
 });
 
 describe('buildReplyRaw', () => {

@@ -210,6 +210,30 @@ describe('buildFreeCheckHtml', () => {
     expect(html).not.toContain('Start free monitoring');
   });
 
+  const NO_DMARC: DnsCheckResult = { ...DNS_FULL, dmarc: null };
+
+  it('no DMARC: shows the exact _dmarc record and the "mailbox you read" note', () => {
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: NO_DMARC });
+    expect(html).toContain('_dmarc.acme.com');
+    expect(html).toContain('v=DMARC1; p=none; rua=mailto:dmarc@acme.com');
+    expect(html).toContain('use a mailbox you read');
+  });
+
+  it('p=reject and all passing: no fix block and no "or we do it" line', () => {
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('protected'), auth: AUTH_PASS, dns: DNS_FULL, bookingUrl: 'https://cal.example/max' });
+    expect(html).not.toContain('What to do next');
+    expect(html).not.toMatch(/or we do it/i);
+  });
+
+  it('"or we do it for you" links BOOKING_URL, else SITE_URL/pricing, else is plain text', () => {
+    const p = { fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: NO_DMARC };
+    expect(buildFreeCheckHtml({ ...p, bookingUrl: 'https://cal.example/max', siteUrl: 'https://inboxangel.io' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/cal\.example\/max"/);
+    expect(buildFreeCheckHtml({ ...p, siteUrl: 'https://inboxangel.io' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/inboxangel\.io\/pricing"/);
+    const plain = buildFreeCheckHtml(p);
+    expect(plain).toContain('Or we do it for you');
+    expect(plain).not.toContain('<a ');
+  });
+
   it('is valid HTML with doctype', () => {
     const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('protected'), auth: AUTH_PASS, dns: DNS_FULL });
     expect(html).toMatch(/^<!DOCTYPE html>/);
