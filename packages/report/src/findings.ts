@@ -95,9 +95,15 @@ const DKIM_SELECTOR_PROVIDER: Record<string, string> = {
 
 const MAILTO = /mailto:[^\s,;"\\]+/gi;
 
-/** DMARC rua/ruf addresses can be personal mailboxes: findings and reports never carry them. */
+/**
+ * DMARC rua/ruf addresses can be personal mailboxes: findings and reports never carry the mailbox. The receiving domain
+ * stays (`mailto:<address>@vendor.example`): it names the DMARC reporting vendor and is not a person.
+ */
 export function redact(text: string): string {
-  return text.replace(MAILTO, 'mailto:<address>');
+  return text.replace(MAILTO, m => {
+    const at = m.lastIndexOf('@');
+    return at > 'mailto:'.length ? `mailto:<address>${m.slice(at)}` : 'mailto:<address>';
+  });
 }
 
 function redactDeep<T>(value: T): T {

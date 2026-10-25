@@ -118,6 +118,8 @@ describe('mail findings (test_mail_check.py)', () => {
     expect(text).not.toContain('x@y.io');
     expect(text).not.toContain('z@acme.dev');
     expect(text).toContain('mailto:<address>');
+    // The receiving domain stays: it names the DMARC vendor (prospecting's vendor-stuck signal) and is not a person.
+    expect(text).toContain('mailto:<address>@y.io');
   });
 });
 
