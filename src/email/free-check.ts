@@ -2,6 +2,11 @@
 // Triggered when an email arrives at check-{token}@reports.inboxangel.io.
 // The token ties the inbound email to a browser session for front-end polling.
 // Parses auth headers, does live DNS lookup, replies with plain-English report, stores result in D1.
+//
+// Delivery: message.reply() first. Cloudflare documents that reply() throws unless the incoming email has a valid DMARC
+// result (and the reply goes to its sender, once, from the receiving domain), so a sender whose domain has no DMARC, or
+// fails it, would get nothing. Then the same report goes out as a new email through the SEND_EMAIL binding (Cloudflare
+// Email Service), which reaches any recipient once the sending domain is onboarded. See docs/email-funnel.md.
 
 import { EmailMessage } from 'cloudflare:email';
 import { createMimeMessage } from 'mimetext/browser';
@@ -15,6 +20,7 @@ import { proveSender, readAuthHeaders } from './sender-proof';
 import { enrollLead } from '../funnel/enroll';
 import { DISCLOSURE } from '../funnel/copy';
 import { unsubscribeUrl } from '../mail/compliance';
+import { ownerMailer } from '../mail/mailer';
 
 function extractDomain(email: string): string {
   const at = email.lastIndexOf('@');
@@ -76,6 +82,40 @@ async function enrollAndDisclose(
   }
 }
 
+interface Report {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  inReplyTo: string | null;
+  headers: Record<string, string>;
+}
+
+/** Deliver the report; true when reply() or the outbound send accepted it. Never throws: the check result is stored either way. */
+async function deliverReport(message: ForwardableEmailMessage, tenant: TenantContext, r: Report): Promise<boolean> {
+  const sender = { name: 'InboxAngel', addr: r.from };
+  try {
+    const raw = buildReplyRaw(sender, r.to, r.subject, r.text, r.html, r.inReplyTo, r.headers);
+    await message.reply(new EmailMessage(r.from, r.to, raw));
+    return true;
+  } catch (err) {
+    console.warn(`[free-check] reply() refused, sending the report as a new email: ${err instanceof Error ? err.message : 'error'}`);
+  }
+  const mailer = ownerMailer(tenant.env);
+  if (!mailer) {
+    console.error('free-check: report not delivered: reply() was refused and no SEND_EMAIL binding is configured');
+    return false;
+  }
+  const threading: Record<string, string> = r.inReplyTo ? { 'In-Reply-To': r.inReplyTo, References: r.inReplyTo } : {};
+  const res = await mailer.send({
+    from: { name: sender.name, email: r.from }, to: r.to, subject: r.subject, text: r.text, html: r.html,
+    headers: { ...threading, ...r.headers },
+  });
+  if (!res.ok) console.error(`free-check: report not delivered: reply() was refused and SEND_EMAIL failed (${res.error})`);
+  return res.ok;
+}
+
 export async function handleFreeCheck(
   message: ForwardableEmailMessage,
   tenant: TenantContext,
@@ -102,13 +142,17 @@ export async function handleFreeCheck(
   if (disclosure) reportText += `\n\n${disclosure.text}\nUnsubscribe: ${disclosure.unsubscribeUrl}\n`;
   const reportHtml = buildFreeCheckHtml({ fromEmail, summary, auth, dns, brand: tenant.brand, disclosure: disclosure ?? undefined });
 
-  // 5. Send reply
+  // 5. Send the report: reply() first, a new email through SEND_EMAIL when reply() is refused.
   const resolvedFrom = tenant.settings.fromEmail;
   if (!resolvedFrom) throw new Error('FROM_EMAIL not configured — complete the setup wizard first');
   const subject = `Email security check — ${domain}`;
-  const raw = buildReplyRaw({ name: 'InboxAngel', addr: resolvedFrom }, fromEmail, subject, reportText, reportHtml, message.headers.get('message-id'),
-    disclosure ? { 'List-Unsubscribe': `<${disclosure.unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {});
-  await message.reply(new EmailMessage(resolvedFrom, fromEmail, raw));
+  const inReplyTo = message.headers.get('message-id');
+  const listHeaders: Record<string, string> = disclosure
+    ? { 'List-Unsubscribe': `<${disclosure.unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+    : {};
+  const sent = await deliverReport(message, tenant, {
+    from: resolvedFrom, to: fromEmail, subject, text: reportText, html: reportHtml, inReplyTo, headers: listHeaders,
+  });
 
   // 6. Store result in D1 (best-effort — don't let DB failure break the email flow)
   try {
@@ -125,7 +169,7 @@ export async function handleFreeCheck(
       dmarc_policy: (dns.dmarc?.policy ?? null) as any,
       dmarc_record: dns.dmarc?.raw ?? null,
       overall_status: summary.status,
-      report_sent: 1,
+      report_sent: sent ? 1 : 0,
       session_token: sessionToken,
     });
   } catch (err) {

@@ -107,6 +107,10 @@ After creating your account, the setup wizard walks you through five steps:
 
 Reports from receiving mail servers worldwide will start arriving within 24 hours. The dashboard shows your pass rate and tells you when it's safe to tighten policy toward `p=reject`.
 
+### Free email check: delivering the report
+
+A visitor emails their `check+<token>@<reports domain>` address and gets the report back. The Worker first answers with Cloudflare's `message.reply()`, which Cloudflare only allows when the incoming email has a valid DMARC result, so a sender whose domain has no DMARC (exactly who the check is for) is refused there. The report then goes out as a new email through the `SEND_EMAIL` binding. For that to reach strangers, **onboard your reports domain as a sending domain in Cloudflare Email Service** (Workers Paid): before onboarding, the binding only reaches verified destination addresses. If both paths fail, the error is logged and the result is stored with `report_sent = 0`. Details: [docs/email-funnel.md](docs/email-funnel.md#free-check-delivery).
+
 ---
 
 ## Authentication

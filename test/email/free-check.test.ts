@@ -12,6 +12,7 @@ vi.mock('cloudflare:email', () => ({
 import { handleFreeCheck, buildReplyRaw } from '../../src/email/free-check';
 import type { Env } from '../../src/index';
 import { makeTenant } from '../helpers/tenant';
+import { createMigratedD1 } from '@inbox-angel/db/testing';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -230,6 +231,82 @@ describe('handleFreeCheck', () => {
     const result = await handleFreeCheck(message, tn(env), 'test-token');
     expect(result).toHaveProperty('result');
     expect(message.reply).toHaveBeenCalledOnce();
+  });
+});
+
+// Cloudflare documents that message.reply() throws unless the incoming email has a valid DMARC result (among other rules),
+// so a sender whose domain has no DMARC would get nothing. The same report then goes out as a new email via SEND_EMAIL.
+describe('handleFreeCheck: delivery when reply() is refused', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+
+  type Sent = { from: { name?: string; email: string } | string; to: string[]; subject: string; text: string; html?: string; replyTo?: string; headers?: Record<string, string> };
+
+  function setup(opts: { replyFails?: boolean; sendFails?: boolean; binding?: boolean; env?: Record<string, unknown> } = {}) {
+    const db = createMigratedD1();
+    const sent: Sent[] = [];
+    const SEND_EMAIL = {
+      send: vi.fn(async (m: Sent) => {
+        if (opts.sendFails) throw Object.assign(new Error('not allowed'), { code: 'E_RECIPIENT_NOT_ALLOWED' });
+        sent.push(m);
+        return { messageId: 'm-1' };
+      }),
+    };
+    const tenant = makeTenant({
+      db,
+      env: { ...(opts.binding === false ? {} : { SEND_EMAIL }), ...opts.env } as never,
+      settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' },
+    });
+    const message = makeMessage({ authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com' });
+    if (opts.replyFails) (message.reply as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('original email is not repliable'));
+    const rows = () => db.sqlite.prepare('SELECT from_email, report_sent, overall_status FROM check_results').all() as Array<{ from_email: string; report_sent: number; overall_status: string }>;
+    return { tenant, message, sent, SEND_EMAIL, rows };
+  }
+
+  it('reply() succeeds: nothing is sent through SEND_EMAIL', async () => {
+    mockDohEmpty();
+    const { tenant, message, SEND_EMAIL, rows } = setup();
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(message.reply).toHaveBeenCalledOnce();
+    expect(SEND_EMAIL.send).not.toHaveBeenCalled();
+    expect(rows()).toEqual([expect.objectContaining({ from_email: 'user@example.com', report_sent: 1 })]);
+  });
+
+  it('reply() throws: one email through SEND_EMAIL to the sender, same subject and body, threaded', async () => {
+    mockDohEmpty();
+    const { tenant, message, sent, rows } = setup({ replyFails: true });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(sent).toHaveLength(1);
+    const m = sent[0];
+    expect(m.to).toEqual(['user@example.com']);
+    expect(m.from).toEqual({ name: 'InboxAngel', email: 'check@reports.inboxangel.io' });
+    expect(m.subject).toBe('Email security check — example.com');
+    expect(m.text).toContain('example.com');
+    expect(m.text).toContain('🚨');
+    expect(m.html).toContain('example.com');
+    expect(m.headers).toMatchObject({ 'In-Reply-To': '<orig-123@mail.example.com>', References: '<orig-123@mail.example.com>' });
+    expect(rows()).toEqual([expect.objectContaining({ from_email: 'user@example.com', report_sent: 1 })]);
+  });
+
+  it('reply() and the send both fail: the error is logged and the check result is still stored as not sent', async () => {
+    mockDohEmpty();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { tenant, message, rows } = setup({ replyFails: true, sendFails: true });
+    const result = await handleFreeCheck(message, tenant, 'tok');
+    expect(result.result).toBe('exposed');
+    expect(rows()).toEqual([expect.objectContaining({ from_email: 'user@example.com', report_sent: 0, overall_status: 'exposed' })]);
+    expect(errors.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/free-check: report not delivered/);
+    errors.mockRestore();
+  });
+
+  it('reply() throws and no SEND_EMAIL binding: logged, still stored as not sent', async () => {
+    mockDohEmpty();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { tenant, message, rows } = setup({ replyFails: true, binding: false });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(rows()).toEqual([expect.objectContaining({ report_sent: 0 })]);
+    expect(errors.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/free-check: report not delivered/);
+    errors.mockRestore();
   });
 });
 
