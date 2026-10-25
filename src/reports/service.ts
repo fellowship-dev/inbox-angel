@@ -5,6 +5,7 @@ import { enrollmentView } from '../domains/service';
 import { getAnalytics } from './analytics';
 import { buildRemediation } from './remediation';
 import type { EvidenceSection } from './contracts';
+import { getGoogleEvidence } from '../metrics/store';
 
 export interface ReportOptions { days?: number; now?: number; resolver?: Resolver; resolvers?: readonly Resolver[] }
 
@@ -24,6 +25,7 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     lookupDmarc: async () => run.dmarc.status === 'error' ? undefined : run.dmarc.record?.raw ?? null,
   });
   const tls = await tenant.scope.reports.tlsSummary(domainId, window.since, window.until);
+  const google = await getGoogleEvidence(tenant.scope, domainId, window);
   const totals = analytics.totals;
   const section = <T>(source: string, population: string, data: T | null, reason?: string): EvidenceSection<T> => ({
     status: data === null ? 'unavailable' : 'available', ...(reason ? { reason } : {}), source, population, window, data,
@@ -37,7 +39,7 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     sections: {
       dmarc: section('dmarc-aggregate', 'Messages represented in received aggregate DMARC reports; not all mail sent', totals.messages ? { ...totals, unit: 'messages', denominator: totals.messages, alignment: analytics.alignment } : null, totals.messages ? undefined : 'no_reports'),
       tls: section('tls-rpt', 'SMTP TLS sessions represented in received TLS-RPT reports; not delivery or inbox placement', tls?.report_count ? { ...tls, unit: 'sessions' } : null, tls?.report_count ? undefined : 'no_reports'),
-      google: section('google-postmaster-v2', 'Eligible Gmail traffic as defined by Google Postmaster', null, 'not_connected'),
+      google,
       inbox_placement: section('none', 'Recipient inbox versus spam placement', null, 'not_measured'),
     },
     remediation: buildRemediation(dns, 'fixes' in analytics ? analytics.fixes : []),
