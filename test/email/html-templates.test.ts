@@ -218,7 +218,7 @@ describe('buildFreeCheckHtml', () => {
     const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: NO_DMARC });
     expect(html).toContain('_dmarc.acme.com');
     expect(html).toContain('v=DMARC1; p=none; rua=mailto:dmarc@acme.com');
-    expect(html).toContain('use a mailbox you read');
+    expect(html).toContain('change the address to one you read');
   });
 
   it('p=reject and all passing: no fix block and no "or we do it" line', () => {
@@ -234,6 +234,35 @@ describe('buildFreeCheckHtml', () => {
     const plain = buildFreeCheckHtml(p);
     expect(plain).toContain('Or we do it for you');
     expect(plain).not.toContain('<a ');
+  });
+
+  it('protected: X and LinkedIn share links, URL-encoded and HTML-escaped, before the help line', () => {
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('protected'), auth: AUTH_PASS, dns: DNS_FULL });
+    const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map(m => m[1].replace(/&amp;/g, '&'));
+    const x = hrefs.find(h => h.startsWith('https://x.com/intent/tweet?text='))!;
+    const li = hrefs.find(h => h.startsWith('https://www.linkedin.com/feed/?shareActive=true&text='))!;
+    for (const u of [x, li]) {
+      expect(u).toBeDefined();
+      expect(u).not.toMatch(/ /);
+      expect(new URL(u).searchParams.get('text')).toContain('acme.com');
+    }
+    expect(html).toContain('shareActive=true&amp;text=');
+    expect(html.indexOf('x.com/intent')).toBeLessThan(html.indexOf('Need help?'));
+  });
+
+  it('at risk and exposed: no share links', () => {
+    for (const status of ['at_risk', 'exposed'] as const) {
+      const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary(status), auth: AUTH_PASS, dns: DNS_FULL });
+      expect(html).not.toContain('x.com/intent');
+      expect(html).not.toContain('linkedin.com');
+    }
+  });
+
+  it('Google MX and no SPF: the SPF record is the catalog\'s Google include', () => {
+    const dns: DnsCheckResult = { domain: 'acme.com', spf: null, dkim: null, dmarc: null, mx: { status: 'found', hosts: [{ priority: 1, host: 'aspmx.l.google.com' }] } };
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed', { spfPass: false }), auth: null, dns });
+    expect(html).toContain('v=spf1 include:_spf.google.com ~all');
+    expect(html).not.toMatch(/resolver|cross-check|consensus|confirmed/i);
   });
 
   it('is valid HTML with doctype', () => {

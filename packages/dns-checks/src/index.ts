@@ -7,4 +7,5 @@ export * from './mx';
 export * from './mta-sts';
 export * from './bimi';
 export * from './providers';
+export * from './dns-hosts';
 export * from './report';

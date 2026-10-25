@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { checkDomain } from '../src/report';
-import { createResolver } from '../src/doh';
+import { createResolver, DEFAULT_DOH_ENDPOINT, DOH_ENDPOINTS, type FetchLike } from '../src/doh';
 import { dohFetch, resp, type Zone } from './helpers';
 
 const POLICY = 'version: STSv1\nmode: enforce\nmx: aspmx.l.google.com\nmax_age: 604800\n';
@@ -101,5 +101,62 @@ describe('checkDomain – DNS errors are never reported as "no record"', () => {
     const r = await checkDomain('x.com', { fetch: dohFetch({}), dkimSelectors: ['google'] });
     expect(r.dkim.scanned).toBe(1);
     expect(r.grade.level).toBe(0);
+  });
+});
+
+describe('checkDomain – NS and DNS host', () => {
+  it('NS ns1.cloudflare.com maps to the cloudflare DNS host', async () => {
+    const r = await run({ ...base, 'NS x.com': ['ns1.cloudflare.com.', 'ns2.cloudflare.com.'] });
+    expect(r.ns).toEqual({ status: 'found', hosts: ['ns1.cloudflare.com', 'ns2.cloudflare.com'] });
+    expect(r.dnsHost).toEqual({ id: 'cloudflare', label: 'Cloudflare' });
+    expect(r.errors).toEqual([]);
+  });
+  it('an unknown NS maps to unknown and keeps the raw hosts', async () => {
+    const r = await run({ ...base, 'NS x.com': ['ns1.example-dns.net.'] });
+    expect(r.dnsHost).toEqual({ id: 'unknown', label: 'Unknown' });
+    expect(r.ns.hosts).toEqual(['ns1.example-dns.net']);
+  });
+  it('no NS records: unknown host, no error', async () => {
+    const r = await run(base);
+    expect(r.ns).toEqual({ status: 'none', hosts: [] });
+    expect(r.dnsHost.id).toBe('unknown');
+    expect(r.errors).toEqual([]);
+  });
+  it('an NS lookup error leaves the host unknown, adds an error, and does not fail the other checks', async () => {
+    const zone: Zone = { ...base, 'TXT _dmarc.x.com': ['v=DMARC1; p=none'] };
+    const ok = await run(zone);
+    const r = await run({ ...zone, 'NS x.com': 'SERVFAIL' });
+    expect(r.ns.status).toBe('error');
+    expect(r.dnsHost.id).toBe('unknown');
+    expect(r.errors).toEqual([{ check: 'ns', message: 'DNS SERVFAIL' }]);
+    expect(r.grade).toEqual(ok.grade);
+    expect(r.spf.status).toBe('ok');
+    expect(r.mx.status).toBe('found');
+  });
+});
+
+describe('checkDomain – named resolver endpoints', () => {
+  it('exports cloudflare, google and nextdns JSON DoH endpoints', () => {
+    expect(DOH_ENDPOINTS).toEqual({
+      cloudflare: 'https://cloudflare-dns.com/dns-query',
+      google: 'https://dns.google/resolve',
+      nextdns: 'https://dns.nextdns.io/dns-query',
+    });
+    expect(DOH_ENDPOINTS.cloudflare).toBe(DEFAULT_DOH_ENDPOINT);
+  });
+  it('passing the google endpoint sends every query there', async () => {
+    const urls: string[] = [];
+    const zone = dohFetch({ ...base, 'NS x.com': ['ns1.cloudflare.com.'] });
+    // Record the URL, then answer from the fake zone (which keys on the cloudflare path).
+    const fetch: FetchLike = async (url, init) => {
+      urls.push(url);
+      return zone(url.replace(DOH_ENDPOINTS.google, DEFAULT_DOH_ENDPOINT), init);
+    };
+    const r = await checkDomain('x.com', { fetch, endpoint: DOH_ENDPOINTS.google, dkimSelectors: ['google'] });
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every(u => u.startsWith(`${DOH_ENDPOINTS.google}?name=`))).toBe(true);
+    expect(urls).toContain(`${DOH_ENDPOINTS.google}?name=x.com&type=NS`);
+    expect(r.dnsHost.id).toBe('cloudflare');
+    expect(r.mx.status).toBe('found');
   });
 });

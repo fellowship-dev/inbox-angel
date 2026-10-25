@@ -9,6 +9,7 @@ import { lookupMtaSts, type MtaStsLookup } from './mta-sts';
 import { lookupBimi, type BimiLookup } from './bimi';
 import { detectProviders, type DetectedProvider } from './providers';
 import { normalizeDomain } from './org-domain';
+import { lookupNs, detectDnsHost, type NsLookup, type DnsHost } from './dns-hosts';
 
 export type Level = 0 | 1 | 2 | 3;
 
@@ -38,9 +39,13 @@ export interface DomainReport {
   mtaSts: MtaStsLookup;
   bimi: BimiLookup;
   providers: DetectedProvider[];
+  /** NS hosts of the checked name. Does not affect the grade. */
+  ns: NsLookup;
+  /** Where the zone is hosted, from `ns`; `unknown` when unrecognised, absent or the lookup failed. */
+  dnsHost: DnsHost;
   grade: Grade;
   /** Names of checks that failed with a DNS/network error, with messages. */
-  errors: { check: 'mx' | 'spf' | 'dmarc' | 'dkim' | 'mta-sts' | 'bimi'; message: string }[];
+  errors: { check: 'mx' | 'spf' | 'dmarc' | 'dkim' | 'mta-sts' | 'bimi' | 'ns'; message: string }[];
 }
 
 export interface CheckDomainOptions extends ResolverOptions {
@@ -52,7 +57,7 @@ export interface CheckDomainOptions extends ResolverOptions {
 
 const LABELS: Record<Level, string> = { 0: 'Unprotected', 1: 'Monitoring', 2: 'Enforced', 3: 'Hardened' };
 
-export function gradeReport(r: Omit<DomainReport, 'grade' | 'errors' | 'providers'>): Grade {
+export function gradeReport(r: Omit<DomainReport, 'grade' | 'errors' | 'providers' | 'ns' | 'dnsHost'>): Grade {
   const reasons: string[] = [];
   const nextSteps: string[] = [];
   const spfErr = r.spf.status === 'temperror';
@@ -116,13 +121,14 @@ export async function checkDomain(domain: string, options: CheckDomainOptions = 
   const name = normalizeDomain(domain);
   const resolver = options.resolver ?? createResolver(options);
 
-  const [mx, spf, dmarc, dkim, mtaSts, bimi] = await Promise.all([
+  const [mx, spf, dmarc, dkim, mtaSts, bimi, ns] = await Promise.all([
     lookupMx(resolver, name),
     analyzeSpf(name, resolver),
     lookupDmarc(resolver, name),
     scanDkimSelectors(resolver, name, options.dkimSelectors ?? COMMON_DKIM_SELECTORS),
     lookupMtaSts(resolver, name),
     lookupBimi(resolver, name),
+    lookupNs(resolver, name),
   ]);
 
   const errors: DomainReport['errors'] = [];
@@ -132,8 +138,9 @@ export async function checkDomain(domain: string, options: CheckDomainOptions = 
   for (const e of dkim.errors) errors.push({ check: 'dkim', message: `${e.selector}: ${e.error}` });
   if (mtaSts.status === 'error') errors.push({ check: 'mta-sts', message: mtaSts.error ?? 'error' });
   if (bimi.status === 'error') errors.push({ check: 'bimi', message: bimi.error ?? 'error' });
+  if (ns.status === 'error') errors.push({ check: 'ns', message: ns.error ?? 'DNS error' });
 
   const providers = detectProviders({ mxHosts: mx.hosts.map(h => h.host), spfIncludes: spf.includes });
   const partial = { domain: name, mx, spf, dmarc, dkim, mtaSts, bimi };
-  return { ...partial, providers, grade: gradeReport(partial), errors };
+  return { ...partial, providers, ns, dnsHost: detectDnsHost(ns.hosts), grade: gradeReport(partial), errors };
 }

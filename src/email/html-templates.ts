@@ -3,7 +3,7 @@
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
-import { CheckSummary, DO_IT_FOR_YOU, doItForYouUrl, fixSteps, HELP_LINE, OverallStatus, retentionSentence } from './report-formatter';
+import { CheckSummary, DO_IT_FOR_YOU, doItForYouUrl, fixSteps, HELP_LINE, OverallStatus, retentionSentence, SHARE_IT, shareLinks } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
 import { AuthResultsHeader } from './parse-headers';
@@ -274,6 +274,13 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
     body += url
       ? `<p style="margin:0;font-size:14px;">${DO_IT_FOR_YOU}: <a href="${esc(url)}" style="color:${accent};">${esc(url)}</a></p>`
       : `<p style="margin:0;font-size:14px;">${DO_IT_FOR_YOU}: reply to this email.</p>`;
+  }
+
+  const share = shareLinks(summary, p.siteUrl);
+  if (share.length) {
+    const accent = esc((p.brand ?? DEFAULT_BRAND).color);
+    const links = share.map(l => `<a href="${esc(l.url)}" style="color:${accent};">${esc(l.label)}</a>`).join(' · ');
+    body += `<p style="margin:16px 0 0;font-size:14px;">${SHARE_IT} (optional, nothing is posted unless you post it): ${links}</p>`;
   }
 
   if (p.disclosure) {

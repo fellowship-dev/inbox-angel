@@ -16,6 +16,7 @@
     "./mta-sts": "./src/mta-sts.ts",
     "./bimi": "./src/bimi.ts",
     "./providers": "./src/providers.ts",
+    "./dns-hosts": "./src/dns-hosts.ts",
     "./org-domain": "./src/org-domain.ts",
     "./email-service-providers": "./src/email-service-providers.ts",
     "./sender-providers": "./src/sender-providers.ts",

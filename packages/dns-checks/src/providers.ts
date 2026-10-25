@@ -29,6 +29,9 @@ const SIGNATURES: Signature[] = [
   { id: 'cloudflare-email-routing', name: 'Cloudflare Email Routing', kind: 'mailbox', mx: [/\.mx\.cloudflare\.net$/], spf: [/^_spf\.mx\.cloudflare\.net$/] },
 ];
 
+/** The provider id table: every id `detectProviders` can return, with its name and kind. */
+export const PROVIDERS: readonly ProviderInfo[] = SIGNATURES.map(({ id, name, kind }) => ({ id, name, kind }));
+
 export interface DetectedProvider extends ProviderInfo {
   /** Which signals matched, e.g. `mx:aspmx.l.google.com`, `spf-include:_spf.google.com` */
   evidence: string[];

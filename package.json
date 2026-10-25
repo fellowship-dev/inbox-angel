@@ -18,7 +18,7 @@
     "seed:remote": "npx tsx scripts/seed-demo.ts > /tmp/ia-seed.sql && wrangler d1 execute inbox-angel --remote --file=/tmp/ia-seed.sql; rm -f /tmp/ia-seed.sql",
     "unseed:local": "wrangler d1 execute inbox-angel --local  --file=scripts/unseed-demo.sql",
     "unseed:remote": "wrangler d1 execute inbox-angel --remote --file=scripts/unseed-demo.sql",
-    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks && tsc -p packages/db && tsc -p web",
+    "typecheck": "tsc --noEmit && tsc -p packages/dns-checks && tsc -p packages/report && tsc -p packages/db && tsc -p web",
     "migrate:local": "node packages/db/scripts/migrate.mjs --local",
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts"
   },
@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@inbox-angel/dns-checks": "*",
+    "@inbox-angel/report": "*",
     "better-auth": "^1.7.12",
     "fast-xml-parser": "^5.7.2",
     "fflate": "^0.8.2",
