@@ -38,6 +38,7 @@ export async function loadTenant(env: BoundEnv, workspace: ResolvedWorkspace, op
     workspaceId: workspace.workspaceId,
     userId: workspace.userId,
     role: workspace.role,
+    access: workspace.access,
     mode,
     cfToken: opts.cfToken ?? cfTokenFor(env, mode, workspace.workspaceId),
     fetch: opts.fetch,

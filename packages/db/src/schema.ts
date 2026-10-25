@@ -702,6 +702,7 @@ export const GLOBAL_TABLES = {
 
 /** Tables that must carry an `workspace_id` column. */
 export const WORKSPACE_OWNED_TABLES = [
+	'products', 'product_domains', 'access_principals', 'access_grants', 'access_credentials',
 	'memberships',
 	'domains',
 	'aggregate_reports',
@@ -760,3 +761,49 @@ export const intakeUsage = sqliteTable(
 	},
 	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] })],
 );
+
+// Explicit delegated access. Existing reports/domains keep their original workspace ownership.
+export const products = sqliteTable('products', {
+ id: text('id').primaryKey(),
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ name: text('name').notNull(),
+ archived_at: integer('archived_at'),
+ created_at: integer('created_at').notNull().default(now),
+});
+export const productDomains = sqliteTable('product_domains', {
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ product_id: text('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+ domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+}, t => [primaryKey({ columns: [t.product_id, t.domain_id] })]);
+export const accessPrincipals = sqliteTable('access_principals', {
+ id: text('id').primaryKey(),
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ kind: text('kind', { enum: ['human', 'service'] }).notNull(),
+ user_id: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+ name: text('name').notNull(),
+ disabled_at: integer('disabled_at'),
+ created_at: integer('created_at').notNull().default(now),
+});
+export const accessGrants = sqliteTable('access_grants', {
+ id: text('id').primaryKey(),
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ principal_id: text('principal_id').notNull().references(() => accessPrincipals.id, { onDelete: 'cascade' }),
+ product_id: text('product_id').references(() => products.id, { onDelete: 'cascade' }),
+ domain: text('domain'),
+ actions: text('actions').notNull(),
+ expires_at: integer('expires_at').notNull(),
+ revoked_at: integer('revoked_at'),
+ created_at: integer('created_at').notNull().default(now),
+});
+export const accessCredentials = sqliteTable('access_credentials', {
+ id: text('id').primaryKey(),
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ principal_id: text('principal_id').notNull().references(() => accessPrincipals.id, { onDelete: 'cascade' }),
+ name: text('name').notNull(),
+ prefix: text('prefix').notNull(),
+ key_hash: text('key_hash').notNull().unique(),
+ expires_at: integer('expires_at').notNull(),
+ revoked_at: integer('revoked_at'),
+ last_used_at: integer('last_used_at'),
+ created_at: integer('created_at').notNull().default(now),
+});

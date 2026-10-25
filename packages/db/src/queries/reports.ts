@@ -352,7 +352,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 				.run();
 		},
 
-		async tlsSummary(domainId: number, since: number) {
+		async tlsSummary(domainId: number, since: number, until?: number) {
 			const rows = await db.all<{ total_success: number; total_failure: number; report_count: number }>(sql`
 				SELECT
 					COALESCE(SUM(total_success), 0) AS total_success,
@@ -360,6 +360,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					COUNT(*) AS report_count
 				FROM tls_reports
 				WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
+				${until === undefined ? sql`` : sql`AND date_begin <= ${until}`}
 			`);
 			return rows[0] ?? null;
 		},

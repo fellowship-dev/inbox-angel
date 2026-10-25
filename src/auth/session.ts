@@ -1,11 +1,8 @@
 // Resolves "who is calling, and in which workspace, with what role" from a request.
 //
-// Credentials, in order:
-//   1. the deprecated API_KEY env var                    → instance admin (owner of ws_default, no user)
-//   2. `X-Api-Key` / `Authorization: Bearer` ia_…        → a per-user API key (its workspace, its owner's current role)
-//   3. `X-Api-Key` / `Authorization: Bearer` <token>     → a Better Auth session (the dashboard keeps its token in localStorage)
-//   4. the Better Auth session cookie                    → same session, sent by the browser (OAuth sign-in)
-import { authLookups, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@inbox-angel/db';
+// Browser sessions use current memberships. ias_ credentials use explicit finite grants.
+// Prelaunch env API_KEY and ia_ machine credentials deliberately have no fallback.
+import { authLookups, globalQueries, type MembershipRole } from '@inbox-angel/db';
 import { resolveApiKey, looksLikeApiKey } from './api-keys';
 import { createAuth } from './index';
 import type { AuthEnv } from './config';
@@ -23,7 +20,7 @@ export class AuthError extends Error {
   }
 }
 
-export type PrincipalKind = 'instance' | 'api_key' | 'session';
+export type PrincipalKind = 'instance' | 'api_key' | 'session' | 'service';
 
 export interface Principal {
   kind: PrincipalKind;
@@ -34,6 +31,7 @@ export interface Principal {
   workspaceId: string;
   role: MembershipRole;
   apiKeyId?: string;
+  access?: import('../access/principal').AccessSubject;
 }
 
 async function sha256(value: string): Promise<Uint8Array> {
@@ -123,6 +121,7 @@ async function fromSession(
     user: { id: user.id, email: user.email, name: user.name },
     workspaceId: chosen.workspace_id,
     role: chosen.role,
+    access: { principalId: user.id, kind: 'human', userId: user.id, workspaceId: chosen.workspace_id, session: true, grants: [], memberships: memberships.map(m => ({ workspaceId: m.workspace_id, role: m.role })) },
   };
 }
 
@@ -135,24 +134,29 @@ export async function authenticate(
   const presented = presentedCredential(request);
 
   if (presented && env.API_KEY && (await safeEqual(presented, env.API_KEY))) {
-    return { kind: 'instance', viaCookie: false, user: null, workspaceId: IMPLICIT_WORKSPACE_ID, role: 'owner' };
+    // Prelaunch instance-wide credentials are intentionally invalidated, never converted at runtime.
+    return null;
   }
   if (!env.DB) return null;
 
   if (presented && looksLikeApiKey(presented)) {
     const key = await resolveApiKey(env.DB, presented);
     if (!key) return null;
-    const user = await globalQueries(env.DB).users.byId(key.userId);
-    if (!user) return null;
-    // Hosted: a key is as good as its owner's proven address.
-    if (isSaas(env) && !user.email_verified) throw new AuthError('verify your email address first', 403);
+    const user = key.userId ? await globalQueries(env.DB).users.byId(key.userId) : null;
+    if (key.access.kind === 'human' && !user) return null;
+    if (isSaas(env) && user && !user.email_verified) throw new AuthError('verify your email address first', 403);
+    const wanted = request.headers.get('x-workspace-id');
+    let workspaceId = key.workspaceId, role = key.role;
+    if (wanted && wanted !== workspaceId) {
+      const membership = key.access.memberships?.find(m => m.workspaceId === wanted);
+      const consent = key.access.grants.some(g => g.workspaceId === wanted && g.revokedAt === null && g.expiresAt > Math.floor(Date.now() / 1000));
+      if (key.access.kind !== 'human' || !membership || !consent) throw new AuthError('workspace not authorized by this credential', 403);
+      workspaceId = wanted; role = membership.role;
+    }
     return {
-      kind: 'api_key',
-      viaCookie: false,
-      user: { id: user.id, email: user.email, name: user.name },
-      workspaceId: key.workspaceId,
-      role: key.role,
-      apiKeyId: key.keyId,
+      kind: key.access.kind === 'service' ? 'service' : 'api_key', viaCookie: false,
+      user: user ? { id: user.id, email: user.email, name: user.name } : null,
+      workspaceId, role, apiKeyId: key.keyId, access: key.access,
     };
   }
   return fromSession(env, request, presented || null, ctx);

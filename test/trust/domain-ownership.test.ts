@@ -93,6 +93,23 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     expect(w.rows('SELECT * FROM domain_claims WHERE workspace_id = ?', w.A.ws)).toEqual([]);
   });
 
+  it('proves and resumes a domain without configuring an intake hub', async () => {
+    const w = await world();
+    w.db.sqlite.prepare("DELETE FROM settings WHERE workspace_id = ?").run(w.A.ws);
+    const { claim } = await json(await add(w, w.A, 'fresh.example'));
+    w.cf.doh['_inboxangel.fresh.example'] = [claim.txt_value];
+    const verified = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} });
+    expect(verified.status).toBe(201);
+    const body = await json(verified);
+    expect(body.intake).toMatchObject({ status: 'unavailable', reason: 'not_configured' });
+    expect(body.domain.rua_address).toBe('');
+    const repeated = await add(w, w.A, 'fresh.example');
+    expect(repeated.status).toBe(200);
+    expect((await json(repeated)).domain.id).toBe(body.domain.id);
+    expect(w.rows("SELECT * FROM domains WHERE domain = 'fresh.example'")).toHaveLength(1);
+    expect(w.rows('SELECT * FROM domain_claims WHERE workspace_id = ?', w.A.ws)).toEqual([]);
+  });
+
   it('first to verify wins: the other pending claims are told, cannot verify, and cannot re-claim', async () => {
     const w = await world();
     const a = (await json(await add(w, w.A, 'acme.com'))).claim;

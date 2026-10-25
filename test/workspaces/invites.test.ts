@@ -1,5 +1,6 @@
 // Invites when the email already has a login: accepting adds a membership, never a second user.
 import { describe, it, expect, vi } from 'vitest';
+import { delegatedKey } from '../auth/grant-fixture';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept } from '../auth/helpers';
 
@@ -90,14 +91,15 @@ describe('invite to an email that already has a login', () => {
     expect(rows(db, "SELECT COUNT(*) n FROM users WHERE email = 'sam@example.com'")[0].n).toBe(1);
   });
 
-  it('an API key cannot accept an invite for its owner', async () => {
+  it('a service credential cannot accept a human invitation', async () => {
     const { db, env, owner, invite } = await world();
     await inviteAndAccept(env, owner, 'sam@example.com', 'member');
     const t = await invite('sam@example.com');
-    const { createApiKey } = await import('../../src/auth/api-keys');
-    const uid = rows(db, "SELECT id FROM users WHERE email = 'sam@example.com'")[0].id;
-    const k = await createApiKey(db as any, { workspaceId: 'ws_default', userId: uid, name: 'k' });
+    const uid = rows(db, "SELECT id FROM users WHERE email = 'owner@example.com'")[0].id;
+    const k = await delegatedKey(db as any, { workspaceId: 'ws_default', userId: uid, name: 'k', domain: 'example.com', kind: 'service' });
+    expect((await call(env, 'GET', '/api/resources', { key: k.key })).status).toBe(200);
     expect((await call(env, 'POST', `/api/invites/${t}`, { key: k.key, body: {} })).status).toBe(401);
+    expect(rows(db, 'SELECT used_at FROM invites WHERE token = ?', t)[0].used_at).toBeNull();
   });
 
   it('expired or unknown invites are 404 for existing users too', async () => {

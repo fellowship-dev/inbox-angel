@@ -24,6 +24,7 @@ export const sessionWorkspaceResolver: WorkspaceResolver = async (request: Reque
     throw e; // 403: valid credential, not allowed (no membership, cross-site cookie write, …)
   }
   return {
+    access: who.access,
     workspaceId: who.workspaceId,
     // The instance API_KEY belongs to no user.
     userId: who.kind === 'instance' ? undefined : who.userId,

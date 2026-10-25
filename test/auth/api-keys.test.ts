@@ -1,161 +1,54 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { Env } from '../../src/index';
-
-vi.mock('../../src/env-utils', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    enrichEnv: vi.fn().mockResolvedValue(undefined),
-    getZoneId: vi.fn().mockReturnValue(undefined),
-    getAccountId: vi.fn().mockReturnValue(undefined),
-    getBaseDomain: vi.fn().mockReturnValue(undefined),
-    reportsDomain: vi.fn().mockReturnValue('reports.example.com'),
-    fromEmail: vi.fn().mockReturnValue('noreply@reports.example.com'),
-  };
-});
-vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
-
+import { describe, it, expect } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { call, makeEnv, setupOwner, inviteAndAccept } from './helpers';
+import { forWorkspace } from '@inbox-angel/db';
+import { issueAccessCredential, resolveApiKey } from '../../src/auth/api-keys';
+import { authenticate } from '../../src/auth/session';
+import { requireAuth } from '../../src/api/auth';
+import type { AuthEnv } from '../../src/auth/config';
 
-const rows = (db: ReturnType<typeof createMigratedD1>, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
-
-async function createKey(env: Env, token: string, body: unknown = { name: 'ci' }) {
-  const res = await call(env, 'POST', '/api/keys', { key: token, body });
-  return { res, body: await res.clone().json() as any };
+async function fixture() {
+ const db=createMigratedD1(), q=forWorkspace(db,'ws_default');
+ await q.access.principals.create({id:'svc',kind:'service',name:'Product A'});
+ await q.domains.insert({domain:'a.example.com',rua_address:'r@example.com'});
+ await q.domains.insert({domain:'b.example.com',rua_address:'r@example.com'});
+ const domains=await q.domains.list();
+ await q.access.grants.create({id:'grant',workspace_id:'ws_default',principal_id:'svc',domain:'a.example.com',actions:'["reports:read"]',expires_at:Math.floor(Date.now()/1000)+3600});
+ const credential=await issueAccessCredential(db,{workspaceId:'ws_default',principalId:'svc',name:'CI',expiresAt:Math.floor(Date.now()/1000)+3600});
+ return {db,q,domains,credential,env:{DB:db,API_KEY:'retired-instance'} as unknown as AuthEnv};
 }
-
-describe('per-user API keys', () => {
-  it('revoke-all kills every key of the caller, and only theirs', async () => {
-    const env = makeEnv();
-    const owner = await setupOwner(env);
-    const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
-    const a = (await createKey(env, owner, { name: 'a' })).body;
-    const b = (await createKey(env, owner, { name: 'b' })).body;
-    const m = (await createKey(env, member, { name: 'm' })).body;
-    const res = await call(env, 'POST', '/api/keys/revoke-all', { key: owner, body: {} });
-    expect(await res.json()).toEqual({ ok: true, revoked: 2 });
-    for (const k of [a, b]) expect((await call(env, 'GET', '/api/domains', { key: k.key })).status).toBe(401);
-    expect((await call(env, 'GET', '/api/domains', { key: m.key })).status).toBe(200);
-  });
-
-  it('creates a key shown once, stored only as a hash, and authenticates as its owner', async () => {
-    const db = createMigratedD1();
-    const env = makeEnv(db);
-    const owner = await setupOwner(env);
-    const { res, body } = await createKey(env, owner, { name: 'deploy bot' });
-    expect(res.status).toBe(201);
-    expect(body.key).toMatch(/^ia_[A-Za-z0-9_-]{43}$/);
-    expect(body.prefix).toBe(body.key.slice(0, 8));
-
-    const stored = rows(db, 'SELECT * FROM api_keys');
-    expect(stored).toHaveLength(1);
-    expect(JSON.stringify(stored[0])).not.toContain(body.key);
-    expect(stored[0]).toMatchObject({ workspace_id: 'ws_default', name: 'deploy bot', prefix: body.prefix, revoked_at: null, last_used_at: null });
-    expect(stored[0].key_hash).toMatch(/^[0-9a-f]{64}$/);
-
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(200);
-    expect((await call(env, 'GET', '/api/domains', { headers: { authorization: `Bearer ${body.key}` } })).status).toBe(200);
-    expect((await call(env, 'GET', '/api/domains', { key: body.key + 'x' })).status).toBe(401);
-  });
-
-  it('lists prefixes only, and records last use', async () => {
-    const db = createMigratedD1();
-    const env = makeEnv(db);
-    const owner = await setupOwner(env);
-    const { body } = await createKey(env, owner);
-    await call(env, 'GET', '/api/domains', { key: body.key });
-
-    const list = await (await call(env, 'GET', '/api/keys', { key: owner })).json() as any;
-    expect(list.keys).toHaveLength(1);
-    expect(list.keys[0]).toMatchObject({ id: body.id, name: 'ci', prefix: body.prefix });
-    expect(list.keys[0].last_used_at).toBeGreaterThan(0);
-    expect(JSON.stringify(list)).not.toContain(body.key);
-    expect(Object.keys(list.keys[0])).not.toContain('key_hash');
-  });
-
-  it('revoking stops the key immediately', async () => {
-    const env = makeEnv();
-    const owner = await setupOwner(env);
-    const { body } = await createKey(env, owner);
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(200);
-    expect((await call(env, 'DELETE', `/api/keys/${body.id}`, { key: owner })).status).toBe(200);
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(401);
-    expect((await call(env, 'DELETE', `/api/keys/${body.id}`, { key: owner })).status).toBe(404);
-    expect(((await (await call(env, 'GET', '/api/keys', { key: owner })).json()) as any).keys).toEqual([]);
-  });
-
-  it('expired keys stop working', async () => {
-    const db = createMigratedD1();
-    const env = makeEnv(db);
-    const owner = await setupOwner(env);
-    const { body } = await createKey(env, owner, { name: 'short', expires_in_days: 1 });
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(200);
-    db.sqlite.prepare('UPDATE api_keys SET expires_at = 1').run();
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(401);
-  });
-
-  it('a key carries its owner’s current role: a member’s key cannot write, and demotion/removal limits it', async () => {
-    const db = createMigratedD1();
-    const env = makeEnv(db);
-    const owner = await setupOwner(env);
-    const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
-    const { body } = await createKey(env, member, { name: 'mine' });
-
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(200);
-    expect((await call(env, 'POST', '/api/domains', { key: body.key, body: { domain: 'x.example.com' } })).status).toBe(403);
-
-    // promote then demote in place
-    db.sqlite.prepare("UPDATE memberships SET role = 'admin' WHERE user_id = (SELECT id FROM users WHERE email = 'm@example.com')").run();
-    expect((await call(env, 'POST', '/api/settings/base-domain', { key: body.key, body: { domain: 'example.com' } })).status).toBeLessThan(300);
-    db.sqlite.prepare("UPDATE memberships SET role = 'member' WHERE user_id = (SELECT id FROM users WHERE email = 'm@example.com')").run();
-    expect((await call(env, 'POST', '/api/settings/base-domain', { key: body.key, body: { domain: 'example.com' } })).status).toBe(403);
-
-    // removed from the team: key is dead
-    const team = await (await call(env, 'GET', '/api/team', { key: owner })).json() as any;
-    const id = team.users.find((u: any) => u.email === 'm@example.com').id;
-    await call(env, 'DELETE', `/api/team/${id}`, { key: owner });
-    expect((await call(env, 'GET', '/api/domains', { key: body.key })).status).toBe(401);
-  });
-
-  it('keys cannot mint keys, and members only see and revoke their own', async () => {
-    const env = makeEnv();
-    const owner = await setupOwner(env);
-    const member = await inviteAndAccept(env, owner, 'm@example.com', 'member');
-    const ownerKey = (await createKey(env, owner, { name: 'owner key' })).body;
-    const memberKey = (await createKey(env, member, { name: 'member key' })).body;
-
-    expect((await call(env, 'POST', '/api/keys', { key: ownerKey.key, body: { name: 'child' } })).status).toBe(403);
-
-    const memberList = await (await call(env, 'GET', '/api/keys', { key: member })).json() as any;
-    expect(memberList.keys.map((k: any) => k.name)).toEqual(['member key']);
-    const ownerList = await (await call(env, 'GET', '/api/keys', { key: owner })).json() as any;
-    expect(ownerList.keys.map((k: any) => k.name).sort()).toEqual(['member key', 'owner key']);
-
-    expect((await call(env, 'DELETE', `/api/keys/${ownerKey.id}`, { key: member })).status).toBe(404);
-    expect((await call(env, 'DELETE', `/api/keys/${memberKey.id}`, { key: owner })).status).toBe(200);
-  });
-
-  it('is scoped to its workspace: a key resolves to the workspace it was created in', async () => {
-    const db = createMigratedD1();
-    const env = makeEnv(db, { MODE: 'saas', SAAS_ENABLED: '1' });
-    await call(env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'password-123' } });
-    const m = rows(db, 'SELECT user_id, workspace_id FROM memberships')[0];
-    const { createApiKey } = await import('../../src/auth/api-keys');
-    const body = await createApiKey(db as unknown as D1Database, { workspaceId: m.workspace_id, userId: m.user_id, name: 'k' });
-    const row = rows(db, 'SELECT workspace_id FROM api_keys')[0];
-    expect(row.workspace_id).toMatch(/^ws_[0-9a-f]{32}$/);
-    expect(row.workspace_id).not.toBe('ws_default');
-
-    const { resolveApiKey } = await import('../../src/auth/api-keys');
-    expect(await resolveApiKey(db as unknown as D1Database, body.key)).toMatchObject({ workspaceId: row.workspace_id, role: 'owner' });
-  });
-
-  it('validates input', async () => {
-    const env = makeEnv();
-    const owner = await setupOwner(env);
-    expect((await createKey(env, owner, {})).res.status).toBe(400);
-    expect((await createKey(env, owner, { name: 'x', expires_in_days: -1 })).res.status).toBe(400);
-    expect((await call(env, 'POST', '/api/keys', { body: { name: 'x' } })).status).toBe(401);
-  });
+const request=(key:string,path='/api/domains/1/health-report',extra:Record<string,string>={}) => new Request('https://i.example.com'+path,{headers:{'x-api-key':key,...extra}});
+describe('explicit expiring API credentials',()=>{
+ it('uses current named service identity and finite grant in both credential transports',async()=>{
+  const f=await fixture();
+  const x=await requireAuth(request(f.credential.key),f.env);
+  expect(x).toMatchObject({kind:'service',workspaceId:'ws_default',access:{principalId:'svc'}});
+  expect(await requireAuth(new Request('https://i.example.com/api/domains/1/health-report',{headers:{authorization:`Bearer ${f.credential.key}`}}),f.env)).toMatchObject({kind:'service'});
+  await expect(requireAuth(request(f.credential.key,'/api/domains/2/health-report'),f.env)).rejects.toThrow('not authorized');
+  await expect(requireAuth(request(f.credential.key,'/api/domains'),f.env)).rejects.toThrow();
+ });
+ it('does not let workspace headers change a service identity',async()=>{
+  const f=await fixture();
+  await expect(authenticate(request(f.credential.key,undefined,{'x-workspace-id':'guessed'}),f.env)).rejects.toThrow('workspace');
+ });
+ it('rejects expired, revoked and disabled credentials on the next authentication',async()=>{
+  for(const failure of ['expiry','revoked','disabled']) {
+   const f=await fixture();
+   if(failure==='expiry') f.db.sqlite.exec('UPDATE access_credentials SET expires_at=1');
+   if(failure==='revoked') await f.q.access.credentials.revoke(f.credential.id,1);
+   if(failure==='disabled') await f.q.access.principals.disable('svc',1);
+   expect(await authenticate(request(f.credential.key),f.env)).toBeNull();
+  }
+ });
+ it('rejects prelaunch instance and ia_ broad credentials ',async()=>{
+  const f=await fixture();
+  expect(await authenticate(request('retired-instance'),f.env)).toBeNull();
+  expect(await resolveApiKey(f.db,'ia_old')).toBeNull();
+ });
+ it('stores hashes only and never returns credential hashes from owner listing',async()=>{
+  const f=await fixture();
+  expect(f.credential.key).toMatch(/^ias_/);
+  expect(JSON.stringify(f.db.sqlite.prepare('SELECT * FROM access_credentials').get())).not.toContain(f.credential.key);
+  expect(await f.q.access.credentials.list()).toMatchObject([{id:f.credential.id,prefix:f.credential.prefix}]);
+  expect(JSON.stringify(await f.q.access.credentials.list())).not.toContain('key_hash');
+ });
 });

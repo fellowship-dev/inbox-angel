@@ -1,3 +1,4 @@
+import { delegatedKey } from './grant-fixture';
 import { describe, it, expect, vi } from 'vitest';
 
 import { call, makeEnv, setupOwner, req, ctx } from './helpers';
@@ -74,7 +75,9 @@ describe('change-password', () => {
     const env = makeEnv();
     const s1 = await setupOwner(env, 'owner@example.com', 'old-password-123');
     const s2 = (await (await call(env, 'POST', '/api/auth/login', { body: { email: 'owner@example.com', password: 'old-password-123' } })).json() as any).token as string;
-    const key = (await (await call(env, 'POST', '/api/keys', { key: s1, body: { name: 'k' } })).json() as any).key as string;
+    const db = env.DB as any;
+    const userId = db.sqlite.prepare('SELECT id FROM users LIMIT 1').get().id;
+    const key = (await delegatedKey(db,{ workspaceId:'ws_default', userId, name:'k', domain:'example.com' })).key;
 
     const res = await call(env, 'POST', '/api/auth/change-password', { key: s1, body: { currentPassword: 'old-password-123', newPassword: 'new-password-456' } });
     expect(res.status).toBe(200);
@@ -83,7 +86,7 @@ describe('change-password', () => {
     const fresh = res.headers.get('set-auth-token');
     expect(fresh).toBeTruthy();
     expect((await call(env, 'GET', '/api/domains', { key: fresh! })).status).toBe(200);
-    expect((await call(env, 'GET', '/api/domains', { key })).status).toBe(200); // documented: keys survive
+    expect(await (await import('../../src/auth/api-keys')).resolveApiKey(db,key)).not.toBeNull(); // explicit credentials survive password changes
     expect((await call(env, 'POST', '/api/auth/login', { body: { email: 'owner@example.com', password: 'new-password-456' } })).status).toBe(200);
   });
 

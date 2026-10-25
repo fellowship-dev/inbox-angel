@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept, signupVerified, req, ctx } from '../auth/helpers';
+import { delegatedKey } from '../auth/grant-fixture';
 import { createAuth } from '../../src/auth';
 import { handleApi } from '../../src/api/router';
 import { handleOAuthUserInfo } from 'better-auth/oauth2';
@@ -208,15 +209,17 @@ describe('invites are accepted only by a verified, matching email', () => {
   });
 });
 
-describe('API keys follow the owner’s verified address (hosted)', () => {
+describe('delegated human credentials follow the owner’s verified address (hosted)', () => {
   it('a key of an unverified user is refused', async () => {
     const w = saas();
-    const token = await signupVerified(w.env, 'a@example.com');
-    const created = await json(await call(w.env, 'POST', '/api/keys', { key: token, body: { name: 'ci' } }));
+    await signupVerified(w.env, 'a@example.com');
+    const uid = w.rows("SELECT id FROM users WHERE email = 'a@example.com'")[0].id;
+    const workspaceId = w.rows('SELECT workspace_id FROM memberships WHERE user_id = ?', uid)[0].workspace_id;
+    const created = await delegatedKey(w.db as any, { workspaceId, userId: uid, name: 'ci', domain: 'example.com' });
     const key = created.key as string;
-    expect((await call(w.env, 'GET', '/api/me', { key })).status).toBe(200);
+    expect((await call(w.env, 'GET', '/api/resources', { key })).status).toBe(200);
     w.db.sqlite.prepare("UPDATE users SET email_verified = 0 WHERE email = 'a@example.com'").run();
-    expect((await call(w.env, 'GET', '/api/me', { key })).status).toBe(403);
+    expect((await call(w.env, 'GET', '/api/resources', { key })).status).toBe(403);
   });
 });
 
