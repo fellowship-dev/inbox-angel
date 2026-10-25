@@ -18,9 +18,9 @@ export const lightColors = {
 	"accent-fg": "#0b1f3a",
 	"accent-subtle": "#fef7e3",
 	blush: "#fca0a4",
-	success: "#15803d",
+	success: "#147a3a",
 	"success-subtle": "#ecfdf3",
-	warning: "#b45309",
+	warning: "#aa4f08",
 	"warning-subtle": "#fff7e6",
 	danger: "#b91c1c",
 	"danger-subtle": "#fef2f2",
@@ -137,15 +137,14 @@ export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min:
 	{ fg: "warning", bg: "surface-0", min: 4.5, note: "warn text on page" },
 	{ fg: "danger", bg: "surface-0", min: 4.5, note: "fail text on page" },
 	{ fg: "danger", bg: "surface-2", min: 4.5, note: "fail text on raised" },
+	{ fg: "success", bg: "surface-2", min: 4.5, note: "pass text on raised" },
+	{ fg: "warning", bg: "surface-2", min: 4.5, note: "warn text on raised" },
 ];
 
 /**
  * Pairs that FAIL AA with the website's token values, so components avoid them:
- * - success and warning on surface-2 are 4.47:1 in light mode → put status text on surface-1 or a *-subtle tint, not on raised surfaces.
  * - accent-fg is navy in both modes → use it only on the --accent fill, never on --accent-subtle in dark.
  */
 export const forbiddenPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; mode: "light" | "dark" }> = [
 	{ fg: "accent-fg", bg: "accent-subtle", mode: "dark" },
-	{ fg: "success", bg: "surface-2", mode: "light" },
-	{ fg: "warning", bg: "surface-2", mode: "light" },
 ];

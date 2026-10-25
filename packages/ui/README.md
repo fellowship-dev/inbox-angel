@@ -27,7 +27,7 @@ import { colors } from "@inbox-angel/ui/tokens"; // JS consumers
 - Status never relies on colour: icon + word (CheckResult, LevelCard findings, StatusDot label, Alert).
 - "Lookup failed" (`error`) is distinct from "Not found" (`missing`) in CheckResult.
 - Pairs that fail AA with the website tokens are listed in `forbiddenPairs` (tokens.ts) and avoided:
-  `success`/`warning` on `surface-2` (4.47:1, light) and `accent-fg` on `accent-subtle` (dark). Form controls use the added
+  `accent-fg` on `accent-subtle` (dark). Form controls use the added
   `--control-border` token because `--line-strong` is ~1.5:1 on white (WCAG 1.4.11 needs 3:1).
 
 ## Foundations
@@ -54,12 +54,12 @@ Status always pairs colour with an icon and a word (Alert, CheckResult, StatusDo
 
 | Status | Text/icon (light / dark) | Tint (light / dark) | Use |
 | --- | --- | --- | --- |
-| success | #15803D / #4ADE80 | #ECFDF3 / #0F2A1A | check passed, verified |
-| warning | #B45309 / #FBBF24 | #FFF7E6 / #2A2110 | works but needs attention (e.g. DMARC `p=none`) |
+| success | #147A3A / #4ADE80 | #ECFDF3 / #0F2A1A | check passed, verified |
+| warning | #AA4F08 / #FBBF24 | #FFF7E6 / #2A2110 | works but needs attention (e.g. DMARC `p=none`) |
 | danger | #B91C1C / #F87171 | #FEF2F2 / #2C1416 | failed, blocked, destructive |
 | info | brand-ink | brand-subtle | neutral notice, sample data |
 
-Put status text on `surface-0/1` or its own tint. `success`/`warning` on `surface-2` is 4.47:1 in light mode and is listed in `forbiddenPairs`.
+Light success/warning were darkened from #15803D/#B45309 so status text meets 4.5:1 on every surface including `surface-2` (4.82:1 / 4.90:1); dark values are unchanged.
 
 ### Typography, spacing, radius, motion
 
