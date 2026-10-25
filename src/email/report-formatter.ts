@@ -114,12 +114,21 @@ export interface CheckReportOptions {
   enrolled?: { text: string; unsubscribeUrl: string };
   /** BOOKING_URL: where "or we do it for you" points first. */
   bookingUrl?: string | null;
+  /** Set when the sender is not enrolled but already known: a finished/stopped lead, or a suppressed address. */
+  lead?: 'inactive' | 'suppressed';
 }
 
-/** What we keep about the sender, truthfully: enrolled leads stay until they unsubscribe; otherwise the check-result window. */
-export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 'enrolled'>): string {
-  if (o.enrolled) return 'We keep your address and this result while you receive our follow-up emails, and delete them when you unsubscribe.';
+/**
+ * What we keep about the sender, truthfully, for each enrolment outcome: check results go after `retentionDays`
+ * (check_results); an enrolled address stays until unsubscribe, then only on the suppression list (unsubscribeEmail);
+ * a lead no longer in the sequence stays up to 12 months after its last activity (src/funnel/cron.ts); a suppressed
+ * address stays suppressed.
+ */
+export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 'enrolled' | 'lead'>): string {
   const days = o.retentionDays ?? retentionPolicy({}).checkResultsDays;
+  if (o.enrolled) return `We delete this result after ${days} days. We use your address for our follow-up emails until you unsubscribe; after that we keep it only on a do-not-contact list.`;
+  if (o.lead === 'inactive') return 'We keep your address and a summary of this result for up to 12 months after your last check, then delete them.';
+  if (o.lead === 'suppressed') return `Your address is on our do-not-contact list and stays there, so you get no follow-up emails. We delete this result after ${days} days.`;
   return `We keep your address and this result for ${days} days, then delete them.`;
 }
 

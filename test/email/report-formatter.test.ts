@@ -302,11 +302,25 @@ describe('closing: help line, truthful retention, configured site link', () => {
     expect(formatCheckReport('a@example.com', summary, null, exposedDns, { retentionDays: 7 })).toContain('for 7 days, then delete them.');
   });
 
-  it('enrolled: says the address is kept while follow-ups run and deleted on unsubscribe', () => {
+  it('enrolled: result deleted after N days; address used until unsubscribe, then kept only on a do-not-contact list', () => {
     const summary = buildSummary('example.com', null, exposedDns);
-    const text = formatCheckReport('a@example.com', summary, null, exposedDns, { enrolled: { text: 'x', unsubscribeUrl: 'https://w.example/u' } });
-    expect(text).toContain('We keep your address and this result while you receive our follow-up emails, and delete them when you unsubscribe.');
+    const text = formatCheckReport('a@example.com', summary, null, exposedDns, { enrolled: { text: 'x', unsubscribeUrl: 'https://w.example/u' }, retentionDays: 14 });
+    expect(text).toContain('We delete this result after 14 days. We use your address for our follow-up emails until you unsubscribe; after that we keep it only on a do-not-contact list.');
+    expect(text).not.toContain('delete them when you unsubscribe');
+  });
+
+  it('already known but no longer receiving follow-ups: kept up to 12 months after the last check', () => {
+    const summary = buildSummary('example.com', null, exposedDns);
+    const text = formatCheckReport('a@example.com', summary, null, exposedDns, { lead: 'inactive' });
+    expect(text).toContain('We keep your address and a summary of this result for up to 12 months after your last check, then delete them.');
     expect(text).not.toContain('for 30 days');
+  });
+
+  it('on the do-not-contact list: says it stays there, and when the result goes', () => {
+    const summary = buildSummary('example.com', null, exposedDns);
+    const text = formatCheckReport('a@example.com', summary, null, exposedDns, { lead: 'suppressed', retentionDays: 30 });
+    expect(text).toContain('Your address is on our do-not-contact list and stays there, so you get no follow-up emails. We delete this result after 30 days.');
+    expect(text).not.toContain('then delete them');
   });
 
   it('links the configured site URL, and no site at all when it is unset', () => {

@@ -45,6 +45,8 @@ function makeMessage(overrides: Partial<{
   from: string;
   to: string;
   authResults: string;
+  raw: string;
+  messageId: string;
 }>= {}): ForwardableEmailMessage {
   const authHeader = overrides.authResults ?? [
     'mx.google.com;',
@@ -53,9 +55,10 @@ function makeMessage(overrides: Partial<{
     ' dmarc=pass (p=reject dis=none) header.from=example.com',
   ].join('');
 
-  const headers = new Headers({ 'authentication-results': authHeader, 'message-id': '<orig-123@mail.example.com>' });
+  const headers = new Headers({ 'authentication-results': authHeader, 'message-id': overrides.messageId ?? '<orig-123@mail.example.com>' });
 
   return {
+    ...(overrides.raw !== undefined ? { raw: rawStream(overrides.raw) } : {}),
     from: overrides.from ?? 'user@example.com',
     to: overrides.to ?? 'check@reports.inboxangel.io',
     headers,
@@ -64,6 +67,24 @@ function makeMessage(overrides: Partial<{
     setReject: vi.fn(),
   } as unknown as ForwardableEmailMessage;
 }
+
+function rawStream(text: string): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+}
+
+/** The receiver's own results (AUTHSERV_ID mx.cloudflare.net) on top, then whatever the sender wrote, then the body. */
+function rawWith(trusted: string | null, forged: string[] = []): string {
+  return [
+    ...(trusted ? [`Authentication-Results: mx.cloudflare.net; ${trusted}`] : []),
+    ...forged.map(f => `Authentication-Results: ${f}`),
+    'From: user@example.com',
+    'Subject: check',
+    '',
+    'hi',
+  ].join('\r\n');
+}
+const AUTHSERV = { AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' };
 
 // Mock DoH responses for SPF/DMARC/DKIM
 function mockDohAll() {
@@ -242,7 +263,7 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
 
   type Sent = { from: { name?: string; email: string } | string; to: string[]; subject: string; text: string; html?: string; replyTo?: string; headers?: Record<string, string> };
 
-  function setup(opts: { replyFails?: boolean; sendFails?: boolean; binding?: boolean; env?: Record<string, unknown> } = {}) {
+  function setup(opts: { replyFails?: boolean; sendFails?: boolean; binding?: boolean; env?: Record<string, unknown>; raw?: string; from?: string } = {}) {
     const db = createMigratedD1();
     const sent: Sent[] = [];
     const SEND_EMAIL = {
@@ -254,10 +275,14 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
     };
     const tenant = makeTenant({
       db,
-      env: { ...(opts.binding === false ? {} : { SEND_EMAIL }), ...opts.env } as never,
+      env: { ...(opts.binding === false ? {} : { SEND_EMAIL }), ...AUTHSERV, ...opts.env } as never,
       settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' },
     });
-    const message = makeMessage({ authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com' });
+    const message = makeMessage({
+      from: opts.from,
+      authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com',
+      raw: opts.raw ?? rawWith('spf=pass smtp.mailfrom=user@example.com; dmarc=none header.from=example.com'),
+    });
     if (opts.replyFails) (message.reply as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('original email is not repliable'));
     const rows = () => db.sqlite.prepare('SELECT from_email, report_sent, overall_status FROM check_results').all() as Array<{ from_email: string; report_sent: number; overall_status: string }>;
     return { tenant, message, sent, SEND_EMAIL, rows };
@@ -308,6 +333,70 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
     expect(errors.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/free-check: report not delivered/);
     errors.mockRestore();
   });
+
+  // The fallback is a new email to the envelope sender, which reply() refused to prove. Without proof it would reflect a
+  // report (partly worded by whoever forged the sender) at a victim, so it needs the receiver's own SPF pass for that address.
+  it('spoofed sender (no trusted SPF pass) and reply() throws: nothing is sent, stored as not sent', async () => {
+    mockDohEmpty();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { tenant, message, SEND_EMAIL, rows } = setup({
+      replyFails: true, from: 'victim@example.com',
+      raw: rawWith('spf=fail smtp.mailfrom=victim@example.com; dmarc=fail header.from=example.com', ['mx.cloudflare.net; spf=pass smtp.mailfrom=victim@example.com']),
+    });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(SEND_EMAIL.send).not.toHaveBeenCalled();
+    expect(rows()).toEqual([expect.objectContaining({ from_email: 'victim@example.com', report_sent: 0 })]);
+    warn.mockRestore();
+  });
+
+  it('trusted SPF pass for another domain than the envelope sender: nothing is sent', async () => {
+    mockDohEmpty();
+    const { tenant, message, SEND_EMAIL } = setup({ replyFails: true, raw: rawWith('spf=pass smtp.mailfrom=bounce@attacker.example') });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(SEND_EMAIL.send).not.toHaveBeenCalled();
+  });
+
+  it('trusted SPF pass for the envelope sender: exactly one send', async () => {
+    mockDohEmpty();
+    const { tenant, message, SEND_EMAIL } = setup({ replyFails: true });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(SEND_EMAIL.send).toHaveBeenCalledOnce();
+  });
+
+  it('AUTHSERV_ID unset: no send even with an SPF pass, stored as not sent', async () => {
+    mockDohEmpty();
+    const { tenant, message, SEND_EMAIL, rows } = setup({ replyFails: true, env: { AUTHSERV_ID: undefined } });
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(SEND_EMAIL.send).not.toHaveBeenCalled();
+    expect(rows()).toEqual([expect.objectContaining({ report_sent: 0 })]);
+  });
+
+  it('fallback body is built from the trusted header only: forged Authentication-Results values never appear', async () => {
+    mockDohEmpty();
+    const { tenant, message, sent } = setup({
+      replyFails: true,
+      raw: rawWith('spf=pass smtp.mailfrom=user@example.com', ['evil.example; dkim=pass header.d=pwned-click-here.example header.s=forgedsel99']),
+    });
+    // What Headers.get() would return: every Authentication-Results joined, the forged one included.
+    message.headers.set('authentication-results', 'mx.cloudflare.net; spf=pass smtp.mailfrom=user@example.com, evil.example; dkim=pass header.d=pwned-click-here.example header.s=forgedsel99');
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(sent).toHaveLength(1);
+    for (const body of [sent[0].text, sent[0].html ?? '']) {
+      expect(body).not.toContain('pwned-click-here');
+      expect(body).not.toContain('forgedsel99');
+    }
+    // and the forged selector was not used for a DNS lookup
+    expect(vi.mocked(fetch).mock.calls.map(c => String(c[0])).join(' ')).not.toContain('forgedsel99');
+  });
+
+  it('forwards the sender Message-ID for threading only when it is a single <id>', async () => {
+    mockDohEmpty();
+    const { tenant, message, sent } = setup({ replyFails: true });
+    message.headers.set('message-id', '<a@b> <c@d>');
+    await handleFreeCheck(message, tenant, 'tok');
+    expect(sent[0].headers?.['In-Reply-To']).toBeUndefined();
+    expect(sent[0].headers?.References).toBeUndefined();
+  });
 });
 
 describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () => {
@@ -317,8 +406,11 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
   function run(env: Record<string, unknown>, replyFails = false) {
     const sent: Array<{ replyTo?: string; text: string; html?: string }> = [];
     const SEND_EMAIL = { send: vi.fn(async (m: { replyTo?: string; text: string; html?: string }) => { sent.push(m); return { messageId: 'm' }; }) };
-    const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...env } as never, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
-    const message = makeMessage({ authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com' });
+    const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...AUTHSERV, ...env } as never, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
+    const message = makeMessage({
+      authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com',
+      raw: rawWith('spf=pass smtp.mailfrom=user@example.com; dmarc=none header.from=example.com'),
+    });
     if (replyFails) (message.reply as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not repliable'));
     return { done: handleFreeCheck(message, tenant, 'tok'), message, sent };
   }

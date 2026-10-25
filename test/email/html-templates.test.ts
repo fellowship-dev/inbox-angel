@@ -198,11 +198,13 @@ describe('buildFreeCheckHtml', () => {
     }
   });
 
-  it('states retention: configured days when not enrolled, until unsubscribe when enrolled', () => {
+  it('states retention truthfully for each enrolment outcome', () => {
     const plain = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, retentionDays: 14 });
     expect(bodyText(plain)).toContain('We keep your address and this result for 14 days, then delete them.');
     const enrolled = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, disclosure: { text: 'x', unsubscribeUrl: 'https://w.example/u' } });
-    expect(bodyText(enrolled)).toContain('while you receive our follow-up emails, and delete them when you unsubscribe.');
+    expect(bodyText(enrolled)).toContain('until you unsubscribe; after that we keep it only on a do-not-contact list.');
+    const suppressed = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, retentionDays: 14, lead: 'suppressed' });
+    expect(bodyText(suppressed)).toContain('Your address is on our do-not-contact list and stays there');
   });
 
   it('omits CTA for protected status', () => {

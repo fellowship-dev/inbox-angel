@@ -205,6 +205,8 @@ export interface FreeCheckHtmlParams {
   siteUrl?: string | null;
   /** Days check results are kept, for the retention line when the sender is not enrolled. */
   retentionDays?: number;
+  /** Not enrolled but already known (see CheckReportOptions.lead), for the retention line. */
+  lead?: 'inactive' | 'suppressed';
   /** BOOKING_URL: where "or we do it for you" points first. */
   bookingUrl?: string | null;
 }
@@ -279,7 +281,7 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
   }
 
   const site = p.siteUrl ? ` <a href="${esc(p.siteUrl)}" style="color:#6b7280;">${esc(p.siteUrl.replace(/^https:\/\//, ''))}</a>` : '';
-  body += `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">${esc(retentionSentence({ retentionDays: p.retentionDays, enrolled: p.disclosure }))}${site}</p>
+  body += `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">${esc(retentionSentence({ retentionDays: p.retentionDays, enrolled: p.disclosure, lead: p.lead }))}${site}</p>
 <p style="margin:16px 0 0;font-size:15px;font-weight:600;">${esc(HELP_LINE)}</p>`;
 
   return htmlLayout(`Email Security Check — ${summary.domain}`, body, p.brand ?? DEFAULT_BRAND);

@@ -74,21 +74,46 @@ export function provesDomain(results: string | null, addressDomain: string): boo
 
 export type SenderProof = { ok: true; via: 'ar' | 'arc' } | { ok: false; reason: string };
 
+/**
+ * The receiver's own results, as one header value with the authserv-id first, or null when AUTHSERV_ID / AUTHSERV_HEADER
+ * are not configured or no header of the configured kind names AUTHSERV_ID (the rules at the top of this file).
+ */
+export function trustedResults(headers: AuthHeaders, authservId: string | undefined, only: string | undefined): string | null {
+  if (!authservId?.trim()) return null;
+  const mode = only?.trim().toLowerCase();
+  const want = norm(authservId);
+  if (mode === 'ar' && headers.ar && norm(headers.ar.split(';')[0]) === want) return headers.ar;
+  if (mode === 'arc' && headers.arc) {
+    const [hop, id, ...rest] = headers.arc.split(';');
+    if (/^\s*i\s*=\s*1\s*$/i.test(hop) && norm(id ?? '') === want) return [id, ...rest].join(';');
+  }
+  return null;
+}
+
 /** Decide whether the sender proved `addressDomain`. Fails closed, with the reason (for the log; it never names the sender). */
 export function proveSender(headers: AuthHeaders, addressDomain: string, authservId: string | undefined, only: string | undefined): SenderProof {
   if (!authservId?.trim()) return { ok: false, reason: 'AUTHSERV_ID is not set' };
   const mode = only?.trim().toLowerCase();
   if (mode !== 'ar' && mode !== 'arc') return { ok: false, reason: 'AUTHSERV_HEADER is not set' };
-  const want = norm(authservId);
-
-  if (mode === 'ar' && headers.ar && norm(headers.ar.split(';')[0]) === want) {
-    return provesDomain(headers.ar, addressDomain) ? { ok: true, via: 'ar' } : { ok: false, reason: 'the receiver\'s results do not show an aligned DKIM pass or a DMARC pass' };
-  }
-  if (mode === 'arc' && headers.arc) {
-    const [hop, id, ...rest] = headers.arc.split(';');
-    if (/^\s*i\s*=\s*1\s*$/i.test(hop) && norm(id ?? '') === want) {
-      return provesDomain([id, ...rest].join(';'), addressDomain) ? { ok: true, via: 'arc' } : { ok: false, reason: 'the receiver\'s ARC results do not show an aligned DKIM pass or a DMARC pass' };
-    }
+  const trusted = trustedResults(headers, authservId, mode);
+  if (trusted) {
+    return provesDomain(trusted, addressDomain)
+      ? { ok: true, via: mode }
+      : { ok: false, reason: mode === 'ar' ? 'the receiver\'s results do not show an aligned DKIM pass or a DMARC pass' : 'the receiver\'s ARC results do not show an aligned DKIM pass or a DMARC pass' };
   }
   return { ok: false, reason: headers.ar || headers.arc ? 'no Authentication-Results (or ARC i=1) header names the configured AUTHSERV_ID' : 'the message has no Authentication-Results header' };
+}
+
+/**
+ * True when the receiver's own results (`trusted`, from trustedResults) show spf=pass for an smtp.mailfrom on exactly the
+ * envelope sender's domain: the sending server was allowed to use that address as its return path. Weaker than
+ * proveSender (a shared sending service passes SPF for all its customers), but enough to send that address one reply.
+ */
+export function spfPassesFor(trusted: string | null, envelopeDomain: string): boolean {
+  if (!trusted) return false;
+  const body = trusted.slice(trusted.indexOf(';') + 1).replace(/\([^)]*\)/g, '');
+  const clause = body.split(';').map(c => c.trim()).find(c => /^spf\s*=/i.test(c));
+  if (!clause || !/^spf\s*=\s*pass\b/i.test(clause)) return false;
+  const mailfrom = clause.match(/(?:^|\s)smtp\.mailfrom=([^\s;]+)/i)?.[1];
+  return !!mailfrom && norm(mailfrom.split('@').pop() ?? '') === norm(envelopeDomain);
 }
