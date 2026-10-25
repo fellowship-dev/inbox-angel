@@ -4,6 +4,8 @@
 import { AuthResultsHeader } from './parse-headers';
 import { DnsCheckResult } from './dns-check';
 import { retentionPolicy } from '../lifecycle/config';
+import type { Fix } from '@inbox-angel/report';
+import { recordFixes, SPF_FINDINGS } from './report-findings';
 
 export type OverallStatus = 'protected' | 'at_risk' | 'exposed';
 
@@ -137,30 +139,36 @@ export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 
 /** One fix: what to do, optionally the exact DNS record to publish, and a short note. */
 export interface FixStep {
   text: string;
-  record?: { name: string; type: 'TXT'; value: string };
+  record?: { name: string; type: string; value: string };
   note?: string;
 }
 
+/** A catalog fix as email steps: its title, then each record with its note; a fix with no record carries its steps. */
+function catalogSteps(fix: Fix): FixStep[] {
+  if (fix.records.length === 0) return [{ text: [`${fix.title}.`, ...fix.steps].join(' ') }];
+  return fix.records.map(r => ({ text: `${fix.title}.`, record: { name: r.name, type: r.type, value: r.value }, ...(r.note ? { note: r.note } : {}) }));
+}
+
+const isSpfFix = (f: Fix) => (SPF_FINDINGS as readonly string[]).includes(f.finding);
+const DMARC_RECORD_BROKEN: ReadonlyArray<string> = ['dmarc-missing', 'dmarc-multiple', 'dmarc-invalid'];
+
 /**
- * The exact next record or setting for each failing check, where it is knowable from this email and the live DNS.
- * Record templates only, no inference: SPF never names an include (only the provider knows its own).
+ * The next record or setting for each problem. SPF and DMARC record fixes come from the @inbox-angel/report catalog
+ * (report-findings.ts); the steps that depend on the received message stay here: the lookup-failed retry, the SPF
+ * envelope domain, the DKIM signing domain and selector, and the DMARC policy upgrade.
  */
 export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: DnsCheckResult): FixStep[] {
   const d = s.domain;
+  const fixes = recordFixes(d, dns);
   const steps: FixStep[] = [];
   if (s.spfLookupFailed || s.dmarcLookupFailed || s.dkimLookupFailed) {
     steps.push({ text: 'Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.' });
   }
 
-  if (s.spfProblem) {
-    steps.push({ text: 'Fix your SPF record: publish exactly one v=spf1 record and keep it within 10 DNS lookups.' });
-  } else if (!s.spfPass && !s.spfLookupFailed) {
+  for (const f of fixes.filter(isSpfFix)) steps.push(...catalogSteps(f));
+  if (dns.spf && !s.spfProblem && !s.spfPass && !s.spfLookupFailed) {
     const envelope = auth?.spf?.domain ?? d;
-    if (!dns.spf) {
-      steps.push({ text: `Add an SPF record: one TXT record at ${d} starting with v=spf1 that lists each service that sends your email, exactly as that provider documents it, ending in ~all or -all.` });
-    } else {
-      steps.push({ text: `SPF failed for ${envelope}: the server that sent this email is not in its SPF record. Add your email provider to the SPF record at ${envelope}, using the include or IP address the provider documents.` });
-    }
+    steps.push({ text: `SPF failed for ${envelope}: the server that sent this email is not in its SPF record. Add your email provider to the SPF record at ${envelope}, using the include or IP address the provider documents.` });
   }
 
   if (!s.dkimPass && !s.dkimLookupFailed) {
@@ -175,20 +183,42 @@ export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: D
     }
   }
 
-  if (!s.dmarcPolicy && s.dmarcLookupFailed) { /* unknown: don't tell them to add a record that may exist */ }
-  else if (!s.dmarcPolicy) {
-    steps.push({
-      text: s.dmarcProblem ? `Fix your DMARC record (${s.dmarcProblem}): replace it with this one TXT record.` : 'Add a DMARC record: publish this TXT record.',
-      record: { name: `_dmarc.${d}`, type: 'TXT', value: `v=DMARC1; p=none; rua=mailto:dmarc@${d}` },
-      note: `Reports go to dmarc@${d}: use a mailbox you read (create it, or put your own address there).`,
-    });
-  } else if (s.dmarcPolicy === 'none') {
-    steps.push({ text: `Change the policy at _dmarc.${d} from p=none to p=quarantine once your own email passes SPF or DKIM; later, p=reject.` });
-  } else if (s.dmarcPolicy === 'quarantine') {
-    steps.push({ text: `Change the policy at _dmarc.${d} from p=quarantine to p=reject once your own email passes SPF or DKIM.` });
+  const dmarcFixes = fixes.filter(f => !isSpfFix(f));
+  for (const f of dmarcFixes) steps.push(...catalogSteps(f));
+  if (!dmarcFixes.some(f => DMARC_RECORD_BROKEN.includes(f.finding))) {
+    if (s.dmarcPolicy === 'none') {
+      steps.push({ text: `Change the policy at _dmarc.${d} from p=none to p=quarantine once your own email passes SPF or DKIM; later, p=reject.` });
+    } else if (s.dmarcPolicy === 'quarantine') {
+      steps.push({ text: `Change the policy at _dmarc.${d} from p=quarantine to p=reject once your own email passes SPF or DKIM.` });
+    }
   }
   return steps;
 }
+
+// ── Share links (protected only; shared with the HTML version) ──
+
+export interface ShareLink {
+  label: 'X' | 'LinkedIn';
+  url: string;
+}
+
+/**
+ * Opt-in share links for a fully protected result: intent URLs that open a prefilled post the sender can edit or
+ * discard. Nothing is posted by us. Empty unless the status is protected.
+ */
+export function shareLinks(s: CheckSummary, siteUrl?: string | null): ShareLink[] {
+  if (s.status !== 'protected') return [];
+  const passed = [s.spfPass && 'SPF', s.dkimPass && 'DKIM', s.dmarcPass && 'DMARC'].filter(Boolean) as string[];
+  const list = passed.length > 1 ? `${passed.slice(0, -1).join(', ')} and ${passed[passed.length - 1]}` : passed[0];
+  const text = `${s.domain} passes ${list} email authentication: checked with InboxAngel.${siteUrl ? ` ${siteUrl}` : ''}`;
+  const q = encodeURIComponent(text);
+  return [
+    { label: 'X', url: `https://x.com/intent/tweet?text=${q}` },
+    { label: 'LinkedIn', url: `https://www.linkedin.com/feed/?shareActive=true&text=${q}` },
+  ];
+}
+
+export const SHARE_IT = 'Share it';
 
 /** Where "or we do it for you" points: BOOKING_URL, else SITE_URL/pricing, else nowhere (plain text). */
 export function doItForYouUrl(o: Pick<CheckReportOptions, 'bookingUrl' | 'siteUrl'>): string | null {
@@ -262,6 +292,8 @@ export function formatCheckReport(
 
   const todo = whatToDoSection(fixSteps(summary, auth, dns), opts);
   if (todo) lines.push(todo);
+  const share = shareLinks(summary, opts.siteUrl);
+  if (share.length) lines.push('', `${SHARE_IT} (optional, nothing is posted unless you post it):`, ...share.map(l => `${l.label}: ${l.url}`));
   if (opts.enrolled) lines.push('', opts.enrolled.text, `Unsubscribe: ${opts.enrolled.unsubscribeUrl}`);
   lines.push('');
   lines.push('─'.repeat(48));

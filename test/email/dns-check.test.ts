@@ -392,6 +392,29 @@ describe('checkDomain', () => {
     expect(result.errors).toBeUndefined();
   });
 
+  it('adds exactly one MX query and returns its hosts (for provider detection in the fixes)', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const u = new URL(url.toString());
+      if (u.searchParams.get('type') === 'MX') {
+        return { ok: true, json: () => Promise.resolve({ Status: 0, Answer: [{ type: 15, data: '1 aspmx.l.google.com.' }] }) } as unknown as Response;
+      }
+      return dohStatus(3);
+    });
+    const result = await checkDomain('example.com');
+    const mxCalls = vi.mocked(fetch).mock.calls.filter(c => new URL(String(c[0])).searchParams.get('type') === 'MX');
+    expect(mxCalls).toHaveLength(1);
+    expect(result.mx).toEqual({ status: 'found', hosts: [{ priority: 1, host: 'aspmx.l.google.com' }] });
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('an MX lookup failure is not a record error: mx carries it and the SPF/DMARC/DKIM errors stay empty', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      new URL(url.toString()).searchParams.get('type') === 'MX' ? dohStatus(2) : dohStatus(3));
+    const result = await checkDomain('example.com');
+    expect(result.mx?.status).toBe('error');
+    expect(result.errors).toBeUndefined();
+  });
+
   it('skips DKIM lookup when no selector provided', async () => {
     mockByName({ 'example.com': makeDohResponse(['v=spf1 ~all']) });
     const result = await checkDomain('example.com');

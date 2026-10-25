@@ -416,6 +416,21 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
   }
   const raw = (m: ForwardableEmailMessage) => ((m.reply as ReturnType<typeof vi.fn>).mock.calls[0][0] as { raw: string }).raw;
 
+  it('Google MX and no SPF record: the emailed fix is the catalog\'s Google SPF record', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const u = new URL(String(url));
+      if (u.searchParams.get('type') === 'MX' && u.searchParams.get('name') === 'example.com') {
+        return { ok: true, json: () => Promise.resolve({ Status: 0, Answer: [{ type: 15, data: '1 aspmx.l.google.com.' }] }) } as unknown as Response;
+      }
+      return { ok: true, json: () => Promise.resolve({ Status: 3 }) } as unknown as Response;
+    });
+    const { done, sent } = run({}, true);
+    await done;
+    expect(sent[0].text).toContain('v=spf1 include:_spf.google.com ~all');
+    expect(sent[0].html).toContain('v=spf1 include:_spf.google.com ~all');
+    expect(sent[0].text).not.toMatch(/resolver|cross-check|consensus/i);
+  });
+
   it('MAIL_REPLY_TO set: the reply carries that Reply-To, and so does the outbound fallback', async () => {
     mockDohEmpty();
     const a = run({ MAIL_REPLY_TO: 'hello@inboxangel.io' });

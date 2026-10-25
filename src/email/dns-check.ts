@@ -14,7 +14,9 @@ import {
   createResolver,
   lookupDkim as pkgLookupDkim,
   lookupDmarc as pkgLookupDmarc,
+  lookupMx,
   type DkimRecord,
+  type MxLookup,
   type DmarcRecord as PkgDmarcRecord,
   type SpfAnalysis,
   type SpfRecord as PkgSpfRecord,
@@ -22,6 +24,9 @@ import {
 
 export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '@inbox-angel/dns-checks';
 export type { DkimRecord };
+
+/** Joins the competing records of a multiple-record permerror into one `raw` (SPF and DMARC). */
+export const RECORDS_SEPARATOR = '  |  ';
 
 /** Returned lookups may carry `permerror`: the record(s) exist but receivers will treat them as an error. */
 export type SpfRecord = PkgSpfRecord & { permerror?: string };
@@ -51,6 +56,8 @@ export interface DnsCheckResult {
   errors?: { spf?: string; dkim?: string; dmarc?: string };
   /** Set per check when records were found but are broken (multiple records, SPF permerror…). */
   problems?: { spf?: string; dmarc?: string };
+  /** The domain's MX answer, for mailbox-provider detection in the fixes only; a failed lookup is `status: 'error'`, never in `errors`. */
+  mx?: MxLookup;
 }
 
 function spfDnsError(a: SpfAnalysis): string | null {
@@ -68,7 +75,7 @@ export async function lookupSpf(domain: string): Promise<SpfRecord | null> {
   if (a.status === 'none') return null;
   if (a.rawRecords) {
     // multiple v=spf1 records: expose all of them so the change is visible, flagged as permerror
-    return { ...parseSpfRecord(a.rawRecords[0]), raw: a.rawRecords.join('  |  '), verdict: 'missing', permerror: a.issues[0]?.message ?? 'multiple SPF records' };
+    return { ...parseSpfRecord(a.rawRecords[0]), raw: a.rawRecords.join(RECORDS_SEPARATOR), verdict: 'missing', permerror: a.issues[0]?.message ?? 'multiple SPF records' };
   }
   if (a.status === 'permerror') return { ...a.record!, permerror: a.issues.find(i => i.code !== 'dns-error')?.message ?? 'SPF permerror' };
   return a.record;
@@ -93,7 +100,7 @@ export async function lookupDmarc(domain: string): Promise<DmarcRecord | null> {
   if (r.status === 'multiple') {
     // RFC 7489 §6.6.3: with several records DMARC does not apply, i.e. effectively no policy.
     const msg = `${r.foundAt} has ${r.rawRecords!.length} DMARC records; receivers ignore DMARC`;
-    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join('  |  '), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg };
+    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join(RECORDS_SEPARATOR), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg };
   }
   return r.record;
 }
@@ -106,10 +113,11 @@ export async function checkDomain(domain: string, dkimSelector?: string | null):
       return { v: null, err: e instanceof Error ? e.message : String(e) };
     }
   };
-  const [spf, dmarc, dkim] = await Promise.all([
+  const [spf, dmarc, dkim, mx] = await Promise.all([
     settle(lookupSpf(domain)),
     settle(lookupDmarc(domain)),
     dkimSelector ? settle(lookupDkim(domain, dkimSelector)) : Promise.resolve<{ v: DkimRecord | null; err?: string }>({ v: null }),
+    lookupMx(createResolver(), domain), // never throws: a DNS failure is status 'error'
   ]);
   const errors: NonNullable<DnsCheckResult['errors']> = {};
   if (spf.err) errors.spf = spf.err;
@@ -123,6 +131,7 @@ export async function checkDomain(domain: string, dkimSelector?: string | null):
     spf: spf.v,
     dkim: dkim.v,
     dmarc: dmarc.v,
+    mx,
     ...(Object.keys(errors).length ? { errors } : {}),
     ...(Object.keys(problems).length ? { problems } : {}),
   };

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildSummary, formatCheckReport, OverallStatus } from '../../src/email/report-formatter';
+import { CATALOG } from '@inbox-angel/report';
+import { buildSummary, fixSteps, formatCheckReport, OverallStatus } from '../../src/email/report-formatter';
 import type { AuthResultsHeader } from '../../src/email/parse-headers';
 import type { DnsCheckResult } from '../../src/email/dns-check';
 
@@ -239,7 +240,7 @@ describe('DNS lookup failures are not reported as missing records', () => {
     expect(text).toContain('could not look up your DMARC record');
     expect(text).toContain('DMARC record: (could not be checked');
     expect(text).not.toContain('No policy set');
-    expect(text).not.toContain('Add a DMARC record');
+    expect(text).not.toContain('Publish a DMARC record');
   });
 
   it('SPF lookup failure is distinguished from "(none found)"', () => {
@@ -247,7 +248,7 @@ describe('DNS lookup failures are not reported as missing records', () => {
     const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
     expect(text).toContain('SPF record:   (could not be checked');
     expect(text).not.toContain('SPF record:   (none found)');
-    expect(text).not.toContain('Add an SPF record');
+    expect(text).not.toContain('Publish an SPF record');
   });
 
   it('a genuinely missing record is still reported as missing', () => {
@@ -264,7 +265,7 @@ describe('broken (permerror) records are not described as lookup failures', () =
     const dns: DnsCheckResult = { domain: 'example.com', spf: { raw: 'v=spf1 -all  |  v=spf1 +all', mechanisms: [], terms: [], verdict: 'missing', permerror: 'x publishes 2 SPF records' } as any, dkim: null, dmarc: null, problems: { spf: 'x publishes 2 SPF records' } };
     const text = formatCheckReport('a@example.com', buildSummary('example.com', null, dns), null, dns);
     expect(text).toContain('Your SPF record is broken: x publishes 2 SPF records');
-    expect(text).toContain('Fix your SPF record: publish exactly one');
+    expect(text).toContain('Merge your SPF records into one');
     expect(text).not.toContain('could not look up your SPF');
   });
 });
@@ -339,7 +340,7 @@ describe('actionable findings: the exact record or setting to change, then "or w
     const text = report(null, NO_RECORDS);
     expect(text).toContain('_dmarc.example.com');
     expect(text).toContain('v=DMARC1; p=none; rua=mailto:dmarc@example.com');
-    expect(text).toMatch(/use a mailbox you read/);
+    expect(text).toMatch(/change the address to one you read/);
   });
 
   it('DMARC p=none: names p=quarantine as the next step', () => {
@@ -378,5 +379,86 @@ describe('actionable findings: the exact record or setting to change, then "or w
     const line = plain.split('\n').find(l => l.startsWith('Or we do it for you'))!;
     expect(line).toBeDefined();
     expect(line).not.toMatch(/https?:/);
+  });
+});
+
+// ── U5: record fixes come from the @inbox-angel/report catalog ──
+
+describe('record fixes come from the catalog; message-derived steps stay', () => {
+  const NO_RECORDS: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
+  const GOOGLE_MX = { status: 'found' as const, hosts: [{ priority: 1, host: 'aspmx.l.google.com' }] };
+  const catalogValue = (finding: string, provider = '*') =>
+    CATALOG[finding].entries.find(e => e.provider === provider)!.records[0].value.replace(/\{domain\}/g, 'example.com');
+  const steps = (auth: AuthResultsHeader | null, dns: DnsCheckResult) => fixSteps(buildSummary('example.com', auth, dns), auth, dns);
+
+  it('no DMARC: the step\'s record is the catalog\'s dmarc-missing record', () => {
+    const dmarc = steps(null, NO_RECORDS).find(st => st.record?.name === '_dmarc.example.com')!;
+    expect(dmarc.record!.value).toBe(catalogValue('dmarc-missing'));
+    expect(dmarc.record!.type).toBe('TXT');
+  });
+
+  it('Google Workspace mailbox (MX) with no SPF: the SPF step names the Google include', () => {
+    const spf = steps(null, { ...NO_RECORDS, mx: GOOGLE_MX }).find(st => st.record?.name === 'example.com')!;
+    expect(spf.record!.value).toBe('v=spf1 include:_spf.google.com ~all');
+    expect(spf.record!.value).toBe(catalogValue('spf-missing', 'google-workspace'));
+  });
+
+  it('no MX answer: the SPF step is the generic catalog record, with the include left for the provider', () => {
+    const spf = steps(null, NO_RECORDS).find(st => st.record?.name === 'example.com')!;
+    expect(spf.record!.value).toBe(catalogValue('spf-missing'));
+  });
+
+  it('a DKIM failure from the received mail keeps the selector-specific step alongside the catalog fixes', () => {
+    const auth: AuthResultsHeader = { ...makeAuth({ dkimResult: 'fail', dmarcResult: 'fail' }), dkim: { result: 'fail', domain: 'example.com', selector: 's2024' } };
+    const all = steps(auth, { ...NO_RECORDS, mx: GOOGLE_MX });
+    expect(all.some(st => st.text.includes('s2024._domainkey.example.com'))).toBe(true);
+    expect(all.some(st => st.record?.value === catalogValue('dmarc-missing'))).toBe(true);
+    expect(all.some(st => st.record?.value === 'v=spf1 include:_spf.google.com ~all')).toBe(true);
+  });
+
+  it('a lookup failure still yields the retry step and no record fix for the unchecked record', () => {
+    const dns: DnsCheckResult = { ...NO_RECORDS, errors: { dmarc: 'SERVFAIL' } };
+    const all = steps(null, dns);
+    expect(all[0].text).toMatch(/Send another email/);
+    expect(all.some(st => st.record?.name === '_dmarc.example.com')).toBe(false);
+  });
+
+  it('the email makes no cross-check or multi-resolver claim', () => {
+    for (const [auth, dns] of [[null, NO_RECORDS], [makeAuth(), makeDns()], [makeAuth({ dmarcResult: 'fail' }), makeDns({ dmarcPolicy: 'quarantine' })]] as const) {
+      const text = formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns);
+      expect(text).not.toMatch(/resolver|cross-check|consensus|confirmed|three/i);
+    }
+  });
+});
+
+describe('share links when fully protected', () => {
+  const urls = (text: string) => text.match(/https:\/\/[^\s"<]+/g) ?? [];
+  const sharedText = (u: string) => new URL(u.replace(/&amp;/g, '&')).searchParams.get('text')!;
+
+  it('protected: X and LinkedIn intent links with URL-encoded prefilled text naming the domain and the passing checks', () => {
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', makeAuth(), makeDns()), makeAuth(), makeDns());
+    const x = urls(text).find(u => u.startsWith('https://x.com/intent/tweet?text='))!;
+    const li = urls(text).find(u => u.startsWith('https://www.linkedin.com/feed/?shareActive=true&text='))!;
+    for (const u of [x, li]) {
+      expect(u).toBeDefined();
+      expect(u).not.toMatch(/ /);
+      expect(sharedText(u)).toContain('example.com');
+      expect(sharedText(u)).toMatch(/SPF.*DKIM.*DMARC/);
+    }
+  });
+
+  it('protected with only DKIM passing: the shared text does not claim SPF', () => {
+    const auth = makeAuth({ spfResult: 'fail' });
+    const text = formatCheckReport('a@example.com', buildSummary('example.com', auth, makeDns()), auth, makeDns());
+    const x = urls(text).find(u => u.startsWith('https://x.com/intent/tweet'))!;
+    expect(sharedText(x)).not.toContain('SPF');
+  });
+
+  it('at risk and exposed: no share links', () => {
+    for (const [auth, dns] of [[makeAuth({ dmarcResult: 'fail' }), makeDns({ dmarcPolicy: 'quarantine' })], [null, { domain: 'example.com', spf: null, dkim: null, dmarc: null }]] as const) {
+      const text = formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns);
+      expect(text).not.toContain('x.com/intent');
+      expect(text).not.toContain('linkedin.com');
+    }
   });
 });
