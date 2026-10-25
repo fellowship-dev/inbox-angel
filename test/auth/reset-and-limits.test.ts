@@ -78,14 +78,19 @@ describe('password reset', () => {
     expect((await call(env, 'POST', '/api/auth/reset', { body: { token, password: 'brand-new-password' } })).status).toBe(400);
   });
 
-  it('without SEND_EMAIL the link goes to the Worker log (self-host fallback)', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('without SEND_EMAIL nothing is sent and the log carries a static reason, never the link or address', async () => {
+    const log = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const other = vi.spyOn(console, 'log').mockImplementation(() => {});
     const env = makeEnv();
     await setupOwner(env, 'owner@example.com');
     await call(env, 'POST', '/api/auth/forgot', { body: { email: 'owner@example.com' } });
     await Promise.all(ctxCalls());
-    expect(log.mock.calls.some(c => String(c[0]).includes('[auth] reset link for owner@example.com'))).toBe(true);
+    expect(log.mock.calls.some(c => String(c[0]).includes('[auth] reset email not sent: SEND_EMAIL binding not configured'))).toBe(true);
+    const out = JSON.stringify([...log.mock.calls, ...other.mock.calls]);
+    expect(out).not.toContain('owner@example.com');
+    expect(out).not.toContain('#/reset/');
     log.mockRestore();
+    other.mockRestore();
   });
 
   it('does not surface mail failures (no enumeration via errors)', async () => {
