@@ -79,6 +79,17 @@ describe('enrolment on a hosted free check', () => {
     expect(t.rows('SELECT * FROM leads')).toEqual([]);
     expect(replyText(m)).not.toContain(DISCLOSURE);
     expect(m.reply).toHaveBeenCalledOnce(); // the report itself is still sent
+    expect(replyText(m)).toContain('Your address is on our do-not-contact list and stays there');
+    expect(replyText(m)).not.toContain('then delete them');
+  });
+
+  it('a lead no longer getting follow-ups is told its address is kept up to 12 months, not the check-result window', async () => {
+    const t = hosted();
+    await t.check();
+    t.db.sqlite.prepare("UPDATE leads SET status = 'completed'").run();
+    const text = replyText(await t.check());
+    expect(text).toContain('for up to 12 months after your last check');
+    expect(text).not.toContain('for 30 days');
   });
 
   it('a sender whose domain did not authenticate is not enrolled (the address could be forged)', async () => {

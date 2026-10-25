@@ -6,7 +6,7 @@ import { hostedEnabled } from '../hosted/config';
 export type FunnelEnv = Pick<
   Env,
   | 'MODE' | 'SAAS_ENABLED' | 'ONBOARDING_SEQUENCE_ENABLED' | 'PUBLIC_BASE_URL' | 'BETTER_AUTH_URL' | 'POSTAL_ADDRESS' | 'BOOKING_URL'
-  | 'SERVICE_PRICES' | 'MAIL_FROM' | 'MAIL_FROM_NAME' | 'MAIL_REPLY_TO' | 'CANARY_DOMAIN' | 'SITE_ORIGINS'
+  | 'SERVICE_PRICES' | 'MAIL_FROM' | 'MAIL_FROM_NAME' | 'MAIL_REPLY_TO' | 'CANARY_DOMAIN' | 'SITE_ORIGINS' | 'SITE_URL'
 >;
 
 /** Hosted: on unless ONBOARDING_SEQUENCE_ENABLED=0. Self-host: off unless ONBOARDING_SEQUENCE_ENABLED=1. */
@@ -20,6 +20,15 @@ export function publicBaseUrl(env: FunnelEnv): string | null {
   // HTTPS only (Cloudflare and mailbox providers reject a plain-HTTP List-Unsubscribe); http is accepted for localhost development.
   return /^https:\/\/[^\s/]+/i.test(raw) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(raw) ? raw : null;
 }
+
+/** The marketing site for links in email (SITE_URL), https only, no trailing slash. Null when unset: never the Worker's origin. */
+export function siteUrl(env: FunnelEnv): string | null {
+  const raw = (env.SITE_URL ?? '').trim().replace(/\/+$/, '');
+  return /^https:\/\/[^\s/]+/i.test(raw) ? raw : null;
+}
+
+/** Where replies go (MAIL_REPLY_TO), or null: then no Reply-To is sent. */
+export const replyTo = (env: FunnelEnv): string | null => env.MAIL_REPLY_TO?.trim() || null;
 
 export const postalAddress = (env: FunnelEnv): string | null => env.POSTAL_ADDRESS?.trim() || null;
 export const bookingUrl = (env: FunnelEnv): string | null => (/^https?:\/\//i.test(env.BOOKING_URL?.trim() ?? '') ? env.BOOKING_URL!.trim() : null);

@@ -3,7 +3,7 @@
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
 import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
-import { CheckSummary, OverallStatus } from './report-formatter';
+import { CheckSummary, DO_IT_FOR_YOU, doItForYouUrl, fixSteps, HELP_LINE, OverallStatus, retentionSentence } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
 import { AuthResultsHeader } from './parse-headers';
@@ -201,6 +201,14 @@ export interface FreeCheckHtmlParams {
   brand?: Brand;
   /** The line telling the sender about the follow-up emails, with its unsubscribe link. */
   disclosure?: { text: string; unsubscribeUrl: string };
+  /** The marketing site (SITE_URL); no marketing link when unset. */
+  siteUrl?: string | null;
+  /** Days check results are kept, for the retention line when the sender is not enrolled. */
+  retentionDays?: number;
+  /** Not enrolled but already known (see CheckReportOptions.lead), for the retention line. */
+  lead?: 'inactive' | 'suppressed';
+  /** BOOKING_URL: where "or we do it for you" points first. */
+  bookingUrl?: string | null;
 }
 
 export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
@@ -248,16 +256,33 @@ export function buildFreeCheckHtml(p: FreeCheckHtmlParams): string {
   }
   body += '</table>';
 
-  if (summary.status !== 'protected') {
-    body += `<p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-InboxAngel can walk you through each fix and monitor your domain 24/7.
-<a href="https://inboxangel.com" style="color:${esc((p.brand ?? DEFAULT_BRAND).color)};">Start free monitoring →</a>
-</p>`;
+  const steps = fixSteps(summary, auth, dns);
+  if (steps.length > 0) {
+    const accent = esc((p.brand ?? DEFAULT_BRAND).color);
+    body += `<h3 style="margin:16px 0 8px;font-size:15px;">What to do next</h3>
+<ol style="margin:0 0 12px;padding-left:20px;font-size:14px;line-height:1.5;">`;
+    for (const st of steps) {
+      body += `<li style="margin-bottom:8px;">${esc(st.text)}`;
+      if (st.record) {
+        body += `<div style="margin:6px 0;font-family:monospace;font-size:12px;background:#f3f4f6;padding:8px;border-radius:4px;">${esc(st.record.name)} &nbsp;${st.record.type}&nbsp; ${esc(st.record.value)}</div>`;
+      }
+      if (st.note) body += `<div style="font-size:13px;color:#374151;">${esc(st.note)}</div>`;
+      body += '</li>';
+    }
+    body += '</ol>';
+    const url = doItForYouUrl(p);
+    body += url
+      ? `<p style="margin:0;font-size:14px;">${DO_IT_FOR_YOU}: <a href="${esc(url)}" style="color:${accent};">${esc(url)}</a></p>`
+      : `<p style="margin:0;font-size:14px;">${DO_IT_FOR_YOU}: reply to this email.</p>`;
   }
 
   if (p.disclosure) {
     body += `<p style="margin:16px 0 0;font-size:13px;color:#374151;">${esc(p.disclosure.text)} <a href="${esc(p.disclosure.unsubscribeUrl)}" style="color:#374151;">Unsubscribe</a></p>`;
   }
+
+  const site = p.siteUrl ? ` <a href="${esc(p.siteUrl)}" style="color:#6b7280;">${esc(p.siteUrl.replace(/^https:\/\//, ''))}</a>` : '';
+  body += `<p style="margin:16px 0 0;font-size:12px;color:#6b7280;">${esc(retentionSentence({ retentionDays: p.retentionDays, enrolled: p.disclosure, lead: p.lead }))}${site}</p>
+<p style="margin:16px 0 0;font-size:15px;font-weight:600;">${esc(HELP_LINE)}</p>`;
 
   return htmlLayout(`Email Security Check — ${summary.domain}`, body, p.brand ?? DEFAULT_BRAND);
 }

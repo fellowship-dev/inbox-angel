@@ -30,6 +30,17 @@ Copy for the sequence is in **one file**, `src/funnel/copy.ts` (a draft for revi
 
 **With no provider** (`RESEND_API_KEY` unset) the sequence queues and sends nothing. The Leads page (and `GET /api/leads` → `delivery.blockers`) says why, or that `PUBLIC_BASE_URL` / `POSTAL_ADDRESS` / `MAIL_FROM` is missing. A missing `BOOKING_URL` holds only the day-14 note; missing `SERVICE_PRICES` sends day 10 without prices.
 
+## Free-check delivery
+
+The report goes back to the sender in two steps (`src/email/free-check.ts`):
+
+1. **`message.reply()`**, threaded under the original. Cloudflare's Email Workers rules (checked 2026-10-24, <https://developers.cloudflare.com/email-routing/email-workers/reply-email-workers/>): "The incoming email must have a valid DMARC result", "An email can only be replied to once per `EmailMessage` event", "The recipient in the reply must match the sender of the incoming email", "The outgoing sender domain must match the domain that received the email", and more than 100 `References` entries is rejected; "otherwise `reply()` throws an exception". A sender with no DMARC, or one that fails it, is therefore refused.
+2. **When `reply()` throws**, and only when `AUTHSERV_ID` and `AUTHSERV_HEADER` are set and the receiver's own results (the trusted header, same rule as enrolment above) show `spf=pass` with an `smtp.mailfrom` on exactly the envelope sender's domain, the same subject, text and HTML go out as a new email through the `SEND_EMAIL` binding, from the same address, with `In-Reply-To`/`References` (allowlisted threading headers) and, for enrolled leads, the same `List-Unsubscribe` headers. Email Service: "Before you onboard a sending domain, you can send emails only to verified destination addresses in your account"; after onboarding "you can send to any recipient immediately" (<https://developers.cloudflare.com/email-service/platform/limits/>); "Arbitrary-recipient sending requires Workers Paid" (<https://developers.cloudflare.com/email-service/>); the sender must be on an onboarded domain (<https://developers.cloudflare.com/email-service/configuration/send-bindings/>). **Ops step: onboard the reports domain in Email Service**, or strangers without DMARC get nothing. Without that SPF proof nothing is sent: `reply()` refused the message, so the envelope sender may be forged, and a new email to it would reflect the report at someone who never asked. The report's SPF/DKIM/DMARC findings and DKIM selector come from the trusted header when there is one; only the `reply()` path (DMARC already passed) falls back to all `Authentication-Results` headers joined.
+
+Every report ends with "Need help? Any doubts? Reply." and carries `MAIL_REPLY_TO` as Reply-To on both paths. Its closing states retention truthfully (N is `RETENTION_CHECK_RESULTS_DAYS`, default 30, the setting that purges `check_results`): not known, address and result kept N days; enrolled, the address and a summary of the result (the lead's `check_summary`) are kept for follow-ups until they unsubscribe or 12 months after their last check, then only the address stays on the do-not-contact (suppression) list, and the full result goes after N days; a past lead no longer getting follow-ups, kept up to 12 months after their last check (lead retention); suppressed, the address stays on the do-not-contact list and the result goes after N days.
+
+If both fail (or the fallback is not allowed, or there is no binding), the reason is logged as `free-check: report not delivered: …` and the check result is still stored, with `report_sent = 0`. Resend is not used as a third path: the report's sender is the reports domain, which is not verified at Resend.
+
 ## Sending provider
 
 **The sequence is sent with Resend only** (`RESEND_API_KEY`, sender `MAIL_FROM`). Cloudflare Email Service is for transactional mail only, and a five-step BIMI/upsell sequence is marketing mail:
@@ -43,6 +54,7 @@ Copy for the sequence is in **one file**, `src/funnel/copy.ts` (a draft for revi
 |---|---|
 | Onboarding sequence (marketing, from `MAIL_FROM`) | Resend only |
 | Change alerts and weekly digests (to the owner's team, from the workspace's own sender) | the `send_email` binding, unchanged. Resend is not used: workspace sender domains are not verified there |
+| Free-check report when `reply()` is refused (transactional, to the sender) | the binding only; see [Free-check delivery](#free-check-delivery) |
 | Monitor confirmation (transactional, arbitrary address) | the binding if present (then it reaches verified addresses, or anyone once a sending domain is onboarded), else Resend from `MAIL_FROM` |
 
 Cloudflare Email Service facts (checked 2026-10-23), relevant to the transactional/owner mail that still uses it:
@@ -89,7 +101,9 @@ The request stores an **unconfirmed** subscription (`confirmed_at` null) and ema
 | `RESEND_API_KEY` | Resend, for the sequence (and the confirmation when there is no binding) |
 | `AUTHSERV_ID` | **required for enrolment**: the receiver's authserv-id, see the ops step above |
 | `AUTHSERV_HEADER` | **required for enrolment**: `ar` or `arc`, the one header kind the receiver adds |
-| `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`), and where replies go |
+| `MAIL_FROM`, `MAIL_FROM_NAME` | sender of sequence mail (default `noreply@<CANARY_DOMAIN>`) |
+| `MAIL_REPLY_TO` | **required for replies**: Reply-To of sequence mail **and of the free-check report**. No fallback (falling back to `OWNER_EMAIL` would publish the admin login to every sender); unset means no Reply-To, and `GET /api/leads` warns even when the sequence is off |
+| `SITE_URL` | public marketing site (`https://` only), for links in the free-check report; unset means no marketing link (never the Worker's own origin) |
 | `PUBLIC_BASE_URL` | public HTTPS origin for unsubscribe and confirmation links (falls back to `BETTER_AUTH_URL`) |
 | `POSTAL_ADDRESS` | footer address |
 | `BOOKING_URL` | day-14 booking link |

@@ -3,6 +3,7 @@
 
 import { AuthResultsHeader } from './parse-headers';
 import { DnsCheckResult } from './dns-check';
+import { retentionPolicy } from '../lifecycle/config';
 
 export type OverallStatus = 'protected' | 'at_risk' | 'exposed';
 
@@ -99,37 +100,114 @@ function dmarcLine(s: CheckSummary): string {
   return '❌ DMARC — No policy set. Nothing stops scammers from impersonating your domain.';
 }
 
-function whatToDoSection(s: CheckSummary): string {
-  if (s.status === 'protected') {
-    if (s.dmarcPolicy === 'none') {
-      return `
-What to do next:
-Your domain passes authentication, but your DMARC policy is still set to "none" — meaning
-fake emails aren't blocked yet. Consider upgrading to p=quarantine or p=reject to fully
-protect your customers and vendors.`;
-    }
-    return `
-What to do next:
-Nothing urgent. Keep your DNS records as-is and monitor your DMARC reports regularly.`;
-  }
+// ── Closing (shared with the HTML version) ────────────────────
 
-  const steps: string[] = [];
+/** The last line of every free-check email. */
+export const HELP_LINE = 'Need help? Any doubts? Reply.';
+
+export interface CheckReportOptions {
+  /** The marketing site (SITE_URL), https only. No marketing link when null or unset. */
+  siteUrl?: string | null;
+  /** How long check results are kept (the lifecycle setting that purges check_results). Defaults to that setting's default. */
+  retentionDays?: number;
+  /** Set when the sender was enrolled in the follow-up emails: the disclosure line and its unsubscribe link. */
+  enrolled?: { text: string; unsubscribeUrl: string };
+  /** BOOKING_URL: where "or we do it for you" points first. */
+  bookingUrl?: string | null;
+  /** Set when the sender is not enrolled but already known: a finished/stopped lead, or a suppressed address. */
+  lead?: 'inactive' | 'suppressed';
+}
+
+/**
+ * What we keep about the sender, truthfully, for each enrolment outcome: check results go after `retentionDays`
+ * (check_results); an enrolled address stays until unsubscribe, then only on the suppression list (unsubscribeEmail);
+ * a lead no longer in the sequence stays up to 12 months after its last activity (src/funnel/cron.ts); a suppressed
+ * address stays suppressed.
+ */
+export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 'enrolled' | 'lead'>): string {
+  const days = o.retentionDays ?? retentionPolicy({}).checkResultsDays;
+  if (o.enrolled) return `We keep your address and a summary of this result for our follow-up emails until you unsubscribe (or 12 months after your last check); after you unsubscribe we keep only your address, on a do-not-contact list. The full result is deleted after ${days} days.`;
+  if (o.lead === 'inactive') return 'We keep your address and a summary of this result for up to 12 months after your last check, then delete them.';
+  if (o.lead === 'suppressed') return `Your address is on our do-not-contact list and stays there, so you get no follow-up emails. We delete this result after ${days} days.`;
+  return `We keep your address and this result for ${days} days, then delete them.`;
+}
+
+// ── Actionable findings (shared with the HTML version) ────────
+
+/** One fix: what to do, optionally the exact DNS record to publish, and a short note. */
+export interface FixStep {
+  text: string;
+  record?: { name: string; type: 'TXT'; value: string };
+  note?: string;
+}
+
+/**
+ * The exact next record or setting for each failing check, where it is knowable from this email and the live DNS.
+ * Record templates only, no inference: SPF never names an include (only the provider knows its own).
+ */
+export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: DnsCheckResult): FixStep[] {
+  const d = s.domain;
+  const steps: FixStep[] = [];
   if (s.spfLookupFailed || s.dmarcLookupFailed || s.dkimLookupFailed) {
-    steps.push('0. Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.');
+    steps.push({ text: 'Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.' });
   }
-  if (s.spfProblem) steps.push('1. Fix your SPF record: publish exactly one v=spf1 record and keep it within 10 DNS lookups.');
-  else if (!s.spfPass && !s.spfLookupFailed) steps.push('1. Add an SPF record to your DNS (takes 5 minutes with your domain registrar).');
-  if (!s.dkimPass && !s.dkimLookupFailed) steps.push(`${steps.length + 1}. Enable DKIM signing in your email provider's settings.`);
-  if (!s.dmarcPolicy && s.dmarcLookupFailed) { /* unknown – don't tell them to add a record that may exist */ }
-  else if (!s.dmarcPolicy) steps.push(`${steps.length + 1}. Add a DMARC record starting with p=none to begin monitoring.`);
-  else if (s.dmarcPolicy === 'none') steps.push(`${steps.length + 1}. Upgrade your DMARC policy from p=none to p=quarantine, then p=reject.`);
 
-  return `
-What to do next:
-${steps.join('\n')}
+  if (s.spfProblem) {
+    steps.push({ text: 'Fix your SPF record: publish exactly one v=spf1 record and keep it within 10 DNS lookups.' });
+  } else if (!s.spfPass && !s.spfLookupFailed) {
+    const envelope = auth?.spf?.domain ?? d;
+    if (!dns.spf) {
+      steps.push({ text: `Add an SPF record: one TXT record at ${d} starting with v=spf1 that lists each service that sends your email, exactly as that provider documents it, ending in ~all or -all.` });
+    } else {
+      steps.push({ text: `SPF failed for ${envelope}: the server that sent this email is not in its SPF record. Add your email provider to the SPF record at ${envelope}, using the include or IP address the provider documents.` });
+    }
+  }
 
-InboxAngel can walk you through each fix and monitor your domain 24/7 so you know the
-moment anything breaks. Start your free monitoring at https://inboxangel.com`;
+  if (!s.dkimPass && !s.dkimLookupFailed) {
+    const sig = auth?.dkim;
+    if (sig?.domain && sig.selector) {
+      const align = sig.domain !== d ? ` It also has to be signed with ${d} (or a subdomain) to count for DMARC: turn on DKIM for ${d} in your provider.` : '';
+      steps.push({ text: `DKIM failed: this email was signed by d=${sig.domain} with selector s=${sig.selector} (${sig.result}). Check that the TXT record at ${sig.selector}._domainkey.${sig.domain} is the key your email provider shows.${align}` });
+    } else if (s.dkimPresent) {
+      steps.push({ text: 'Turn on DKIM signing in your email provider: a key is published but this email was not signed.' });
+    } else {
+      steps.push({ text: 'Enable DKIM signing in your email provider\'s settings and publish the key record it gives you.' });
+    }
+  }
+
+  if (!s.dmarcPolicy && s.dmarcLookupFailed) { /* unknown: don't tell them to add a record that may exist */ }
+  else if (!s.dmarcPolicy) {
+    steps.push({
+      text: s.dmarcProblem ? `Fix your DMARC record (${s.dmarcProblem}): replace it with this one TXT record.` : 'Add a DMARC record: publish this TXT record.',
+      record: { name: `_dmarc.${d}`, type: 'TXT', value: `v=DMARC1; p=none; rua=mailto:dmarc@${d}` },
+      note: `Reports go to dmarc@${d}: use a mailbox you read (create it, or put your own address there).`,
+    });
+  } else if (s.dmarcPolicy === 'none') {
+    steps.push({ text: `Change the policy at _dmarc.${d} from p=none to p=quarantine once your own email passes SPF or DKIM; later, p=reject.` });
+  } else if (s.dmarcPolicy === 'quarantine') {
+    steps.push({ text: `Change the policy at _dmarc.${d} from p=quarantine to p=reject once your own email passes SPF or DKIM.` });
+  }
+  return steps;
+}
+
+/** Where "or we do it for you" points: BOOKING_URL, else SITE_URL/pricing, else nowhere (plain text). */
+export function doItForYouUrl(o: Pick<CheckReportOptions, 'bookingUrl' | 'siteUrl'>): string | null {
+  return o.bookingUrl || (o.siteUrl ? `${o.siteUrl}/pricing` : null);
+}
+
+export const DO_IT_FOR_YOU = 'Or we do it for you';
+
+function whatToDoSection(steps: FixStep[], opts: CheckReportOptions): string {
+  if (steps.length === 0) return '';
+  const lines = ['', 'What to do next:'];
+  steps.forEach((st, i) => {
+    lines.push(`${i + 1}. ${st.text}`);
+    if (st.record) lines.push(`     ${st.record.name}  ${st.record.type}  "${st.record.value}"`);
+    if (st.note) lines.push(`   ${st.note}`);
+  });
+  const url = doItForYouUrl(opts);
+  lines.push('', url ? `${DO_IT_FOR_YOU}: ${url}` : `${DO_IT_FOR_YOU}: reply to this email.`);
+  return lines.join('\n');
 }
 
 /**
@@ -140,6 +218,7 @@ export function formatCheckReport(
   summary: CheckSummary,
   auth: AuthResultsHeader | null,
   dns: DnsCheckResult,
+  opts: CheckReportOptions = {},
 ): string {
   const domain = summary.domain;
   const lines: string[] = [
@@ -181,12 +260,16 @@ export function formatCheckReport(
     lines.push('DKIM key:     (no selector in this email — could not verify)');
   }
 
-  lines.push(whatToDoSection(summary));
+  const todo = whatToDoSection(fixSteps(summary, auth, dns), opts);
+  if (todo) lines.push(todo);
+  if (opts.enrolled) lines.push('', opts.enrolled.text, `Unsubscribe: ${opts.enrolled.unsubscribeUrl}`);
   lines.push('');
   lines.push('─'.repeat(48));
   lines.push('This report was generated automatically by InboxAngel.');
   lines.push('You received it because you sent an email to our check address.');
-  lines.push('No data about your domain is stored. https://inboxangel.com');
+  lines.push(retentionSentence(opts));
+  if (opts.siteUrl) lines.push(opts.siteUrl);
+  lines.push('', HELP_LINE);
 
   return lines.join('\n');
 }

@@ -72,7 +72,8 @@ export interface Env {
   RESEND_API_KEY?: string;       // secret: Resend API key; the onboarding sequence is sent with Resend (Cloudflare Email Service is transactional-only)
   MAIL_FROM?: string;            // sender address of funnel mail, e.g. max@inboxangel.io (default noreply@<CANARY_DOMAIN>)
   MAIL_FROM_NAME?: string;       // display name of funnel mail (default "Inbox Angel")
-  MAIL_REPLY_TO?: string;        // where replies to funnel mail go (a mailbox someone reads)
+  MAIL_REPLY_TO?: string;        // where replies to funnel mail and to the free-check report go (a mailbox someone reads); no Reply-To when unset
+  SITE_URL?: string;             // public marketing site (https), for links in the free-check report; no link when unset
   PUBLIC_BASE_URL?: string;      // public origin of this Worker, for unsubscribe and confirmation links (falls back to BETTER_AUTH_URL)
   AUTHSERV_ID?: string;          // authserv-id of the receiving server's results (see docs/email-funnel.md); with AUTHSERV_HEADER, REQUIRED for the sequence to enrol anyone
   AUTHSERV_HEADER?: string;      // "ar" (Authentication-Results) or "arc" (ARC-Authentication-Results): the one header kind the receiver adds; REQUIRED for enrolment

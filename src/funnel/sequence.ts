@@ -12,7 +12,7 @@ import type { CheckSummary } from '../email/report-formatter';
 import { DEFAULT_BRAND_COLOR } from '../tenancy/context';
 import { sendNonTransactional } from '../mail/compliance';
 import { funnelMailer, providerProblem, type Mailer } from '../mail/mailer';
-import { bookingUrl, funnelSender, postalAddress, publicBaseUrl, sequenceEnabled, servicePrices } from './config';
+import { bookingUrl, funnelSender, postalAddress, publicBaseUrl, replyTo, sequenceEnabled, servicePrices } from './config';
 import { SEQUENCE_DAYS, stepCopy } from './copy';
 
 const DAY = 86400;
@@ -32,6 +32,8 @@ export function readiness(env: BoundEnv): Readiness {
   const blockers: string[] = [];
   const warnings: string[] = [];
   const enabled = sequenceEnabled(env);
+  // The free-check report uses the same Reply-To whether or not the sequence runs, so this is checked first.
+  if (!replyTo(env)) warnings.push('MAIL_REPLY_TO is not set: replies to the free-check report and funnel mail have nowhere to go (no Reply-To is sent)');
   if (!enabled) return { enabled, blockers: ['The sequence is off (self-host: set ONBOARDING_SEQUENCE_ENABLED=1)'], warnings };
   const provider = providerProblem(env);
   if (provider) blockers.push(provider);
@@ -41,7 +43,6 @@ export function readiness(env: BoundEnv): Readiness {
   if (!env.AUTHSERV_ID?.trim() || !['ar', 'arc'].includes(env.AUTHSERV_HEADER?.trim().toLowerCase() ?? '')) warnings.push('AUTHSERV_ID and AUTHSERV_HEADER are not both set: no sender is enrolled until they are (see docs/email-funnel.md)');
   if (!bookingUrl(env)) warnings.push('BOOKING_URL is not set: the day-14 email is held until it is');
   if (Object.keys(servicePrices(env)).length === 0) warnings.push('SERVICE_PRICES is not set: the day-10 email goes out without prices');
-  if (!env.MAIL_REPLY_TO) warnings.push('MAIL_REPLY_TO is not set: replies go to the sender address');
   return { enabled, blockers, warnings };
 }
 

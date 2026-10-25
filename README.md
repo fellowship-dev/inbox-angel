@@ -85,6 +85,8 @@ npm run deploy
 
 No `BASE_DOMAIN`, no `REPORTS_DOMAIN`, no zone IDs — the setup wizard handles all domain configuration after deploy.
 
+**Option C — GitHub Actions (manual):** the `Deploy` workflow (`.github/workflows/deploy.yml`) runs only when you start it from the Actions tab (**Run workflow**); pushes to `main` never deploy. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets listed at the top of the workflow.
+
 ---
 
 ### Step 2 — Create your account
@@ -104,6 +106,16 @@ After creating your account, the setup wizard walks you through five steps:
 5. **Routing** — sets up MX records and email routing. Registers your email as a verified destination so you can receive alerts and password resets.
 
 Reports from receiving mail servers worldwide will start arriving within 24 hours. The dashboard shows your pass rate and tells you when it's safe to tighten policy toward `p=reject`.
+
+### Free email check: delivering the report
+
+A visitor emails their `check+<token>@<reports domain>` address and gets the report back. The Worker first answers with Cloudflare's `message.reply()`, which Cloudflare only allows when the incoming email has a valid DMARC result, so a sender whose domain has no DMARC (exactly who the check is for) is refused there. The report then goes out as a new email through the `SEND_EMAIL` binding, **only when `AUTHSERV_ID` and `AUTHSERV_HEADER` are set and the receiver's own Authentication-Results show an SPF pass for the envelope sender's domain** (`smtp.mailfrom`); otherwise the sender may be forged and the report would land on someone else, so nothing is sent. For it to reach strangers, **onboard your reports domain as a sending domain in Cloudflare Email Service** (Workers Paid): before onboarding, the binding only reaches verified destination addresses. When the report is not delivered, the reason is logged and the result is stored with `report_sent = 0`. Details: [docs/email-funnel.md](docs/email-funnel.md#free-check-delivery).
+
+| Variable | Free check |
+|---|---|
+| `MAIL_REPLY_TO` | **Required for replies.** The report ends with "Need help? Any doubts? Reply." and carries this Reply-To (a mailbox someone reads, e.g. routed with Email Routing). Unset: no Reply-To, and the Leads page (`GET /api/leads` → `delivery.warnings`) flags it even when the onboarding sequence is off. |
+| `SITE_URL` | Your public marketing site (`https://…`), linked from the report. Unset: no marketing link. `PUBLIC_BASE_URL` stays the Worker's own origin, for unsubscribe and confirmation links. |
+| `RETENTION_CHECK_RESULTS_DAYS` | How long check results are kept (default 30). The report states it; a sender enrolled in the follow-up emails is told their address and a result summary are kept for follow-ups until they unsubscribe (then only the address, on a do-not-contact list), a past lead that it is kept up to 12 months after their last check, a suppressed address that it stays on the do-not-contact list. |
 
 ---
 

@@ -1,4 +1,4 @@
-# Deploys the Cloudflare Worker on every push to main.
+# Deploys the Cloudflare Worker. Manual only: start it from the Actions tab (Run workflow); pushes never deploy.
 #
 # Required secrets (set in GitHub repo Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN  — API token with Workers Scripts:Edit, D1:Edit, Email Sending:Edit,
@@ -8,9 +8,7 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
