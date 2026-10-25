@@ -702,6 +702,7 @@ export const GLOBAL_TABLES = {
 
 /** Tables that must carry an `workspace_id` column. */
 export const WORKSPACE_OWNED_TABLES = [
+	'google_postmaster_connections', 'metric_observations',
 	'products', 'product_domains', 'access_principals', 'access_grants', 'access_credentials',
 	'memberships',
 	'domains',
@@ -807,3 +808,21 @@ export const accessCredentials = sqliteTable('access_credentials', {
  last_used_at: integer('last_used_at'),
  created_at: integer('created_at').notNull().default(now),
 });
+
+/** Provider grants and sanitized observations have separate lifetimes. Disconnect clears only tokens. */
+export const googlePostmasterConnections = sqliteTable('google_postmaster_connections', {
+ id: text('id').primaryKey(),
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+ token_envelope: text('token_envelope'),
+ status: text('status').notNull().default('connected'),
+ last_attempt_at: integer('last_attempt_at'),
+ last_success_at: integer('last_success_at'),
+}, t => [unique().on(t.workspace_id, t.domain_id)]);
+export const metricObservations = sqliteTable('metric_observations', {
+ workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+ connection_id: text('connection_id').notNull().references(() => googlePostmasterConnections.id, { onDelete: 'cascade' }),
+ domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+ metric: text('metric').notNull(), period_start: text('period_start').notNull(), period_end: text('period_end').notNull(),
+ source_id: text('source_id').notNull(), payload: text('payload').notNull(),
+}, t => [primaryKey({ columns: [t.connection_id,t.domain_id,t.metric,t.period_start,t.period_end,t.source_id] })]);

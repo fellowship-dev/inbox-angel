@@ -19,6 +19,8 @@ export const EXPORT_COLUMNS = {
 	invites: ['email', 'role', 'invited_by', 'created_at', 'expires_at', 'used_at'],
 	api_keys: ['id', 'user_id', 'name', 'prefix', 'created_at', 'last_used_at', 'expires_at', 'revoked_at'],
 	settings: ['key', 'value', 'updated_at'],
+	google_postmaster_connections: ['id', 'domain_id', 'status', 'last_attempt_at', 'last_success_at'],
+	metric_observations: ['connection_id', 'domain_id', 'metric', 'period_start', 'period_end', 'source_id', 'payload'],
 	cloudflare_connections: ['id', 'label', 'cf_account_id', 'cf_account_name', 'auth_type', 'scopes', 'status', 'status_detail', 'created_by', 'created_at', 'last_used_at'],
 	domains: ['id', 'domain', 'rua_address', 'dmarc_policy', 'dmarc_pct', 'spf_record', 'auth_record_provisioned', 'created_at', 'updated_at', 'dns_record_id', 'rollout_rec_policy', 'rollout_rec_pct', 'parent_id', 'is_default', 'alerts_enabled', 'spf_lookup_count', 'cf_connection_id', 'verified_via', 'evicted_at', 'evicted_name'],
 	aggregate_reports: ['id', 'domain_id', 'org_name', 'report_id', 'date_begin', 'date_end', 'total_count', 'pass_count', 'fail_count', 'created_at', 'reporter_auth', 'reporter_auth_domain'],
@@ -39,6 +41,8 @@ export const EXPORT_EXCLUDED = {
 	invites: ['token', 'workspace_id'],
 	api_keys: ['workspace_id', 'key_hash'],
 	settings: ['workspace_id'],
+	google_postmaster_connections: ['workspace_id', 'token_envelope'],
+	metric_observations: ['workspace_id'],
 	cloudflare_connections: ['workspace_id', 'token_envelope'],
 	domains: ['workspace_id'],
 	aggregate_reports: ['workspace_id', 'raw_xml'],
@@ -69,6 +73,7 @@ export function exportQueries(dbLike: DbLike, workspaceId: string) {
 		/** Rows in the big tables together: the export refuses workspaces past what one invocation can read. */
 		async bigRowCount(): Promise<number> {
 			const parts = await Promise.all([
+				count(sql`SELECT COUNT(*) AS n FROM metric_observations WHERE workspace_id = ${workspaceId}`),
 				count(sql`SELECT COUNT(*) AS n FROM report_records WHERE workspace_id = ${workspaceId}`),
 				count(sql`SELECT COUNT(*) AS n FROM aggregate_reports WHERE workspace_id = ${workspaceId}`),
 				count(sql`SELECT COUNT(*) AS n FROM tls_reports WHERE workspace_id = ${workspaceId}`),
@@ -87,6 +92,7 @@ export function exportQueries(dbLike: DbLike, workspaceId: string) {
 			api_keys: () => all(sql`SELECT ${C('api_keys')} FROM api_keys WHERE workspace_id = ${workspaceId} ORDER BY created_at`),
 			settings: () =>
 				all(sql`SELECT ${C('settings')} FROM settings WHERE workspace_id = ${workspaceId} AND key IN (${sql.join(EXPORT_SETTING_KEYS.map((k) => sql`${k}`), sql`, `)}) ORDER BY key`),
+			google_postmaster_connections: () => all(sql`SELECT ${C('google_postmaster_connections')} FROM google_postmaster_connections WHERE workspace_id = ${workspaceId} ORDER BY id`),
 			cloudflare_connections: () => all(sql`SELECT ${C('cloudflare_connections')} FROM cloudflare_connections WHERE workspace_id = ${workspaceId} ORDER BY created_at`),
 			spf_flatten_config: () => all(sql`SELECT ${C('spf_flatten_config')} FROM spf_flatten_config WHERE workspace_id = ${workspaceId} ORDER BY domain_id`),
 			mta_sts_config: () => all(sql`SELECT ${C('mta_sts_config')} FROM mta_sts_config WHERE workspace_id = ${workspaceId} ORDER BY domain_id`),
@@ -95,6 +101,8 @@ export function exportQueries(dbLike: DbLike, workspaceId: string) {
 
 		/** Large tables: rows with id > `after`, ascending. */
 		paged: {
+			// SQLite rowid is an export cursor only; provider identity is source_id plus metric/period.
+			metric_observations: (after: number, limit: number) => all(sql`SELECT rowid AS id, ${C('metric_observations')} FROM metric_observations WHERE workspace_id = ${workspaceId} AND rowid > ${after} ORDER BY rowid LIMIT ${limit}`),
 			domains: (after: number, limit: number) => all(sql`SELECT ${C('domains')} FROM domains WHERE workspace_id = ${workspaceId} AND id > ${after} ORDER BY id LIMIT ${limit}`),
 			aggregate_reports: (after: number, limit: number) => all(sql`SELECT ${C('aggregate_reports')} FROM aggregate_reports WHERE workspace_id = ${workspaceId} AND id > ${after} ORDER BY id LIMIT ${limit}`),
 			report_records: (after: number, limit: number) => all(sql`SELECT ${C('report_records')} FROM report_records WHERE workspace_id = ${workspaceId} AND id > ${after} ORDER BY id LIMIT ${limit}`),

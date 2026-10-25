@@ -1,3 +1,4 @@
+import { metricQueries } from './metrics';
 import { accessQueries } from './access-grants';
 export * from './access-grants';
 import { getDb, type DbLike } from '../client';
@@ -48,6 +49,7 @@ export function forWorkspace(db: DbLike, workspaceId: string) {
 	const d = getDb(db);
 	return {
 		workspaceId,
+		metrics: metricQueries(d, workspaceId),
 		access: accessQueries(d, workspaceId),
 		domains: domainQueries(d, workspaceId),
 		claims: claimQueries(d, workspaceId),
