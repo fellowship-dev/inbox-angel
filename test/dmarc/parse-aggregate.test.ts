@@ -72,4 +72,49 @@ describe('parseAggregateReportXml', () => {
     const report = await parseAggregateReportXml(bytes, OFFLINE);
     expect(report.report_metadata.org_name).toBe('example.net');
   });
+
+  // Aggregate reports are attacker-controlled input: pin how XML entities are treated.
+  describe('XML entities in untrusted reports', () => {
+    const withOrg = (org: string, doctype = '') =>
+      fixture('simple.xml')
+        .replace('<?xml version="1.0"?>', `<?xml version="1.0"?>${doctype}`)
+        .replace('<org_name>example.net</org_name>', `<org_name>${org}</org_name>`);
+
+    it('decodes the five predefined entities in text values', async () => {
+      const report = await parseAggregateReportXml(
+        withOrg('A &amp; B &lt;c&gt; &quot;d&quot; &apos;e&apos;'), OFFLINE);
+      expect(report.report_metadata.org_name).toBe('A & B <c> "d" \'e\'');
+    });
+
+    it('rejects a report that declares an external entity', async () => {
+      const xml = withOrg('&xxe;', '<!DOCTYPE feedback [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>');
+      await expect(parseAggregateReportXml(xml, OFFLINE)).rejects.toThrow(InvalidAggregateReport);
+    });
+
+    it('does not expand entity declarations that reference other entities (billion laughs)', async () => {
+      const doctype = '<!DOCTYPE feedback ['
+        + '<!ENTITY a "aaaaaaaaaa">'
+        + '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+        + '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">'
+        + '<!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">'
+        + ']>';
+      const report = await parseAggregateReportXml(
+        withOrg('&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;', doctype), OFFLINE);
+      // Full expansion would be 10^5 characters.
+      expect(report.report_metadata.org_name.length).toBeLessThan(1000);
+      expect(report.report_metadata.org_name).not.toContain('aaaaaaaaaa');
+    });
+
+    it('rejects a report whose flat entity expansion exceeds the parser limit', async () => {
+      const doctype = `<!DOCTYPE feedback [<!ENTITY big "${'a'.repeat(9000)}">]>`;
+      const xml = withOrg('&big;'.repeat(20), doctype); // 180k characters > 100k default limit
+      await expect(parseAggregateReportXml(xml, OFFLINE)).rejects.toThrow(InvalidAggregateReport);
+    });
+
+    it('still expands a small internal entity declaration', async () => {
+      const report = await parseAggregateReportXml(
+        withOrg('&org;', '<!DOCTYPE feedback [<!ENTITY org "example.org">]>'), OFFLINE);
+      expect(report.report_metadata.org_name).toBe('example.org');
+    });
+  });
 });

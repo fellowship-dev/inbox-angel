@@ -174,6 +174,8 @@ The deployable Worker stays at the repo root so the Deploy to Cloudflare button 
 
 ## Local Development
 
+Requires Node.js 22.22.2 or newer (24.15.0+ on the 24 line; odd-numbered 23 and 25 are unsupported). `wrangler` 4.92 and `miniflare` require Node 22 or later; the dashboard test tooling (`jsdom` 30 and its dependencies) sets the 22.22.2 floor.
+
 ```bash
 npm install             # installs the root app and all workspaces (including web/)
 npm run dev:dashboard   # web/ Vite dev server on :5173 (proxies /api to :8787)
