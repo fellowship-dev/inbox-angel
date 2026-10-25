@@ -87,7 +87,7 @@ export function ComponentsPage() {
 		<TooltipProvider>
 			<main className="mx-auto max-w-6xl space-y-12 px-4 py-8 sm:px-6">
 				<PageHeader
-					eyebrow={<span className="flex items-center gap-2"><LogoMark className="h-6 w-auto" /> Inbox Angel design system</span>}
+					eyebrow={<span className="flex items-center gap-2"><LogoMark className="size-6 rounded-md" /> Inbox Angel design system</span>}
 					title="Component gallery"
 					description="Every component in light and dark. Sample data throughout."
 				/>

@@ -23,9 +23,9 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--r-full); }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
 
-/* Visible focus on every interactive element (brand-ink is >= 3:1 on all surfaces). */
+/* Visible focus on every interactive element (--focus is >= 3:1 on all surfaces, navy light / gold dark). */
 :focus-visible {
-  outline: 2px solid var(--brand-ink);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 

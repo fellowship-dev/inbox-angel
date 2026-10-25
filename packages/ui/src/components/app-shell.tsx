@@ -73,7 +73,9 @@ function NavList({
 								onClick: onNavigate,
 								className: cn(
 									"flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors [&_svg]:size-5 [&_svg]:shrink-0",
-									item.current ? "bg-brand-subtle text-brand-ink" : "text-ink-2 hover:bg-surface-2 hover:text-ink-1",
+									item.current
+										? "relative bg-brand-subtle font-semibold text-brand-ink before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-brand-ink"
+										: "text-ink-2 hover:bg-surface-2 hover:text-ink-1",
 									collapsed && "justify-center px-0",
 								),
 								children: (
@@ -197,14 +199,14 @@ export function AppShell({
 				</DialogPrimitive.Root>
 
 				<div className="flex min-w-0 flex-1 flex-col">
-					<header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-surface-1/95 px-4 backdrop-blur sm:px-6">
+					<header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-surface-1 px-4 sm:px-6">
 						<IconButton className="md:hidden" label="Open navigation" aria-haspopup="dialog" onClick={() => setMobileOpen(true)}>
 							<Menu aria-hidden />
 						</IconButton>
 						<div className="flex min-w-0 flex-1 items-center gap-2">{topbarStart}</div>
 						<div className="flex shrink-0 items-center gap-2">{topbarEnd}</div>
 					</header>
-					<main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 space-y-8 px-4 py-6 sm:px-6 sm:py-8">
+					<main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-6xl flex-1 space-y-8 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 						{children}
 					</main>
 				</div>

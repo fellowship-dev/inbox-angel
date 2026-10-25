@@ -1,21 +1,21 @@
 /** Design tokens for JS consumers (charts, canvas, email templates). Mirrors styles/tokens.css. */
 
 export const lightColors = {
-	"surface-0": "#f8fafc",
+	"surface-0": "#f7f8fa",
 	"surface-1": "#ffffff",
-	"surface-2": "#f1f5f9",
-	"surface-3": "#e2e8f0",
-	"ink-1": "#0f172a",
-	"ink-2": "#475569",
-	"ink-3": "#64748b",
-	brand: "#60a5fa",
-	"brand-hover": "#3b8ff0",
-	"brand-ink": "#1d5bb5",
-	"brand-subtle": "#eff6ff",
-	"brand-fg": "#0b1f3a",
+	"surface-2": "#eff2f6",
+	"surface-3": "#e3e9f0",
+	"ink-1": "#0b1f3a",
+	"ink-2": "#526175",
+	"ink-3": "#617185",
+	brand: "#0b1f3a",
+	"brand-hover": "#173a63",
+	"brand-ink": "#0b1f3a",
+	"brand-subtle": "#e8eef5",
+	"brand-fg": "#ffffff",
 	accent: "#fad172",
 	"accent-hover": "#f5c04a",
-	"accent-fg": "#3b2a00",
+	"accent-fg": "#0b1f3a",
 	"accent-subtle": "#fef7e3",
 	blush: "#fca0a4",
 	success: "#15803d",
@@ -24,27 +24,29 @@ export const lightColors = {
 	"warning-subtle": "#fff7e6",
 	danger: "#b91c1c",
 	"danger-subtle": "#fef2f2",
-	line: "#e2e8f0",
-	"line-strong": "#cbd5e1",
-	"control-border": "#64748b",
+	line: "#d7dfe8",
+	"line-strong": "#b8c5d4",
+	"control-border": "#617185",
+	focus: "#0b1f3a",
 } as const;
 
 export type ColorToken = keyof typeof lightColors;
 
 /** Dark values; tokens absent here keep their light value (as on the website). */
 export const darkOverrides = {
-	"surface-0": "#0a1220",
-	"surface-1": "#101a2d",
-	"surface-2": "#17233a",
-	"surface-3": "#22314d",
-	"ink-1": "#f1f5f9",
-	"ink-2": "#a8b5c8",
-	"ink-3": "#8191a8",
-	brand: "#60a5fa",
-	"brand-hover": "#7bb6fb",
-	"brand-ink": "#93c5fd",
-	"brand-subtle": "#10233f",
+	"surface-0": "#0b1220",
+	"surface-1": "#142238",
+	"surface-2": "#1c2e47",
+	"surface-3": "#293d58",
+	"ink-1": "#f4f7fb",
+	"ink-2": "#a8b5c7",
+	"ink-3": "#8a9bb1",
+	brand: "#fad172",
+	"brand-hover": "#ffe09a",
+	"brand-ink": "#fad172",
+	"brand-subtle": "#332c1d",
 	"brand-fg": "#0b1f3a",
+	"accent-fg": "#0b1f3a",
 	"accent-subtle": "#2a2210",
 	success: "#4ade80",
 	"success-subtle": "#0f2a1a",
@@ -52,9 +54,10 @@ export const darkOverrides = {
 	"warning-subtle": "#2a2110",
 	danger: "#f87171",
 	"danger-subtle": "#2c1416",
-	line: "#22314d",
-	"line-strong": "#33466a",
-	"control-border": "#8191a8",
+	line: "#33465f",
+	"line-strong": "#50647e",
+	"control-border": "#8a9bb1",
+	focus: "#fad172",
 } as const satisfies Partial<Record<ColorToken, string>>;
 
 export const darkColors: Record<ColorToken, string> = { ...lightColors, ...darkOverrides };
@@ -112,8 +115,8 @@ export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min:
 	{ fg: "brand-ink", bg: "brand-subtle", min: 4.5, note: "link on tint" },
 	{ fg: "accent-fg", bg: "accent", min: 4.5, note: "text on gold" },
 	{ fg: "ink-1", bg: "accent-subtle", min: 4.5, note: "text on gold tint (accent-fg is not themed for dark, so do not use it here)" },
-	{ fg: "ink-1", bg: "brand-subtle", min: 4.5, note: "text on blue tint" },
-	{ fg: "ink-2", bg: "brand-subtle", min: 4.5, note: "secondary on blue tint" },
+	{ fg: "ink-1", bg: "brand-subtle", min: 4.5, note: "text on brand tint" },
+	{ fg: "ink-2", bg: "brand-subtle", min: 4.5, note: "secondary on brand tint" },
 	{ fg: "success", bg: "surface-1", min: 4.5, note: "pass text on card" },
 	{ fg: "success", bg: "success-subtle", min: 4.5, note: "pass text on tint" },
 	{ fg: "warning", bg: "surface-1", min: 4.5, note: "warn text on card" },
@@ -122,17 +125,28 @@ export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min:
 	{ fg: "danger", bg: "danger-subtle", min: 4.5, note: "fail text on tint" },
 	{ fg: "control-border", bg: "surface-1", min: 3, note: "input edge on card" },
 	{ fg: "control-border", bg: "surface-0", min: 3, note: "input edge on page" },
-	{ fg: "brand-ink", bg: "surface-1", min: 3, note: "focus ring on card" },
-	{ fg: "brand-ink", bg: "surface-0", min: 3, note: "focus ring on page" },
-	{ fg: "brand-ink", bg: "surface-2", min: 3, note: "focus ring on raised" },
+	{ fg: "focus", bg: "surface-1", min: 3, note: "focus ring on card" },
+	{ fg: "focus", bg: "surface-0", min: 3, note: "focus ring on page" },
+	{ fg: "focus", bg: "surface-2", min: 3, note: "focus ring on raised" },
+	{ fg: "focus", bg: "brand-subtle", min: 3, note: "focus ring on selected nav item" },
+	{ fg: "brand", bg: "surface-1", min: 3, note: "primary fill / switch / checkbox edge on card" },
+	{ fg: "brand-fg", bg: "brand", min: 7, note: "primary label (AAA)" },
+	{ fg: "ink-2", bg: "surface-3", min: 4.5, note: "secondary on strongest surface" },
+	{ fg: "success", bg: "surface-0", min: 4.5, note: "pass text on page" },
+	{ fg: "warning", bg: "surface-0", min: 4.5, note: "warn text on page" },
+	{ fg: "danger", bg: "surface-0", min: 4.5, note: "fail text on page" },
+	{ fg: "danger", bg: "surface-2", min: 4.5, note: "fail text on raised" },
 ];
 
 /**
  * Pairs that FAIL AA with the website's token values, so components avoid them:
  * - ink-3 on surface-2 is 4.34:1 in light mode → use ink-2 on raised surfaces.
- * - accent-fg is not overridden for dark mode → use it only on the --accent fill, never on --accent-subtle.
+ * - success and warning on surface-2 are 4.47:1 in light mode → put status text on surface-1 or a *-subtle tint, not on raised surfaces.
+ * - accent-fg is navy in both modes → use it only on the --accent fill, never on --accent-subtle in dark.
  */
 export const forbiddenPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; mode: "light" | "dark" }> = [
 	{ fg: "ink-3", bg: "surface-2", mode: "light" },
 	{ fg: "accent-fg", bg: "accent-subtle", mode: "dark" },
+	{ fg: "success", bg: "surface-2", mode: "light" },
+	{ fg: "warning", bg: "surface-2", mode: "light" },
 ];

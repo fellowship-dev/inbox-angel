@@ -4,7 +4,7 @@ import {
 } from "@inbox-angel/ui";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { useId, useState } from "react";
-import { SAMPLE_DOMAIN, SampleBanner } from "../sample";
+import { SAMPLE_DKIM, SAMPLE_DOMAIN, SAMPLE_EMAIL, SampleBanner } from "../sample";
 
 const steps = ["Domain", "Connect DNS", "Publish records", "Verify"];
 const current = 2;
@@ -16,7 +16,7 @@ export function SetupWizardStep() {
 		<div className="min-h-screen bg-surface-0 text-ink-1">
 			<header className="border-b border-line bg-surface-1">
 				<div className="mx-auto flex h-16 max-w-3xl items-center gap-2 px-4 sm:px-6">
-					<LogoMark className="h-7 w-auto text-ink-1" />
+					<LogoMark className="size-8 rounded-md" />
 					<span className="text-base font-bold tracking-tight">Inbox Angel</span>
 					<span className="ml-auto text-sm text-ink-2">Setup</span>
 				</div>
@@ -66,14 +66,15 @@ export function SetupWizardStep() {
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor={`${id}-rua`}>Where should reports go?</Label>
-							<Input id={`${id}-rua`} type="email" defaultValue={`reports@${SAMPLE_DOMAIN}`} aria-describedby={`${id}-rua-hint`} />
+							<Input id={`${id}-rua`} type="email" defaultValue={SAMPLE_EMAIL} aria-describedby={`${id}-rua-hint`} />
 							<FieldHint id={`${id}-rua-hint`}>Aggregate reports from receivers arrive here.</FieldHint>
 						</div>
-						<RecordBlock title="1. DMARC (TXT record)" record={{ type: "TXT", name: "_dmarc", value: `v=DMARC1; p=none; rua=mailto:reports@${SAMPLE_DOMAIN}`, ttl: "Auto" }} />
+						<RecordBlock title="1. DMARC (TXT record)" record={{ type: "TXT", name: "_dmarc", value: `v=DMARC1; p=none; rua=mailto:${SAMPLE_EMAIL}`, ttl: "Auto" }} />
 						<RecordBlock title="2. SPF (TXT record)" record={{ type: "TXT", name: "@", value: "v=spf1 include:_spf.sample-sender.test ~all", ttl: "Auto" }} />
+						<RecordBlock title="3. DKIM (TXT record)" record={{ type: "TXT", name: "sample1._domainkey", value: SAMPLE_DKIM, ttl: "Auto" }} />
 						<div className="flex items-center gap-2">
 							<Checkbox id={`${id}-done`} checked={done} onCheckedChange={(v) => setDone(v === true)} />
-							<Label htmlFor={`${id}-done`}>I added both records at my DNS provider</Label>
+							<Label htmlFor={`${id}-done`}>I added all records at my DNS provider</Label>
 						</div>
 						<Alert variant="info" title="DNS can take a while">
 							Changes can take from a few minutes up to a day to be visible. If verification fails right away, wait and try again.

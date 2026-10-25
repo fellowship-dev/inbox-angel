@@ -3,6 +3,7 @@ export * from "./tokens/tokens.js";
 
 export * from "./components/alert.js";
 export * from "./components/app-shell.js";
+export * from "./components/auth-layout.js";
 export * from "./components/badge.js";
 export * from "./components/button.js";
 export * from "./components/button-variants.js";

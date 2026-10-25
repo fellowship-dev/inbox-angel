@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Inbox, Settings } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	AppShell, Button, CheckResult, CheckResultList, EmptyState, LevelCard, LogoMark, PageHeader, RecordBlock, Skeleton, Stat,
+	AppShell, AuthLayout, Button, Field, Input, CheckResult, CheckResultList, EmptyState, LevelCard, LogoMark, PageHeader, RecordBlock, Skeleton, Stat,
 	StatGroup, StatusDot, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow, Toaster, WorkspaceSwitcher, dismissToast, toast,
 } from "../src";
 import { expectNoViolations } from "./a11y";
@@ -60,7 +60,31 @@ describe("Table / EmptyState / Skeleton", () => {
 	});
 });
 
+describe("AuthLayout", () => {
+	it("one h1, labelled fields, no axe violations", async () => {
+		const { container } = render(
+			<AuthLayout title="Sign in" description="Use your account">
+				<Field id="email" label="Email" hint="Used to sign in">
+					<Input id="email" type="email" aria-describedby="email-hint" />
+				</Field>
+			</AuthLayout>,
+		);
+		expect(screen.getByRole("heading", { level: 1, name: "Sign in" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Email")).toHaveAccessibleDescription("Used to sign in");
+		await expectNoViolations(container);
+	});
+});
+
 describe("PageHeader / LogoMark", () => {
+	it("LogoMark keeps the website halo-envelope geometry", () => {
+		const { container } = render(<LogoMark />);
+		const svg = container.querySelector("svg")!;
+		expect(svg).toHaveAttribute("viewBox", "0 0 100 100");
+		expect(svg.querySelector("rect")).toHaveAttribute("fill", "#0b1f3a");
+		const halo = svg.querySelector("ellipse")!;
+		expect([halo.getAttribute("cx"), halo.getAttribute("cy"), halo.getAttribute("rx"), halo.getAttribute("ry"), halo.getAttribute("stroke")]).toEqual(["50", "23", "19", "5.5", "#fad172"]);
+		expect(svg.querySelector("path")).toHaveAttribute("d", "M24 42 50 61 76 42");
+	});
 	it("renders one h1 with actions", () => {
 		render(<PageHeader title="Domain overview" description="d" actions={<Button>Act</Button>} />);
 		expect(screen.getByRole("heading", { level: 1, name: "Domain overview" })).toBeInTheDocument();
@@ -262,7 +286,7 @@ describe("WorkspaceSwitcher", () => {
 	it("shows the current workspace, lists all with roles, selects another, and offers to create one", async () => {
 		const onSelect = vi.fn();
 		const onCreate = vi.fn();
-		render(<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={onSelect} onCreate={onCreate} />);
+		render(<WorkspaceSwitcher current={workspaces[0]!} workspaces={workspaces} onSelect={onSelect} onCreate={onCreate} />);
 		const trigger = screen.getByRole("button", { name: "Workspace: Fellowship. Switch workspace" });
 		await userEvent.click(trigger);
 		const menu = await screen.findByRole("menu");
@@ -276,7 +300,7 @@ describe("WorkspaceSwitcher", () => {
 
 	it("choosing the current workspace does nothing; without onCreate there is no create entry; compact keeps the name for assistive tech", async () => {
 		const onSelect = vi.fn();
-		render(<WorkspaceSwitcher compact current={workspaces[0]} workspaces={workspaces} onSelect={onSelect} />);
+		render(<WorkspaceSwitcher compact current={workspaces[0]!} workspaces={workspaces} onSelect={onSelect} />);
 		await userEvent.click(screen.getByRole("button", { name: /Workspace: Fellowship/ }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: /Fellowship/ }));
 		expect(onSelect).not.toHaveBeenCalled();
@@ -286,7 +310,7 @@ describe("WorkspaceSwitcher", () => {
 
 	it("sits above the nav in the app shell's sidebar", () => {
 		render(
-			<AppShell brand={<span>Brand</span>} nav={[{ items: [{ label: "Domains", href: "/" }] }]} sidebarTop={<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={() => {}} />}>
+			<AppShell brand={<span>Brand</span>} nav={[{ items: [{ label: "Domains", href: "/" }] }]} sidebarTop={<WorkspaceSwitcher current={workspaces[0]!} workspaces={workspaces} onSelect={() => {}} />}>
 				<p>page</p>
 			</AppShell>,
 		);
@@ -294,7 +318,7 @@ describe("WorkspaceSwitcher", () => {
 	});
 
 	it("has no accessibility violations", async () => {
-		const { container } = render(<WorkspaceSwitcher current={workspaces[0]} workspaces={workspaces} onSelect={() => {}} onCreate={() => {}} />);
+		const { container } = render(<WorkspaceSwitcher current={workspaces[0]!} workspaces={workspaces} onSelect={() => {}} onCreate={() => {}} />);
 		await expectNoViolations(container);
 	});
 });

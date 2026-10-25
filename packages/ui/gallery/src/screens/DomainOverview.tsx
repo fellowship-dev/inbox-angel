@@ -23,7 +23,7 @@ export function DomainOverview() {
 		<AppShell
 			brand={
 				<>
-					<LogoMark className="h-7 w-auto shrink-0 text-ink-1" />
+					<LogoMark className="size-8 shrink-0 rounded-md" />
 					<span className="truncate text-base font-bold tracking-tight">Inbox Angel</span>
 				</>
 			}

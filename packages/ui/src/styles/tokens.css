@@ -2,8 +2,10 @@
    Inbox Angel design tokens. Values are taken verbatim from the website's
    globals.css (docs/design/site-globals.css); test/tokens.test.ts keeps them in sync.
 
-   --brand is a FILL (white on #60a5fa fails AA): text on it uses --brand-fg,
-   brand-coloured text on surfaces uses --brand-ink.
+   Palette: sober navy #0B1F3A is the light-mode brand (fills, links, headings); halo gold #FAD172 is the
+   dark-mode brand and the accent in both. --brand is a FILL: text on it uses --brand-fg (white on navy,
+   navy on gold); brand-coloured text on surfaces uses --brand-ink. --focus is the ring colour.
+   Blush --blush is decorative only (never text, never the only signal).
 
    Theme selection:
    - default: light; follows prefers-color-scheme: dark
@@ -14,27 +16,27 @@
   color-scheme: light;
 
   /* Surfaces */
-  --surface-0: #f8fafc;
+  --surface-0: #f7f8fa;
   --surface-1: #ffffff;
-  --surface-2: #f1f5f9;
-  --surface-3: #e2e8f0;
+  --surface-2: #eff2f6;
+  --surface-3: #e3e9f0;
 
   /* Text */
-  --ink-1: #0f172a;
-  --ink-2: #475569;
-  --ink-3: #64748b;
+  --ink-1: #0b1f3a;
+  --ink-2: #526175;
+  --ink-3: #617185;
 
-  /* Brand — sky blue from the logo */
-  --brand: #60a5fa;
-  --brand-hover: #3b8ff0;
-  --brand-ink: #1d5bb5;
-  --brand-subtle: #eff6ff;
-  --brand-fg: #0b1f3a;
+  /* Brand — navy (light) / gold (dark) */
+  --brand: #0b1f3a;
+  --brand-hover: #173a63;
+  --brand-ink: #0b1f3a;
+  --brand-subtle: #e8eef5;
+  --brand-fg: #ffffff;
 
-  /* Accent — halo gold and blush from the logo */
+  /* Accent — halo gold (navy label) and blush (decorative only) */
   --accent: #fad172;
   --accent-hover: #f5c04a;
-  --accent-fg: #3b2a00;
+  --accent-fg: #0b1f3a;
   --accent-subtle: #fef7e3;
   --blush: #fca0a4;
 
@@ -47,8 +49,8 @@
   --danger-subtle: #fef2f2;
 
   /* Borders */
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
+  --line: #d7dfe8;
+  --line-strong: #b8c5d4;
 
   /* Shadow */
   --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.05);
@@ -67,7 +69,8 @@
   /* Additions to the website set (not in site-globals.css).
      --line-strong is ~1.5:1 on white, below the 3:1 WCAG 1.4.11 needs for
      form-control edges, so controls use --control-border (= --ink-3). */
-  --control-border: #64748b;
+  --control-border: #617185;
+  --focus: #0b1f3a;
 
   /* Fonts (bundled via @fontsource-variable, no CDN) */
   --font-geist-sans: "Geist Variable";
@@ -78,20 +81,22 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --surface-0: #0a1220;
-    --surface-1: #101a2d;
-    --surface-2: #17233a;
-    --surface-3: #22314d;
+    --surface-0: #0b1220;
+    --surface-1: #142238;
+    --surface-2: #1c2e47;
+    --surface-3: #293d58;
 
-    --ink-1: #f1f5f9;
-    --ink-2: #a8b5c8;
-    --ink-3: #8191a8;
+    --ink-1: #f4f7fb;
+    --ink-2: #a8b5c7;
+    --ink-3: #8a9bb1;
 
-    --brand: #60a5fa;
-    --brand-hover: #7bb6fb;
-    --brand-ink: #93c5fd;
-    --brand-subtle: #10233f;
+    --brand: #fad172;
+    --brand-hover: #ffe09a;
+    --brand-ink: #fad172;
+    --brand-subtle: #332c1d;
     --brand-fg: #0b1f3a;
+
+    --accent-fg: #0b1f3a;
 
     --accent-subtle: #2a2210;
 
@@ -102,35 +107,38 @@
     --danger: #f87171;
     --danger-subtle: #2c1416;
 
-    --line: #22314d;
-    --line-strong: #33466a;
+    --line: #33465f;
+    --line-strong: #50647e;
 
     --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
     --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
     --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
     --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.3);
 
-    --control-border: #8191a8;
+    --control-border: #8a9bb1;
+    --focus: #fad172;
   }
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --surface-0: #0a1220;
-  --surface-1: #101a2d;
-  --surface-2: #17233a;
-  --surface-3: #22314d;
+  --surface-0: #0b1220;
+  --surface-1: #142238;
+  --surface-2: #1c2e47;
+  --surface-3: #293d58;
 
-  --ink-1: #f1f5f9;
-  --ink-2: #a8b5c8;
-  --ink-3: #8191a8;
+  --ink-1: #f4f7fb;
+  --ink-2: #a8b5c7;
+  --ink-3: #8a9bb1;
 
-  --brand: #60a5fa;
-  --brand-hover: #7bb6fb;
-  --brand-ink: #93c5fd;
-  --brand-subtle: #10233f;
+  --brand: #fad172;
+  --brand-hover: #ffe09a;
+  --brand-ink: #fad172;
+  --brand-subtle: #332c1d;
   --brand-fg: #0b1f3a;
+
+  --accent-fg: #0b1f3a;
 
   --accent-subtle: #2a2210;
 
@@ -141,13 +149,14 @@
   --danger: #f87171;
   --danger-subtle: #2c1416;
 
-  --line: #22314d;
-  --line-strong: #33466a;
+  --line: #33465f;
+  --line-strong: #50647e;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.3);
 
-  --control-border: #8191a8;
+  --control-border: #8a9bb1;
+  --focus: #fad172;
 }

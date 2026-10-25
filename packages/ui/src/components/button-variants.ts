@@ -6,7 +6,7 @@ export const buttonVariants = cva(
 	{
 		variants: {
 			variant: {
-				// Brand FILL with navy text (white on #60a5fa fails AA).
+				// Brand FILL (navy in light, gold in dark) with its --brand-fg label.
 				primary: "bg-brand text-brand-fg hover:bg-brand-hover",
 				secondary: "border border-line-strong bg-surface-1 text-ink-1 hover:bg-surface-2",
 				ghost: "text-ink-1 hover:bg-surface-2",

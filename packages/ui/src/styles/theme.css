@@ -33,6 +33,7 @@
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-control: var(--control-border);
+  --color-focus: var(--focus);
 
   --radius-sm: var(--r-sm);
   --radius-md: var(--r-md);
