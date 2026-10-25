@@ -27,7 +27,7 @@ import { colors } from "@inbox-angel/ui/tokens"; // JS consumers
 - Status never relies on colour: icon + word (CheckResult, LevelCard findings, StatusDot label, Alert).
 - "Lookup failed" (`error`) is distinct from "Not found" (`missing`) in CheckResult.
 - Pairs that fail AA with the website tokens are listed in `forbiddenPairs` (tokens.ts) and avoided:
-  `ink-3` on `surface-2` (4.34:1, light) and `accent-fg` on `accent-subtle` (dark). Form controls use the added
+  `success`/`warning` on `surface-2` (4.47:1, light) and `accent-fg` on `accent-subtle` (dark). Form controls use the added
   `--control-border` token because `--line-strong` is ~1.5:1 on white (WCAG 1.4.11 needs 3:1).
 
 ## Foundations
@@ -37,7 +37,7 @@ import { colors } from "@inbox-angel/ui/tokens"; // JS consumers
 | Token | Light | Dark |
 | --- | --- | --- |
 | surface-0 / 1 / 2 / 3 | #F7F8FA / #FFFFFF / #EFF2F6 / #E3E9F0 | #0B1220 / #142238 / #1C2E47 / #293D58 |
-| ink-1 / 2 / 3 | #0B1F3A / #526175 / #617185 | #F4F7FB / #A8B5C7 / #8A9BB1 |
+| ink-1 / 2 / 3 | #0B1F3A / #526175 / #5D6D82 | #F4F7FB / #A8B5C7 / #8A9BB1 |
 | brand = brand-ink | #0B1F3A | #FAD172 |
 | brand-hover / brand-fg / brand-subtle | #173A63 / #FFFFFF / #E8EEF5 | #FFE09A / #0B1F3A / #332C1D |
 | line / line-strong | #D7DFE8 / #B8C5D4 | #33465F / #50647E |

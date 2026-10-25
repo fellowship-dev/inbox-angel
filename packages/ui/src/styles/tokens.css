@@ -24,7 +24,7 @@
   /* Text */
   --ink-1: #0b1f3a;
   --ink-2: #526175;
-  --ink-3: #617185;
+  --ink-3: #5d6d82;
 
   /* Brand — navy (light) / gold (dark) */
   --brand: #0b1f3a;
@@ -68,7 +68,7 @@
 
   /* Additions to the website set (not in site-globals.css).
      --line-strong is ~1.5:1 on white, below the 3:1 WCAG 1.4.11 needs for
-     form-control edges, so controls use --control-border (= --ink-3). */
+     form-control edges, so controls use --control-border. */
   --control-border: #617185;
   --focus: #0b1f3a;
 

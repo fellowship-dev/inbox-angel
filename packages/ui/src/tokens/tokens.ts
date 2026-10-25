@@ -7,7 +7,7 @@ export const lightColors = {
 	"surface-3": "#e3e9f0",
 	"ink-1": "#0b1f3a",
 	"ink-2": "#526175",
-	"ink-3": "#617185",
+	"ink-3": "#5d6d82",
 	brand: "#0b1f3a",
 	"brand-hover": "#173a63",
 	"brand-ink": "#0b1f3a",
@@ -107,6 +107,7 @@ export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min:
 	{ fg: "ink-2", bg: "surface-2", min: 4.5, note: "secondary on raised" },
 	{ fg: "ink-3", bg: "surface-0", min: 4.5, note: "subtle on page" },
 	{ fg: "ink-3", bg: "surface-1", min: 4.5, note: "subtle on card" },
+	{ fg: "ink-3", bg: "surface-2", min: 4.5, note: "subtle on raised (small text)" },
 	{ fg: "brand-fg", bg: "brand", min: 4.5, note: "button label" },
 	{ fg: "brand-fg", bg: "brand-hover", min: 4.5, note: "button label, hover" },
 	{ fg: "brand-ink", bg: "surface-0", min: 4.5, note: "link on page" },
@@ -140,12 +141,10 @@ export const contrastPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; min:
 
 /**
  * Pairs that FAIL AA with the website's token values, so components avoid them:
- * - ink-3 on surface-2 is 4.34:1 in light mode → use ink-2 on raised surfaces.
  * - success and warning on surface-2 are 4.47:1 in light mode → put status text on surface-1 or a *-subtle tint, not on raised surfaces.
  * - accent-fg is navy in both modes → use it only on the --accent fill, never on --accent-subtle in dark.
  */
 export const forbiddenPairs: ReadonlyArray<{ fg: ColorToken; bg: ColorToken; mode: "light" | "dark" }> = [
-	{ fg: "ink-3", bg: "surface-2", mode: "light" },
 	{ fg: "accent-fg", bg: "accent-subtle", mode: "dark" },
 	{ fg: "success", bg: "surface-2", mode: "light" },
 	{ fg: "warning", bg: "surface-2", mode: "light" },
