@@ -1,9 +1,11 @@
-// Password-reset email, over the same outbound path as every other InboxAngel email
+// Password-reset and verification emails, over the same outbound path as every other InboxAngel email
 // (the SEND_EMAIL Email Routing binding).
 //
 // Self-host limitation: Cloudflare Email Routing only delivers to destination addresses
 // verified on the workspace, so a reset email reaches the owner (verified during setup) but
-// not an arbitrary teammate. Without SEND_EMAIL the link is written to the Worker log.
+// not an arbitrary teammate. Without SEND_EMAIL (or a sender address) nothing is sent and the Worker log
+// records only a static reason: for reset and verification the link, the recipient and provider errors
+// can carry credentials, so they are never logged.
 import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
 import type { AuthEnv } from './config';
 
@@ -24,11 +26,11 @@ export async function sendPasswordResetEmail(
   if (env.SEND_EMAIL && from) {
     try {
       await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [user.email], subject: 'Reset your InboxAngel password', text });
-    } catch (e) {
-      console.error('[auth] reset email send failed:', e);
+    } catch {
+      console.error('[auth] reset email send failed (provider error not logged)');
     }
   } else {
-    console.log(`[auth] reset link for ${user.email}: ${resetUrl}`);
+    unsent('reset', env);
   }
 }
 
@@ -42,12 +44,18 @@ export async function sendVerificationEmail(
   if (env.SEND_EMAIL && from) {
     try {
       await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [user.email], subject: 'Confirm your InboxAngel email', text });
-    } catch (e) {
-      console.error('[auth] verification email send failed:', e);
+    } catch {
+      console.error('[auth] verification email send failed (provider error not logged)');
     }
   } else {
-    console.log(`[auth] verification link for ${user.email}: ${verifyUrl}`);
+    unsent('verification', env);
   }
+}
+
+/** Static diagnostic for an email that could not be sent: names the operation and the missing piece, never the link, recipient or provider error. */
+function unsent(operation: string, env: AuthEnv): void {
+  const reason = !env.SEND_EMAIL ? 'SEND_EMAIL binding not configured' : 'no sender address (set from_email or base_domain)';
+  console.warn(`[auth] ${operation} email not sent: ${reason}`);
 }
 
 /** Tells a workspace's owners that a domain was taken from it because another workspace proved it controls the domain. */

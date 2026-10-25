@@ -131,7 +131,7 @@ signed in as the invited address. First OAuth link ends the user's other session
 **Bot check (required).** Hosted sign-up fails closed (503) unless `TURNSTILE_SECRET_KEY` is set; `TURNSTILE_SITE_KEY` is the public key served to the sign-up page. OAuth logins link to an
 existing account only when both the local account's email and the provider's are verified, and an OAuth sign-up matches a
 pending invite only on a provider-verified email. Verification mail uses the platform sender (`from_email` setting of the
-default workspace) over `SEND_EMAIL`; without it the link is written to the Worker log. Self-host is unchanged: the owner
+default workspace) over `SEND_EMAIL`; without it nothing is sent and the Worker log records only a static reason (never the link or address). Self-host is unchanged: the owner
 is marked verified at setup.
 
 **Domain ownership.** A domain a workspace adds is a *claim* (`domain_claims`) until proven; it is not in `domains`, so
