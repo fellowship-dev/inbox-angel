@@ -2,15 +2,23 @@ import { Button, Toaster } from "@inbox-angel/ui";
 import { useEffect, useState } from "react";
 import { ComponentsPage } from "./ComponentsPage";
 import { DomainOverview } from "./screens/DomainOverview";
+import { AuthScreen } from "./screens/AuthScreen";
+import { DomainEmpty } from "./screens/DomainEmpty";
 import { SetupWizardStep } from "./screens/SetupWizardStep";
+import { StatesScreen } from "./screens/StatesScreen";
 
-type View = "components" | "overview" | "wizard";
+type View = "components" | "signin" | "setup-owner" | "overview-empty" | "overview" | "wizard" | "loading" | "error";
 type Theme = "light" | "dark" | "system";
 
 const views: Array<{ id: View; label: string }> = [
 	{ id: "components", label: "Components" },
-	{ id: "overview", label: "Screen: Domain overview" },
-	{ id: "wizard", label: "Screen: Setup wizard step" },
+	{ id: "signin", label: "Sign in" },
+	{ id: "setup-owner", label: "Owner setup" },
+	{ id: "overview-empty", label: "Empty overview" },
+	{ id: "overview", label: "Populated overview" },
+	{ id: "wizard", label: "DNS record step" },
+	{ id: "loading", label: "Loading" },
+	{ id: "error", label: "Retryable error" },
 ];
 
 const parse = (): { view: View; theme: Theme } => {
@@ -62,6 +70,11 @@ export function App() {
 				</div>
 			</nav>
 			{view === "components" ? <ComponentsPage /> : null}
+			{view === "signin" ? <AuthScreen mode="signin" /> : null}
+			{view === "setup-owner" ? <AuthScreen mode="setup" /> : null}
+			{view === "overview-empty" ? <DomainEmpty /> : null}
+			{view === "loading" ? <StatesScreen key="loading" initial="loading" /> : null}
+			{view === "error" ? <StatesScreen key="error" initial="error" /> : null}
 			{view === "overview" ? <DomainOverview /> : null}
 			{view === "wizard" ? <SetupWizardStep /> : null}
 			<Toaster />

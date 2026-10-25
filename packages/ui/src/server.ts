@@ -4,6 +4,7 @@ export { cn } from "./lib/cn.js";
 export * from "./tokens/tokens.js";
 
 export * from "./components/alert.js";
+export * from "./components/auth-layout.js";
 export * from "./components/badge.js";
 export * from "./components/button-variants.js";
 export * from "./components/card.js";

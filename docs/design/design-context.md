@@ -13,10 +13,10 @@ Voice names the email, not the protocol: "signup emails", "password reset", then
 
 ### Aesthetic Direction
 - **References**: resend.com (clarity), plausible.io (honest open-source SaaS), linear.app (polish).
-- **Palette**: sky blue `#60A5FA` is the brand fill. Because white on `#60A5FA` fails AA, buttons use the brand fill with deep-navy text, and links/text accents use a darker blue (`--brand-ink`). Warm halo gold `#FAD172` and blush `#FCA0A4` come straight from the logo and are used sparingly (highlights, the guarantee, small marks). Neutrals are cool slate with a faint blue cast, not warm zinc.
+- **Palette**: sober navy `#0B1F3A` is the light-mode brand: primary actions, links, headings. In dark mode the brand fill is halo gold `#FAD172` with navy labels. Gold is also the highlight accent in both modes; blush `#FCA0A4` is a minor decorative accent only (never text). Neutrals are cool slate-navy. No sky blue as a primary, no gradients.
 - **Typography**: Geist Sans for UI and prose; Geist Mono for DNS records, error codes and anything copy-pasteable. DNS/records are first-class UI: monospace blocks with a copy button.
 - **Shape and motion**: soft radii, thin hairlines, little shadow; light mode default with full dark mode; motion is subtle and honors `prefers-reduced-motion`.
-- **Mark**: the kawaii envelope-with-halo (`inboxangel-kawaii-simple.svg`) in the header; used as an accent, never as decoration spam.
+- **Mark**: the website's halo-envelope (gold halo and envelope on a navy square, `LogoMark`) in the header; no face, wings or mascot; used as an accent, never as decoration spam.
 - **Anti-references**: NOT enterprise-security (shields, padlocks, SOC 2 badge walls, dark-navy fear marketing), NOT a hype landing page (counters, "trusted by", gradients), NOT cutesy to the point of undermining competence.
 
 ### Design Principles
@@ -27,11 +27,11 @@ Voice names the email, not the protocol: "signup emails", "password reset", then
 5. **Quiet confidence**: generous space, one primary action per section, repeated at top, middle and bottom of the home page.
 
 ### Token System
-Defined in `frontend/app/globals.css`:
+Defined in `packages/ui/src/styles/tokens.css` (exact values and typography, spacing, radius, motion and status rules in `packages/ui/README.md`):
 - `--surface-0/1/2/3` — page, card, raised, strong-line surfaces
 - `--ink-1/2/3` — primary, secondary, subtle text
-- `--brand` (`#60A5FA`) — fills; `--brand-fg` — text on brand fill (navy); `--brand-ink` — brand-coloured text and links on surfaces; `--brand-subtle` — tints
-- `--accent` (`#FAD172`) / `--blush` (`#FCA0A4`) — logo-derived highlights
+- `--brand` — fills (navy light / gold dark); `--brand-fg` — text on brand fill (white on navy, navy on gold); `--brand-ink` — brand-coloured text and links on surfaces; `--brand-subtle` — tints; `--focus` — focus ring
+- `--accent` (`#FAD172`, navy `--accent-fg`) / `--blush` (`#FCA0A4`, decorative) — logo-derived highlights
 - `--line`, `--line-strong` — borders
 - `--success`, `--warning`, `--danger` — semantic states for checker results
 

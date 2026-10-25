@@ -54,7 +54,7 @@ export function Shell() {
 		<AppShell
 			brand={
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
-					<LogoMark className="size-8 shrink-0" aria-hidden />
+					<LogoMark className="size-8 shrink-0 rounded-md" aria-hidden />
 					<span>Inbox Angel</span>
 				</Link>
 			}

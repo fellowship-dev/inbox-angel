@@ -30,7 +30,7 @@ describe("built package (dist) in Node ESM", () => {
 		expect(out).toContain("Level 1");
 	});
 	it("tokens entry imports", () => {
-		expect(node(`const t = await import("@inbox-angel/ui/tokens"); console.log(t.colors.light.brand)`)).toBe("#60a5fa");
+		expect(node(`const t = await import("@inbox-angel/ui/tokens"); console.log(t.colors.light.brand)`)).toBe("#0b1f3a");
 	});
 	it("keeps the \"use client\" directive in the build output of interactive components", () => {
 		for (const f of ["button", "dialog", "select", "toast", "app-shell", "record-block", "check-result", "tooltip", "tabs", "dropdown-menu", "checkbox", "switch", "label", "icon-button"]) {

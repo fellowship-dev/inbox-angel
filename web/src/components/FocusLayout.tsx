@@ -11,7 +11,7 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 		<div className="min-h-screen bg-surface-0 text-ink-1">
 			<header className="flex h-16 items-center justify-between border-b border-line bg-surface-1 px-4 sm:px-6">
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
-					<LogoMark className="size-7" aria-hidden />
+					<LogoMark className="size-7 rounded-md" aria-hidden />
 					Inbox Angel
 				</Link>
 				<div className="flex items-center gap-2">

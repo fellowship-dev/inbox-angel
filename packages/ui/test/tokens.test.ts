@@ -55,7 +55,7 @@ describe("tokens.css vs website site-globals.css", () => {
 	});
 	it("only documented additions beyond the website set", () => {
 		const extra = Object.keys(ourLight).filter((k) => !(k in siteLight));
-		expect(extra.sort()).toEqual(["--control-border", "--font-geist-mono", "--font-geist-sans"]);
+		expect(extra.sort()).toEqual(["--control-border", "--focus", "--font-geist-mono", "--font-geist-sans"]);
 	});
 });
 
