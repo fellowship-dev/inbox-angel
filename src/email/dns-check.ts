@@ -30,7 +30,8 @@ export const RECORDS_SEPARATOR = '  |  ';
 
 /** Returned lookups may carry `permerror`: the record(s) exist but receivers will treat them as an error. */
 export type SpfRecord = PkgSpfRecord & { permerror?: string };
-export type DmarcRecord = PkgDmarcRecord & { permerror?: string };
+/** `inheritedFrom`: set when the record was not at `_dmarc.<domain>` but inherited from the organizational domain (its name). */
+export type DmarcRecord = PkgDmarcRecord & { permerror?: string; inheritedFrom?: string };
 
 export interface DnsRecord {
   type: string;
@@ -97,12 +98,13 @@ export async function lookupDkim(domain: string, selector: string): Promise<Dkim
 export async function lookupDmarc(domain: string): Promise<DmarcRecord | null> {
   const r = await pkgLookupDmarc(createResolver(), domain);
   if (r.status === 'error') throw new DnsLookupError(`DMARC lookup for ${domain} failed: ${r.error}`);
+  const inherited = r.inherited && r.foundAt ? { inheritedFrom: r.foundAt } : {};
   if (r.status === 'multiple') {
     // RFC 7489 §6.6.3: with several records DMARC does not apply, i.e. effectively no policy.
     const msg = `${r.foundAt} has ${r.rawRecords!.length} DMARC records; receivers ignore DMARC`;
-    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join(RECORDS_SEPARATOR), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg };
+    return { ...parseDmarcRecord(r.rawRecords![0]), raw: r.rawRecords!.join(RECORDS_SEPARATOR), policy: 'none', subdomainPolicy: 'none', valid: false, issues: [msg], permerror: msg, ...inherited };
   }
-  return r.record;
+  return r.record && { ...r.record, ...inherited };
 }
 
 export async function checkDomain(domain: string, dkimSelector?: string | null): Promise<DnsCheckResult> {

@@ -94,7 +94,7 @@ export function renderMarkdown(m: ReportModel): string {
     '## Steps', '',
     '### First: re-read and check freshness', '',
     `1. This report was generated at ${m.generatedAt}. If that is older than 7 days, stop and ask for a fresh report.`,
-    `2. Re-read every record named in this report: ${names.map(n => `\`dig +short TXT ${n}\``).join(', ')}, \`dig +short MX ${d}\` and \`dig +short NS ${d}\`. If any live answer differs from the current records above, stop.`, '',
+    `2. Re-read every record named in this report: ${names.map(n => `\`dig +short TXT ${n}\``).join(', ')}, \`dig +short MX ${d}\` and \`dig +short NS ${d}\`. If any live answer differs from the current records above, stop. In the current records, \`${REDACTED_ADDRESS}\` stands for any mailbox address redacted from this report: it matches whatever address is live there, and is not a difference.`, '',
   ];
   if (m.steps.length) for (const s of m.steps) out.push(...stepBlock(s, d));
   else out.push('No changes to make: no confirmed finding has an exact DNS change in this report.', '');

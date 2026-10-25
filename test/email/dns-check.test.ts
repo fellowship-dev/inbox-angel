@@ -442,3 +442,15 @@ describe('checkDomain', () => {
     expect(result.errors?.dmarc).toMatch(/SERVFAIL/);
   });
 });
+
+describe('lookupDmarc marks a record inherited from the organizational domain', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('sets inheritedFrom to the name it was found at, and leaves it unset for the domain\'s own record', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(emptyDohResponse).mockResolvedValueOnce(makeDohResponse(['v=DMARC1; p=reject']));
+    expect((await lookupDmarc('mail.example.com'))!.inheritedFrom).toBe('_dmarc.example.com');
+    vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['v=DMARC1; p=reject']));
+    expect((await lookupDmarc('example.com'))!.inheritedFrom).toBeUndefined();
+  });
+});

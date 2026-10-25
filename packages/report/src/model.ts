@@ -1,7 +1,9 @@
 // The report model: one versioned object built from the resolver runs, rendered as HTML, JSON and the agent-prompt Markdown.
 //
 // Findings come from the consensus of the runs (KTD3): `confirmed` findings are facts, `unconfirmed` ones are shown as
-// such and never get a fix step. Facts, fixes and BIMI readiness are read from the run with the fewest failed lookups.
+// such and never get a fix step. Each finding's fix and derived values are read from the first run that produced it;
+// each current-record section (SPF, DMARC, MX, DKIM, MTA-STS, BIMI) from the first run whose lookup for it completed;
+// everything else (grade, providers, unchecked) from the run with the fewest failed lookups.
 // Everything is redacted (`build`): no DMARC report mailbox read from DNS leaves the process.
 
 import type { DetectedProvider, DnsHost, DomainReport, Grade } from '@inbox-angel/dns-checks';
@@ -158,15 +160,29 @@ export function buildReport({ runs, ns, dnsHost, reportUrl = null, generatedAt }
   const base = runs.reduce((best, r) => (r.errors.length < best.errors.length ? r : best));
   const nsRun = runs.find(r => r.ns.status !== 'error') ?? base;
   const host = dnsHost ?? nsRun.dnsHost;
-  const { facts: baseFacts } = build(base, generatedAt);
-  const facts: Facts = { ...baseFacts, dnsHost: host, ns: ns ?? nsRun.ns.hosts };
+  const built = runs.map(r => build(r, generatedAt));
+  const baseFacts = built[runs.indexOf(base)].facts;
+  const shared = { dnsHost: host, ns: ns ?? nsRun.ns.hosts };
+  /** Facts of the first run whose lookup for `check` completed (the fewest-errors run when none did). */
+  const completed = (check: DomainReport['errors'][number]['check']) =>
+    built[runs.findIndex(r => !r.errors.some(e => e.check === check))]?.facts ?? baseFacts;
+  const facts: Facts = {
+    ...baseFacts, ...shared,
+    spf: completed('spf').spf, dmarc: completed('dmarc').dmarc, mx: completed('mx').mx, dkim: completed('dkim').dkim,
+    mtaSts: completed('mta-sts').mtaSts, bimi: completed('bimi').bimi,
+  };
+  /** Facts of the first run that produced `id`: its fix and derived values match the records that finding rests on. */
+  const factsFor = (id: string): Facts => {
+    const i = built.findIndex(b => b.findings.some(x => x.id === id));
+    return i < 0 ? facts : { ...built[i].facts, ...shared };
+  };
 
   const findings: ReportFinding[] = consensus(runs, generatedAt)
     .filter(c => c.status !== 'absent' && c.finding)
     .map(c => ({
       ...c.finding!, status: c.status === 'confirmed' ? 'confirmed' as const : 'unconfirmed' as const,
       consensus: { produced: c.produced, contradicted: c.contradicted, errored: c.errored },
-      fix: fill(c.finding!, facts), derived: derived(c.finding!.id, facts),
+      fix: fill(c.finding!, factsFor(c.id)), derived: derived(c.finding!.id, factsFor(c.id)),
     }))
     .map((f, i) => ({ f, i }))
     .sort((a, b) => b.f.impact * b.f.confidence - a.f.impact * a.f.confidence || a.i - b.i)

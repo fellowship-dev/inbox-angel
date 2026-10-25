@@ -150,14 +150,16 @@ function catalogSteps(fix: Fix): FixStep[] {
 }
 
 const isSpfFix = (f: Fix) => (SPF_FINDINGS as readonly string[]).includes(f.finding);
-const DMARC_RECORD_BROKEN: ReadonlyArray<string> = ['dmarc-missing', 'dmarc-multiple', 'dmarc-invalid'];
 
 /**
  * The next record or setting for each problem. SPF and DMARC record fixes come from the @inbox-angel/report catalog
- * (report-findings.ts); the steps that depend on the received message stay here: the lookup-failed retry, the SPF
- * envelope domain, the DKIM signing domain and selector, and the DMARC policy upgrade.
+ * (report-findings.ts), each only when the received message failed that protocol; the steps that depend on the
+ * received message stay here: the lookup-failed retry, the SPF envelope domain, the DKIM signing domain and selector,
+ * and the DMARC policy upgrade (skipped when a catalog DMARC fix already rewrites the record). A protected result gets
+ * no steps.
  */
 export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: DnsCheckResult): FixStep[] {
+  if (s.status === 'protected') return [];
   const d = s.domain;
   const fixes = recordFixes(d, dns);
   const steps: FixStep[] = [];
@@ -165,7 +167,7 @@ export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: D
     steps.push({ text: 'Some DNS lookups failed, so parts of this report are incomplete. Send another email in a few minutes to re-run the check.' });
   }
 
-  for (const f of fixes.filter(isSpfFix)) steps.push(...catalogSteps(f));
+  if (!s.spfPass) for (const f of fixes.filter(isSpfFix)) steps.push(...catalogSteps(f));
   if (dns.spf && !s.spfProblem && !s.spfPass && !s.spfLookupFailed) {
     const envelope = auth?.spf?.domain ?? d;
     steps.push({ text: `SPF failed for ${envelope}: the server that sent this email is not in its SPF record. Add your email provider to the SPF record at ${envelope}, using the include or IP address the provider documents.` });
@@ -183,9 +185,10 @@ export function fixSteps(s: CheckSummary, auth: AuthResultsHeader | null, dns: D
     }
   }
 
-  const dmarcFixes = fixes.filter(f => !isSpfFix(f));
+  const dmarcFixes = s.dmarcPass ? [] : fixes.filter(f => !isSpfFix(f));
   for (const f of dmarcFixes) steps.push(...catalogSteps(f));
-  if (!dmarcFixes.some(f => DMARC_RECORD_BROKEN.includes(f.finding))) {
+  // one DMARC step per record: a catalog DMARC fix already rewrites it, so no separate policy upgrade
+  if (dmarcFixes.length === 0 && !dns.dmarc?.inheritedFrom) {
     if (s.dmarcPolicy === 'none') {
       steps.push({ text: `Change the policy at _dmarc.${d} from p=none to p=quarantine once your own email passes SPF or DKIM; later, p=reject.` });
     } else if (s.dmarcPolicy === 'quarantine') {

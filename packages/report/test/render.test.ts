@@ -279,3 +279,40 @@ describe('parity across outputs', () => {
     expect(fixes).not.toContain('_dmarc.split.dev');
   });
 });
+
+describe('review fixes: facts per finding and current records from completed lookups', () => {
+  const RAWS = ['v=spf1 include:_spf.google.com ~all', 'v=spf1 include:resend.com ~all'];
+  const dkimErrors = [{ check: 'dkim' as const, message: 'selector google: SERVFAIL' }, { check: 'dkim' as const, message: 'selector resend: SERVFAIL' }];
+  const seen = { providers: [GOOGLE], spf: 'permerror' as const, spfRaws: RAWS, spfIssues: [{ code: 'multiple-records' as const, domain: 'two.dev', message: '2 records' }], errors: dkimErrors };
+  const runs = [
+    makeRec('two.dev', { providers: [GOOGLE], spf: 'temperror', spfIssues: [{ code: 'dns-error', domain: 'two.dev', message: 'SERVFAIL' }], errors: [{ check: 'spf', message: 'SERVFAIL' }] }), // Cloudflare
+    makeRec('two.dev', seen), // Google
+    makeRec('two.dev', seen), // NextDNS
+  ];
+
+  it('a confirmed multiple-spf keeps its merged-record step when the fewest-errors run had the SPF lookup fail', () => {
+    const m = report(runs);
+    const f = m.findings.find(x => x.id === 'multiple-spf')!;
+    expect(f.status).toBe('confirmed');
+    expect(f.derived.spf_value).toBe('v=spf1 include:_spf.google.com include:resend.com ~all');
+    const step = m.steps.find(s => s.finding === 'multiple-spf')!;
+    expect(step).toMatchObject({ action: 'replace', expectedCurrent: RAWS, newValue: 'v=spf1 include:_spf.google.com include:resend.com ~all' });
+  });
+
+  it('current records come from a run whose lookup for that record completed', () => {
+    const m = report(runs);
+    expect(m.facts.spf.raws).toEqual(RAWS);
+    const md = renderMarkdown(m);
+    expect(md).not.toContain('could be read (lookup failed)');
+  });
+});
+
+describe('re-read step and redacted addresses', () => {
+  it('step 2 says <address> stands for any mailbox and matches whatever address is live', () => {
+    const md = renderMarkdown(report([1, 2, 3].map(() => makeRec('acme.dev', { providers: [GOOGLE], spf: 'ok', spfRaw: 'v=spf1 include:_spf.google.com ~all', verdict: 'soft', dmarc: 'found', dmarcRaw: 'v=DMARC1; p=reject; rua=mailto:ops@acme.dev', dmarcPolicy: 'reject', rua: ['mailto:ops@acme.dev'] }))));
+    expect(md).toContain('mailto:<address>');
+    const step2 = md.split('\n').find(l => l.startsWith('2. Re-read every record'))!;
+    expect(step2).toMatch(/`<address>` stands for any mailbox/);
+    expect(step2).toMatch(/matches whatever address is live/);
+  });
+});

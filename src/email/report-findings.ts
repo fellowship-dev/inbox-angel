@@ -43,10 +43,11 @@ function spfOf(domain: string, dns: DnsCheckResult): SpfAnalysis {
 }
 
 function dmarcOf(domain: string, dns: DnsCheckResult): DomainReport['dmarc'] {
-  const base = { domain, inherited: false, organizationalDomain: domain };
+  const inheritedFrom = dns.dmarc?.inheritedFrom;
+  const base = { domain, inherited: !!inheritedFrom, organizationalDomain: inheritedFrom ? inheritedFrom.replace(/^_dmarc\./, '') : domain };
   if (dns.errors?.dmarc) return { ...base, status: 'error', record: null, foundAt: null, error: dns.errors.dmarc };
   if (!dns.dmarc) return { ...base, status: 'none', record: null, foundAt: null };
-  const foundAt = `_dmarc.${domain}`;
+  const foundAt = inheritedFrom ?? `_dmarc.${domain}`;
   const raws = dns.dmarc.raw.split(RECORDS_SEPARATOR);
   if (dns.problems?.dmarc && raws.length > 1) return { ...base, status: 'multiple', record: null, foundAt, rawRecords: raws };
   return { ...base, status: 'found', record: dns.dmarc, foundAt };
@@ -79,10 +80,12 @@ export function domainReportOf(domain: string, dns: DnsCheckResult): DomainRepor
 
 /**
  * Catalog fixes for the SPF and DMARC record findings of one free check, in finding order. Unredacted on purpose:
- * the report goes to the domain's own sender, and the DMARC fixes must keep their real rua= address.
+ * the report goes to the domain's own sender, and the DMARC fixes must keep their real rua= address. A DMARC record
+ * inherited from the organizational domain gets no DMARC fix: the catalog records are written at `_dmarc.<domain>`.
  */
 export function recordFixes(domain: string, dns: DnsCheckResult, checkedAt = new Date().toISOString()): Fix[] {
   const report = domainReportOf(domain, dns);
   const facts = factsOf(report, checkedAt);
-  return findingsOf(report, checkedAt).filter(f => RECORD_FINDINGS.includes(f.id)).map(f => fill(f, facts));
+  const ids = dns.dmarc?.inheritedFrom ? SPF_FINDINGS as readonly string[] : RECORD_FINDINGS;
+  return findingsOf(report, checkedAt).filter(f => ids.includes(f.id)).map(f => fill(f, facts));
 }

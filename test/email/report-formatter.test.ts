@@ -343,8 +343,8 @@ describe('actionable findings: the exact record or setting to change, then "or w
     expect(text).toMatch(/change the address to one you read/);
   });
 
-  it('DMARC p=none: names p=quarantine as the next step', () => {
-    const text = report(makeAuth({ dmarcPolicy: 'none' }), makeDns({ dmarcPolicy: 'none' }));
+  it('DMARC p=none and this email failed DMARC: names p=quarantine as the next step', () => {
+    const text = report(makeAuth({ dmarcPolicy: 'none', dmarcResult: 'fail' }), makeDns({ dmarcPolicy: 'none' }));
     expect(text).toMatch(/_dmarc\.example\.com from p=none to p=quarantine/);
   });
 
@@ -409,7 +409,7 @@ describe('record fixes come from the catalog; message-derived steps stay', () =>
   });
 
   it('a DKIM failure from the received mail keeps the selector-specific step alongside the catalog fixes', () => {
-    const auth: AuthResultsHeader = { ...makeAuth({ dkimResult: 'fail', dmarcResult: 'fail' }), dkim: { result: 'fail', domain: 'example.com', selector: 's2024' } };
+    const auth: AuthResultsHeader = { ...makeAuth({ spfResult: 'fail', dkimResult: 'fail', dmarcResult: 'fail' }), dkim: { result: 'fail', domain: 'example.com', selector: 's2024' } };
     const all = steps(auth, { ...NO_RECORDS, mx: GOOGLE_MX });
     expect(all.some(st => st.text.includes('s2024._domainkey.example.com'))).toBe(true);
     expect(all.some(st => st.record?.value === catalogValue('dmarc-missing'))).toBe(true);
@@ -460,5 +460,62 @@ describe('share links when fully protected', () => {
       expect(text).not.toContain('x.com/intent');
       expect(text).not.toContain('linkedin.com');
     }
+  });
+});
+
+// ── Review fixes: catalog record fixes follow what the received message failed ──
+
+describe('catalog record fixes only for the protocol the received message failed', () => {
+  const report = (auth: AuthResultsHeader | null, dns: DnsCheckResult) =>
+    formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns, { siteUrl: 'https://inboxangel.io' });
+  const steps = (auth: AuthResultsHeader | null, dns: DnsCheckResult) => fixSteps(buildSummary('example.com', auth, dns), auth, dns);
+
+  it('protected with no SPF record: no fix steps and no "do it for you", share links stay', () => {
+    const auth = makeAuth({ spfResult: 'fail' });
+    const dns: DnsCheckResult = { ...makeDns(), spf: null };
+    expect(buildSummary('example.com', auth, dns).status).toBe<OverallStatus>('protected');
+    expect(steps(auth, dns)).toEqual([]);
+    const text = report(auth, dns);
+    expect(text).not.toContain('What to do next');
+    expect(text).not.toMatch(/Publish an SPF record|or we do it for you/i);
+    expect(text).toContain('x.com/intent/tweet');
+  });
+
+  it('at risk with SPF passing on the message: no catalog SPF fix, the DMARC failure still gets its steps', () => {
+    const auth = makeAuth({ dkimResult: 'fail', dmarcResult: 'fail', dmarcPolicy: 'quarantine' });
+    const dns: DnsCheckResult = { ...makeDns({ dmarcPolicy: 'quarantine' }), spf: null }; // SPF passed for another envelope domain
+    const s = buildSummary('example.com', auth, dns);
+    expect(s.status).toBe<OverallStatus>('at_risk');
+    const all = steps(auth, dns);
+    expect(all.some(st => st.record?.name === 'example.com')).toBe(false);
+    expect(all.length).toBeGreaterThan(0);
+  });
+
+  it('exposed with SPF failing: the catalog SPF fix is kept', () => {
+    const auth = makeAuth({ spfResult: 'fail', dkimResult: 'fail', dmarcResult: 'fail', dmarcPolicy: 'none' });
+    const dns: DnsCheckResult = { ...makeDns({ dmarcPolicy: 'none' }), spf: null };
+    expect(steps(auth, dns).some(st => st.record?.name === 'example.com')).toBe(true);
+  });
+
+  it('dmarc-p-none-no-rua: one DMARC step (the catalog record), not also the p=none to p=quarantine edit', () => {
+    const auth = makeAuth({ dmarcResult: 'fail', dmarcPolicy: 'none', dkimResult: 'fail' });
+    const dns = makeDns({ dmarcPolicy: 'none' });
+    dns.dmarc = { ...dns.dmarc!, raw: 'v=DMARC1; p=none', rua: [] };
+    const dmarcSteps = steps(auth, dns).filter(st => st.record?.name === '_dmarc.example.com' || st.text.includes('_dmarc.example.com'));
+    expect(dmarcSteps).toHaveLength(1);
+    expect(dmarcSteps[0].record?.value).toContain('rua=mailto:dmarc@example.com');
+  });
+});
+
+describe('an inherited DMARC record gets no record fix at _dmarc.<subdomain>', () => {
+  it('p=none with no rua inherited from the organizational domain: no catalog DMARC fix', () => {
+    const dns: DnsCheckResult = {
+      domain: 'mail.example.com', spf: null, dkim: null,
+      dmarc: { raw: 'v=DMARC1; p=none', policy: 'none', subdomainPolicy: 'none', pct: 100, rua: [], ruf: [], inheritedFrom: '_dmarc.example.com' } as any,
+    };
+    const auth: AuthResultsHeader = { ...makeAuth({ dmarcResult: 'fail', dmarcPolicy: 'none', dkimResult: 'fail', spfResult: 'fail' }) };
+    const all = fixSteps(buildSummary('mail.example.com', auth, dns), auth, dns);
+    expect(all.some(st => st.record?.name?.startsWith('_dmarc.'))).toBe(false);
+    expect(all.some(st => st.text.includes('_dmarc.mail.example.com'))).toBe(false);
   });
 });

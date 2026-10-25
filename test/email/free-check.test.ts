@@ -403,13 +403,13 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
 
-  function run(env: Record<string, unknown>, replyFails = false) {
+  function run(env: Record<string, unknown>, replyFails = false, trustedAuth = 'spf=pass smtp.mailfrom=user@example.com; dmarc=none header.from=example.com') {
     const sent: Array<{ replyTo?: string; text: string; html?: string }> = [];
     const SEND_EMAIL = { send: vi.fn(async (m: { replyTo?: string; text: string; html?: string }) => { sent.push(m); return { messageId: 'm' }; }) };
     const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...AUTHSERV, ...env } as never, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
     const message = makeMessage({
       authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com',
-      raw: rawWith('spf=pass smtp.mailfrom=user@example.com; dmarc=none header.from=example.com'),
+      raw: rawWith(trustedAuth),
     });
     if (replyFails) (message.reply as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not repliable'));
     return { done: handleFreeCheck(message, tenant, 'tok'), message, sent };
@@ -424,11 +424,11 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
       }
       return { ok: true, json: () => Promise.resolve({ Status: 3 }) } as unknown as Response;
     });
-    const { done, sent } = run({}, true);
+    // SPF did not pass on this message (no record), so the reply goes through reply(): the SEND_EMAIL fallback needs an SPF pass
+    const { done, message } = run({}, false, 'spf=none smtp.mailfrom=user@example.com; dkim=pass header.d=example.com header.s=sel1; dmarc=none header.from=example.com');
     await done;
-    expect(sent[0].text).toContain('v=spf1 include:_spf.google.com ~all');
-    expect(sent[0].html).toContain('v=spf1 include:_spf.google.com ~all');
-    expect(sent[0].text).not.toMatch(/resolver|cross-check|consensus/i);
+    expect(raw(message)).toContain('v=spf1 include:_spf.google.com ~all');
+    expect(raw(message)).not.toMatch(/resolver|cross-check|consensus/i);
   });
 
   it('MAIL_REPLY_TO set: the reply carries that Reply-To, and so does the outbound fallback', async () => {
