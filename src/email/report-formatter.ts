@@ -126,7 +126,7 @@ export interface CheckReportOptions {
  */
 export function retentionSentence(o: Pick<CheckReportOptions, 'retentionDays' | 'enrolled' | 'lead'>): string {
   const days = o.retentionDays ?? retentionPolicy({}).checkResultsDays;
-  if (o.enrolled) return `We delete this result after ${days} days. We use your address for our follow-up emails until you unsubscribe; after that we keep it only on a do-not-contact list.`;
+  if (o.enrolled) return `We keep your address and a summary of this result for our follow-up emails until you unsubscribe (or 12 months after your last check); after you unsubscribe we keep only your address, on a do-not-contact list. The full result is deleted after ${days} days.`;
   if (o.lead === 'inactive') return 'We keep your address and a summary of this result for up to 12 months after your last check, then delete them.';
   if (o.lead === 'suppressed') return `Your address is on our do-not-contact list and stays there, so you get no follow-up emails. We delete this result after ${days} days.`;
   return `We keep your address and this result for ${days} days, then delete them.`;

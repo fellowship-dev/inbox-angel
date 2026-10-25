@@ -305,7 +305,7 @@ describe('closing: help line, truthful retention, configured site link', () => {
   it('enrolled: result deleted after N days; address used until unsubscribe, then kept only on a do-not-contact list', () => {
     const summary = buildSummary('example.com', null, exposedDns);
     const text = formatCheckReport('a@example.com', summary, null, exposedDns, { enrolled: { text: 'x', unsubscribeUrl: 'https://w.example/u' }, retentionDays: 14 });
-    expect(text).toContain('We delete this result after 14 days. We use your address for our follow-up emails until you unsubscribe; after that we keep it only on a do-not-contact list.');
+    expect(text).toContain('We keep your address and a summary of this result for our follow-up emails until you unsubscribe (or 12 months after your last check); after you unsubscribe we keep only your address, on a do-not-contact list. The full result is deleted after 14 days.');
     expect(text).not.toContain('delete them when you unsubscribe');
   });
 

@@ -115,7 +115,7 @@ A visitor emails their `check+<token>@<reports domain>` address and gets the rep
 |---|---|
 | `MAIL_REPLY_TO` | **Required for replies.** The report ends with "Need help? Any doubts? Reply." and carries this Reply-To (a mailbox someone reads, e.g. routed with Email Routing). Unset: no Reply-To, and the Leads page (`GET /api/leads` → `delivery.warnings`) flags it even when the onboarding sequence is off. |
 | `SITE_URL` | Your public marketing site (`https://…`), linked from the report. Unset: no marketing link. `PUBLIC_BASE_URL` stays the Worker's own origin, for unsubscribe and confirmation links. |
-| `RETENTION_CHECK_RESULTS_DAYS` | How long check results are kept (default 30). The report states it; a sender enrolled in the follow-up emails is told their address is used until they unsubscribe and then kept only on a do-not-contact list, a past lead that it is kept up to 12 months after their last check, a suppressed address that it stays on the do-not-contact list. |
+| `RETENTION_CHECK_RESULTS_DAYS` | How long check results are kept (default 30). The report states it; a sender enrolled in the follow-up emails is told their address and a result summary are kept for follow-ups until they unsubscribe (then only the address, on a do-not-contact list), a past lead that it is kept up to 12 months after their last check, a suppressed address that it stays on the do-not-contact list. |
 
 ---
 
