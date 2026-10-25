@@ -39,9 +39,15 @@ Checklists validate **requirements writing quality** — not implementation.
 
 4. **Generate checklist** at `FEATURE_DIR/checklists/<domain>.md`:
    - Start from `templates/checklist-template.md`.
-   - 10–20 items grouped by quality dimension (completeness, clarity, consistency, coverage, edge cases).
+   - 10–20 items grouped by quality dimension. Use these six:
+     - **Completeness**: are all needed requirements present?
+     - **Clarity**: are they unambiguous and specific?
+     - **Consistency**: do they agree with each other?
+     - **Measurability**: can each be objectively verified?
+     - **Coverage**: are all flows / scenario classes addressed?
+     - **Edge Cases**: are boundary and failure conditions defined?
    - Each item is a yes/no question targeting requirement quality.
-   - Tie each question to specific spec sections where possible.
+   - Tie each question to specific spec sections where possible (`[Spec §X.Y]` or `[Gap]`).
 
 5. **Report**: path to checklist file, item count, grouping summary.
 
