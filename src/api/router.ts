@@ -96,7 +96,7 @@ import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
-import { parseDomainList, bulkInsertDomains } from '../domains/bulk';
+import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim, type VerifiedVia } from '../domains/ownership';
 import { fetchSubdomains } from '../domains/ct';
@@ -1949,6 +1949,7 @@ async function _handleApi(
       const list = parseDomainList(body.domains);
       if (list.length === 0) return err('no valid domains provided', 400);
       if (list.length > 50) return err('too many domains: limit is 50 per request', 400);
+      if (!tenant.settings.reportsDomain) return err(REPORTS_DOMAIN_MISSING, 400);
       const results = await bulkInsertDomains(
         tenant,
         list,

@@ -10,6 +10,8 @@ import { admitDomain, claimView, settleClaims, type ClaimView } from './ownershi
 const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 const BATCH_LIMIT = 50;
 
+export const REPORTS_DOMAIN_MISSING = 'Reports domain not configured — complete the setup wizard first';
+
 export type BulkImportStatus = 'imported' | 'duplicate' | 'invalid' | 'error' | 'pending';
 
 export interface BulkImportResult {
@@ -49,6 +51,7 @@ interface AuditOpts {
 /**
  * Insert each domain in the list, provision DNS, and return per-row status.
  * Caps at BATCH_LIMIT entries; excess entries are omitted from results.
+ * Throws when no reports domain is configured: aggregate reports must go to a domain this instance runs.
  */
 export async function bulkInsertDomains(
   tenant: TenantContext,
@@ -56,6 +59,8 @@ export async function bulkInsertDomains(
   audit: AuditOpts = {},
 ): Promise<BulkImportResult[]> {
   const rdomain = tenant.settings.reportsDomain;
+  if (!rdomain) throw new Error(REPORTS_DOMAIN_MISSING);
+  const ruaAddress = `rua@${rdomain}`;
   const batch = domains.slice(0, BATCH_LIMIT);
   const results: BulkImportResult[] = [];
 
@@ -76,8 +81,6 @@ export async function bulkInsertDomains(
     if (admission.kind === 'taken') { results.push({ domain, status: 'duplicate', error: 'already registered in another workspace' }); continue; }
     if (admission.kind === 'limit') { results.push({ domain, status: 'error', error: 'too many unverified domains — verify or remove some first' }); continue; }
     if (admission.kind === 'pending') { results.push({ domain, status: 'pending', claim: claimView(admission.claim) }); continue; }
-
-    const ruaAddress = rdomain ? `rua@${rdomain}` : `rua@reports.inboxangel.io`;
 
     let domainId: number;
     try {

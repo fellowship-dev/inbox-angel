@@ -85,6 +85,8 @@ npm run deploy
 
 No `BASE_DOMAIN`, no `REPORTS_DOMAIN`, no zone IDs — the setup wizard handles all domain configuration after deploy.
 
+**Option C — GitHub Actions (manual):** the `Deploy` workflow (`.github/workflows/deploy.yml`) runs only when you start it from the Actions tab (**Run workflow**); pushes to `main` never deploy. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets listed at the top of the workflow.
+
 ---
 
 ### Step 2 — Create your account

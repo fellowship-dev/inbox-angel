@@ -104,6 +104,19 @@ describe('bulkInsertDomains', () => {
     expect(rows[0]).toMatchObject({ domain: 'acme.com', rua_address: 'rua@reports.inboxangel.io', dns_record_id: 'dns-rec-1' });
   });
 
+  it('uses the configured reports domain for the rua address', async () => {
+    const db = makeDb();
+    await bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: 'reports.example.org' }, cfToken: 'tok' }), ['acme.com']);
+    expect(db.domainRows()[0]).toMatchObject({ domain: 'acme.com', rua_address: 'rua@reports.example.org' });
+  });
+
+  it('fails with an error naming the reports domain when none is configured, and inserts nothing', async () => {
+    const db = makeDb();
+    await expect(bulkInsertDomains(makeTenant({ db, settings: { reportsDomain: undefined } }), ['acme.com']))
+      .rejects.toThrow(/reports domain not configured/i);
+    expect(db.domainRows()).toHaveLength(0);
+  });
+
   it('returns duplicate status when domain already exists', async () => {
     const db = makeDb();
     seedDomain(db, 'acme.com'); // existing row
