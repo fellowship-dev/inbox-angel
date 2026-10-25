@@ -55,6 +55,14 @@ describe('service principals and HTTP isolation', () => {
   await f.owner.mapDomain('ws_default',f.a.id,f.domains[0].id,true);
   await expect(authorizeResource(f.db,f.resolved.access,'reports:read',{workspaceId:'ws_default',productId:f.a.id,domain:f.domains[0].domain})).rejects.toThrow();
  });
+ it('labels shared domain coverage without disclosing unconsented product identities',async () => {
+  const f = await productFixture();
+  await f.owner.mapDomain('ws_default', f.b.id, f.domains[0].id);
+  const rows = await authorizedDomains(f.db, f.resolved.access, {workspaceId:'ws_default',productId:f.a.id});
+  expect(rows).toHaveLength(1);
+  expect(rows[0].coverage).toBe('shared-domain');
+  expect(rows[0].mappedProductIds).toEqual([f.a.id]);
+ });
  it('finite human consent does not expand after membership and demotion limits actions',async () => {
   const {db,owner}=fixture();
   const principal=await owner.createPrincipal('ws_default','Portfolio','human');

@@ -69,7 +69,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
 				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
-				  AND ar.date_begin >= ${horizon} ${scope(domainId)}
+				  AND ar.date_begin >= ${horizon} AND ar.date_begin <= ${now} ${scope(domainId)}
 				GROUP BY rr.source_ip, d.id, rr.header_from, rr.spf_domain, rr.spf_result, rr.dkim_domain, rr.dkim_result
 				HAVING messages > 0 OR advice_messages > 0
 				ORDER BY messages DESC, advice_messages DESC
@@ -77,7 +77,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 		},
 
 		/** Daily totals from the reports' own evaluated results (these are DMARC pass/fail, not derived). */
-		trend(domainId: number | null, since: number): Promise<TrendRow[]> {
+		trend(domainId: number | null, since: number, until = Math.floor(Date.now() / 1000)): Promise<TrendRow[]> {
 			return db.all<TrendRow>(sql`
 				SELECT
 					date(datetime(ar.date_begin, 'unixepoch')) AS day,
@@ -86,7 +86,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					SUM(ar.fail_count)  AS failed
 				FROM aggregate_reports ar
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
-				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${since} ${scope(domainId)}
+				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${since} AND ar.date_begin <= ${until} ${scope(domainId)}
 				GROUP BY day
 				ORDER BY day ASC
 			`);
@@ -99,13 +99,13 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 				SELECT MIN(ar.date_begin) AS first
 				FROM aggregate_reports ar
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
-				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${horizon} ${scope(domainId)}
+				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${horizon} AND ar.date_begin <= ${now} ${scope(domainId)}
 			`);
 			return rows[0]?.first ?? null;
 		},
 
 		/** Per-domain totals for the workspace-wide page (every domain listed, with zeros when it has no reports). */
-		domainTotals(since: number) {
+		domainTotals(since: number, until = Math.floor(Date.now() / 1000)) {
 			return db.all<{ domain_id: number; domain: string; dmarc_policy: string | null; dmarc_pct: number | null; spf_record: string | null; spf_lookup_count: number | null; total: number; passed: number; days_with_reports: number }>(sql`
 				SELECT
 					d.id AS domain_id,
@@ -118,7 +118,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					COALESCE(SUM(r.pass_count), 0) AS passed,
 					COUNT(DISTINCT date(datetime(r.date_begin, 'unixepoch'))) AS days_with_reports
 				FROM domains d
-				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
+				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND r.date_begin <= ${until}
 				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL
 				GROUP BY d.id, d.domain, d.dmarc_policy, d.dmarc_pct, d.spf_record, d.spf_lookup_count
 				ORDER BY d.domain

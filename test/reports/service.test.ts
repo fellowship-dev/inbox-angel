@@ -5,6 +5,7 @@ import { checkDomain } from '@inbox-angel/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 import { makeTenant } from '../helpers/tenant';
 import { getDomainReport } from '../../src/reports/service';
+import { seedDomainReports } from '../analytics/world';
 
 async function world() {
   const tenant = makeTenant({ settings: { reportsDomain: undefined } });
@@ -57,5 +58,14 @@ describe('shared domain evidence report', () => {
   it('cannot read another workspace domain by guessed id', async () => {
     const { tenant, id } = await world();
     await expect(getDomainReport(makeTenant({ db: tenant.db, workspaceId: 'foreign' }), id)).rejects.toMatchObject({ status: 404 });
+  });
+  it('excludes future DMARC observations from sender advice and history', async () => {
+    const { tenant, id } = await world();
+    await seedDomainReports(tenant.db, tenant.workspaceId, id, 'x.com', [-1], [{ip:'203.0.113.8',count:1000,pass:false}], now);
+    const report = await getDomainReport(tenant, id, {resolver:createResolver({fetch:dohFetch({})}),now});
+    expect(report.analytics.senders).toEqual([]);
+    expect(report.analytics.fixes).toEqual([]);
+    expect(report.analytics.totals.messages).toBe(0);
+    expect(report.sections.dmarc.status).toBe('unavailable');
   });
 });

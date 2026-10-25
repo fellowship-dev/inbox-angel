@@ -50,7 +50,11 @@ export async function authorizedDomains(db: D1Database, subject: AccessSubject, 
   const resource = { ...selector, domain: domain.domain };
   if (!canAccess(current, action, resource)) continue;
   const products = await scope.access.products.domainProducts(domain.id);
-  result.push({ ...domain, productId: selector.productId, coverage: 'shared-domain' as const, mappedProductIds: products.map(p => p.product_id) });
+  const mappedProductIds = products.filter(p =>
+   canAccess(current, 'resources:read', { workspaceId: selector.workspaceId, productId: p.product_id, domain: domain.domain }) ||
+   canAccess(current, 'resources:read', { workspaceId: selector.workspaceId, productId: p.product_id })
+  ).map(p => p.product_id);
+  result.push({ ...domain, productId: selector.productId, coverage: 'shared-domain' as const, mappedProductIds });
  }
  return result;
 }

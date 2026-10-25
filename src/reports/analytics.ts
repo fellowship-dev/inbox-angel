@@ -69,7 +69,7 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     // One pass over the rows and one over the trend serve both the requested window and the 30-day advice window.
     const [allRows, allTrend, earliest, live] = await Promise.all([
       q.senderRows(id, since, adviceSince, now),
-      q.trend(id, Math.min(since, adviceSince)),
+      q.trend(id, Math.min(since, adviceSince), now),
       q.earliestReport(id, now),
       (options.lookupDmarc ?? liveDmarc)(domain.domain),
     ]);
@@ -98,9 +98,9 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
 
   const [allRows, allTrend, earliest, totals] = await Promise.all([
     q.senderRows(null, since, adviceSince, now),
-    q.trend(null, Math.min(since, adviceSince)),
+    q.trend(null, Math.min(since, adviceSince), now),
     q.earliestReport(null, now),
-    q.domainTotals(adviceSince),
+    q.domainTotals(adviceSince, now),
   ]);
   const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest });
   const adviceRows = inWindow(allRows, 'advice_messages');
