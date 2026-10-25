@@ -13,10 +13,11 @@
 
 export type DnsStatus = 'ok' | 'nodata' | 'nxdomain' | 'error';
 
-export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'TXT' | 'CNAME' | 'PTR';
+export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'NS' | 'TXT' | 'CNAME' | 'PTR';
 
 export const RECORD_TYPE_CODES: Record<DnsRecordType, number> = {
   A: 1,
+  NS: 2,
   CNAME: 5,
   MX: 15,
   PTR: 12,
@@ -85,6 +86,15 @@ export interface Resolver {
 }
 
 export const DEFAULT_DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
+
+/** Public JSON DoH endpoints, for running the same check once per resolver (`endpoint` option). */
+export const DOH_ENDPOINTS = {
+  cloudflare: DEFAULT_DOH_ENDPOINT,
+  google: 'https://dns.google/resolve',
+  nextdns: 'https://dns.nextdns.io/dns-query',
+} as const;
+
+export type DohResolverName = keyof typeof DOH_ENDPOINTS;
 
 const defaultFetch: FetchLike = (url, init) => globalThis.fetch(url, init) as Promise<FetchResponseLike>;
 

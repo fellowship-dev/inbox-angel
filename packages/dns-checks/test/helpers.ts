@@ -1,6 +1,6 @@
 import { createResolver, type FetchLike, type FetchResponseLike, type Resolver } from '../src/doh';
 
-const TYPE_CODE: Record<string, number> = { A: 1, CNAME: 5, PTR: 12, MX: 15, TXT: 16, AAAA: 28 };
+const TYPE_CODE: Record<string, number> = { A: 1, NS: 2, CNAME: 5, PTR: 12, MX: 15, TXT: 16, AAAA: 28 };
 
 export type Zone = Record<string, string[] | 'SERVFAIL' | 'TIMEOUT' | 'HTTP500' | 'GARBAGE' | 'NODATA'>;
 
