@@ -40,3 +40,24 @@ it('refreshes encrypted expired credentials with separate Postmaster OAuth clien
  await connectGoogle(tenant.scope,id,crypto,{access:'expired-fixture',refresh:'revoked-fixture',expiresAt:1});
  expect(await syncGoogleMetrics(tenant.scope,id,crypto,config,window,vi.fn().mockResolvedValue(Response.json({error:'invalid_grant'},{status:400})))).toMatchObject({status:'available',reason:'token_revoked',data:{stale:true}});
 });
+it('known revoked grant stays unusable until an explicit reconnect',async()=>{
+ const {tenant,id,crypto}=await world();await syncGoogleMetrics(tenant.scope,id,crypto,config,window,vi.fn().mockResolvedValue(new Response('',{status:401})));
+ const fetcher=vi.fn().mockResolvedValue(Response.json({}));
+ expect(await syncGoogleMetrics(tenant.scope,id,crypto,config,window,fetcher)).toMatchObject({reason:'token_revoked'});expect(fetcher).not.toHaveBeenCalled();
+ await connectGoogle(tenant.scope,id,crypto,{access:'reconnected-fixture',expiresAt:9999999999});await syncGoogleMetrics(tenant.scope,id,crypto,config,window,fetcher);expect(fetcher).toHaveBeenCalledOnce();
+});
+it('disconnect after page one prevents a new token-bearing page request',async()=>{
+ const {tenant,id,crypto}=await world();const fetcher=vi.fn().mockImplementationOnce(async()=>{await disconnectGoogle(tenant.scope,id);return Response.json({nextPageToken:'next'});}).mockResolvedValue(Response.json({}));
+ expect(await syncGoogleMetrics(tenant.scope,id,crypto,config,window,fetcher)).toMatchObject({reason:'disconnected'});expect(fetcher).toHaveBeenCalledOnce();
+});
+it('disconnect while decrypting blocks the first query and disconnect while decrypting expired grant blocks refresh',async()=>{
+ for(const expiresAt of [9999999999,1]) {
+  const {tenant,id,crypto}=await world();await connectGoogle(tenant.scope,id,crypto,{access:'fixture',refresh:'fixture',expiresAt});
+  const open=crypto.open.bind(crypto);vi.spyOn(crypto,'open').mockImplementationOnce(async(...args)=>{const material=await open(...args);await disconnectGoogle(tenant.scope,id);return material;});
+  const fetcher=vi.fn();await syncGoogleMetrics(tenant.scope,id,crypto,config,window,fetcher);expect(fetcher).not.toHaveBeenCalled();
+ }
+});
+it('a stale failed collection cannot clear a new explicit reconnect',async()=>{
+ const {tenant,id,crypto}=await world();const fetcher=vi.fn().mockImplementationOnce(async()=>{await connectGoogle(tenant.scope,id,crypto,{access:'replacement-fixture',expiresAt:9999999999});return new Response('',{status:401});});
+ await syncGoogleMetrics(tenant.scope,id,crypto,config,window,fetcher);expect(await tenant.scope.metrics.status(id)).toMatchObject({status:'connected'});expect((await tenant.scope.metrics.secret(id))?.token_envelope).toBeTruthy();
+});

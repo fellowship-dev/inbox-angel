@@ -1,3 +1,5 @@
+import { withMcpAuthorization } from './auth/mcp-issuer';
+import { createInboxMcpHandler } from './mcp/transport';
 import { handleEmail } from './email/handler';
 import { handleApi } from './api/router';
 import { handleRelay, isRelayPath, relayEnabled } from './connections/relay';
@@ -39,6 +41,8 @@ export interface Env {
   GITHUB_CLIENT_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_POSTMASTER_CLIENT_ID?: string;
+  GOOGLE_POSTMASTER_CLIENT_SECRET?: string;
   // Cloudflare (secrets — set via wrangler secret put)
   CLOUDFLARE_API_TOKEN?: string; // EMAIL token: email routing + DNS writes
   // Cloudflare connections (docs/cloudflare-oauth.md)
@@ -95,7 +99,7 @@ export interface Env {
 export type BoundEnv = Env & { DB: D1Database };
 
 // HTTP API (dashboard calls, DNS provisioning)
-export const coreWorker = {
+export const coreWorker = Object.freeze({
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // OAuth relay deployment (CF_OAUTH_RELAY_SECRET set): stateless, needs no database. Inert everywhere else.
     if (relayEnabled(env) && isRelayPath(new URL(request.url).pathname)) return handleRelay(request, env);
@@ -162,10 +166,10 @@ export const coreWorker = {
     await runCronForWorkspaces(event, env as BoundEnv, ctx);
     await runHostedCron(event, env as BoundEnv, ctx);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env>);
 
 
-export default coreWorker;
+export default withMcpAuthorization(coreWorker, createInboxMcpHandler());
 
 function setupPage(): Response {
   const html = `<!DOCTYPE html>

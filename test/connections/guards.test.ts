@@ -16,12 +16,12 @@ describe('connection secrets stay in their lane', () => {
     expect(using(/\.TOKEN_ENCRYPTION_KEY/)).toEqual(['connections/crypto.ts']);
   });
 
-  it('the stored envelope is handled only by the connection service', () => {
-    expect(using(/token_envelope/)).toEqual(['connections/service.ts']);
+  it('stored envelopes stay in their provider connection modules', () => {
+    expect(using(/token_envelope/)).toEqual(['connections/service.ts', 'metrics/google-postmaster/connection.ts', 'metrics/google-postmaster/sync.ts']);
   });
 
-  it('OAuth tokens are minted and revoked only through connections/oauth.ts', () => {
-    expect(using(/grant_type|token_type_hint/)).toEqual(['connections/oauth.ts']);
+  it('provider tokens are minted only in their OAuth clients', () => {
+    expect(using(/grant_type|token_type_hint/)).toEqual(['connections/oauth.ts', 'metrics/google-postmaster/client.ts']);
   });
 
   it('nothing outside the connection layer builds a CfClient from a stored connection', () => {
@@ -30,7 +30,7 @@ describe('connection secrets stay in their lane', () => {
 
   it('no logging call in src/connections can mention a token, code, state, secret or envelope', () => {
     const offenders = files
-      .filter(f => f.path.startsWith('connections/'))
+      .filter(f => f.path.startsWith('connections/') || f.path.startsWith('metrics/') || f.path.startsWith('mcp/') || f.path === 'auth/mcp-issuer.ts' || f.path === 'auth/bootstrap.ts')
       .flatMap(f => f.text.split('\n').map((l, i) => ({ f: f.path, l, i })))
       .filter(({ l }) => /console\.(log|warn|error|info|debug)\(/.test(l))
       // the one allowed line: the operator-error log in service.ts (ids and error class names only)

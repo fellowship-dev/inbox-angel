@@ -11,15 +11,26 @@ const cryptoId=()=>crypto.randomUUID();
 export const disconnectGoogle=(scope:WorkspaceScope,domainId:number)=>scope.metrics.disconnect(domainId);
 export async function googleAccess(scope:WorkspaceScope,domainId:number,crypto:TokenCrypto,config:GoogleOAuthConfig,fetcher:typeof fetch=fetch) {
  const row=await scope.metrics.secret(domainId);
+ if(row?.status==='token_revoked')throw new GoogleProviderError('token_revoked');
  if(!row||row.status==='disconnected'||!row.token_envelope)throw new GoogleProviderError('disconnected');
+ let generation=row.token_envelope;
+ const assertActive=async()=>{
+  const current=await scope.metrics.secret(domainId);
+  if(current?.status==='token_revoked')throw new GoogleProviderError('token_revoked');
+  if(!current||current.status==='disconnected'||!current.token_envelope)throw new GoogleProviderError('disconnected');
+  if(current.id!==row.id||current.token_envelope!==generation)throw new GoogleProviderError('provider_error');
+ };
  const aad=envelopeAad(scope.workspaceId,row.id);let material=await crypto.open(row.token_envelope,aad);
  if(material.expired(Math.floor(Date.now()/1000))) {
   const refreshToken=material.refresh();if(!refreshToken)throw new GoogleProviderError('token_revoked');
+  await assertActive();
   const next=await exchangeGoogleToken(config,{refreshToken},fetcher);const envelope=await crypto.seal(next,aad);
   if(!await scope.metrics.swapEnvelope(domainId,row.token_envelope,envelope))throw new GoogleProviderError('provider_error');
-  material=await crypto.open(envelope,aad);
+  generation=envelope;material=await crypto.open(envelope,aad);
  } else if(!crypto.isCurrent(row.token_envelope)) {
-  if(!await scope.metrics.swapEnvelope(domainId,row.token_envelope,await crypto.seal(material,aad)))throw new GoogleProviderError('provider_error');
+  const envelope=await crypto.seal(material,aad);
+  if(!await scope.metrics.swapEnvelope(domainId,row.token_envelope,envelope))throw new GoogleProviderError('provider_error');
+  generation=envelope;
  }
- return {id:row.id,material};
+ return {id:row.id,material,assertActive,envelope:generation};
 }

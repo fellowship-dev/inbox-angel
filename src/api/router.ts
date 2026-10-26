@@ -77,6 +77,7 @@ import { version } from '../../package.json';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleAccessRoutes } from '../access/routes';
+import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
@@ -544,6 +545,9 @@ async function _handleApi(
 
   const accessResponse = await handleAccessRoutes(request, env, ctx);
   if (accessResponse) return accessResponse;
+
+  const metricsResponse = await handleGoogleMetricRoutes(request, env, ctx);
+  if (metricsResponse) return metricsResponse;
 
   // All /api/* routes require auth
   if (!path.startsWith('/api/')) {

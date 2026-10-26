@@ -25,6 +25,10 @@ describe('shared domain evidence report', () => {
     expect(report.sections.dmarc).toMatchObject({ status: 'unavailable', reason: 'no_reports', source: 'dmarc-aggregate' });
     expect(report.sections.google).toMatchObject({ status: 'unavailable', reason: 'not_connected' });
     expect(report.sections.tls).toMatchObject({ status: 'unavailable', reason: 'no_reports' });
+    expect(report.sections.dmarc.evidence.coverage.observed_dates).toEqual([]);
+    expect(report.sections.dmarc.evidence.coverage.missing_dates).toHaveLength(31);
+    expect(report.sections.dmarc.evidence.freshness.latest_received_at).toBeNull();
+    expect(report.sections.tls.evidence.observations).toEqual([]);
     expect(report.coverage).toMatchObject({ scope: 'shared-domain', product_attribution: false });
     expect(report.intake.status).toBe('unavailable');
     expect(report.remediation.some(f => f.finding === 'dmarc-missing')).toBe(true);
@@ -53,6 +57,45 @@ describe('shared domain evidence report', () => {
       status: 'available', window: { until: now },
       data: { total_success: 10, total_failure: 1, report_count: 1 },
     });
+  });
+
+  it('preserves source periods and receipt age, distinguishing observed zero counts from missing dates', async () => {
+    const { tenant, id } = await world();
+    const begin = Math.floor(now / 86400) * 86400 - 86400;
+    const end = begin + 86399;
+    await tenant.scope.reports.insertAggregate({ domain_id: id, org_name: 'DMARC reporter', report_id: 'original-source-42', date_begin: begin, date_end: end, total_count: 0, pass_count: 0, fail_count: 0, raw_xml: '<private>never expose</private>' });
+    await tenant.scope.reports.insertTls({ domain_id: id, org_name: 'TLS reporter', date_begin: begin, date_end: end, total_success: 0, total_failure: 0, failure_details: 'private', raw_json: 'private' });
+    const received = now - 60;
+    const db = tenant.env.DB as unknown as ReturnType<typeof import('@inbox-angel/db/testing').createMigratedD1>;
+    db.sqlite.prepare('UPDATE aggregate_reports SET created_at = ?').run(received);
+    db.sqlite.prepare('UPDATE tls_reports SET created_at = ?').run(received);
+    const report = await getDomainReport(tenant, id, { resolver: createResolver({ fetch: dohFetch({}) }), now, days: 2 });
+    expect(report.sections.dmarc).toMatchObject({ status: 'available', data: { messages: 0, denominator: 0, pass_rate: null } });
+    expect(report.sections.tls).toMatchObject({ status: 'available', data: { total_success: 0, total_failure: 0 } });
+    for (const section of [report.sections.dmarc, report.sections.tls]) {
+      expect(section.evidence).toMatchObject({
+        report_count: 1, truncated: false,
+        observations: [{ date_begin: begin, date_end: end, received_at: received, receipt_age_seconds: 60 }],
+        coverage: { observed_dates: [new Date(begin * 1000).toISOString().slice(0, 10)], missing_dates: [new Date((begin - 86400) * 1000).toISOString().slice(0, 10), new Date(now * 1000).toISOString().slice(0, 10)] },
+        freshness: { latest_period_end: end, latest_received_at: received, receipt_age_seconds: 60 },
+      });
+      expect(JSON.stringify(section)).not.toContain('private');
+    }
+    expect(report.sections.dmarc.evidence.observations[0]).toMatchObject({ source_report_id: 'original-source-42', reporter: 'DMARC reporter' });
+    expect(report.sections.tls.evidence.observations[0].source_report_id).toBeNull();
+  });
+
+  it('caps sanitized source references while retaining full aggregate totals and coverage', async () => {
+    const { tenant, id } = await world();
+    const begin = Math.floor(now / 86400) * 86400 - 86400;
+    for (let i = 0; i < 201; i++) {
+      await tenant.scope.reports.insertAggregate({ domain_id: id, org_name: 'reporter', report_id: `source-${i}`, date_begin: begin, date_end: begin + 86399, total_count: 1, pass_count: 1, fail_count: 0, raw_xml: null });
+    }
+    const report = await getDomainReport(tenant, id, { resolver: createResolver({ fetch: dohFetch({}) }), now, days: 2 });
+    expect(report.sections.dmarc.data?.messages).toBe(201);
+    expect(report.sections.dmarc.evidence).toMatchObject({ report_count: 201, truncated: true });
+    expect(report.sections.dmarc.evidence.observations).toHaveLength(200);
+    expect(report.sections.dmarc.evidence.coverage.observed_dates).toHaveLength(1);
   });
 
   it('cannot read another workspace domain by guessed id', async () => {

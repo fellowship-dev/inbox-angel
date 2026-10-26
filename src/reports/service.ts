@@ -4,7 +4,7 @@ import type { TenantContext } from '../tenancy/context';
 import { enrollmentView } from '../domains/service';
 import { getAnalytics } from './analytics';
 import { buildRemediation } from './remediation';
-import type { EvidenceSection } from './contracts';
+import type { EvidenceSection, EvidenceProvenance } from './contracts';
 import { getGoogleEvidence } from '../metrics/store';
 
 export interface ReportOptions { days?: number; now?: number; resolver?: Resolver; resolvers?: readonly Resolver[] }
@@ -25,6 +25,24 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     lookupDmarc: async () => run.dmarc.status === 'error' ? undefined : run.dmarc.record?.raw ?? null,
   });
   const tls = await tenant.scope.reports.tlsSummary(domainId, window.since, window.until);
+  const evidence = await tenant.scope.reports.evidence(domainId, window.since, window.until);
+  const dates: string[] = [];
+  for (let day = window.since; day <= now; day += 86400) dates.push(new Date(day * 1000).toISOString().slice(0, 10));
+  const provenance = (source: typeof evidence.dmarc): EvidenceProvenance => ({
+    report_count: source.report_count, truncated: source.truncated,
+    observations: source.observations.map(({ created_at, ...observation }) => ({
+      ...observation, received_at: created_at, receipt_age_seconds: now - created_at,
+    })),
+    coverage: {
+      date_basis: 'report-start-utc', observed_dates: source.observed_dates,
+      missing_dates: dates.filter(date => !source.observed_dates.includes(date)), complete_mail_population: false,
+    },
+    freshness: {
+      latest_period_end: source.latest_period_end, latest_received_at: source.latest_received_at,
+      period_end_age_seconds: source.latest_period_end === null ? null : now - source.latest_period_end,
+      receipt_age_seconds: source.latest_received_at === null ? null : now - source.latest_received_at,
+    },
+  });
   const google = await getGoogleEvidence(tenant.scope, domainId, window);
   const totals = analytics.totals;
   const section = <T>(source: string, population: string, data: T | null, reason?: string): EvidenceSection<T> => ({
@@ -37,8 +55,8 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     intake: enrollmentView(domain, tenant.settings.reportsDomain).intake,
     dns, analytics,
     sections: {
-      dmarc: section('dmarc-aggregate', 'Messages represented in received aggregate DMARC reports; not all mail sent', totals.messages ? { ...totals, unit: 'messages', denominator: totals.messages, alignment: analytics.alignment } : null, totals.messages ? undefined : 'no_reports'),
-      tls: section('tls-rpt', 'SMTP TLS sessions represented in received TLS-RPT reports; not delivery or inbox placement', tls?.report_count ? { ...tls, unit: 'sessions' } : null, tls?.report_count ? undefined : 'no_reports'),
+      dmarc: { ...section('dmarc-aggregate', 'Messages represented in received aggregate DMARC reports; not all mail sent', evidence.dmarc.report_count ? { ...totals, unit: 'messages', denominator: totals.messages, alignment: analytics.alignment } : null, evidence.dmarc.report_count ? undefined : 'no_reports'), evidence: provenance(evidence.dmarc) },
+      tls: { ...section('tls-rpt', 'SMTP TLS sessions represented in received TLS-RPT reports; not delivery or inbox placement', tls?.report_count ? { ...tls, unit: 'sessions' } : null, tls?.report_count ? undefined : 'no_reports'), evidence: provenance(evidence.tls) },
       google,
       inbox_placement: section('none', 'Recipient inbox versus spam placement', null, 'not_measured'),
     },

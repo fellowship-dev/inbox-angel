@@ -95,6 +95,24 @@ type NewReport = Omit<typeof aggregateReports.$inferInsert, 'id' | 'created_at' 
 type NewRecord = Omit<typeof reportRecords.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
 type NewTlsReport = Omit<typeof tlsReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
 
+/** Sanitized references only: source payloads and authentication headers never enter reports. */
+export interface ReportEvidenceRow {
+  id: number;
+  source_report_id: string | null;
+  reporter: string;
+  date_begin: number;
+  date_end: number;
+  created_at: number;
+  total_count: number;
+  pass_count: number;
+  fail_count: number;
+}
+interface EvidenceSummaryRow {
+  report_count: number;
+  latest_period_end: number | null;
+  latest_received_at: number | null;
+}
+
 export function reportQueries(db: Db, workspaceId: string) {
 	const A = sql`${workspaceId}`;
 
@@ -351,6 +369,26 @@ export function reportQueries(db: Db, workspaceId: string) {
 				})
 				.run();
 		},
+
+    /** Bounded source references; summary and observed dates cover the entire selected range. */
+    async evidence(domainId: number, since: number, until: number) {
+      const [dmarc, tls, dmarcSummary, tlsSummary, dmarcDates, tlsDates] = await Promise.all([
+        db.all<ReportEvidenceRow>(sql`SELECT id, report_id AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_count, pass_count, fail_count FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY date_begin DESC, id DESC LIMIT 201`),
+        db.all<ReportEvidenceRow>(sql`SELECT id, NULL AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_success + total_failure AS total_count, total_success AS pass_count, total_failure AS fail_count FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY date_begin DESC, id DESC LIMIT 201`),
+        db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until}`),
+        db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until}`),
+        db.all<{ day: string }>(sql`SELECT DISTINCT date(date_begin, 'unixepoch') AS day FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY day`),
+        db.all<{ day: string }>(sql`SELECT DISTINCT date(date_begin, 'unixepoch') AS day FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY day`),
+      ]);
+      const source = (rows: ReportEvidenceRow[], summary: EvidenceSummaryRow[], dates: { day: string }[]) => ({
+        observations: rows.slice(0, 200), truncated: rows.length > 200,
+        report_count: summary[0]?.report_count ?? 0,
+        latest_period_end: summary[0]?.latest_period_end ?? null,
+        latest_received_at: summary[0]?.latest_received_at ?? null,
+        observed_dates: dates.map(row => row.day),
+      });
+      return { dmarc: source(dmarc, dmarcSummary, dmarcDates), tls: source(tls, tlsSummary, tlsDates) };
+    },
 
 		async tlsSummary(domainId: number, since: number, until?: number) {
 			const rows = await db.all<{ total_success: number; total_failure: number; report_count: number }>(sql`

@@ -20,3 +20,33 @@ export interface Remediation {
   changes: ReportModel['steps'];
   verification: string[];
 }
+
+/** Dates describe report-start buckets, not proof that all mail or every interval was observed. */
+export interface EvidenceProvenance {
+  report_count: number;
+  truncated: boolean;
+  observations: Array<{
+    id: number;
+    source_report_id: string | null;
+    reporter: string;
+    date_begin: number;
+    date_end: number;
+    received_at: number;
+    receipt_age_seconds: number;
+    total_count: number;
+    pass_count: number;
+    fail_count: number;
+  }>;
+  coverage: {
+    date_basis: 'report-start-utc';
+    observed_dates: string[];
+    missing_dates: string[];
+    complete_mail_population: false;
+  };
+  freshness: {
+    latest_period_end: number | null;
+    latest_received_at: number | null;
+    period_end_age_seconds: number | null;
+    receipt_age_seconds: number | null;
+  };
+}

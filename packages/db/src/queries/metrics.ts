@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, ne } from 'drizzle-orm';
+import { and, eq, gte, lte, ne, isNull } from 'drizzle-orm';
 import type { Db } from '../client';
 import { domains, googlePostmasterConnections as connections, metricObservations as observations } from '../schema';
 export function metricQueries(db:Db,workspaceId:string) {
@@ -18,7 +18,7 @@ export function metricQueries(db:Db,workspaceId:string) {
    const r=await db.update(connections).set({token_envelope:next}).where(and(domain(domainId),eq(connections.token_envelope,expected),ne(connections.status,'disconnected'))).run();return (r.meta.changes??0)>0;
   },
   disconnect:(domainId:number)=>db.update(connections).set({token_envelope:null,status:'disconnected'}).where(domain(domainId)).run(),
-  attempt:(domainId:number,status:string,at:number,success=false)=>db.update(connections).set({status,last_attempt_at:at,...(success?{last_success_at:at}:{})}).where(and(domain(domainId),ne(connections.status,'disconnected'))).run(),
+  attempt:(domainId:number,status:string,at:number,success=false,expectedEnvelope?:string|null)=>db.update(connections).set({status,last_attempt_at:at,...(status==='token_revoked'?{token_envelope:null}:{}),...(success?{last_success_at:at}:{})}).where(and(domain(domainId),ne(connections.status,'disconnected'),expectedEnvelope===undefined?undefined:expectedEnvelope===null?isNull(connections.token_envelope):eq(connections.token_envelope,expectedEnvelope))).run(),
   async write(domainId:number,connectionId:string,rows:{metric:string;periodStart:string;periodEnd:string;sourceId:string}[]) {
    const current=await this.status(domainId);if(current?.id!==connectionId||current.status==='disconnected')throw new Error('Connection unavailable');
    for(const row of rows)await db.insert(observations).values({workspace_id:workspaceId,connection_id:connectionId,domain_id:domainId,metric:row.metric,period_start:row.periodStart,period_end:row.periodEnd,source_id:row.sourceId,payload:JSON.stringify(row)}).onConflictDoUpdate({target:[observations.connection_id,observations.domain_id,observations.metric,observations.period_start,observations.period_end,observations.source_id],set:{payload:JSON.stringify(row)}}).run();
