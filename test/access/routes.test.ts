@@ -10,6 +10,12 @@ describe('owner access management HTTP adapter', () => {
   const send=async(method:string,path:string,body?:unknown,key=token)=> (await handleAccessRoutes(req(method,path,{key,body}),env,ctx))!;
   const product=await (await send('POST','/api/access/products',{name:'A'})).json() as any;
   expect(product.id).toBeTruthy();
+  const enrolled=await (await call(env,'POST','/api/domains',{key:token,body:{domain:'mail.example.com'}})).json() as any;
+  const mappingPath=`/api/access/products/${product.id}/domains/${enrolled.domain.id}`;
+  expect((await send('PUT',mappingPath)).status).toBe(200);
+  expect((await (await send('GET','/api/resources')).json() as any).domains[0].mappedProductIds).toContain(product.id);
+  expect((await send('DELETE',mappingPath)).status).toBe(200);
+  expect((await send('PUT',mappingPath)).status).toBe(200);
   const principal=await (await send('POST','/api/access/principals',{name:'A worker',kind:'service'})).json() as any;
   const expires_at=Math.floor(Date.now()/1000)+3600;
   expect((await send('POST','/api/access/grants',{principal_id:principal.id,product_id:product.id,domain:'mail.example.com',actions:['resources:read','reports:read'],expires_at})).status).toBe(201);

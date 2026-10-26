@@ -30,7 +30,8 @@
     "miniflare": "4.20260515.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6",
-    "wrangler": "^4.92.0"
+    "wrangler": "^4.92.0",
+    "yaml": "2.9.1"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",

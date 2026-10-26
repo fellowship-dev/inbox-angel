@@ -16,7 +16,7 @@ export async function handleAccessRoutes(request: Request, env: AuthEnv, ctx?: P
   if (path === '/api/resources' && method === 'GET') return Response.json({ domains: await authorizedDomains(env.DB, auth.access, { workspaceId, productId: url.searchParams.get('product_id') ?? undefined }) });
   if (path === '/api/access' && method === 'GET') return Response.json(await service.list(workspaceId));
   let body: Record<string, unknown> = {};
-  if (method === 'POST' || method === 'PATCH' || method === 'PUT') { try { body = await request.json(); } catch { return Response.json({ error: 'invalid JSON' }, { status: 400 }); } }
+  if (method === 'POST' || method === 'PATCH') { try { body = await request.json(); } catch { return Response.json({ error: 'invalid JSON' }, { status: 400 }); } }
   if (path === '/api/access/products' && method === 'POST') return Response.json(await service.createProduct(workspaceId, body.name as string), { status: 201 });
   const product = path.match(/^\/api\/access\/products\/([^/]+)$/);
   if (product && (method === 'PATCH' || method === 'DELETE')) { await service.updateProduct(workspaceId, product[1], method === 'DELETE' ? { archived: true } : { name: body.name as string }); return Response.json({ ok: true }); }

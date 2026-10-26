@@ -119,10 +119,19 @@ describe('real Workers OAuth contract',()=>{
   const redirect=new URL(approved.headers.get('location')!);expect(redirect.searchParams.get('iss')).toBe(origin);
   const code=redirect.searchParams.get('code')!;
   const tokenBody=new URLSearchParams({grant_type:'authorization_code',client_id:clientId,code,code_verifier:verifier,redirect_uri:'https://client.example/callback',resource:origin+'/mcp'});
-  const redemptions=await Promise.all([0,1].map(()=>fetch('/oauth/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:tokenBody.toString()})));
+  const responses = new Set<object>();
+  const redemptions=await Promise.all([0,1].map(async()=>{
+   const response=await fetch('/oauth/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:tokenBody.toString()});
+   // Read each independently owned HTTP body as soon as it arrives, before
+   // waiting on the competing redemption. Retain values, never live streams.
+   expect(responses.has(response), 'redemptions have distinct HTTP responses').toBe(false);
+   responses.add(response);
+   expect(response.bodyUsed, 'redemption response body is initially unread').toBe(false);
+   return {status:response.status,data:await response.json()};
+  }));
   expect(redemptions.some(r=>r.status===200)).toBe(true);
   expect(redemptions.every(r=>r.status===200||r.status===400)).toBe(true);
-  const issued=await Promise.all(redemptions.filter(r=>r.status===200).map(r=>r.json())) as any[];
+  const issued=redemptions.filter(r=>r.status===200).map(r=>r.data) as any[];
   const principals=new Set<string>();
   for (const tokens of issued) {
    const result=await fetch('/mcp',{headers:{authorization:'Bearer '+tokens.access_token}});

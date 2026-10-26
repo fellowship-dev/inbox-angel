@@ -154,7 +154,7 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(24);
+		expect(exemptions).toBe(25);
 	});
 
 	it('pins the privileged access lookup census without exempting scoped access queries', () => {
@@ -162,10 +162,11 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		const [lookups, scoped] = raw.split('export function accessQueries');
 		expect(lookups).toContain('export function accessLookups');
 		const privileged = chains(lookups).filter(chain => /workspace-scope-exempt:/.test(chain));
-		expect(privileged).toHaveLength(4);
+		expect(privileged).toHaveLength(5);
 		for (const [table, field] of [['accessCredentials', 'id'], ['accessCredentials', 'key_hash'], ['accessPrincipals', 'id'], ['accessGrants', 'principal_id']]) {
 			expect(privileged.filter(chain => chain.includes(`eq(${table}.${field},`))).toHaveLength(1);
 		}
+		expect(privileged.filter(chain => chain.includes('eq(accessPrincipals.user_id, userId)') && chain.includes("eq(accessPrincipals.kind, 'human')"))).toHaveLength(1);
 		expect(scoped).toBeTruthy();
 		expect(scoped).not.toContain('workspace-scope-exempt:');
 		expect(checkSource(raw)).toEqual([]);

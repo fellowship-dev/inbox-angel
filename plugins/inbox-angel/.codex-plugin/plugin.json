@@ -1,0 +1,23 @@
+{
+  "name": "inbox-angel",
+  "version": "0.1.0",
+  "description": "Agent workflows for email configuration, observed metrics and proposed fixes.",
+  "author": {
+    "name": "Fellowship"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Inbox Angel",
+    "shortDescription": "Email health for your agents",
+    "longDescription": "Inspect email configuration, read collected domain statistics and plan evidence-backed fixes through your own Inbox Angel installation.",
+    "developerName": "Fellowship",
+    "category": "Productivity",
+    "capabilities": [
+      "Email reports",
+      "Domain setup",
+      "Remediation plans"
+    ],
+    "defaultPrompt": "Check my email health and show the next evidence-backed fix."
+  }
+}

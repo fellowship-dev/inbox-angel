@@ -1,13 +1,15 @@
 {
 	// ── Self-hosting checklist ──────────────────────────────────────────────────
 	// 1. Run: wrangler d1 create inbox-angel → paste database_id below
-	// 2. Set one secret: wrangler secret put CLOUDFLARE_API_TOKEN
+	// 2. Create/bind an installation-owned OAUTH_KV namespace and set BETTER_AUTH_URL to its HTTPS origin.
+	// 3. Upload private BOOTSTRAP_SECRET proof before first-owner setup (docs/agent-operations.md).
+	// 4. For DNS/routing operations: wrangler secret put CLOUDFLARE_API_TOKEN
 	//    Create at: dash.cloudflare.com → My Profile → API Tokens
 	//    Required permissions:
 	//      Account: Account Settings:Read, Workers Scripts:Edit, D1:Edit, Email Sending:Edit
 	//      Zone (All zones): Zone:Read, Email Routing Rules:Edit, DNS:Edit, Workers Routes:Edit
-	// 3. npm run deploy
-	// 4. Visit the dashboard → create your account → enter your domain in the wizard
+	// 5. npm run deploy
+	// 6. Visit the canonical dashboard → prove installer custody → create owner → enroll domain
 	//    The wizard handles everything else: zone ID resolution, reports subdomain,
 	//    DMARC records, email routing setup.
 	// ───────────────────────────────────────────────────────────────────────────
@@ -19,6 +21,7 @@
 	},
 	"assets": {
 		"directory": "./web/dist",
+		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
 		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health"]
 	},
@@ -92,6 +95,7 @@
 	"vars": {
 		"WORKER_NAME": "inbox-angel-worker"
 		// Domain config is entered in the setup wizard and stored in D1.
-		// Required secret: CLOUDFLARE_API_TOKEN (see README for token permissions)
+		// Installer proof secret: BOOTSTRAP_SECRET; agent issuer: BETTER_AUTH_URL + OAUTH_KV.
+		// DNS/routing secret: CLOUDFLARE_API_TOKEN (see README for token permissions).
 	}
 }

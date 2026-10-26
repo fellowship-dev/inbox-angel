@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Inbox, Settings } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -186,8 +186,8 @@ describe("StatusDot / Stat", () => {
 
 describe("RecordBlock", () => {
 	const value = "v=DMARC1; p=none; rua=mailto:reports@example.test";
-	const setup = () => {
-		vi.useFakeTimers({ shouldAdvanceTime: true });
+	const setup = (shouldAdvanceTime = true) => {
+		vi.useFakeTimers({ shouldAdvanceTime });
 		// userEvent.setup() installs its own clipboard stub, so override it afterwards.
 		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 		const writeText = vi.fn().mockResolvedValue(undefined);
@@ -216,14 +216,15 @@ describe("RecordBlock", () => {
 		expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
 	});
 	it("announces again on a repeat copy within 2s (live region is cleared first)", async () => {
-		const { user } = setup();
+		// Wall-clock auto advancement can cross the announcement delay during user.click under load.
+		setup(false);
 		render(<RecordBlock record={{ type: "TXT", name: "_dmarc", value }} />);
 		const live = () => screen.getAllByRole("status")[1]!; // [0] is the name field's region
-		await user.click(screen.getByRole("button", { name: "Copy value" }));
+		await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy value" })); });
 		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
 		expect(live()).toHaveTextContent("Copied to clipboard");
 		await act(async () => void (await vi.advanceTimersByTimeAsync(500)));
-		await user.click(screen.getByRole("button", { name: "Copy value" }));
+		await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy value" })); });
 		expect(live()).toBeEmptyDOMElement();
 		await act(async () => void (await vi.advanceTimersByTimeAsync(60)));
 		expect(live()).toHaveTextContent("Copied to clipboard");

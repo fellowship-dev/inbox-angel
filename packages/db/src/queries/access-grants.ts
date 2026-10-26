@@ -9,6 +9,7 @@ export function accessLookups(dbLike: DbLike) {
   credentialById: (id: string) => db.select().from(accessCredentials).where(/* workspace-scope-exempt: rechecking the authenticated credential */ eq(accessCredentials.id, id)).get(),
   credentialByHash: (hash: string) => db.select().from(accessCredentials).where(/* workspace-scope-exempt: credential hash identifies its workspace */ eq(accessCredentials.key_hash, hash)).get(),
   principalById: (id: string) => db.select().from(accessPrincipals).where(/* workspace-scope-exempt: resolving an authenticated principal identity */ eq(accessPrincipals.id, id)).get(),
+  humanPrincipalsForUser: (userId: string) => db.select().from(accessPrincipals).where(/* workspace-scope-exempt: own-user connection management survives membership removal */ and(eq(accessPrincipals.user_id, userId), eq(accessPrincipals.kind, 'human'))).all(),
   grantsForPrincipal: (id: string) => db.select().from(accessGrants).where(/* workspace-scope-exempt: finite portfolio consent enumerates workspaces */ eq(accessGrants.principal_id, id)).all(),
  };
 }

@@ -1,5 +1,5 @@
 import type { OAuthProviderOptions } from '@cloudflare/workers-oauth-provider';
-import { accessLookups, globalQueries } from '@inbox-angel/db';
+import { accessLookups, globalQueries, forWorkspace } from '@inbox-angel/db';
 import type { BoundEnv } from '../index';
 import type { AccessSubject } from '../access/principal';
 import { resolveAccessSubject } from '../access/resolve';
@@ -11,6 +11,18 @@ import { handleMcpConnections } from '../mcp/connections';
 export interface McpIdentity { principalId: string; issuer: string; resource: string; credentialId?: string }
 export type McpHandler = { fetch(request: Request, env: BoundEnv, ctx: ExecutionContext & { props: McpIdentity }): Promise<Response> | Response };
 export type DefaultHandler = { fetch(request: Request, env: BoundEnv, ctx: ExecutionContext): Promise<Response> | Response };
+
+/** Informational timestamp only; grants and revocation stay authoritative in their own rows. */
+export async function recordAgentUse(env: BoundEnv, subject: AccessSubject, now = Math.floor(Date.now() / 1000)): Promise<void> {
+ if (subject.kind !== 'human') return;
+ const settings = forWorkspace(env.DB, subject.workspaceId).settings;
+ const key = `mcp_connection:${subject.principalId}`;
+ const row = await settings.get(key);
+ if (!row) return;
+ const connection = JSON.parse(row.value);
+ if (connection.principalId !== subject.principalId || connection.userId !== subject.userId) return;
+ await settings.set(key, JSON.stringify({ ...connection, lastUsedAt: now }));
+}
 
 /** Re-resolve the current D1 identity and finite grant set on every request AND every refresh. */
 export async function resolveMcpIdentity(env: BoundEnv, props: unknown): Promise<AccessSubject | null> {
@@ -44,7 +56,9 @@ export async function createMcpProvider(env: BoundEnv, origin: string, handler: 
   apiRoute: '/mcp',
   apiHandler: { async fetch(request, env, ctx) {
    const props = ctx.props as McpIdentity;
-   if (!(await resolveMcpIdentity(env, props))) return Response.json({ error: 'invalid_token' }, { status: 401 });
+   const subject = await resolveMcpIdentity(env, props);
+   if (!subject) return Response.json({ error: 'invalid_token' }, { status: 401 });
+   ctx.waitUntil(recordAgentUse(env, subject).catch(() => {}));
    return handler.fetch(request, env, ctx as ExecutionContext & { props: McpIdentity });
   } },
   defaultHandler: { async fetch(request, env, ctx) {

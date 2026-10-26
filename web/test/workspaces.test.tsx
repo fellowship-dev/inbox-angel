@@ -25,7 +25,7 @@ function server(workspaces = [FELLOWSHIP, LEXGO], extra: Record<string, unknown 
 	};
 	return mockApi({
 		'GET /api/auth/status': STATUS,
-		'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' },
+		'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' }, 'GET /api/mcp/connections': { connections: [] }, 'GET /api/access': { products: [], principals: [], credentials: [], grants: [] }, 'GET /api/resources': { domains: [] }, 'GET /api/metrics/google/connections': { configured: false, connections: [] },
 		'GET /api/me': ({ headers }: { headers: Record<string, string> }) => {
 			const w = current(headers);
 			return w ? meFor(w) : fail(403, 'not a member of that workspace');
@@ -73,7 +73,10 @@ describe('workspace switcher', () => {
 		workspaceStore.reload();
 		const api = server();
 		boot('#/');
-		expect(await screen.findByRole('button', { name: /Workspace: Lexgo/ })).toBeInTheDocument();
+		// Session resolution rewrites the hash and remounts the shell before its membership query
+		// fills the workspace label. Keep the exact selected-workspace assertion, but allow that
+		// bootstrap chain to settle under the full suite's worker contention (default wait is 1s).
+		expect(await screen.findByRole('button', { name: /Workspace: Lexgo/ }, { timeout: 5_000 })).toBeInTheDocument();
 		await waitFor(() => expect(window.location.hash).toBe('#/w/ws_lexgo/'));
 		expect((await screen.findAllByText('lexgo-one.example.com')).length).toBeGreaterThan(0);
 		expect(api.calls.filter((c) => c.path === '/api/domains').every((c) => c.headers['x-workspace-id'] === 'ws_lexgo')).toBe(true);
@@ -90,7 +93,7 @@ describe('workspace switcher', () => {
 	it('a deep link keeps its workspace and page, and the sidebar links stay inside the workspace', async () => {
 		server(undefined, { 'GET /api/keys': { keys: [] } });
 		boot('#/w/ws_lexgo/keys');
-		expect(await screen.findByRole('heading', { name: 'API keys', level: 1 })).toBeInTheDocument();
+		expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
 		const nav = screen.getByRole('navigation', { name: 'Main' });
 		expect(within(nav).getByRole('link', { name: 'Members' })).toHaveAttribute('href', '#/w/ws_lexgo/members');
 		expect(await screen.findByRole('button', { name: /Workspace: Lexgo/ })).toBeInTheDocument();
@@ -204,7 +207,7 @@ describe('workspace settings (roles in the UI)', () => {
 			routes: {
 				'GET /api/workspaces': { workspaces },
 				'GET /api/me': { user: { id: 'u1', email: 'max@example.com', name: 'Max' }, role, workspace_id: 'ws_default', kind: 'session' },
-				'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' },
+				'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' }, 'GET /api/mcp/connections': { connections: [] }, 'GET /api/access': { products: [], principals: [], credentials: [], grants: [] }, 'GET /api/resources': { domains: [] }, 'GET /api/metrics/google/connections': { configured: false, connections: [] },
 				'GET /api/domains': { domains: [] },
 				...routes,
 			},

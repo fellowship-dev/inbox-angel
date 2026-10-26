@@ -45,6 +45,8 @@ export function onUnauthorized(handler: (() => void) | null): void {
 
 export interface RequestOptions {
 	method?: string;
+	/** Request-specific headers, including installer proof during first-run setup. */
+	headers?: Record<string, string>;
 	body?: unknown;
 	signal?: AbortSignal;
 	/** The caller handles 401 itself (the session probe): don't sign out and wipe the cache. */
@@ -54,7 +56,7 @@ export interface RequestOptions {
 }
 
 export async function api<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
-	const headers: Record<string, string> = {};
+	const headers: Record<string, string> = { ...opts.headers };
 	if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 	const workspace = opts.workspace === undefined ? workspaceStore.get() : opts.workspace;
 	if (workspace && !path.startsWith('/api/invites/')) headers['X-Workspace-Id'] = workspace;

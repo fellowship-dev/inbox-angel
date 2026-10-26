@@ -1,3 +1,4 @@
+import { consentPage, consentIdentity } from './consent';
 import type { OAuthProviderOptions, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 import { accessLookups, authLookups, forWorkspace } from '@inbox-angel/db';
 import type { BoundEnv } from '../index';
@@ -10,7 +11,17 @@ import { mcpInstallation } from './discovery';
 
 const escape = (v: unknown) => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const prefix = 'mcp_connection:';
-export interface AgentConnection { principalId: string; userId: string; workspaceId: string; clientId: string; name: string; createdAt: number; expiresAt: number }
+export interface AgentConnection { principalId: string; userId: string; workspaceId: string; clientId: string; name: string; createdAt: number; expiresAt: number; lastUsedAt?: number }
+
+/** Only the authenticated user's connection metadata; never grants or workspace contents. */
+export async function listAgentConnections(env: BoundEnv, userId: string) {
+ const connections: Array<AgentConnection & { revoked: boolean }> = [];
+ for (const p of await accessLookups(env.DB).humanPrincipalsForUser(userId)) {
+  const record = await forWorkspace(env.DB, p.workspace_id).settings.get(`${prefix}${p.id}`);
+  if (record) connections.push({ ...JSON.parse(record.value), revoked: p.disabled_at !== null });
+ }
+ return connections;
+}
 
 export async function revokeAgentConnection(env: BoundEnv, userId: string, principalId: string, api: OAuthHelpers) {
  const p = await accessLookups(env.DB).principalById(principalId);
@@ -40,13 +51,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  const actor: AccessSubject = { principalId: user.id, kind: 'human', userId: user.id, workspaceId: memberships[0]?.workspace_id ?? '', grants: [], session: true, memberships: memberships.map(m => ({ workspaceId: m.workspace_id, role: m.role })) };
  if (request.method !== 'GET' && (!request.headers.has('origin') || !passesCsrfCheck(request, env))) return Response.json({ error: 'cross-origin request rejected' }, { status: 403 });
  if (path === '/api/mcp/connections' && request.method === 'GET') {
-  const connections: unknown[] = [];
-  for (const m of memberships) for (const p of await forWorkspace(env.DB, m.workspace_id).access.principals.list()) {
-   if (p.user_id !== user.id) continue;
-   const record = await forWorkspace(env.DB, m.workspace_id).settings.get(`${prefix}${p.id}`);
-   if (record) connections.push({ ...JSON.parse(record.value), revoked: p.disabled_at !== null });
-  }
-  return Response.json({ connections });
+  return Response.json({ connections: await listAgentConnections(env, user.id) });
  }
  if (path.startsWith('/api/mcp/connections/') && request.method === 'DELETE') {
   const id = path.slice('/api/mcp/connections/'.length);
@@ -73,7 +78,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     }
    }
    const headers = new Headers(consent.headers); headers.set('Content-Type', 'text/html; charset=utf-8'); headers.set('Cache-Control', 'no-store');
-   return new Response(`<!doctype html><meta name="viewport" content="width=device-width"><title>Connect agent</title><h1>Authorize Inbox Angel agent</h1><p>${escape(JSON.stringify(description))}</p><form method="post"><input type="hidden" name="handle" value="${escape(consent.handle)}"><fieldset><legend>Select exact resources</legend>${choices.join('')}</fieldset><fieldset><legend>Or preauthorize one exact new domain for onboarding</legend><label>Workspace<select name="workspaceId"><option value="">None</option>${memberships.map(m => `<option>${escape(m.workspace_id)}</option>`).join('')}</select></label><label>Domain<input name="domain" placeholder="mail.example.com"></label></fieldset><fieldset><legend>Allowed actions</legend>${ACCESS_ACTIONS.filter(a => a !== 'access:manage').map(a => `<label><input type="checkbox" name="actions" value="${a}">${a}</label><br>`).join('')}</fieldset><label>Expires in days<input type="number" name="days" min="1" max="30" value="7"></label><button>Authorize selected access</button></form>`, { headers });
+   return new Response(consentPage(`<h1>Authorize Inbox Angel agent</h1>${consentIdentity(description, url.origin)}<form method="post"><input type="hidden" name="handle" value="${escape(consent.handle)}"><fieldset><legend>Select exact resources</legend>${choices.join('')}</fieldset><fieldset><legend>Or preauthorize one exact new domain for onboarding</legend><label>Workspace<select name="workspaceId"><option value="">None</option>${memberships.map(m => `<option>${escape(m.workspace_id)}</option>`).join('')}</select></label><label>Domain<input name="domain" placeholder="mail.example.com"></label></fieldset><fieldset><legend>Allowed actions</legend>${ACCESS_ACTIONS.filter(a => a !== 'access:manage').map(a => `<label><input type="checkbox" name="actions" value="${a}">${a}</label><br>`).join('')}</fieldset><label>Expires in days<input type="number" name="days" min="1" max="30" value="7"></label><button>Authorize selected access</button></form>`), { headers });
   }
   if (request.method === 'POST') {
    if (!(request.headers.get('content-type') ?? '').startsWith('application/x-www-form-urlencoded')) return Response.json({ error: 'form required' }, { status: 415 });

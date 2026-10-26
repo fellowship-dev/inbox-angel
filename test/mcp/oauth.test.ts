@@ -5,6 +5,7 @@ import { connection } from './helpers';
 describe('installation identity', () => {
  it('uses a configured canonical HTTPS origin', () => {
   expect(mcpInstallation({ BETTER_AUTH_URL: 'https://my-host.example' })).toEqual({ issuer: 'https://my-host.example', resource: 'https://my-host.example/mcp' });
+  expect(mcpInstallation({ BETTER_AUTH_URL: 'https://my-host.example:8443' })).toEqual({ issuer: 'https://my-host.example:8443', resource: 'https://my-host.example:8443/mcp' });
   expect(() => mcpInstallation({})).toThrow();
   expect(() => mcpInstallation({ BETTER_AUTH_URL: 'http://my-host.example' })).toThrow();
   expect(() => mcpInstallation({ BETTER_AUTH_URL: 'https://my-host.example/path' })).toThrow();
