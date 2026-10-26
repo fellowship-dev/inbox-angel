@@ -7,6 +7,7 @@ test.use({ ignoreHTTPSErrors: true, trace: 'off', video: 'off' });
 test('operator enrollment, finite product access, revocation and responsive reports', async ({ page, playwright }) => {
   test.skip(!process.env.E2E_OPERATOR_FILE, 'Requires a private operator file and isolated Worker');
   test.setTimeout(120_000);
+  page.setDefaultTimeout(15_000);
   const operator = operatorCredentials();
   const serviceName = `Acceptance service ${Date.now()}`;
   const origin = new URL(process.env.E2E_BASE_URL!).origin;
@@ -37,7 +38,7 @@ test('operator enrollment, finite product access, revocation and responsive repo
   await expect(page.getByLabel('Product', { exact: true })).not.toHaveValue('');
   const productId = await page.getByLabel('Product', { exact: true }).inputValue();
   // Mapping is persisted before the controlled checkbox re-renders.
-  await page.getByLabel('agent-platform.test', { exact: true }).click();
+  await page.getByRole('checkbox', { name: /^agent-platform\.test/ }).first().click();
   await expect(page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.test')).toBeVisible();
   await page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.test').check();
   await page.getByLabel('Service principal and credential name').fill(serviceName);
@@ -65,4 +66,22 @@ test('operator enrollment, finite product access, revocation and responsive repo
   await expect(page.getByText('Inbox placement', { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/inbox-agent-report-mobile.png', fullPage: true });
+  const registered = await page.request.post('/oauth/register', { data: {
+    client_name: 'Local acceptance client', redirect_uris: ['https://client.example/callback'],
+    grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none',
+  } });
+  expect(registered.status()).toBe(201);
+  const { client_id } = await registered.json();
+  const query = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: 'https://client.example/callback', scope: 'inbox-angel', resource: origin + '/mcp', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256' });
+  await page.goto('/oauth/authorize?' + query);
+  await expect(page.getByRole('heading', { name: 'Authorize Inbox Angel agent' })).toBeVisible();
+  const permission = page.getByRole('checkbox', { name: 'reports:read', exact: true });
+  await permission.focus();
+  await page.keyboard.press('Space');
+  await expect(permission).toBeChecked();
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `/tmp/inbox-agent-consent-${width}.png`, fullPage: true });
+  }
 });
