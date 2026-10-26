@@ -1,38 +1,16 @@
-// Dashboard v2 (React) end to end: first-run setup → add domain → see records → create and revoke an API key.
-//
-// Against a fresh local Worker (the first-run owner can only be created once):
-//   rm -rf /tmp/ia-e2e && node packages/db/scripts/migrate.mjs --local --persist-to /tmp/ia-e2e
-//   npx wrangler dev --local --persist-to /tmp/ia-e2e        # serves web/dist (npm run build:dashboard first)
-//   E2E_BASE_URL=http://127.0.0.1:8787 npx playwright test e2e/dashboard-v2.spec.ts
-// If the instance already has an owner, set E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD and the test signs in instead.
-import { expect, test, type Page } from '@playwright/test';
+// Local dashboard flow using installer-held proof, cookie sessions and finite product credentials.
+// Set E2E_OPERATOR_FILE to a private JSON file {email,password,proof}; no shared default account.
+import { expect, request as apiRequest, test } from '@playwright/test';
+import { signIn } from './support/session';
+import { ensureDomain } from './support/db';
 
-const EMAIL = process.env.E2E_OWNER_EMAIL ?? 'owner@e2e.test';
-const PASSWORD = process.env.E2E_OWNER_PASSWORD ?? 'e2e-password-123';
 const DOMAIN = 'e2e-corp.test';
-
 test.describe.configure({ mode: 'serial' });
-
-async function signInOrSetUp(page: Page) {
-	await page.goto('/');
-	const setup = page.getByRole('heading', { name: 'Create your account' });
-	const signIn = page.getByRole('heading', { name: 'Sign in' });
-	await expect(setup.or(signIn)).toBeVisible();
-	if (await setup.isVisible()) {
-		await page.getByLabel('Your name (optional)').fill('E2E Owner');
-		await page.getByLabel('Email', { exact: true }).fill(EMAIL);
-		await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
-		await page.getByLabel('Confirm password').fill(PASSWORD);
-		await page.getByRole('button', { name: 'Create account' }).click();
-	} else {
-		await page.getByLabel('Email', { exact: true }).fill(EMAIL);
-		await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
-		await page.getByRole('button', { name: 'Sign in' }).click();
-	}
-}
+// Password/one-time credentials must never be captured in Playwright traces or artifacts.
+test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 test('first-run setup, add the first domain, see its records', async ({ page }) => {
-	await signInOrSetUp(page);
+	await signIn(page);
 
 	// A brand-new instance has no domain: straight into the setup wizard.
 	const domains = page.getByRole('heading', { name: 'Domains', level: 1 });
@@ -41,9 +19,9 @@ test('first-run setup, add the first domain, see its records', async ({ page }) 
 	if (await wizard.isVisible()) {
 		await page.getByPlaceholder('yourdomain.com').fill(DOMAIN);
 		await page.getByRole('button', { name: /Continue/ }).click();
-		await expect(page).toHaveURL(/#\/domains\/\d+\/setup\/2$/);
+		await expect(page).toHaveURL(/\/domains\/\d+\/setup\/2$/);
 		await page.getByRole('link', { name: 'Skip setup' }).click();
-		await expect(page).toHaveURL(/#\/domains\/\d+$/);
+		await expect(page).toHaveURL(/\/domains\/\d+$/);
 	}
 
 	// The domain is listed as a level card, then opens to its records.
@@ -62,34 +40,47 @@ test('first-run setup, add the first domain, see its records', async ({ page }) 
 	await expect(looksUp).toBeVisible({ timeout: 20_000 });
 });
 
-test('create an API key (secret shown once) and revoke it', async ({ page }) => {
-	await signInOrSetUp(page);
-	await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
-	await page.goto('/#/keys');
-	await expect(page.getByRole('heading', { name: 'API keys', level: 1 })).toBeVisible();
+test('issue a finite product credential, clear its one-time secret and revoke it', async ({ page }) => {
+ await signIn(page);
+ await ensureDomain(page, DOMAIN);
+ await page.goto('/#/settings');
+ await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+ await expect(page.getByRole('heading', { name: 'Products and service credentials' })).toBeVisible();
+ const name = `e2e product credential ${Date.now()}`;
+ await page.getByLabel('New workspace product').fill(`E2E product ${Date.now()}`);
+ await page.getByRole('button', { name: 'Create product', exact: true }).click();
+ const product = page.getByLabel('Product', { exact: true });
+ await expect(product).not.toHaveValue('');
+ const productId = await product.inputValue();
+ await page.locator('label').filter({ hasText: DOMAIN }).first().getByRole('checkbox').click();
+ const credentialDomain = page.getByRole('group', { name: 'Exact credential domains' }).getByRole('checkbox', { name: DOMAIN, exact: true });
+ await expect(credentialDomain).toBeVisible();
+ await credentialDomain.check();
+ await page.getByLabel('Service principal and credential name').fill(name);
+ await page.getByLabel('Credential and grants expire in days').fill('1');
+ await page.getByRole('button', { name: 'Issue restricted credential' }).click();
+ const secret = page.getByLabel('New credential secret');
+ await expect(secret).toBeVisible();
+ const value = await secret.inputValue();
+ expect(value.startsWith('ias_') && value.length >= 40).toBe(true);
 
-	await page.getByLabel('Name').fill('e2e key');
-	await page.getByRole('button', { name: 'Create key' }).click();
-	const secret = page.getByTestId('secret-value');
-	await expect(secret).toHaveText(/^ia_[\w-]{20,}$/);
-	const value = (await secret.textContent())!;
+ // This context has no operator cookies: every assertion exercises only the delegated key.
+ const machine = await apiRequest.newContext({ baseURL: new URL(page.url()).origin });
+ try {
+  const headers = { 'X-Api-Key': value };
+  const resourcePath = `/api/resources?product_id=${encodeURIComponent(productId)}`;
+  const result = await machine.get(resourcePath, { headers });
+  expect(result.status()).toBe(200);
+  const data = await result.json() as { domains: Array<{ domain: string }> };
+  expect(data.domains.map(d => d.domain)).toEqual([DOMAIN]);
+  expect((await machine.post('/api/access/principals', { headers, data: { name: 'forbidden stronger identity', kind: 'service' } })).status()).toBe(403);
 
-	// The secret authenticates against the API…
-	const res = await page.request.get('/api/domains', { headers: { 'X-Api-Key': value } });
-	expect(res.status()).toBe(200);
-
-	// …is shown once…
-	await page.getByRole('button', { name: 'I have saved it' }).click();
-	await expect(page.getByTestId('secret-once')).toHaveCount(0);
-	await page.reload();
-	await expect(page.getByText(value)).toHaveCount(0);
-	const row = page.getByRole('row', { name: /e2e key/ });
-	await expect(row).toContainText(value.slice(0, 8));
-
-	// …and stops working once revoked.
-	await page.getByRole('button', { name: 'Revoke e2e key' }).click();
-	await page.getByRole('dialog').getByRole('button', { name: 'Revoke key' }).click();
-	await expect(page.getByText('No API keys yet')).toBeVisible();
-	const after = await page.request.get('/api/domains', { headers: { 'X-Api-Key': value } });
-	expect(after.status()).toBe(401);
+  await page.getByRole('button', { name: 'Credential stored — clear secret', exact: true }).click();
+  await expect(secret).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel('New credential secret')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: `Revoke ${name}`, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `Revoke ${name}`, exact: true }).click();
+  await expect.poll(async () => (await machine.get(resourcePath, { headers })).status()).toBe(401);
+ } finally { await machine.dispose(); }
 });

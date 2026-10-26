@@ -31,17 +31,17 @@ A **workspace** holds domains, reports, members, Cloudflare connections and (lat
 **Cloudflare in a self-hosted workspace**
 
 * The server's `CLOUDFLARE_API_TOKEN` can reach every zone of the operator's account, so **only the default workspace uses it**. Every other workspace has no Cloudflare access until it links its own connection (a pasted token or OAuth, with the zone allow-list; see [cloudflare-oauth.md](cloudflare-oauth.md)). Until then anything that needs Cloudflare answers `400` with `code: "cloudflare_not_connected"` ("connect Cloudflare first"), `GET /api/zones` included; with a connection, `/api/zones` lists only the zones its owner allowed. Domains can still be added by hand (without DNS changes).
-* API keys belong to a user and resolve per selected workspace (`X-Workspace-Id`), like sessions; they get exactly the workspace's role and access, nothing more.
+* Machine credentials belong to named principals with finite product/domain/action grants. A selected workspace header cannot broaden them. Human portfolio consent enumerates allowed resources across current memberships; later invitations do not expand it. Product/credential administration requires a browser owner. See [agent operations](agent-operations.md).
 
 **Reports and jobs**
 
 * Inbound reports are routed to the workspace that owns the **reports domain** the message was sent to. A reports domain (`reports.<base domain>`) and a monitored hostname each belong to **one** workspace: the setup wizard refuses one another workspace holds (`409`), the domain and its settings are written in one batch, and the database enforces uniqueness of the reports domain (`idx_settings_reports_domain`). Mail for an unknown reports domain goes to the default workspace. Give each workspace's reports domain Email Routing to this Worker.
 * Cron jobs (digests, SPF flattening, checks) run for every workspace.
-* First-run setup still creates the owner of the default workspace; further people join by invite, and sign-up stays closed.
+* First-run setup requires installer-held single-use proof and creates the owner of the default workspace; further people join by invite, and sign-up stays closed.
 
 ## API
 
-All routes need a signed-in **user** (a session, not an API key or the instance key: `403` otherwise). Everything else in `/api` acts on the workspace named by the `X-Workspace-Id` header (a membership is required, `403` otherwise; without the header, the caller's oldest workspace). The `/api/workspaces` routes ignore that header: they act on you and the id in the path, and answer `404` for a workspace you are not in.
+All routes need a signed-in **user** (a session, not an API key or the instance key: `403` otherwise). Browser session operations select the workspace using `X-Workspace-Id` (membership required; without it, the oldest membership). Delegated HTTP/MCP operations additionally require their current finite resource/action grants; guessing a workspace or domain ID does not expand authority. The `/api/workspaces` routes ignore that header: they act on you and the id in the path, and answer `404` for a workspace you are not in.
 
 | Route | Who | |
 |---|---|---|

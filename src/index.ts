@@ -17,7 +17,7 @@ import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
 export interface Env {
   DB: D1Database | undefined;
   ASSETS: Fetcher;
-  API_KEY?: string;              // DEPRECATED self-host "instance admin" key. Prefer per-user keys (Settings → API keys).
+  API_KEY?: string;              // Retired broad-key setting; no authentication authority. Use finite principal credentials.
   // Data retention, whole days (docs/data-retention.md). Defaults are the published windows.
   RAW_XML_RETENTION_DAYS?: string;      // raw report XML / TLS-RPT JSON: default 30 (self-host), 0 = never store (hosted)
   RETENTION_REPORTS_DAYS?: string;      // aggregate report rows and records: default 395 (13 months)
@@ -197,9 +197,10 @@ function setupPage(): Response {
     <li>Create a D1 database:<br><pre>wrangler d1 create inbox-angel</pre></li>
     <li>Copy the <code>database_id</code> from the output and paste it into <code>wrangler.jsonc</code> under <code>d1_databases[0].database_id</code>.</li>
     <li>Set your API token:<br><pre>wrangler secret put CLOUDFLARE_API_TOKEN</pre>
-      <small>This is the only secret you need. Your domain is configured in the setup wizard after first login.</small>
+      <small>DNS/routing operations use this token. Owner setup separately requires private installer proof; agents require installation-owned OAuth storage and a canonical HTTPS origin.</small>
     </li>
-    <li>Deploy:<br><pre>npm run deploy</pre>Then visit your dashboard, create a workspace, and enter your domain in the setup wizard.</li>
+    <li>Create and bind an installation-owned <code>OAUTH_KV</code> namespace; set <code>BETTER_AUTH_URL</code> to the canonical HTTPS origin. Follow the private-file procedure in <code>docs/agent-operations.md</code> to upload <code>BOOTSTRAP_SECRET</code> without printing it.</li>
+    <li>Deploy:<br><pre>npm run deploy</pre>Then visit the canonical dashboard, enter installer proof and create the owner. Domain enrollment and optional DNS/routing setup follow.</li>
   </ol>
   <div class="note">
     Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>

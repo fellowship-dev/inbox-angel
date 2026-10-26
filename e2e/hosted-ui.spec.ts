@@ -5,7 +5,7 @@
 //   npx playwright test e2e/hosted-ui.spec.ts
 import { expect, test } from '@playwright/test';
 import { ensureDomain } from './support/db';
-import { signIn, tokenOf } from './support/session';
+import { signIn } from './support/session';
 
 const DOMAIN = 'hosted-e2e.test';
 const ID = 'k3j2h4g5f6d7s8a9';
@@ -24,7 +24,7 @@ const status = (over: Record<string, unknown> = {}) => ({
 
 test('enable hosted records, copy the pointers, verify, and the addresses are not shown again', async ({ page }) => {
 	await signIn(page);
-	const domain = { id: await ensureDomain(page, await tokenOf(page), DOMAIN) };
+	const domain = { id: await ensureDomain(page, DOMAIN) };
 
 	let enabled = false;
 	let verified = false;

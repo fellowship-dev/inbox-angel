@@ -3,7 +3,7 @@
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
 
-> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and apply migration 0014. Mail addressed without a valid token is rejected, not filed anywhere.
+> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and run `npm run migrate`. Mail addressed without a valid token is rejected, not filed anywhere.
 
 Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Customer setup](#customer-setup) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits-and-quotas)
 
@@ -55,7 +55,7 @@ email passed DMARC-aligned authentication for the reporting organisation (`repor
 
 Secret: `wrangler secret put HOSTED_RECORDS_TOKEN` (see [token scopes](#3-the-records-token)).
 
-Apply migration `0014_hosted_intake.sql` (`npm run migrate`) before enabling anything.
+Apply the current migrations with `npm run migrate` before enabling anything. Hosted intake tables are included in the current baseline; trust and access updates are additive migrations.
 
 ### 2. Email Routing (inbound)
 
@@ -122,7 +122,7 @@ the pointer instructions name `h.<zone>` from config, so they must read the doma
 
 ## Trust model: who can do what
 
-**Email verification.** A hosted account has no session until its email is verified, and API keys of unverified users are refused. Sign-up sends a
+**Email verification.** A hosted account has no session until its email is verified, and delegated credentials of unverified human users are refused. Sign-up sends a
 link; login before verifying answers `403 email_not_verified` (and sends a fresh link). Verifying never signs anyone in: the password chosen
 before the address was proven is discarded, every session of that user ends, and the person who clicked the link sets their own password (so
 registering someone else's address gains nothing). An invite link alone does not grant membership: the invitee signs up (or in), verifies, and accepts while
@@ -146,12 +146,14 @@ A workspace may hold 25 pending claims. Domains that existed before this feature
 invites they sent.
 
 **Browser session.** The dashboard authenticates with an HttpOnly, SameSite=Lax (Secure on https) cookie; browsers are never
-sent the session token. Scripts and API keys use bearer tokens (`X-Api-Key`).
+sent the session token. Unattended products use named service principals and finite grants with hashed `ias_…` credentials (`X-Api-Key` or bearer); the legacy broad key contract is retired. Browser agents use this installation's OAuth consent. Product/credential and Google Postmaster administration require an owner session. See [agent operations](agent-operations.md).
 
 **Not available when hosted:** `POST /api/setup/email-routing`, `/api/setup/custom-domain`, `/api/settings/register-destination`
 (they act on a whole Cloudflare account and are self-host setup steps).
 
 ## Customer setup
+
+A new hosted customer registers, verifies their email and enrolls/proves their domain in their own workspace. They do not run the self-host base-domain setup wizard. Retrying enrollment resumes the durable pending claim. Agent/plugin access uses the same installation endpoint and finite consent as self-host; it does not activate public signup or prove that deployment/provider acceptance has completed. Google Postmaster is a separate owner connection. See [agent operations](agent-operations.md).
 
 Enable hosted records for a domain (dashboard, or `POST /api/domains/:id/hosted`). The response shows the intake addresses **once**; they are already
 published in the hosted records. Then the customer adds pointers in their own DNS, and nothing else, ever:

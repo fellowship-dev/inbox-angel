@@ -1,12 +1,15 @@
 // Playwright smoke test — Bulk Domain Import
 //
-// Requires a running dashboard (default http://127.0.0.1:8787) with an admin session
-// injected into localStorage as 'ia_api_key'.
+// Requires a running local dashboard and private E2E_OPERATOR_FILE credentials.
 //
 // Run: npm run dev (wrangler dev), then npm run test:e2e  (override target with E2E_BASE_URL).
-// Pre-condition: dashboard URL reachable, admin API key available.
+// Pre-condition: local dashboard reachable; operator file contains email, password and installer proof.
 
 import { test, expect } from '@playwright/test';
+import { signIn } from './support/session';
+import { ensureDomain } from './support/db';
+
+test.beforeEach(async ({ page }) => { await signIn(page); });
 
 
 test.describe('Bulk domain import', () => {
@@ -43,15 +46,16 @@ test.describe('Bulk domain import', () => {
 
   test('reports duplicates without failing the whole batch', async ({ page }) => {
     await page.goto(`/#/bulk-import`);
-    // Submit a list where at least one is likely already registered
-    await page.locator('textarea').fill('fellowship.dev\nbulk-e2e-unique-xyz.invalid');
+    // Seed an exact local fixture so this test does not depend on an unrelated real domain.
+    await ensureDomain(page, 'bulk-e2e-test-1.invalid');
+    await page.locator('textarea').fill('bulk-e2e-test-1.invalid\nbulk-e2e-unique-xyz.invalid');
     await page.getByRole('button', { name: /Import domains/ }).click();
 
     await expect(page.locator('table')).toBeVisible({ timeout: 10_000 });
 
-    // fellowship.dev should be duplicate, unique domain should be imported
-    const fellowshipRow = page.locator('tr', { has: page.locator('code:text("fellowship.dev")') });
-    await expect(fellowshipRow.locator('span:text("duplicate")')).toBeVisible();
+    // The fixture is a duplicate; the second domain can be imported.
+    const duplicateRow = page.locator('tr', { has: page.locator('code:text("bulk-e2e-test-1.invalid")') });
+    await expect(duplicateRow.locator('span:text("duplicate")')).toBeVisible();
   });
 
   test('shows invalid status for a malformed entry', async ({ page }) => {
