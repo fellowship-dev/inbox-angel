@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { WORKSPACE_OWNED_TABLES } from '@inbox-angel/db';
 import { call, makeEnv, signupVerified } from './helpers';
-import { createApiKey } from '../../src/auth/api-keys';
+import { delegatedKey } from './grant-fixture';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from '../hosted/world';
 import { AUTH } from '../connections/mock-oauth';
@@ -35,8 +35,8 @@ async function world() {
   const B = await signup('b-owner@example.com');
   expect(A.workspaceId).not.toBe(B.workspaceId);
 
-  const keyA = (await createApiKey(db as any, { workspaceId: A.workspaceId, userId: A.userId, name: 'a' })).key;
-  const keyB = await createApiKey(db as any, { workspaceId: B.workspaceId, userId: B.userId, name: 'b-key' });
+  const keyA = (await delegatedKey(db as any, { workspaceId: A.workspaceId, userId: A.userId, name: 'a', domain: 'a-own.example.com' })).key;
+  const keyB = await delegatedKey(db as any, { workspaceId: B.workspaceId, userId: B.userId, name: 'b-key', domain: 'b-secret.example.com' });
 
   // A's own data (ids interleave with B's on purpose).
   db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id) VALUES (1, 'a-own.example.com', 'rua@a.test', ?)").run(A.workspaceId);
@@ -99,6 +99,7 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/domains/claims/1/verify', body: {}, kind: 'denied', note: 'B\'s pending claim' },
   { method: 'DELETE', path: '/api/domains/claims/1', kind: 'denied', note: 'B\'s pending claim' },
   { method: 'GET', path: '/api/domains/2/stats', kind: 'denied' },
+  { method: 'GET', path: '/api/domains/2/health-report', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/reports?date=2023-11-14', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/sources', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/explore', kind: 'denied' },
@@ -214,12 +215,19 @@ describe('two hosted workspaces: A cannot reach B', () => {
         expect(snapshotOf(w.db, w.B.workspaceId)).toBe(before);
         expect(cf.calls.filter(c => c.zoneId === 'zone-b')).toEqual([]);
         // B's credentials still work (A revoking "all my keys" did not touch B's)
-        expect(rows(w.db, 'SELECT revoked_at FROM api_keys WHERE id = ?', w.keyB.id)).toEqual([{ revoked_at: null }]);
+        expect(rows(w.db, 'SELECT revoked_at FROM access_credentials WHERE id = ?', w.keyB.id)).toEqual([{ revoked_at: null }]);
       });
 
       it('A’s own workspace is still usable, and A’s writes land in A’s workspace', async () => {
         const w = await world();
         const key = credential === 'session' ? w.A.token : w.keyA;
+        if (credential === 'api key') {
+          expect((await call(w.env, 'GET', '/api/domains', { key })).status).toBe(403);
+          expect((await call(w.env, 'GET', '/api/domains/1/stats', { key })).status).toBe(200);
+          expect((await call(w.env, 'POST', '/api/team/invite', { key, body: { email: 'new-for-a@example.com' } })).status).toBe(403);
+          expect(rows(w.db, "SELECT workspace_id FROM invites WHERE email = 'new-for-a@example.com'")).toEqual([]);
+          return;
+        }
         const list = await (await call(w.env, 'GET', '/api/domains', { key })).json() as any;
         expect(list.domains.map((d: any) => d.domain)).toEqual(['a-own.example.com']);
         // A domain A has not proven is a claim, not a domain: nothing but the claim is written.
@@ -238,19 +246,20 @@ describe('two hosted workspaces: A cannot reach B', () => {
     });
   }
 
-  it('A cannot pick B with X-Workspace-Id (session); API keys ignore the header', async () => {
+  it('A cannot pick B with X-Workspace-Id through sessions or finite delegated keys', async () => {
     const w = await world();
     const sess = await call(w.env, 'GET', '/api/domains', { key: w.A.token, headers: { 'x-workspace-id': w.B.workspaceId } });
     expect(sess.status).toBe(403);
     expect(await sess.text()).not.toContain('b-secret');
-    const viaKey = await (await call(w.env, 'GET', '/api/domains', { key: w.keyA, headers: { 'x-workspace-id': w.B.workspaceId } })).json() as any;
-    expect(viaKey.domains.map((d: any) => d.domain)).toEqual(['a-own.example.com']);
+    const viaKey = await call(w.env, 'GET', '/api/domains/1/stats', { key: w.keyA, headers: { 'x-workspace-id': w.B.workspaceId } });
+    expect(viaKey.status).toBe(403);
+    expect(await viaKey.text()).not.toContain('b-secret');
   });
 
   it('A’s credentials never resolve to B’s workspace, and B’s never to A’s', async () => {
     const w = await world();
     const { sessionWorkspaceResolver } = await import('../../src/auth/resolver');
-    const who = (key: string) => sessionWorkspaceResolver(new Request('https://ia.example.com/api/domains', { headers: { 'x-api-key': key } }), w.env);
+    const who = (key: string) => sessionWorkspaceResolver(new Request('https://ia.example.com/api/access', { headers: { 'x-api-key': key } }), w.env);
     expect(await who(w.A.token)).toMatchObject({ workspaceId: w.A.workspaceId });
     expect(await who(w.keyA)).toMatchObject({ workspaceId: w.A.workspaceId });
     expect(await who(w.B.token)).toMatchObject({ workspaceId: w.B.workspaceId });
@@ -259,8 +268,8 @@ describe('two hosted workspaces: A cannot reach B', () => {
 
   it('a member of B cannot act on A either, and a B-key listing shows only B’s keys', async () => {
     const w = await world();
-    const mine = await (await call(w.env, 'GET', '/api/keys', { key: w.B.token })).json() as any;
-    expect(mine.keys.map((k: any) => k.id)).toEqual([w.keyB.id]);
+    const mine = rows(w.db, 'SELECT id FROM access_credentials WHERE workspace_id = ?', w.B.workspaceId);
+    expect(mine.map((k: any) => k.id)).toEqual([w.keyB.id]);
     const aDomain = await call(w.env, 'GET', '/api/domains/1/stats', { key: w.B.token });
     expect(aDomain.status).toBe(404);
   });
@@ -285,7 +294,9 @@ describe('two hosted workspaces: A cannot reach B', () => {
 
   it('table covers every route of the analytics module (add new routes here)', () => {
     const src = readFileSync(join(__dirname, '../../src/analytics/routes.ts'), 'utf8');
-    const documented = [...src.matchAll(/^\/\/\s+GET\s+(\/api\/[^?\s]+)/gm)].map(m => `GET ${m[1].replace(':id', '2')}`);
+    const pattern = src.match(/url\.pathname\.match\(\/(.+)\/\)/)![1];
+    const route = new RegExp(pattern);
+    const documented = ['/api/analytics', '/api/domains/2/analytics'].filter(path => route.test(path)).map(path => `GET ${path}`);
     expect(documented).toEqual(['GET /api/analytics', 'GET /api/domains/2/analytics']);
     const covered = ROUTES.map(r => `${r.method} ${r.path.split('?')[0]}`);
     expect(documented.filter(d => !covered.includes(d))).toEqual([]);

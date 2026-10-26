@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept, signupVerified } from '../auth/helpers';
+import { delegatedKey } from '../auth/grant-fixture';
 import { HOSTED_ENV } from '../hosted/world';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -89,16 +90,16 @@ describe('GET/POST /api/workspaces', () => {
     expect((await call(env, 'PATCH', `/api/workspaces/${second}`, { key: b, body: { name: 'x' } })).status).toBe(404);
   });
 
-  it('is for signed-in users only: no credential → 401; API keys and the instance key → 403', async () => {
+  it('is for signed-in users only: no credential and retired instance key → 401; scoped machine credentials → 403', async () => {
     const { env, owner, db } = await selfHost();
     expect((await call(env, 'GET', '/api/workspaces')).status).toBe(401);
-    const { createApiKey } = await import('../../src/auth/api-keys');
     const uid = rows(db, 'SELECT id FROM users')[0].id;
-    const k = await createApiKey(db as any, { workspaceId: 'ws_default', userId: uid, name: 'k' });
+    const k = await delegatedKey(db as any, { workspaceId: 'ws_default', userId: uid, name: 'k', domain: 'example.com', kind: 'service' });
+    expect((await call(env, 'GET', '/api/resources', { key: k.key })).status).toBe(200);
     expect((await call(env, 'GET', '/api/workspaces', { key: k.key })).status).toBe(403);
     expect((await call(env, 'POST', '/api/workspaces', { key: k.key, body: { name: 'x' } })).status).toBe(403);
     const withInstanceKey = makeEnv(db, { API_KEY: 'instance-key-0123456789' });
-    expect((await call(withInstanceKey, 'GET', '/api/workspaces', { key: 'instance-key-0123456789' })).status).toBe(403);
+    expect((await call(withInstanceKey, 'GET', '/api/workspaces', { key: 'instance-key-0123456789' })).status).toBe(401);
     expect(owner).toBeTruthy();
   });
 

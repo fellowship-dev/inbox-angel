@@ -2,7 +2,6 @@
 import type { TenantContext } from '../tenancy/context';
 import { logAudit } from '../audit/log';
 import type { AuthContext } from '../api/auth';
-import { createApiKey } from './api-keys';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number) => json({ error: message }, status);
@@ -37,21 +36,7 @@ export async function handleKeyRoutes(
 
   // POST /api/keys { name, expires_in_days? } — the secret is returned once.
   if (path === '/api/keys' && method === 'POST') {
-    // A key cannot mint more keys: that would outlive its own revocation.
-    if (!auth.user || auth.kind !== 'session') return err('create API keys while signed in, not with another key', 403);
-    let body: { name?: string; expires_in_days?: number };
-    try { body = await request.json(); } catch { return err('Invalid JSON body', 400); }
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    if (!name || name.length > 80) return err('name is required (max 80 characters)', 400);
-    const days = body.expires_in_days;
-    if (days !== undefined && (typeof days !== 'number' || !(days > 0) || days > 3650)) return err('expires_in_days must be between 1 and 3650', 400);
-    const created = await createApiKey(tenant.db, { workspaceId: tenant.workspaceId, userId: auth.user.id, name, expiresInDays: days });
-    logAudit(tenant, {
-      actor_id: auth.user.id, actor_email: auth.user.email, actor_type: 'user',
-      action: 'api_key.created', resource_type: 'api_key', resource_id: created.id, resource_name: name,
-      after_value: { prefix: created.prefix },
-    }, ctx);
-    return json({ id: created.id, name, key: created.key, prefix: created.prefix }, 201);
+    return err('broad API keys are retired; use /api/access with explicit resources and expiry', 410);
   }
 
   // POST /api/keys/revoke-all — revoke all of your own keys (they survive a password change otherwise).

@@ -18,11 +18,11 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { call, ctx, makeEnv, setupOwner, inviteAndAccept, req, signupVerified } from './helpers';
 import { sessionWorkspaceResolver } from '../../src/auth/resolver';
-import { createApiKey } from '../../src/auth/api-keys';
+import { delegatedKey } from './grant-fixture';
 
 const rows = (db: { sqlite: any }, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
 const ask = (env: Env, key?: string, headers: Record<string, string> = {}) =>
-  sessionWorkspaceResolver(req('GET', '/api/domains', { key, headers }), env);
+  sessionWorkspaceResolver(req('GET', '/api/access', { key, headers }), env);
 
 describe('WorkspaceResolver: session → user → membership → workspace', () => {
   it('maps a session to its workspace, user and role', async () => {
@@ -62,15 +62,15 @@ describe('WorkspaceResolver: session → user → membership → workspace', () 
     await expect(ask(env, b, { 'x-workspace-id': accA })).rejects.toThrow(/not a member/); // b is not in a's workspace (403)
   });
 
-  it('API keys resolve to their workspace; the instance key to ws_default; nothing resolves to null', async () => {
+  it('finite delegated keys resolve identity and retired instance credentials resolve to null', async () => {
     const db = createMigratedD1();
     const env = makeEnv(db, { API_KEY: 'instance-secret-key' });
     const owner = await setupOwner(env);
     const userId = rows(db, 'SELECT id FROM users')[0].id;
-    const { key } = await createApiKey(db as unknown as D1Database, { workspaceId: 'ws_default', userId, name: 'k' });
+    const { key } = await delegatedKey(db as unknown as D1Database, { workspaceId: 'ws_default', userId, name: 'k', domain: 'example.com' });
 
     expect(await ask(env, key)).toMatchObject({ workspaceId: 'ws_default', userId, role: 'owner', kind: 'api_key' });
-    expect(await ask(env, 'instance-secret-key')).toMatchObject({ workspaceId: 'ws_default', userId: undefined, role: 'owner', kind: 'instance' });
+    expect(await ask(env, 'instance-secret-key')).toBeNull();
     expect(await ask(env)).toBeNull();
     expect(await ask(env, 'nonsense')).toBeNull();
     expect(owner).toBeTruthy();

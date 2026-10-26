@@ -1,12 +1,14 @@
 // Playwright smoke test — CT Log Subdomain Discovery
 //
-// Requires a running dashboard (default http://127.0.0.1:8787) with an admin session
-// injected into localStorage as 'ia_api_key'.
+// Requires a running local dashboard and private E2E_OPERATOR_FILE credentials.
 //
 // Run: npm run dev (wrangler dev), then npm run test:e2e  (override target with E2E_BASE_URL).
-// Pre-condition: dashboard URL reachable, admin API key available.
+// Pre-condition: local dashboard reachable; operator file contains email, password and installer proof.
 
 import { test, expect } from '@playwright/test';
+import { signIn } from './support/session';
+
+test.beforeEach(async ({ page }) => { await signIn(page); });
 
 
 // A known domain with public CT entries; any widely-used domain works.

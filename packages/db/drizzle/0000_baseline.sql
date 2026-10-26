@@ -508,3 +508,59 @@ CREATE TABLE `workspaces` (
 	`name` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL
 );
+
+--> statement-breakpoint
+CREATE TABLE products (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ name TEXT NOT NULL, archived_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE product_domains (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+ domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+ PRIMARY KEY(product_id, domain_id)
+);
+CREATE TABLE access_principals (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL, user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+ name TEXT NOT NULL, disabled_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE access_grants (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ principal_id TEXT NOT NULL REFERENCES access_principals(id) ON DELETE CASCADE,
+ product_id TEXT REFERENCES products(id) ON DELETE CASCADE, domain TEXT,
+ actions TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE access_credentials (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ principal_id TEXT NOT NULL REFERENCES access_principals(id) ON DELETE CASCADE,
+ name TEXT NOT NULL, prefix TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE,
+ expires_at INTEGER NOT NULL, revoked_at INTEGER, last_used_at INTEGER,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+--> statement-breakpoint
+CREATE TABLE google_postmaster_connections (
+ id TEXT PRIMARY KEY NOT NULL,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+ token_envelope TEXT,
+ status TEXT NOT NULL DEFAULT 'connected',
+ last_attempt_at INTEGER,
+ last_success_at INTEGER,
+ UNIQUE(workspace_id, domain_id)
+);
+--> statement-breakpoint
+CREATE TABLE metric_observations (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+ connection_id TEXT NOT NULL REFERENCES google_postmaster_connections(id) ON DELETE CASCADE,
+ domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+ metric TEXT NOT NULL,
+ period_start TEXT NOT NULL,
+ period_end TEXT NOT NULL,
+ source_id TEXT NOT NULL,
+ payload TEXT NOT NULL,
+ PRIMARY KEY(connection_id, domain_id, metric, period_start, period_end, source_id)
+);
+--> statement-breakpoint

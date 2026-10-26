@@ -10,7 +10,7 @@
 //   npx playwright test e2e/workspaces.spec.ts
 import { expect, test, type Page } from '@playwright/test';
 import { runSql } from './support/db';
-import { signIn, tokenOf } from './support/session';
+import { signIn } from './support/session';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -31,7 +31,6 @@ async function openSwitcher(page: Page) {
 
 test('Max creates the Lexgo workspace from the switcher and lands on its empty state', async ({ page }) => {
 	await signIn(page);
-	const key = await tokenOf(page);
 	// the default workspace has a domain of its own
 	runSql(`INSERT OR IGNORE INTO domains (workspace_id, domain, rua_address) VALUES ('ws_default', '${FELLOWSHIP_DOMAIN}', 'rua@reports.e2e.test');`);
 	await page.goto('/');
@@ -49,7 +48,7 @@ test('Max creates the Lexgo workspace from the switcher and lands on its empty s
 	await expect(page.getByRole('link', { name: 'Add your first domain' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Connect Cloudflare' })).toBeVisible();
 
-	const list = (await (await page.request.get('/api/workspaces', { headers: { 'X-Api-Key': key } })).json()).workspaces as Array<{ id: string; name: string }>;
+	const list = (await (await page.request.get('/api/workspaces')).json()).workspaces as Array<{ id: string; name: string }>;
 	lexgoId = list.find((w) => w.name === 'Lexgo')!.id;
 	expect(lexgoId).toMatch(/^ws_/);
 });
@@ -100,8 +99,7 @@ test('the coworker accepts, logs in, and sees only Lexgo — read-only', async (
 	await page.keyboard.press('Escape');
 
 	// pointing the dashboard at Fellowship gets the coworker nowhere: a notice, and back to Lexgo
-	const key = await tokenOf(page);
-	const direct = await page.request.get('/api/domains', { headers: { 'X-Api-Key': key, 'X-Workspace-Id': 'ws_default' } });
+	const direct = await page.request.get('/api/domains', { headers: { 'X-Workspace-Id': 'ws_default' } });
 	expect(direct.status()).toBe(403);
 	await page.goto('/#/w/ws_default/');
 	await expect(page).toHaveURL(new RegExp(`#/w/${lexgoId}/`));

@@ -1,3 +1,4 @@
+import { authorizeHttpRequest } from '../access/http-policy';
 // Request authentication for /api/*. The work is in src/auth/session.ts; this is the
 // seam the router (and its tests) call.
 import { authenticate, passesCsrfCheck, AuthError, type Principal } from '../auth/session';
@@ -15,6 +16,7 @@ export interface AuthContext {
   kind: Principal['kind'];
   user: Principal['user'];
   apiKeyId?: string;
+  access?: import('../access/principal').AccessSubject;
 }
 
 /**
@@ -31,7 +33,9 @@ export async function requireAuth(
   if (principal.viaCookie && !passesCsrfCheck(request, env)) {
     throw new AuthError('cross-origin request rejected', 403);
   }
+  await authorizeHttpRequest(request, env.DB as D1Database, principal);
   return {
+    access: principal.access,
     userId: principal.user?.id ?? 'instance',
     workspaceId: principal.workspaceId,
     role: principal.role,

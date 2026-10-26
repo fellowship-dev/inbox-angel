@@ -10,7 +10,7 @@ import { fail, me, mockApi, STATUS } from './render';
 const at = (route: string) => ({ children }: { children: ReactNode }) => <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>;
 
 function boot(route: string, routes: Record<string, unknown>) {
-	const api = mockApi({ 'GET /api/auth/status': STATUS, 'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' }, ...routes });
+	const api = mockApi({ 'GET /api/auth/status': STATUS, 'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' }, 'GET /api/mcp/connections': { connections: [] }, 'GET /api/access': { products: [], principals: [], credentials: [], grants: [] }, 'GET /api/resources': { domains: [] }, 'GET /api/metrics/google/connections': { configured: false, connections: [] }, ...routes });
 	render(<App queryClient={createQueryClient()} Router={at(route)} />);
 	return api;
 }
@@ -36,9 +36,9 @@ describe('app', () => {
 	it('renders the sidebar and the page for a signed-in user, marking the current section', async () => {
 		boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': { keys: [] } });
 		const nav = await screen.findByRole('navigation', { name: 'Main' });
-		expect(within(nav).getByRole('link', { name: 'API keys' })).toHaveAttribute('aria-current', 'page');
+		await waitFor(() => expect(within(nav).getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page'));
 		expect(within(nav).getByRole('link', { name: 'Domains' })).not.toHaveAttribute('aria-current');
-		expect(await screen.findByRole('heading', { name: 'API keys', level: 1 })).toBeInTheDocument();
+		expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
 	});
 
 	it('sends a signed-in owner of an empty instance to the setup wizard, but not a member', async () => {
@@ -47,7 +47,7 @@ describe('app', () => {
 	});
 
 	it('returns to sign-in when a request comes back 401 mid-session', async () => {
-		boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/keys': fail(401, 'expired') });
+		boot('/keys', { 'GET /api/me': me('owner'), 'GET /api/access': fail(401, 'expired') });
 		expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
 	});
 

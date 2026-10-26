@@ -20,7 +20,11 @@ Exports the `Env` interface that describes every Cloudflare binding and secret t
 | `AUTH_LIMITER` | Rate limiter | 10 req/min per key — protects auth endpoints |
 | `API_LIMITER` | Rate limiter | 200 req/min global — protects all API routes |
 | `CLOUDFLARE_API_TOKEN` | secret | EMAIL token — DNS writes and email routing |
-| `API_KEY` | secret (optional) | Static API key auth for headless integrations |
+| `OAUTH_KV` | `KVNamespace` | Installation-owned agent OAuth state/token storage |
+| `BETTER_AUTH_URL` | var | Canonical HTTPS browser/agent issuer origin |
+| `BOOTSTRAP_SECRET` | secret | Installer-held single-use first-owner proof |
+| `TOKEN_ENCRYPTION_KEY` | secret | Encrypts Cloudflare and Google provider credentials |
+| `GOOGLE_POSTMASTER_CLIENT_ID`, `GOOGLE_POSTMASTER_CLIENT_SECRET` | vars / private secret | Separate Google Postmaster read connection |
 | `WORKER_NAME` | var | Defaults to `"inbox-angel-worker"` |
 | `MODE` | var (optional) | `selfhost` (default) or `saas` |
 
@@ -32,8 +36,9 @@ Routing priority (evaluated top to bottom):
 
 1. If `env.DB` is missing → return setup page (503 HTML with wrangler setup instructions)
 2. `mta-sts.*` hostname + `/.well-known/mta-sts.txt` path → serve MTA-STS policy file (RFC 8461)
-3. `/health` or `/api/*` → `handleApi()` (dashboard API, DNS provisioning)
-4. Anything else → `env.ASSETS.fetch(request)` (dashboard SPA)
+3. MCP/OAuth/discovery and agent-connection routes → installation-owned OAuth adapter with current D1 principal/grant checks
+4. `/health` or `/api/*` → `handleApi()` (dashboard API, DNS provisioning)
+5. Anything else → `env.ASSETS.fetch(request)` (dashboard SPA)
 
 **`email(message, env, ctx)`** — Email Worker handler
 
@@ -137,3 +142,7 @@ The worker imports it by relative path and only adds the Cloudflare/D1 side:
 | `src/monitor/check.ts` | Diffs baselines; a failed lookup keeps the old baseline and reports no change |
 
 Public Suffix List data comes from the `tldts` dependency; update it with `npm update tldts`.
+
+## Agent and reporting modules
+
+`src/access/` owns finite principals/grants, exact resource resolution and owner administration. `src/mcp/` and `src/auth/mcp-issuer.ts` adapt installation-owned OAuth and tools to that policy. `src/reports/service.ts` combines fresh DNS, captured DMARC/TLS evidence, Google cache and shared remediation for HTTP, dashboard and MCP. `src/metrics/` owns the separate Google Postmaster owner connection and explicit sync. `plugins/inbox-angel/` contains public client guidance; `tools/configure-agent-plugin.mjs` creates an endpoint-specific copy without credentials. See [operator setup and acceptance](agent-operations.md).

@@ -64,7 +64,7 @@ Worker vars (`wrangler.jsonc` `vars`) unless marked secret.
 | `CF_OAUTH_RELAY_ALLOWED_HOSTS` | var, optional, relay only | comma-separated hostnames instances may forward to (registered instances); any other host is refused |
 
 OAuth is offered when the client id, authorize URL and token URL are set **and** `TOKEN_ENCRYPTION_KEY` is configured.
-Migration `0015` (`npm run migrate`) adds the tables.
+The current baseline includes the Cloudflare connection tables; apply all current migrations with `npm run migrate` before serving the Worker. Google Postmaster uses a separate owner grant while sharing the token-encryption key format; see [agent operations](agent-operations.md#google-postmaster-is-a-separate-owner-connection).
 
 ## How it works
 

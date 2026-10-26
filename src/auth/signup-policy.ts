@@ -8,13 +8,14 @@
 // the user is being created (`SignupIntent`). OAuth callbacks reach Better Auth directly and
 // are 'external': they follow the same rules, but invites are matched by email, and only when the
 // OAuth provider reports that email as verified (an unverified address proves nothing about its holder).
+import { verifyBootstrapProof, consumeBootstrapProof } from './bootstrap';
 import { APIError } from 'better-auth/api';
 import { authLookups, forWorkspace, forImplicitWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@inbox-angel/db';
 import { isSaas, type AuthEnv } from './config';
 
 export type SignupIntent =
   | { kind: 'external' }
-  | { kind: 'setup' }
+  | { kind: 'setup'; bootstrapProof: string }
   | { kind: 'signup' }
   | { kind: 'invite'; token: string }
   /** Hosted: someone signing up to accept an invite. Holding the link proves nothing, so the invite is not claimed here and
@@ -59,9 +60,10 @@ export async function assertMaySignUp(env: AuthEnv, intent: SignupIntent, email:
   if (!ownerExists && claimant && claimant !== email.toLowerCase()) reject('this instance is reserved for its configured owner');
   if (intent.kind === 'setup') {
     if (ownerExists) reject('already configured');
+    if (!(await verifyBootstrapProof(env, intent.bootstrapProof))) reject('installer proof required');
     return;
   }
-  if (!ownerExists) return; // first user in via OAuth
+  if (!ownerExists) reject('installer proof required — finish owner setup first');
   if (!(await inviteFor(db, intent, email, emailVerified))) reject('sign-up is closed — ask an owner for an invite');
 }
 
@@ -99,8 +101,10 @@ export async function provisionUser(
     await forWorkspace(db, workspaceId).team.addMember(user.id, 'owner');
     placed = { workspaceId, role: 'owner' };
   } else {
-    // Atomic: of two simultaneous first sign-ups, exactly one becomes owner.
+    if (intent.kind !== 'setup' || !(await verifyBootstrapProof(env, intent.bootstrapProof))) return fail('installer proof required');
+    // Atomic: of two simultaneous proven first sign-ups, exactly one becomes owner.
     if (!(await forImplicitWorkspace(db).team.claimOwnership(user.id))) return fail('already configured');
+    await consumeBootstrapProof(env);
     placed = { workspaceId: IMPLICIT_WORKSPACE_ID, role: 'owner' };
   }
 

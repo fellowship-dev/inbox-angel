@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "inbox-angel",
+  "version": "0.1.0",
+  "description": "Agent workflows for email configuration, observed metrics and proposed fixes.",
+  "author": {
+    "name": "Fellowship"
+  },
+  "repository": "https://github.com/fellowship-dev/inbox-angel",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Inbox Angel",
+        "shortDescription": "Email health for your agents",
+        "longDescription": "Inspect email configuration, read collected domain statistics and plan evidence-backed fixes through your own Inbox Angel installation.",
+        "developerName": "Fellowship",
+        "category": "Productivity",
+        "capabilities": [
+          "Email reports",
+          "Domain setup",
+          "Remediation plans"
+        ],
+        "defaultPrompt": "Check my email health and show the next evidence-backed fix."
+      }
+    }
+  }
+}

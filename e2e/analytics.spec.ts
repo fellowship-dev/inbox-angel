@@ -6,13 +6,13 @@
 import { expect, test } from '@playwright/test';
 import { analyticsSeedSql } from './support/analytics-seed';
 import { ensureDomain, runSql } from './support/db';
-import { signIn, tokenOf } from './support/session';
+import { signIn } from './support/session';
 
 const DOMAIN = 'analytics-e2e.test';
 
 test('sender inventory, what to fix next and readiness from seeded reports', async ({ page }) => {
 	await signIn(page);
-	const domain = { id: await ensureDomain(page, await tokenOf(page), DOMAIN) };
+	const domain = { id: await ensureDomain(page, DOMAIN) };
 	runSql(analyticsSeedSql(domain.id, DOMAIN));
 
 	await page.goto(`/#/domains/${domain.id}/analytics`);

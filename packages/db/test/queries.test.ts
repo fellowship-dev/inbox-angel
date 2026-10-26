@@ -176,6 +176,7 @@ describe('behaviour carried over from the old queries.ts', () => {
 		await a.reports.insertTls(t);
 		await a.reports.insertTls({ ...t, total_success: 7, total_failure: 3 });
 		expect(await a.reports.tlsSummary(d, 0)).toEqual({ total_success: 7, total_failure: 3, report_count: 1 });
+		expect(await a.reports.tlsSummary(d, 0, 4)).toEqual({ total_success: 0, total_failure: 0, report_count: 0 });
 	});
 
 	it('weekly stats include domains with no reports; failing sources aggregate by IP', async () => {

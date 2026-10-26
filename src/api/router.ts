@@ -76,6 +76,8 @@ import { AuthError } from './auth';
 import { version } from '../../package.json';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
+import { handleAccessRoutes } from '../access/routes';
+import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
@@ -98,7 +100,9 @@ import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
-import { admitDomain, claimView, listClaims, settleClaims, verifyClaim, type VerifiedVia } from '../domains/ownership';
+import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
+import { enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
 import { track } from '../telemetry';
@@ -200,110 +204,8 @@ async function addDomain(request: Request, tenant: TenantContext, userEmail?: st
     return err('domain is required', 400);
   }
 
-  const domain = body.domain.toLowerCase().trim();
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
-    return err('invalid domain format', 400);
-  }
-
-  // SaaS: a domain is only a claim until its owner is proven (see src/domains/ownership.ts); nothing else happens meanwhile.
-  const admission = await admitDomain(tenant, domain);
-  if (admission.kind === 'taken') return err('domain already registered in another workspace', 409);
-  if (admission.kind === 'limit') return err('too many unverified domains — verify or remove some first', 429);
-  if (admission.kind === 'pending') {
-    return json({ pending: true, claim: claimView(admission.claim), domain: null }, 202);
-  }
-  return createVerifiedDomain(tenant, domain, admission.via, userEmail, ctx, actorId);
-}
-
-/** Inserts a domain whose ownership is established, with the side effects of adding one. */
-async function createVerifiedDomain(tenant: TenantContext, domain: string, via: VerifiedVia, userEmail?: string, ctx?: ExecutionContext, actorId?: string): Promise<Response> {
-  const rdomain = tenant.settings.reportsDomain;
-  if (!rdomain) return err('Reports domain not configured — complete the setup wizard first', 500);
-
-  // Fixed rua address — routing is by XML policy_domain, not by address encoding
-  const ruaAddress = `rua@${rdomain}`;
-
-  // Compute the auth record name (but do NOT create it — wizard handles DNS provisioning)
-  const authRecordName = `${domain}._report._dmarc.${rdomain}`;
-
-  // Insert domain row — no DNS writes here; all DNS changes require explicit user action
-  let domainId: number;
-  try {
-    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via });
-    domainId = result.meta.last_row_id as number;
-  } catch (e: any) {
-    if (e?.message?.includes('UNIQUE')) return err('domain already registered', 409);
-    throw e;
-  }
-  await settleClaims(tenant, domain);
-
-  track(tenant, { event: 'domain.add' }); // fire-and-forget, non-blocking
-
-  logAudit(tenant, {
-    actor_id: actorId ?? null, actor_email: userEmail ?? null, actor_type: 'user',
-    action: 'domain.add',
-    resource_type: 'domain', resource_id: String(domainId), resource_name: domain,
-    after_value: { domain, rua_address: ruaAddress },
-  }, ctx);
-
-  // Auto-subscribe the adding user to monitoring alerts
-  const email = userEmail;
-  if (email) {
-    await tenant.scope.monitor.insert({
-      email: email.toLowerCase().trim(),
-      domain,
-      session_token: null,
-      confirmed_at: Math.floor(Date.now() / 1000), // a signed-in account holder adding their own domain: no confirmation needed
-      spf_record: null,
-      dmarc_policy: null,
-      dmarc_pct: null,
-      dmarc_record: null,
-    }).catch(e => console.warn('[domain.add] monitor sub insert failed (non-fatal):', e));
-  }
-
-  // Background SPF lookup — fire-and-forget, doesn't block response
-  if (ctx) {
-    ctx.waitUntil(
-      lookupSpf(domain)
-        .then(spf => {
-          if (spf?.lookup_count !== undefined) {
-            return tenant.scope.domains.updateSpfLookupCount(domainId, spf.lookup_count);
-          }
-        })
-        .catch(e => console.warn('[domain.add] background SPF walk failed (non-fatal):', e))
-    );
-  }
-
-  // Return the full domain row so the frontend has the ID
-  const domainRow = await tenant.scope.domains.getById(domainId);
-
-  // If subdomain, fetch parent context for the inheritance-aware wizard
-  let parent_context: { domain: string; dmarc_policy: string | null; dmarc_sp: string | null; has_dmarc: boolean } | null = null;
-  if (domainRow?.parent_id) {
-    const parentRow = await tenant.scope.domains.getById(domainRow.parent_id);
-    if (parentRow) {
-      // A failed lookup leaves parent_context unset: "unknown" must not be reported as "parent has no DMARC".
-      const parentDmarc = await lookupDmarc(parentRow.domain).then(r => ({ ok: true as const, r }), () => ({ ok: false as const, r: null }));
-      if (parentDmarc.ok) {
-        const pd = parentDmarc.r;
-        parent_context = {
-          domain: parentRow.domain,
-          dmarc_policy: pd?.policy ?? null,
-          // sp= tag: null means not explicitly set (frontend distinguishes sp=none vs absent)
-          dmarc_sp: pd ? (pd.subdomainPolicy ?? null) : null,
-          has_dmarc: pd !== null,
-        };
-      }
-    }
-  }
-
-  return json({
-    domain: domainRow,
-    rua_hint: `Add rua=mailto:${ruaAddress} to your DMARC record`,
-    auth_record: authRecordName,
-    dns_instructions: `Add this TXT record to authorize DMARC reports:\n  ${authRecordName}  TXT  "v=DMARC1;"`,
-    ...(parent_context !== null ? { parent_context } : {}),
-  }, 201);
+  const result = await enrollDomain(tenant, body.domain, userEmail, ctx, actorId);
+  return json(result, 'pending' in result ? 202 : result.resumed ? 200 : 201);
 }
 
 /** Public handle of an invite for listing and revoking: the token itself stays with whoever was given the link. */
@@ -641,6 +543,12 @@ async function _handleApi(
   const authResponse = await handleAuthRoute(request, env, ctx, tenantFor);
   if (authResponse) return authResponse;
 
+  const accessResponse = await handleAccessRoutes(request, env, ctx);
+  if (accessResponse) return accessResponse;
+
+  const metricsResponse = await handleGoogleMetricRoutes(request, env, ctx);
+  if (metricsResponse) return metricsResponse;
+
   // All /api/* routes require auth
   if (!path.startsWith('/api/')) {
     return err('not found', 404);
@@ -820,7 +728,8 @@ async function _handleApi(
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
       if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
-      return createVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
+      const result = await commitVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
+      return json(result, result.resumed ? 200 : 201);
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
@@ -886,6 +795,12 @@ async function _handleApi(
     if (checkSummaryMatch && method === 'GET') {
       return await getDomainCheckSummary(tenant, checkSummaryMatch[1]);
     }
+    const healthReportMatch = path.match(/^\/api\/domains\/(\d+)\/health-report$/);
+    if (healthReportMatch && method === 'GET') {
+      const days = Number(url.searchParams.get('days') ?? '30');
+      return json(await getDomainReport(tenant, Number(healthReportMatch[1]), { days }));
+    }
+
     // GET /api/domains/:id/dns-check — check if user has added the _dmarc TXT record
     const dnsCheckMatch = path.match(/^\/api\/domains\/([^/]+)\/dns-check$/);
     if (dnsCheckMatch && method === 'GET') {

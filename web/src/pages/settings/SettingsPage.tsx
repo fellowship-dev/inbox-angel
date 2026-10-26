@@ -2,7 +2,6 @@ import { Badge, Button, Card, CardContent, FieldError, Input, PageHeader, Skelet
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Moon, Sun } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
 import { ReadOnlyNotice, Section, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
@@ -10,6 +9,8 @@ import { setTheme, useTheme } from '../../lib/theme';
 import { Field } from '../auth/AuthLayout';
 import { DangerZone } from './DangerZone';
 import { WorkspaceSection } from './WorkspaceSection';
+import { AgentConnectionsSection } from './AgentConnectionsSection';
+import { MetricConnectionsSection } from './MetricConnectionsSection';
 
 interface VersionInfo {
 	current: string;
@@ -65,6 +66,9 @@ export function SettingsPage() {
 			</Section>
 
 			<WorkspaceSection />
+
+			<AgentConnectionsSection />
+			<MetricConnectionsSection />
 
 			<Section title="Appearance" description="Follows your system until you choose.">
 				<div className="flex flex-wrap gap-2" role="group" aria-label="Theme">
@@ -125,7 +129,7 @@ export function SettingsPage() {
 				</Card>
 				{customDomain.isError ? <FieldError>{errorMessage(customDomain.error)}</FieldError> : null}
 				<p className="text-sm text-ink-2">
-					Need to script something? <Link to="/keys" className="text-brand-ink underline underline-offset-4">Create an API key</Link>.
+					Unattended products use the scoped service credentials above.
 				</p>
 			</Section>
 

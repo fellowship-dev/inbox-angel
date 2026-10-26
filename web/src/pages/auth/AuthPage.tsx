@@ -25,6 +25,7 @@ export function AuthPage() {
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
+	const [bootstrapProof, setBootstrapProof] = useState('');
 	const [telemetry, setTelemetry] = useState(status?.telemetry_default ?? false);
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
@@ -43,13 +44,15 @@ export function AuthPage() {
 			if (password.length < 8) return setError('Password must be at least 8 characters.');
 			if (password !== confirm) return setError('Passwords do not match.');
 		}
+		if (mode === 'setup' && bootstrapProof.length < 32) return setError('Installer proof must be at least 32 characters.');
 		setBusy(true);
 		try {
 			const cf = status?.turnstile_site_key ? turnstileToken(e.currentTarget) : undefined;
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
-			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body });
+			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Inbox-Angel-Bootstrap': bootstrapProof } } : {}) });
+			setBootstrapProof('');
 			if (res.verification_required) {
 				setVerifyFor(email);
 				return;
@@ -81,11 +84,12 @@ export function AuthPage() {
 
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
-		mode === 'setup' ? 'Set up your Inbox Angel instance. You will use these credentials to sign in.' : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
+		mode === 'setup' ? "Create this installation's owner using the single-use proof held by its installer. No shared default password is used." : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
+				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="Single-use secret supplied by the person who installed this instance. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
 				{registering ? (
 					<Field id="name" label="Your name (optional)">
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />

@@ -25,6 +25,7 @@ const BOOKKEEPING = new Set(['d1_migrations', '_migrations']);
 const KEYWORDS = new Set(['where', 'on', 'set', 'values', 'select', 'group', 'order', 'limit', 'left', 'inner', 'join', 'using', 'as', 'returning', 'and', 'or', 'cross']);
 
 const TABLE_VARS: Record<string, string> = {
+	products: 'products', productDomains: 'product_domains', accessPrincipals: 'access_principals', accessGrants: 'access_grants', accessCredentials: 'access_credentials',
 	domains: 'domains', aggregateReports: 'aggregate_reports', reportRecords: 'report_records', tlsReports: 'tls_reports',
 	spfFlattenConfig: 'spf_flatten_config', mtaStsConfig: 'mta_sts_config', monitorSubscriptions: 'monitor_subscriptions',
 	settings: 'settings', invites: 'invites', auditLog: 'audit_log', memberships: 'memberships', apiKeys: 'api_keys',
@@ -103,7 +104,7 @@ export function checkBuilder(raw: string): Hit[] {
 	const src = stripComments(raw);
 	// predicate helpers: `const mine = eq(T.workspace_id, workspaceId)` and `const f = (..) => and(mine, ...)`
 	const helpers: Array<[string, string]> = []; // [helper name, table var] (names like `mine` repeat per table)
-	for (const m of src.matchAll(/const (\w+) = eq\((\w+)\.workspace_id,\s*\w+\)/g)) helpers.push([m[1], m[2]]);
+	for (const m of src.matchAll(/const (\w+) = (?:\([^\n]*?\) => and\()?eq\((\w+)\.workspace_id,\s*\w+\)/g)) helpers.push([m[1], m[2]]);
 	for (const m of src.matchAll(/const (\w+) = ([^\n]*)/g)) {
 		if (!/\band\(/.test(m[2])) continue;
 		for (const [h, t] of [...helpers]) if (new RegExp(`\\b${h}\\b`).test(m[2]) && !helpers.some(([n, tt]) => n === m[1] && tt === t)) helpers.push([m[1], t]);
@@ -148,12 +149,27 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		expect(scan(walk(join(ROOT, 'src'))).found).toEqual([]);
 	});
 
-	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, one in funnel.ts: an unsubscribe removes the address from every workspace, three in workspaces.ts: a user own workspaces and routing by reports domain / hostname, six in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id, five in claims.ts: who verified a domain first, finding and detaching an unproven holder)', () => {
+	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, one in funnel.ts: an unsubscribe removes the address from every workspace, three in workspaces.ts: a user own workspaces and routing by reports domain / hostname, six in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id, five in claims.ts: who verified a domain first, finding and detaching an unproven holder; four in access-grants.ts: credential id/hash, principal identity and finite portfolio consent)', () => {
 		const files = walk(join(ROOT, 'packages/db/src/queries')).filter((f) => !/global(-lifecycle)?\.ts$/.test(f));
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(20);
+		expect(exemptions).toBe(25);
+	});
+
+	it('pins the privileged access lookup census without exempting scoped access queries', () => {
+		const raw = readFileSync(join(ROOT, 'packages/db/src/queries/access-grants.ts'), 'utf8');
+		const [lookups, scoped] = raw.split('export function accessQueries');
+		expect(lookups).toContain('export function accessLookups');
+		const privileged = chains(lookups).filter(chain => /workspace-scope-exempt:/.test(chain));
+		expect(privileged).toHaveLength(5);
+		for (const [table, field] of [['accessCredentials', 'id'], ['accessCredentials', 'key_hash'], ['accessPrincipals', 'id'], ['accessGrants', 'principal_id']]) {
+			expect(privileged.filter(chain => chain.includes(`eq(${table}.${field},`))).toHaveLength(1);
+		}
+		expect(privileged.filter(chain => chain.includes('eq(accessPrincipals.user_id, userId)') && chain.includes("eq(accessPrincipals.kind, 'human')"))).toHaveLength(1);
+		expect(scoped).toBeTruthy();
+		expect(scoped).not.toContain('workspace-scope-exempt:');
+		expect(checkSource(raw)).toEqual([]);
 	});
 
 	it('global.ts only touches allow-listed global tables', () => {
@@ -218,6 +234,14 @@ describe('positive cases and other shapes', () => {
 		expect(checkSql('SELECT * FROM ip_info WHERE ip = ?')).toEqual([]);
 		expect(checkSql('SELECT * FROM brand_new_table WHERE id = ?')).toHaveLength(1);
 		expect(checkSql('some prose: data from the table')).toEqual([]);
+	});
+
+	it('access tables are checked individually, including joins and wrong-table predicates', () => {
+		for (const t of ['products', 'productDomains', 'accessPrincipals', 'accessGrants', 'accessCredentials']) {
+			expect(checkSource(`db.select().from(${t}).all();`)).toHaveLength(1);
+			expect(checkSource(`db.select().from(${t}).where(eq(domains.workspace_id, workspaceId)).all();`)).toHaveLength(1);
+			expect(checkSource(`db.select().from(${t}).where(eq(${t}.workspace_id, workspaceId)).all();`)).toEqual([]);
+		}
 	});
 
 	it('honours a workspace-scope-exempt marker inside a chain', () => {

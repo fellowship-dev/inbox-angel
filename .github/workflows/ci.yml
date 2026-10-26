@@ -1,5 +1,5 @@
 # Install + test on every pull request and push to main. Independent of deploy.yml
-# (which is disabled in this repository; self-hosters enable it in their fork).
+# (manual deployment only; these checks do not deploy).
 name: CI
 
 on:
@@ -26,3 +26,4 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:ui
       - run: npm run test:web
+      - run: npm run build:dashboard

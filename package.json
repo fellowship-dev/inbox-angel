@@ -26,18 +26,25 @@
     "@cloudflare/vitest-pool-workers": "^0.16.6",
     "@cloudflare/workers-types": "^4.20260515.1",
     "@playwright/test": "^1.64.1",
+    "esbuild": "0.27.3",
+    "miniflare": "4.20260515.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6",
-    "wrangler": "^4.92.0"
+    "wrangler": "^4.92.0",
+    "yaml": "2.9.1"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
     "@inbox-angel/dns-checks": "*",
     "@inbox-angel/report": "*",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "better-auth": "^1.7.12",
     "fast-xml-parser": "^5.7.2",
     "fflate": "^0.8.2",
     "mimetext": "^3.0.28",
-    "tldts": "^7.4.19"
+    "tldts": "^7.4.19",
+    "zod": "4.6.7"
   },
   "cloudflare": {
     "bindings": {

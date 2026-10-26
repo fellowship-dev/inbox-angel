@@ -1,3 +1,4 @@
+import { HealthReportSection } from './HealthReportSection';
 import { Alert, Badge, Button, EmptyState, PageHeader, Stat, StatGroup, Tabs, TabsList, TabsTrigger } from '@inbox-angel/ui';
 import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
 import { useState } from 'react';
@@ -159,6 +160,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			/>
 			<ReadOnlyNotice />
 			<SetupBanner domainId={domain.id} />
+			<HealthReportSection domainId={domain.id} />
 
 			<Section
 				title="Results"

@@ -9,10 +9,9 @@ function makeRequest(headers: Record<string, string> = {}): Request {
 }
 
 describe('requireAuth', () => {
-  it('treats a matching API_KEY as the instance admin (no user, never echoes the key)', async () => {
+  it('rejects the retired instance API_KEY even when it matches the configuration', async () => {
     const req = makeRequest({ 'x-api-key': 'test-key-org_abc123' });
-    const ctx = await requireAuth(req, ENV);
-    expect(ctx).toMatchObject({ userId: 'instance', kind: 'instance', role: 'owner', workspaceId: 'ws_default', user: null });
+    await expect(requireAuth(req, ENV)).rejects.toMatchObject({ status: 401 });
   });
 
   it('throws AuthError when x-api-key is missing', async () => {

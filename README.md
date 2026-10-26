@@ -9,7 +9,7 @@ Self-hostable email authentication platform — DMARC monitoring, SPF management
 
 Most domains start at `p=none` — DMARC is watching but not protecting. Getting to `p=reject` means spoofed email claiming to be from your domain gets blocked at delivery. But you can't flip that switch blindly: you need to know that all your legitimate senders are properly authenticated first.
 
-InboxAngel collects DMARC aggregate reports from receiving mail servers worldwide and shows you exactly what's passing, what's failing, and where it's coming from. Once your pass rate is consistently high, the dashboard tells you it's safe to enforce. From there you can go further — SPF flattening, MTA-STS, TLS-RPT — but the core value is getting you from "I don't know" to `p=reject` without breaking your email.
+InboxAngel collects DMARC aggregate reports from receiving mail servers worldwide and shows you exactly what's passing, what's failing, and where it's coming from. The dashboard combines observed sender alignment, coverage and readiness before proposing an enforcement change. From there you can go further — SPF flattening, MTA-STS, TLS-RPT — but the core value is getting you from "I don't know" to `p=reject` without breaking your email.
 
 ### DMARC monitoring
 
@@ -22,7 +22,7 @@ Receiving mail servers → XML aggregate report → rua@reports.yourdomain.com
         └── Stores in D1 → dashboard shows 30/60-day trends + guidance
 ```
 
-When your pass rate is stable above 95%, the dashboard tells you it's time to tighten policy. It shows you the exact DNS record to update.
+The dashboard shows observed alignment and readiness with their source windows and missing evidence. A pass rate alone does not establish that every legitimate sender is covered; review the prerequisites before authorizing an enforcement change.
 
 ### SPF management
 
@@ -73,25 +73,29 @@ The Worker needs a token at runtime to manage Email Routing rules and DNS record
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/fellowship-dev/inbox-angel)
 
-The button forks the repo, creates a D1 database, and prompts for your API token. That's it — one secret, zero env vars.
+The button starts the Worker/D1 deployment and prompts for the runtime API token. Before first-owner setup, also complete the installation-owned OAuth namespace, canonical HTTPS origin and private installer-proof steps in [the operator guide](docs/agent-operations.md#installer-setup). Do not treat a successful deployment as completed setup.
 
 **Option B — CLI:**
 
 ```bash
 npm install
 wrangler secret put CLOUDFLARE_API_TOKEN  # the token you created above
+# Create/bind your D1 and OAUTH_KV, set BETTER_AUTH_URL, and upload BOOTSTRAP_SECRET
+# using the private-file procedure in docs/agent-operations.md before first setup.
 npm run deploy
 ```
 
-No `BASE_DOMAIN`, no `REPORTS_DOMAIN`, no zone IDs — the setup wizard handles all domain configuration after deploy.
+The installation needs `OAUTH_KV`, a canonical HTTPS `BETTER_AUTH_URL` and private `BOOTSTRAP_SECRET`; domain intake and optional Cloudflare DNS/routing configuration are separate setup steps. No Fellowship account, Google connection or outbound mail service is needed for a first live-DNS health report.
 
 **Option C — GitHub Actions (manual):** the `Deploy` workflow (`.github/workflows/deploy.yml`) runs only when you start it from the Actions tab (**Run workflow**); pushes to `main` never deploy. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets listed at the top of the workflow.
 
 ---
 
+<a id="post-deploy"></a>
+
 ### Step 2 — Create your account
 
-Open your worker URL. On first visit you'll see a setup form — enter your email and a password. You become the owner; sign-up then closes (see [Authentication](#authentication)).
+Open the canonical HTTPS Worker URL. Enter your email, new password and the installer-held proof in the masked **Installer proof** field. Successful setup consumes the proof and creates the owner; public visitors and social sign-in cannot claim first ownership. Keep proof/password values out of chat, URLs and logs. See [installer setup and recovery](docs/agent-operations.md).
 
 ---
 
@@ -105,7 +109,7 @@ After creating your account, the setup wizard walks you through five steps:
 4. **DMARC** — shows your current record and recommended changes. Can apply via Cloudflare DNS with one click.
 5. **Routing** — sets up MX records and email routing. Registers your email as a verified destination so you can receive alerts and password resets.
 
-Reports from receiving mail servers worldwide will start arriving within 24 hours. The dashboard shows your pass rate and tells you when it's safe to tighten policy toward `p=reject`.
+Received reports appear after reporting DNS and intake are configured and receivers send them; arrival timing and coverage vary. The shared health report is useful immediately from live DNS and explicitly unavailable history. Review sender evidence and prerequisites before tightening policy toward `p=reject`.
 
 ### Free email check: delivering the report
 
@@ -123,26 +127,26 @@ A visitor emails their `check+<token>@<reports domain>` address and gets the rep
 
 Auth is [Better Auth](https://www.better-auth.com) on D1 (sessions, logins and reset tokens live in your database).
 
-* **Email + password** always works — nothing to configure. The first person to open the dashboard becomes the **owner**; after that sign-up is closed and people join by **invite** (Team → Invite).
-* **⚠ First-run takeover window.** Until the first owner exists, *anyone* who reaches the Worker URL can claim it — with a password, or with any GitHub/Google account if OAuth is configured. Create your account right after deploying, and/or set `OWNER_EMAIL=you@yourdomain.com`: then only that email can claim first ownership (password or OAuth).
-* **Roles** (per workspace): `owner` and `admin` can change anything (DNS, domains, settings, team); `member` is read-only. Only the owner can remove an admin; the owner cannot be removed.
-* **Workspaces:** one login can belong to several workspaces (say your own and a client's), each with its own domains, reports, members and roles. Switch from the top of the sidebar; invite people into the workspace you are in (a person who already has a login gets a one-click accept, not a second account). On self-host only the instance owner creates workspaces, and only the default workspace uses the server's Cloudflare token; see [docs/workspaces.md](docs/workspaces.md).
-* **GitHub / Google sign-in** appears only when its credentials are set (`wrangler secret put GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). The callback URLs are `https://<your-worker>/api/auth/callback/github` and `…/google`. On a self-hosted instance an OAuth user can only join if they are the first user or hold an invite for the same email.
-* **API keys** are per user, scoped to one workspace, and carry their owner's role (a member's key is read-only). Create one while signed in — `POST /api/keys {"name":"ci","expires_in_days":90}` — and send it as `X-Api-Key: ia_…` (or `Authorization: Bearer ia_…`). The secret is shown once; only a SHA-256 is stored. `GET /api/keys` lists prefixes and last use, `DELETE /api/keys/:id` revokes, `POST /api/keys/revoke-all` revokes all of yours. **API keys survive a password change** (changing a password signs out every other *session*, not keys) — revoke them yourself if a key may be compromised.
-* **`API_KEY` (env) is deprecated.** It still works as a self-host "instance admin" key (full access to the default workspace, no user identity), but prefer per-user keys; it will be removed in a future major release.
-* **Password reset** emails go out through the same outbound path as alerts. On self-host, Cloudflare Email Routing only delivers to *verified destination addresses*, so a reset email reaches the owner (verified during setup) but not an arbitrary teammate — until their address is verified, ask the owner to invite them again or ask the owner to reset it (without a `SEND_EMAIL` binding nothing is sent, and the Worker log records only that, never the link).
+* **First owner:** email/password setup requires the installation's private, single-use `BOOTSTRAP_SECRET` proof. Without valid proof it stays closed; no shared default password or first-visitor ownership race exists. Social sign-in cannot create the first owner. Further self-host users join by invite.
+* **Roles** are per workspace. Owners/admins can perform permitted domain operations; members read. Product grants, credential administration and Google Postmaster connections require a browser **owner**, not merely an admin. Delegated principals remain constrained by their current finite grants.
+* **Workspaces:** one login can belong to several workspaces, each with its own domains, reports, members and roles. Switch from the top of the sidebar. Only the self-host instance owner creates further workspaces; only the default workspace uses the server's Cloudflare token. See [workspaces](docs/workspaces.md).
+* **GitHub / Google sign-in** appears when its separate credentials are configured (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Callbacks are `https://<your-worker>/api/auth/callback/github` and `…/google`. An invited self-host user must satisfy the existing account/invite policy; social login is not bootstrap proof.
+* **Interactive agents:** use this installation's HTTPS `/mcp` endpoint, browser sign-in and exact resource/action/expiry consent. The dashboard lists personal connected agents and supports revocation. See [agent setup](docs/agent-operations.md#first-useful-report) and [plugin setup](plugins/inbox-angel/SETUP.md).
+* **Product credentials:** owners create named products, domain mappings, service principals and finite grants in Settings. One-time `ias_…` credentials are stored as hashes and cannot create stronger credentials or administer users. Rotation issues a replacement before owner acknowledgement revokes the previous key. Shared sending domains retain shared-domain telemetry coverage.
+* **Legacy credentials:** old `ia_…` keys and `API_KEY` env authority are retired. `POST /api/keys` answers `410`; old `/keys` bookmarks go to Settings. Migration `0006_access_grants.sql` revokes broad keys without resetting users, domains or report history. [Convert each integration deliberately](docs/agent-operations.md#upgrade-from-broad-prelaunch-keys).
+* **Password reset** uses the configured outbound path. On self-host, Cloudflare Email Routing requires a verified destination; verify and test delivery to the owner separately. First-owner account verification does not prove mail delivery. An installation without a working outbound path has no email-based self-service recovery; preserve owner password/session custody. [Recovery limits](docs/agent-operations.md#owner-recovery-and-acceptance-boundaries) are explicit; the consumed bootstrap proof does not reopen ownership.
 * **Security:** auth POSTs (setup, login, logout, reset, invite…) must be `application/json` and, when sent by a browser, same-origin (login-CSRF protection); cookie-authenticated writes must come from the same origin (set `TRUSTED_ORIGINS` for extra ones); login, sign-up and reset are rate-limited per IP in D1; resetting a password signs out every session; password reset never reveals whether an address exists.
-* Optional settings: `OWNER_EMAIL`; `MODE=saas` + `SAAS_ENABLED=1` (hosted mode, **not launched**: every sign-up gets its own workspace and everything — data, audit entries, invites, API keys — is scoped to the caller's workspace; without `SAAS_ENABLED=1` the Worker answers 503 in `MODE=saas`), `BETTER_AUTH_SECRET` (session signing secret — generated and stored in D1 if unset), `BETTER_AUTH_URL` (public origin behind a proxy).
+* Optional settings: `OWNER_EMAIL`; `MODE=saas` + `SAAS_ENABLED=1` (hosted mode, **not launched**: every sign-up gets its own workspace and everything — data, audit entries, invites and delegated grants — is scoped to the caller's workspace; without `SAAS_ENABLED=1` the Worker answers 503 in `MODE=saas`), `BETTER_AUTH_SECRET` (session signing secret — generated and stored in D1 if unset), `BETTER_AUTH_URL` (canonical HTTPS installation origin), `BOOTSTRAP_SECRET` (private first-owner proof) and `OAUTH_KV` (installation-owned agent OAuth storage). Optional `MCP_DCR_ENABLED=1` enables dynamic registration for clients that require it; client-ID metadata documents are supported by default.
 
-> Upgrading from before Better Auth: existing users, roles and password hashes carry over unchanged (migration `0013`). **Everyone is signed out once** (old session tokens are not honored) and outstanding password-reset links stop working. Members who could previously change DNS are now read-only — promote them to admin if needed.
+Google Postmaster uses a separate owner-approved read connection and explicit 1–90 day sync. Configure its `GOOGLE_POSTMASTER_CLIENT_ID`, `GOOGLE_POSTMASTER_CLIENT_SECRET` and `TOKEN_ENCRYPTION_KEY`; Google account sign-in alone grants no metrics. [Source definitions, unavailable states and recovery](docs/agent-operations.md#google-postmaster-is-a-separate-owner-connection) are part of the operator workflow.
 
 ## Upgrading
 
 The schema is managed by `packages/db` migrations; the Worker no longer changes it at runtime.
 
 1. Back up D1: `wrangler d1 export inbox-angel --remote --output backup.sql`
-2. Run `npm run migrate` (then deploy). It first records migrations your database already contains, then runs `wrangler d1 migrations apply`.
-3. **Never run a bare `wrangler d1 migrations apply` on an existing install** — on databases from older releases it fails by design (duplicate columns / renamed `0005_*` migration).
+2. Run `npm run migrate` before serving the new Worker. The wrapper applies unapplied migration files through Wrangler.
+3. Convert retired broad credentials to owner-issued finite grants and credentials. Current access/metrics migrations are additive; no data reset is required. Preserve a database/Worker backup pair for rollback.
 
 Until migrated, the Worker answers 503 and inbound email is refused for retry. Details, rollback and edge cases: [packages/db/UPGRADING.md](packages/db/UPGRADING.md).
 
@@ -155,7 +159,7 @@ Until migrated, the Worker answers 503 and inbound email is refused for retry. D
 | Outbound email | Cloudflare Email Workers | Sends digests and alerts |
 | Storage | Cloudflare D1 | SQLite at the edge |
 | DNS provisioning | Cloudflare DNS API | Per-domain auth records + SPF + MTA-STS |
-| Auth | Better Auth on D1 | Email + password; optional GitHub/Google; roles; per-user API keys |
+| Auth | Better Auth on D1 | Email/password and optional social login; browser OAuth for agents; finite principal grants |
 | Frontend | Embedded SPA | React app in `web/` (on `packages/ui`), served as static assets |
 
 ---
@@ -182,11 +186,13 @@ npm run dev:dashboard   # web/ Vite dev server on :5173 (proxies /api to :8787)
 npm run test:web        # dashboard component + route tests
 npm run dev             # Worker on :8787 (wrangler dev); applies local migrations first
 npm test                # unit tests: test/ and packages/*/test
-npm run typecheck       # tsc --noEmit (app) + tsc -p packages/dns-checks
+npm run typecheck       # app + shared packages + dashboard typechecks
 npm run test:e2e        # Playwright against http://127.0.0.1:8787 (start `npm run dev` first)
 ```
 
-`npm run dev` builds the dashboard first (`npm install` must have installed the `web/` workspace deps) and applies `migrate:local`; until the local D1 is migrated `/health` answers 503. A local database created before the migration history was squashed (`.wrangler/state`) must be deleted and recreated.
+`npm run dev` builds the dashboard first (`npm install` must have installed the `web/` workspace deps) and applies `migrate:local`; until the local D1 is migrated `/health` answers 503. The current additive access/metrics upgrade preserves existing data. Historical pre-baseline databases have a separate compatibility boundary described in [packages/db/UPGRADING.md](packages/db/UPGRADING.md); preserve their export instead of treating a reset as an upgrade step.
+
+Agent authorization requires a canonical HTTPS origin even for local protocol acceptance. Keep local fixture/protocol proof distinct from deployed desktop-client and live Google acceptance; see [acceptance boundaries](docs/agent-operations.md#owner-recovery-and-acceptance-boundaries).
 
 `test:e2e` targets local `wrangler dev` by default; set `E2E_BASE_URL` to point elsewhere. It is not part of CI. There is no Workers-runtime (`@cloudflare/vitest-pool-workers`) suite yet — the old `test:workers` script just re-ran the node tests, so it was removed. Add a pool-workers config alongside the first real Worker integration test.
 

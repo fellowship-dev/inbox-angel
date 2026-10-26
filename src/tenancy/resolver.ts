@@ -13,6 +13,7 @@ import { getMode } from './mode';
 import { sessionWorkspaceResolver } from '../auth/resolver';
 
 export interface ResolvedWorkspace {
+  access?: import('../access/principal').AccessSubject;
   workspaceId: string;
   userId?: string;
   role?: string;

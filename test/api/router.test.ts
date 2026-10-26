@@ -249,13 +249,13 @@ describe('POST /api/domains', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 409 on duplicate domain', async () => {
+  it('resumes the same domain on repeated enrollment without adding a duplicate', async () => {
     const env = makeEnv();
-    // insertDomain hits the UNIQUE constraint (no DNS provisioning on domain add anymore)
     seedDomain(env, { id: 1, domain: 'acme.com' });
     const res = await handleApi(req('POST', '/api/domains', { domain: 'acme.com' }), env, ctx);
-    expect(res.status).toBe(409);
-    expect(rows(env, 'SELECT id FROM domains')).toHaveLength(1);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ resumed: true, domain: { id: 1, domain: 'acme.com' } });
+    expect(rows(env, 'SELECT id, domain FROM domains')).toEqual([{ id: 1, domain: 'acme.com' }]);
   });
 
   it('uses fixed rua address rua@REPORTS_DOMAIN', async () => {

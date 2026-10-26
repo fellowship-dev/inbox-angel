@@ -23,11 +23,11 @@ function makeDb() {
 
 function makeEnv(db: D1Database): Env {
   // No API_KEY: the self-host default where the legacy auto key used to apply.
-  return { DB: db, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '' } as unknown as Env;
+  return { BOOTSTRAP_SECRET: 'test-only-installer-proof-32-characters-minimum', DB: db, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '' } as unknown as Env;
 }
 
 function req(method: string, path: string, opts: { key?: string; body?: unknown } = {}) {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = path === '/api/auth/setup' ? { 'x-inbox-angel-bootstrap': 'test-only-installer-proof-32-characters-minimum' } : {};
   if (opts.key) headers['x-api-key'] = opts.key;
   if (opts.body) headers['content-type'] = 'application/json';
   return new Request(`${BASE}${path}`, { method, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });

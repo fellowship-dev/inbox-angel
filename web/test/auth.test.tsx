@@ -67,6 +67,7 @@ describe('first-run setup', () => {
 		const user = userEvent.setup();
 		expect(await screen.findByRole('heading', { name: 'Create your account' })).toBeInTheDocument();
 		await user.type(screen.getByLabelText('Email'), 'owner@example.com');
+		await user.type(screen.getByLabelText('Installer proof'), 'installer-proof-012345678901234567890123');
 		await user.type(screen.getByLabelText('Password'), 'long-enough-1');
 		await user.type(screen.getByLabelText('Confirm password'), 'different-123');
 		await user.click(screen.getByRole('button', { name: 'Create account' }));
@@ -89,12 +90,15 @@ describe('first-run setup', () => {
 		await user.type(await screen.findByLabelText('Email'), 'owner@example.com');
 		await user.type(screen.getByLabelText('Password'), 'long-enough-1');
 		await user.type(screen.getByLabelText('Confirm password'), 'long-enough-1');
+		await user.type(screen.getByLabelText('Installer proof'), 'installer-proof-012345678901234567890123');
 		await user.click(screen.getByRole('checkbox'));
 		await user.click(screen.getByRole('button', { name: 'Create account' }));
 
 		await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
 		expect(localStorage.getItem('ia_api_key')).toBeNull();
-		expect(calls.find((c) => c.path === '/api/auth/setup')?.body).toMatchObject({ email: 'owner@example.com', telemetry: true });
+		expect(calls.find((c) => c.path === '/api/auth/setup')?.body).toEqual({ name: '', email: 'owner@example.com', password: 'long-enough-1', telemetry: true });
+		expect(calls.find((c) => c.path === '/api/auth/setup')?.headers['x-inbox-angel-bootstrap']).toBe('installer-proof-012345678901234567890123');
+		expect(screen.getByLabelText('Installer proof')).toHaveValue('');
 	});
 });
 

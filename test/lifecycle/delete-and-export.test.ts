@@ -1,6 +1,7 @@
 // Workspace delete revokes Cloudflare access; account deletion; ownership transfer; data export.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { world, type World } from '../connections/world';
+import { delegatedKey } from '../auth/grant-fixture';
 import { retryRevocations } from '../../src/lifecycle/revoke';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
@@ -140,8 +141,8 @@ describe('DELETE /api/account', () => {
     const w = await world();
     const adminId = w.rows("SELECT id FROM users WHERE email = 'admin@example.com'")[0].id;
     const aId = w.rows("SELECT id FROM users WHERE email = 'a@example.com'")[0].id;
-    // an API key, an audit entry with the email, an invite sent to them
-    expect((await w.api(w.A.token, 'POST', '/api/keys', { name: 'k' })).status).toBeLessThan(300);
+    // A personal delegated credential, an audit entry with the email, an invite sent to them.
+    const credential = await delegatedKey(w.db as any, { workspaceId: w.A.ws, userId: aId, name: 'personal', domain: 'a-corp.com' });
     w.db.sqlite.prepare("INSERT INTO invites (token, email, invited_by, expires_at, workspace_id) VALUES ('tok', 'a@example.com', ?, 9999999999, ?)").run(adminId, w.B.ws);
     expect(w.rows('SELECT COUNT(*) n FROM audit_log WHERE actor_email = ?', 'a@example.com')[0].n).toBeGreaterThan(0);
 
@@ -153,7 +154,9 @@ describe('DELETE /api/account', () => {
     expect(res.status).toBe(200);
     expect(w.rows('SELECT id FROM users WHERE id = ?', aId)).toEqual([]);
     for (const t of ['sessions', 'auth_accounts']) expect(w.rows(`SELECT COUNT(*) n FROM ${t} WHERE user_id = ?`, aId)[0].n).toBe(0);
-    expect(w.rows('SELECT COUNT(*) n FROM api_keys WHERE user_id = ?', aId)[0].n).toBe(0);
+    expect(w.rows('SELECT COUNT(*) n FROM access_principals WHERE user_id = ?', aId)[0].n).toBe(0);
+    expect(w.rows('SELECT COUNT(*) n FROM access_credentials WHERE id = ?', credential.id)[0].n).toBe(0);
+    expect((await w.api(credential.key, 'GET', '/api/resources')).status).toBe(401);
     expect(w.rows('SELECT COUNT(*) n FROM memberships WHERE user_id = ?', aId)[0].n).toBe(0);
     expect(w.rows("SELECT COUNT(*) n FROM invites WHERE email = 'a@example.com'")[0].n).toBe(0);
     expect(w.rows('SELECT COUNT(*) n FROM audit_log WHERE actor_email = ?', 'a@example.com')[0].n).toBe(0);
@@ -226,12 +229,14 @@ describe('DELETE /api/account', () => {
     expect(w.rows('SELECT id FROM workspaces WHERE id = ?', second)).toHaveLength(1);
   });
 
-  it('API keys cannot delete accounts', async () => {
+  it('scoped service credentials cannot delete accounts', async () => {
     const w = await world();
-    const key = await json(await w.api(w.B.token, 'POST', '/api/keys', { name: 'k' }));
-    const raw = key.key ?? key.token;
-    expect(raw).toBeTruthy();
+    const uid = w.rows("SELECT id FROM users WHERE email = 'b@example.com'")[0].id;
+    const key = await delegatedKey(w.db as any, { workspaceId: w.B.ws, userId: uid, name: 'k', domain: 'b-corp.org', kind: 'service' });
+    const raw = key.key;
+    expect((await w.api(raw, 'GET', '/api/resources')).status).toBe(200);
     expect((await w.api(raw, 'DELETE', '/api/account', { confirm: 'b@example.com' })).status).toBe(403);
+    expect(w.rows("SELECT id FROM users WHERE email = 'b@example.com'")).toHaveLength(1);
   });
 
   it('the self-host instance owner cannot delete the default workspace out from under everyone', async () => {

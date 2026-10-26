@@ -5,7 +5,7 @@ vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public fr
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import worker from '../../src/index';
-import { call, makeEnv, signupVerified } from '../auth/helpers';
+import { call, makeEnv, signupVerified, setupOwner } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { hostedNames } from '../../src/hosted/records';
 import { refreshHostedMtaStsMx } from '../../src/hosted/cron';
@@ -107,8 +107,9 @@ describe('GET /api/hosted/config', () => {
   });
 
   it('says no in self-host, without erroring', async () => {
-    const env = makeEnv(createMigratedD1(), { API_KEY: 'k' }) as any;
-    const r = await call(env, 'GET', '/api/hosted/config', { key: 'k' });
+    const env = makeEnv(createMigratedD1(), {}) as any;
+    const key = await setupOwner(env);
+    const r = await call(env, 'GET', '/api/hosted/config', { key });
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ enabled: false });
   });

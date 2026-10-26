@@ -42,6 +42,7 @@ export interface TenantSettings {
 export interface Brand { color: string; logoUrl?: string }
 
 export interface TenantInit {
+  access?: import('../access/principal').AccessSubject;
   env: BoundEnv;
   workspaceId: string;
   userId?: string;
@@ -55,6 +56,7 @@ export interface TenantInit {
 }
 
 export class TenantContext {
+  readonly access?: import('../access/principal').AccessSubject;
   readonly workspaceId: string;
   readonly userId?: string;
   readonly role?: string;
@@ -75,6 +77,7 @@ export class TenantContext {
   #telemetry?: Promise<boolean>;
 
   constructor(init: TenantInit) {
+    this.access = init.access;
     this.env = init.env;
     this.db = init.env.DB;
     this.workspaceId = init.workspaceId;

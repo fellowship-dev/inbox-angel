@@ -10,6 +10,12 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## Access and metrics upgrade
+
+Migrations `0006_access_grants.sql` and `0007_metrics.sql` are additive. Apply them before serving the new Worker. `0006` revokes legacy broad `api_keys` while preserving their rows, existing users/memberships, domains and report history; it adds products, mappings, principals, grants and hashed credentials. `0007` adds Google connection/observation storage. This upgrade does not require a data reset.
+
+Existing owners sign in and issue replacement finite product/domain/action grants and one-time `ias_…` credentials through Settings. Old `ia_…` keys and `API_KEY` environment authority no longer authenticate. Test each integration's permitted report and sibling-resource denial before declaring the conversion complete. See [agent operations](../../docs/agent-operations.md#upgrade-from-broad-prelaunch-keys) for namespace/origin setup, private bootstrap custody and rotation. Do not use the historical pre-baseline boundary below as a reason to recreate a current database.
+
 ## History was reset before the first release
 
 The migration history was **squashed into a single baseline before the first release**, and the tenant concept was renamed
@@ -40,5 +46,5 @@ schema, so roll back by restoring the backup together with the previous Worker v
 
 ## Requirements
 
-* Node ≥ 20 for `npm run migrate`; `engines` pins this.
+* A Node version supported by the root `package.json` engines (22.22.2+, 24.15.0+ on the 24 line, or 26+).
 * `wrangler` ≥ 4.

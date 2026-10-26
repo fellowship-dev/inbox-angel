@@ -15,8 +15,8 @@ export function runSql(sql: string): void {
 }
 
 /** The id of `domain` in the owner's workspace, adding it first if needed. */
-export async function ensureDomain(page: Page, key: string, domain: string): Promise<number> {
-	const list = async () => ((await (await page.request.get('/api/domains', { headers: { 'X-Api-Key': key } })).json()).domains as Array<{ id: number; domain: string }>);
+export async function ensureDomain(page: Page, domain: string): Promise<number> {
+	const list = async () => ((await (await page.request.get('/api/domains')).json()).domains as Array<{ id: number; domain: string }>);
 	let found = (await list()).find((d) => d.domain === domain);
 	if (!found) {
 		runSql(`INSERT OR IGNORE INTO domains (workspace_id, domain, rua_address) VALUES ('ws_default', '${domain}', 'rua@reports.e2e.test');`);

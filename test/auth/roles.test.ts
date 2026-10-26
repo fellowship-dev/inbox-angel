@@ -112,15 +112,11 @@ describe('roles: owner / admin / member', () => {
     expect((await call(env, 'GET', '/api/audit-log', { key: admin })).status).toBe(200);
   });
 
-  it('the deprecated API_KEY acts as instance admin: writes allowed, no user identity', async () => {
+  it('retired instance credentials cannot read, write, invite or mint keys', async () => {
     const env = makeEnv(createMigratedD1(), { API_KEY: 'instance-secret-key' });
-    expect((await call(env, 'GET', '/api/domains', { key: 'instance-secret-key' })).status).toBe(200);
-    expect((await call(env, 'POST', '/api/settings/base-domain', { key: 'instance-secret-key', body: { domain: 'example.com' } })).status).toBeLessThan(300);
-    expect((await call(env, 'GET', '/api/audit-log', { key: 'instance-secret-key' })).status).toBe(200);
-    // identity-bound actions need a user
-    expect((await call(env, 'POST', '/api/team/invite', { key: 'instance-secret-key', body: { email: 'x@example.com' } })).status).toBe(403);
-    expect((await call(env, 'POST', '/api/keys', { key: 'instance-secret-key', body: { name: 'k' } })).status).toBe(403);
-    expect((await call(env, 'GET', '/api/domains', { key: 'wrong' })).status).toBe(401);
+    for (const [method,path,body] of [['GET','/api/domains',undefined],['POST','/api/settings/base-domain',{domain:'example.com'}],['GET','/api/audit-log',undefined],['POST','/api/team/invite',{email:'x@example.com'}],['POST','/api/keys',{name:'k'}]] as const) {
+      expect((await call(env,method,path,{key:'instance-secret-key',body})).status).toBe(401);
+    }
   });
 
   it('an API_KEY does not unlock a user session of the same value, and bad credentials get 401', async () => {

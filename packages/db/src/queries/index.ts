@@ -1,3 +1,6 @@
+import { metricQueries } from './metrics';
+import { accessQueries } from './access-grants';
+export * from './access-grants';
 import { getDb, type DbLike } from '../client';
 import { IMPLICIT_WORKSPACE_ID } from '../schema';
 import { apiKeyQueries } from './api-keys';
@@ -46,6 +49,8 @@ export function forWorkspace(db: DbLike, workspaceId: string) {
 	const d = getDb(db);
 	return {
 		workspaceId,
+		metrics: metricQueries(d, workspaceId),
+		access: accessQueries(d, workspaceId),
 		domains: domainQueries(d, workspaceId),
 		claims: claimQueries(d, workspaceId),
 		reports: reportQueries(d, workspaceId),

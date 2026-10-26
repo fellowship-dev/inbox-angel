@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { unwrapDriverError, type Db } from '../client';
-import { cloudflareConnections, domains } from '../schema';
+import { cloudflareConnections, domains, productDomains } from '../schema';
 
 export type DomainRow = typeof domains.$inferSelect;
 
@@ -32,7 +32,7 @@ export function domainQueries(db: Db, workspaceId: string) {
 			return db.select().from(domains).where(and(mine, live, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
 		},
 
-		async insert(d: { domain: string; rua_address: string; verified_via?: string }) {
+		async insert(d: { domain: string; rua_address: string; verified_via?: string }, productId?: string) {
 			// Auto-detect parent: strip the leftmost label and check if the apex exists
 			const parts = d.domain.split('.');
 			let parentId: number | null = null;
@@ -45,7 +45,17 @@ export function domainQueries(db: Db, workspaceId: string) {
 				if (parent) parentId = parent.id;
 			}
 			try {
-				return await db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId, verified_via: d.verified_via }).run();
+				const insert = db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId, verified_via: d.verified_via });
+				if (!productId) return await insert.run();
+				// The binding exists iff this exact insert succeeds. A duplicate or a failed
+				// mapping rolls back the whole batch, so reconnect cannot adopt an old row.
+				const mapping = db.insert(productDomains).select(db.select({
+					workspace_id: sql<string>`${workspaceId}`.as('workspace_id'),
+					product_id: sql<string>`${productId}`.as('product_id'),
+					domain_id: domains.id,
+				}).from(domains).where(and(mine, eq(domains.domain, d.domain), eq(domains.id, sql`last_insert_rowid()`))));
+				const result = await db.batch([insert, mapping]);
+				return result[0];
 			} catch (e) {
 				throw unwrapDriverError(e); // callers match on 'UNIQUE'
 			}
