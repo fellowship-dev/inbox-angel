@@ -27,7 +27,7 @@
     "@cloudflare/workers-types": "^4.20260515.1",
     "@playwright/test": "^1.64.1",
     "esbuild": "0.27.3",
-    "miniflare": "4.20260515.0",
+    "miniflare": "4.20260730.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.6",
     "wrangler": "^4.92.0",
