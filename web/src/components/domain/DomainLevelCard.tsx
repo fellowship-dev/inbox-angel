@@ -8,6 +8,8 @@ import { useHostedInfo } from '../../lib/hosted';
 import { assessDomain, assessHostedDomain, didNotResolve, dnsCheckLine } from '../../lib/levels';
 import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
+import { useReportsNotConnected } from '../ReportsNotConnected';
+import { TalkToMax } from '../TalkToMax';
 
 function DomainLink({ domain }: { domain: Domain }) {
 	return (
@@ -24,6 +26,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 	const wizard = useWizardState(domain.id);
 	const hosted = useHostedInfo(domain.id); // null unless hosted is on for the deployment and this domain
 	const { canWrite } = useSession(); // read-only members cannot run the setup wizard, so they are not invited to
+	const reportsOff = useReportsNotConnected(domain); // hosted, before report intake: no 7-day results can exist
 
 	if (summary.isPending) {
 		return (
@@ -54,6 +57,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 							onRetry={() => void summary.refetch()}
 						/>
 					</CheckResultList>
+					<TalkToMax lead="Still failing after a retry?" about={`about ${domain.domain}`} />
 				</CardContent>
 			</Card>
 		);
@@ -74,6 +78,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 								: 'At the last good check DNS said this name does not exist, so there were no SPF or DMARC records to show. The latest check got no answer, so this may have changed.'} />
 					</CheckResultList>
 					<p className="text-sm text-ink-2">{dnsCheckLine(summary.data)}</p>
+					<TalkToMax lead="Sure this is the right name?" about={`about ${domain.domain}`} />
 				</CardContent>
 			</Card>
 		);
@@ -87,7 +92,9 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 		<LevelCard level={a.level} domain={<DomainLink domain={domain} />} description={a.description} findings={a.findings}>
 			<div className="space-y-3 border-t border-line pt-4 text-sm">
 				<p className="text-ink-2">
-					{stats.isError
+					{reportsOff
+						? 'Reports not connected yet, so there are no 7-day results.'
+						: stats.isError
 						? '7-day results are unavailable right now.'
 						: !sums
 							? 'Loading 7-day results…'
@@ -99,6 +106,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 				{hosted ? null : (
 					<p className="text-ink-2">{dnsCheckLine(summary.data)}</p>
 				)}
+				{!hosted && summary.data.dns_check_status === 'failed' ? <TalkToMax lead="DNS checks keep failing?" about={`about ${domain.domain}`} /> : null}
 				{a.next ? <p className="text-ink-1">Next: {a.next}</p> : null}
 				<div className="flex flex-wrap items-center gap-2">
 					{summary.data.dmarc_policy ? <Badge variant="outline">p={summary.data.dmarc_policy}</Badge> : null}

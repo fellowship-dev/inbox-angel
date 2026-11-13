@@ -274,3 +274,50 @@ describe('dmarcAdvice', () => {
 	});
 });
 
+
+// ── Overview cards: the stuck states from the DNS refresh (a check that keeps failing, a name that does not resolve) ──
+
+describe('overview level cards: Talk to Max at stuck states', () => {
+	const hoursAgo = (h: number) => Math.floor(Date.now() / 1000) - h * 3600;
+	const summary = (extra = {}) => ({ domain_id: 7, domain: 'acme.com', dmarc_policy: null, spf_record: null, total_messages: 0, pass_messages: 0, fail_messages: 0, dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, dns_checked_at: hoursAgo(3), dns_check_attempted_at: hoursAgo(3), dns_check_status: 'ok', ...extra });
+	const overview = (sum: unknown, status: Partial<AuthStatus> = HOSTED) =>
+		renderApp(<OverviewPage />, {
+			status,
+			routes: {
+				'GET /api/domains': { domains: [hostedDomain] },
+				'GET /api/domains/7/check-summary': sum,
+				'GET /api/domains/7/stats': { domain: 'acme.com', days: 7, stats: [] },
+				'GET /api/domains/7/wizard-state': wizard({ spf: 'not_started', dkim: 'not_started', dmarc: 'not_started' }),
+				'GET /api/hosted/config': { enabled: false },
+			},
+		});
+
+	it('a domain that does not resolve offers a person', async () => {
+		overview(summary({ dns_check_status: 'nxdomain' }));
+		const card = await screen.findByRole('group', { name: 'acme.com' });
+		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		expectSafeTalkLink(within(card).getByRole('link', { name: /Talk to Max/ }));
+	});
+
+	it('a check that keeps failing offers a person, and the card says reports are not connected', async () => {
+		overview(summary({ dns_checked_at: hoursAgo(72), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed', dns_last_good_status: 'ok' }));
+		const card = await screen.findByRole('group', { name: /Level \d/ });
+		expect(within(card).getByText(/Last check failed 1 hour ago/)).toBeInTheDocument();
+		expect(within(card).getByText(/DNS checks keep failing\?/)).toBeInTheDocument();
+		expect(within(card).getByText('Reports not connected yet, so there are no 7-day results.')).toBeInTheDocument();
+		expect(within(card).queryByText('No reports in the last 7 days.')).not.toBeInTheDocument();
+	});
+
+	it('a summary that cannot load offers a person', async () => {
+		overview(fail(500, 'summary unavailable'));
+		const card = await screen.findByRole('group', { name: 'acme.com' });
+		expectSafeTalkLink(await within(card).findByRole('link', { name: /Talk to Max/ }));
+	});
+
+	it('no booking link: the same states show no link', async () => {
+		overview(summary({ dns_check_status: 'nxdomain' }), HOSTED_NO_LINK);
+		const card = await screen.findByRole('group', { name: 'acme.com' });
+		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		expect(talkLinks()).toHaveLength(0);
+	});
+});
