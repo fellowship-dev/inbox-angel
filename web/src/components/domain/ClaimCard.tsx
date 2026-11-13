@@ -74,12 +74,12 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 						<CopyField label="Name" value={claim.txt_name} />
 						<CopyField label="Value" value={claim.txt_value} />
 					</div>
-					{claim.last_error && !error ? <p className="text-sm text-ink-2">Last check: {claim.last_error}</p> : null}
+					{claim.last_error && !error ? <p className="text-sm text-ink-2 [overflow-wrap:anywhere]">Last check: {claim.last_error}</p> : null}
 				</>
 			)}
 			{error ? (
 				<Alert variant="warning" role="alert">
-					{error}
+					<span className="[overflow-wrap:anywhere]">{error}</span>
 				</Alert>
 			) : null}
 			{!lost && failures >= 2 ? <TalkToMax lead="Added the record and it still does not verify?" about={`about ${claim.domain}`} /> : null}
