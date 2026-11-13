@@ -1910,7 +1910,7 @@ async function _handleApi(
       const list = parseDomainList(body.domains);
       if (list.length === 0) return err('no valid domains provided', 400);
       if (list.length > 50) return err('too many domains: limit is 50 per request', 400);
-      if (!tenant.settings.reportsDomain) return err(REPORTS_DOMAIN_MISSING, 400);
+      if (tenant.mode !== 'saas' && !tenant.settings.reportsDomain) return err(REPORTS_DOMAIN_MISSING, 400);
       const results = await bulkInsertDomains(
         tenant,
         list,
