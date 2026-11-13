@@ -147,7 +147,7 @@ export function OverviewPage() {
 						</p>
 					</div>
 					{claims.map((c) => (
-						<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
+						<ClaimCard key={c.id} claim={c} canWrite={canWrite} preview="lazy" />
 					))}
 				</section>
 			) : null}

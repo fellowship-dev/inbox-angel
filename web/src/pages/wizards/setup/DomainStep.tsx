@@ -5,9 +5,12 @@ import { ClaimCard } from '../../../components/domain/ClaimCard';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepFooter } from '../../../components/wizard/StepNav';
 import { WriteButton } from '../../../components/states';
+import { PlanLimitNotice, planLimitOf } from '../../../components/PlanLimitNotice';
 import { DomainRefusalHelp } from '../../../components/TalkToMax';
 import { api, errorMessage } from '../../../lib/api';
+import { normalizeDomainInput } from '../../../lib/domain-input';
 import { useHosted } from '../../../lib/session';
+import { clearSignupDomainIf, readSignupDomain } from '../../../lib/signup-intent';
 import type { DomainClaim } from '../../../lib/types';
 
 interface Zone {
@@ -32,7 +35,8 @@ export const DOMAIN_PATTERN = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) => void }) {
 	const fieldId = useId();
 	const hintId = useId();
-	const [domain, setDomain] = useState('');
+	// The domain asked for on the website, if any: a prefill the person confirms with Continue.
+	const [domain, setDomain] = useState(() => readSignupDomain() ?? '');
 	const [manual, setManual] = useState(false);
 	const [validation, setValidation] = useState('');
 	const [claim, setClaim] = useState<DomainClaim | null>(null);
@@ -41,11 +45,13 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	// A failed zone lookup (no Cloudflare token, API down) just means typing the domain by hand.
 	const zones = useQuery({ queryKey: ['zones'], queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
 	const zoneList = zones.data ?? [];
-	const showSelect = !manual && zoneList.length > 0;
+	// A prefilled domain that is not one of the listed zones is typed, not picked.
+	const showSelect = !manual && zoneList.length > 0 && (domain === '' || zoneList.some((z) => z.name === domain));
 
 	const save = useMutation({
 		mutationFn: (d: string) => api<BaseDomainResult>('/api/settings/base-domain', { method: 'POST', body: { domain: d } }),
-		onSuccess: (r) => {
+		onSuccess: (r, d) => {
+			clearSignupDomainIf(d);
 			if (r.pending && r.claim) setClaim(r.claim);
 			else if (r.domain_id !== undefined) onDomainSet(r.domain_id);
 		},
@@ -53,8 +59,8 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 
 	function submit(e: FormEvent) {
 		e.preventDefault();
-		const d = domain.toLowerCase().trim();
-		if (!DOMAIN_PATTERN.test(d)) {
+		const d = normalizeDomainInput(domain);
+		if (!d || !DOMAIN_PATTERN.test(d)) {
 			setValidation('Enter a valid domain like yourdomain.com');
 			return;
 		}
@@ -65,12 +71,13 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	if (claim) {
 		return (
 			<StepCard title="Verify you own this domain" focusHeading={false}>
-				<ClaimCard claim={claim} onVerified={(d) => onDomainSet(d.id)} onRemoved={() => setClaim(null)} />
+				<ClaimCard claim={claim} preview onVerified={(d) => onDomainSet(d.id)} onRemoved={() => setClaim(null)} />
 			</StepCard>
 		);
 	}
 
-	const error = validation || (save.isError ? errorMessage(save.error) : '');
+	const atLimit = save.isError ? planLimitOf(save.error) : null;
+	const error = validation || (save.isError && !atLimit ? errorMessage(save.error) : '');
 	return (
 		<StepCard title={hosted ? 'Which domain do you send email from?' : "What's your main domain?"} focusHeading={false}>
 			<form onSubmit={submit} className="space-y-4" noValidate>
@@ -136,6 +143,7 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 						)}
 					</FieldHint>
 					{error ? <FieldError>{error}</FieldError> : null}
+					{atLimit ? <PlanLimitNotice limit={atLimit} /> : null}
 					{save.isError ? <DomainRefusalHelp error={save.error} /> : null}
 				</div>
 				<StepFooter

@@ -1,6 +1,7 @@
 import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
 import { AlertTriangle, CheckCircle2, Clock, Copy, XCircle } from 'lucide-react';
 import { Link } from 'react-router';
+import { PlanLimitNotice } from '../PlanLimitNotice';
 import { ClaimCard } from './ClaimCard';
 import type { BulkImportItem, BulkImportResponse } from '../../lib/domain-queries';
 
@@ -23,6 +24,8 @@ function note(r: BulkImportItem): string {
 
 /** Result of POST /api/domains/bulk-import: summary badge, per-domain table, link back to the list. */
 export function ImportResults({ result, showNotes = true }: { result: BulkImportResponse; showNotes?: boolean }) {
+	// Once per import, above the rows: every row after the cap carries the same code.
+	const limitRow = result.results.find((r) => r.code === 'plan_limit');
 	return (
 		<div className="space-y-4" data-testid="import-results">
 			<p>
@@ -30,6 +33,7 @@ export function ImportResults({ result, showNotes = true }: { result: BulkImport
 					{result.imported} of {result.total} domain{result.total === 1 ? '' : 's'} imported
 				</Badge>
 			</p>
+			{limitRow ? <PlanLimitNotice limit={{ kind: 'domains_per_workspace', message: limitRow.error ?? 'This workspace has reached its limit of domains.', help_url: limitRow.help_url ?? null }} /> : null}
 			<Table label="Import results">
 				<TableHeader>
 					<TableRow>
