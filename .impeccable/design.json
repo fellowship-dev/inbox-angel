@@ -299,6 +299,11 @@
         "section": "colors"
       },
       {
+        "name": "The No-Gradients Rule",
+        "body": "No gradients, anywhere, on the dashboard or the website (Max, 2026-11-13): no gradient fills, text, dividers, borders, loading shimmers or scroll shadows. Every colour is a solid token. This is a hard rule, not a preference; existing gradients in code are known debt to remove, not precedent.",
+        "section": "colors"
+      },
+      {
         "name": "The Records-Are-Content Rule",
         "body": "Anything copy-pasteable is monospace, selectable and copyable.",
         "section": "typography"
@@ -318,7 +323,8 @@
       "Do honour `prefers-reduced-motion`."
     ],
     "donts": [
-      "Don't use sky blue as a primary, gradients, or a mascot face.",
+      "Don't use sky blue as a primary or a mascot face.",
+      "Don't use gradients anywhere: fills, text, dividers, borders, loading shimmers and scroll shadows are solid colours.",
       "Don't use blush for text or as the only signal.",
       "Don't use enterprise-security imagery (shields, padlocks, badge walls) or hype-landing devices (counters, \"trusted by\").",
       "Don't use `accent-fg` on `accent-subtle` in dark mode (fails AA; listed in `forbiddenPairs`) or `--line-strong` for form-control edges.",
