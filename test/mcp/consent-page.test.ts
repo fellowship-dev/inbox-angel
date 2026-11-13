@@ -30,7 +30,7 @@ describe('consent page', () => {
   expect(html).not.toMatch(/"><img/);
   expect(html).toContain(escape(attack));
   // Every attribute value stays inside its quotes: no quote from the attack closes one.
-  for (const tag of html.match(/<[^>]+>/g) ?? []) expect(tag).not.toMatch(/\son\w+=/i);
+  for (const tag of html.match(/<[^>]+>/g) ?? []) expect(tag.replace(/"[^"]*"/g, '""')).not.toMatch(/\son\w+=/i);
  });
 
  it('names workspaces and domains in plain text and keeps raw ids out of what people read', () => {
