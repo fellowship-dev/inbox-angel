@@ -3,6 +3,9 @@
 
 import { normalizeName, type Resolver } from './doh';
 import { organizationalDomain } from './org-domain';
+import { parseDmarcTags } from './dmarc-tags';
+
+export { parseDmarcTags, readDmarcTag } from './dmarc-tags';
 
 export type DmarcPolicy = 'none' | 'quarantine' | 'reject';
 
@@ -22,18 +25,8 @@ export interface DmarcRecord {
 }
 
 export function isDmarcRecord(txt: string): boolean {
-  return /^\s*v=DMARC1\s*(;|$)/i.test(txt);
-}
-
-function parseTags(raw: string): Record<string, string> {
-  const tags: Record<string, string> = {};
-  for (const part of raw.split(';')) {
-    const i = part.indexOf('=');
-    if (i < 0) continue;
-    const k = part.slice(0, i).trim().toLowerCase();
-    if (k && !(k in tags)) tags[k] = part.slice(i + 1).trim();
-  }
-  return tags;
+  // `v` must be the first tag (RFC 7489 §6.3), with the same whitespace and case tolerance as every other tag.
+  return /^\s*v\s*=\s*DMARC1\s*(;|$)/i.test(txt);
 }
 
 const POLICIES = new Set(['none', 'quarantine', 'reject']);
@@ -44,7 +37,7 @@ function asPolicy(v: string | undefined): DmarcPolicy | null {
 }
 
 export function parseDmarcRecord(raw: string): DmarcRecord {
-  const tags = parseTags(raw);
+  const tags = parseDmarcTags(raw);
   const issues: string[] = [];
 
   const p = asPolicy(tags['p']);

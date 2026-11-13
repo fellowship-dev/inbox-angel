@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9f4ced7a-8d16-45e1-8cb6-e7826e4202dd",
+  "id": "74a5c7e8-4d54-4bff-9e75-92ab9003479d",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -1747,6 +1747,13 @@
         },
         "dmarc_inherited_from": {
           "name": "dmarc_inherited_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dns_last_good_status": {
+          "name": "dns_last_good_status",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

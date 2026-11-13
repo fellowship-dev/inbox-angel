@@ -105,6 +105,7 @@ export function domainQueries(db: Db, workspaceId: string) {
 		 * kept, never nulled. `dmarc` carries the three DMARC columns together: the effective policy, why there is none
 		 * (`multiple`/`invalid`), and the organizational domain it was inherited from.
 		 * `dns_checked_at` advances only when both SPF and DMARC resolved, so "Checked <time>" is true of both.
+		 * `dns_last_good_status` ('ok' | 'nxdomain') is written with `dns_checked_at` and survives a later failed attempt.
 		 * The attempt itself is always recorded: 'failed' when either lookup got no answer, 'nxdomain' when the domain
 		 * does not exist, else 'ok'.
 		 */
@@ -120,7 +121,10 @@ export function domainQueries(db: Db, workspaceId: string) {
 				set.dmarc_issue = r.dmarc.issue;
 				set.dmarc_inherited_from = r.dmarc.inherited_from;
 			}
-			if (complete) set.dns_checked_at = r.at;
+			if (complete) {
+				set.dns_checked_at = r.at;
+				set.dns_last_good_status = r.nxdomain ? 'nxdomain' : 'ok';
+			}
 			return db.update(domains).set({ ...set, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},
 

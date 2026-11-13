@@ -4,6 +4,8 @@
 // which replaces the old pct= sampling as the intermediate signal. Each step is gated
 // behind a pass-rate threshold to prevent mail loss.
 
+import { parseDmarcTags as parseSharedTags } from '@inbox-angel/dns-checks/dmarc-tags';
+
 export type RolloutPolicy = 'none' | 'quarantine' | 'reject';
 
 export interface RolloutStep {
@@ -30,16 +32,9 @@ function asPolicy(p: string | null | undefined): RolloutPolicy | null {
   return v === 'none' || v === 'quarantine' || v === 'reject' ? v : null;
 }
 
-/** Splits a DMARC record into lower-cased tag → value (first occurrence wins). */
+/** Splits a DMARC record into lower-cased tag → value (first occurrence wins), with the shared RFC 7489 parser. */
 export function parseDmarcTags(record: string): Map<string, string> {
-  const tags = new Map<string, string>();
-  for (const part of record.replace(/^"|"$/g, '').split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    const k = part.slice(0, eq).trim().toLowerCase();
-    if (k && !tags.has(k)) tags.set(k, part.slice(eq + 1).trim());
-  }
-  return tags;
+  return new Map(Object.entries(parseSharedTags(record.replace(/^"|"$/g, ''))));
 }
 
 /**

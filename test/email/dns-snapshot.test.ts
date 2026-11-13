@@ -81,3 +81,30 @@ describe('spfFromTxt', () => {
     expect(spfFromTxt(['google-site-verification=x'])).toBeNull();
   });
 });
+
+// The same RFC 7489 tag rules as web/src/lib/dmarc-record.ts (both use parseDmarcTags from @inbox-angel/dns-checks).
+describe('stored effective policy from raw TXT: whitespace, case, invalid sp=', () => {
+  const ok = (...records: string[]): TxtResult => ({ status: 'ok', records });
+  const resolverWith = (parent: TxtResult) => ({ fetch: (() => { throw new Error('no http'); }) as any, resolve: async () => { throw new Error('unused'); }, txt: async () => parent });
+  const own = (rec: string) => dmarcFactsFor(resolverWith(ok()), 'mail.acme.com', ok(rec));
+  const inherited = (rec: string) => dmarcFactsFor(resolverWith(ok(rec)), 'mail.acme.com', { status: 'nxdomain', records: [] });
+
+  it.each([
+    ['v=DMARC1; p = reject'],
+    ['v=DMARC1 ; p\t=\treject ;'],
+    ['v = DMARC1; p=reject'],
+    ['V=DMARC1; P=Reject'],
+  ])('own %j -> reject', async (rec) => expect(await own(rec)).toEqual({ policy: 'reject', issue: null, inherited_from: null }));
+
+  it('inherited with sp=bogus: sp is absent, the parent\'s p applies', async () => {
+    expect(await inherited('v=DMARC1; p=reject; sp=bogus')).toEqual({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
+  });
+  it('inherited with sp = none: none', async () => {
+    expect(await inherited('v=DMARC1; p=reject; sp = none')).toEqual({ policy: 'none', issue: null, inherited_from: 'acme.com' });
+    expect(await inherited('v=DMARC1; p=reject; SP=None')).toEqual({ policy: 'none', issue: null, inherited_from: 'acme.com' });
+  });
+  it('own record with an invalid p: issue invalid, no policy', async () => {
+    expect(await own('v=DMARC1; p=bogus')).toEqual({ policy: null, issue: 'invalid', inherited_from: null });
+    expect(await own('v=DMARC1; p = ; rua=mailto:a@b.c')).toEqual({ policy: null, issue: 'invalid', inherited_from: null });
+  });
+});

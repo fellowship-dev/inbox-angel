@@ -124,6 +124,8 @@ export const domains = sqliteTable(
 		dmarc_issue: text('dmarc_issue'),
 		/** Organizational domain whose DMARC record covers this domain when it has none of its own (dmarc_policy is that record's sp=, or p=). */
 		dmarc_inherited_from: text('dmarc_inherited_from'),
+		/** Result of the last check that read both SPF and DMARC: 'ok' | 'nxdomain'. Kept when a later attempt fails, so the card can still say the domain did not resolve at that check. */
+		dns_last_good_status: text('dns_last_good_status'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),

@@ -214,4 +214,21 @@ describe('OverviewPage: what the stored DNS facts say', () => {
 		expect(screen.queryByText(/Mail is being sent/)).not.toBeInTheDocument();
 		expect(screen.queryByRole('group', { name: /Level \d/ })).not.toBeInTheDocument();
 	});
+
+	it('a failed attempt after a good check that found no such domain still says it did not resolve, not empty records', async () => {
+		page({ dmarc_policy: null, spf_record: null, dns_checked_at: hoursAgo(30), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed', dns_last_good_status: 'nxdomain' }, 'no-such-host.example');
+		const card = await screen.findByRole('group', { name: 'no-such-host.example' });
+		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		expect(within(card).getByText(/At the last good check DNS said this name does not exist/)).toBeInTheDocument();
+		expect(within(card).getByText(/may have changed/)).toBeInTheDocument();
+		expect(within(card).getByText('Last check failed 1 hour ago. At the last good check (1 day ago) this domain did not resolve.')).toBeInTheDocument();
+		expect(screen.queryByRole('group', { name: /Level \d/ })).not.toBeInTheDocument();
+		expect(screen.queryByText(/SPF record|No DMARC record/)).not.toBeInTheDocument();
+	});
+
+	it('a failed attempt after a good check that resolved is an ordinary card with the failure line', async () => {
+		page({ dns_checked_at: hoursAgo(72), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed', dns_last_good_status: 'ok' });
+		const card = await screen.findByRole('group', { name: /Level \d/ });
+		expect(within(card).getByText('Last check failed 1 hour ago. Last good check 3 days ago.')).toBeInTheDocument();
+	});
 });

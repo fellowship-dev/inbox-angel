@@ -11,6 +11,7 @@
     "./doh": "./src/doh.ts",
     "./spf": "./src/spf.ts",
     "./dmarc": "./src/dmarc.ts",
+    "./dmarc-tags": "./src/dmarc-tags.ts",
     "./dkim": "./src/dkim.ts",
     "./txt": "./src/txt.ts",
     "./mx": "./src/mx.ts",

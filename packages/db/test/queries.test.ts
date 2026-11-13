@@ -291,7 +291,7 @@ describe('domains.recordDnsCheck', () => {
 
 	it('stores both answers, when they were read, and that the attempt was ok', async () => {
 		const id = await seed();
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000, dns_check_attempted_at: 1000, dns_check_status: 'ok', dmarc_issue: null, dmarc_inherited_from: null });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000, dns_check_attempted_at: 1000, dns_check_status: 'ok', dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: 'ok' });
 	});
 
 	it('"no record" is evidence: null is stored and the check time advances', async () => {
@@ -330,6 +330,18 @@ describe('domains.recordDnsCheck', () => {
 		const id = await seed();
 		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: NONE, nxdomain: true, at: 2000 });
 		expect(await row(id)).toMatchObject({ dns_check_status: 'nxdomain', dns_checked_at: 2000 });
+	});
+
+	it('the last good status survives a failed attempt, so an nxdomain domain is not shown as having empty records', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: NONE, nxdomain: true, at: 2000 });
+		expect(await row(id)).toMatchObject({ dns_last_good_status: 'nxdomain' });
+		await a.domains.recordDnsCheck(id, { spf_record: undefined, dmarc: undefined, at: 3000 }); // no answer at all
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: undefined, nxdomain: false, at: 3500 }); // half an answer
+		expect(await row(id)).toMatchObject({ dns_check_status: 'failed', dns_check_attempted_at: 3500, dns_checked_at: 2000, dns_last_good_status: 'nxdomain' });
+		expect(await a.reports.checkSummary(id, 0)).toMatchObject({ dns_check_status: 'failed', dns_checked_at: 2000, dns_last_good_status: 'nxdomain' });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc: NONE, at: 4000 }); // the domain exists again
+		expect(await row(id)).toMatchObject({ dns_check_status: 'ok', dns_checked_at: 4000, dns_last_good_status: 'ok' });
 	});
 
 	it('a publish through the app clears inherited and issue: the policy is now the domain\'s own', async () => {

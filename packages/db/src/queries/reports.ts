@@ -85,6 +85,7 @@ export interface DomainCheckSummary {
 	dns_check_status: string | null;
 	dmarc_issue: string | null;
 	dmarc_inherited_from: string | null;
+	dns_last_good_status: string | null;
 	total_messages: number;
 	pass_messages: number;
 	fail_messages: number;
@@ -343,6 +344,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					d.dns_check_status,
 					d.dmarc_issue,
 					d.dmarc_inherited_from,
+					d.dns_last_good_status,
 					COALESCE(SUM(ar.total_count), 0) AS total_messages,
 					COALESCE(SUM(ar.pass_count),  0) AS pass_messages,
 					COALESCE(SUM(ar.fail_count),  0) AS fail_messages,
@@ -357,7 +359,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 				LEFT JOIN report_records rr    ON rr.report_id = ar.id AND rr.workspace_id = ${A}
 				LEFT JOIN mta_sts_config m     ON m.domain_id = d.id AND m.workspace_id = ${A}
 				WHERE d.workspace_id = ${A} AND d.id = ${domainId}
-				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, d.dns_checked_at, d.dns_check_attempted_at, d.dns_check_status, d.dmarc_issue, d.dmarc_inherited_from, m.enabled, m.mode
+				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, d.dns_checked_at, d.dns_check_attempted_at, d.dns_check_status, d.dmarc_issue, d.dmarc_inherited_from, d.dns_last_good_status, m.enabled, m.mode
 			`);
 			return rows[0] ?? null;
 		},

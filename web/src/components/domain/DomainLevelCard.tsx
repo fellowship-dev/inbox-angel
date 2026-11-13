@@ -5,7 +5,7 @@ import { useCheckSummary, useStats, useWizardState } from '../../lib/domain-quer
 import { formatNumber } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
-import { assessDomain, assessHostedDomain, dnsCheckLine } from '../../lib/levels';
+import { assessDomain, assessHostedDomain, didNotResolve, dnsCheckLine } from '../../lib/levels';
 import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
@@ -60,7 +60,8 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 	}
 
 	// DNS says the name does not exist: there is no level to show, and "Delivering" would claim mail is flowing.
-	if (!hosted && summary.data.dns_check_status === 'nxdomain') {
+	const unresolved = hosted ? null : didNotResolve(summary.data);
+	if (unresolved) {
 		return (
 			<Card role="group" aria-label={domain.domain}>
 				<CardContent className="space-y-3">
@@ -68,7 +69,9 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 						<DomainLink domain={domain} />
 					</h2>
 					<CheckResultList>
-						<CheckResult status="missing" statusLabel="Does not resolve" title="This domain does not resolve" summary="DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain." />
+						<CheckResult status="missing" statusLabel="Does not resolve" title="This domain does not resolve" summary={unresolved === 'now'
+								? 'DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain.'
+								: 'At the last good check DNS said this name does not exist, so there were no SPF or DMARC records to show. The latest check got no answer, so this may have changed.'} />
 					</CheckResultList>
 					<p className="text-sm text-ink-2">{dnsCheckLine(summary.data)}</p>
 				</CardContent>

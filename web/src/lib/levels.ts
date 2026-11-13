@@ -85,9 +85,14 @@ export function assessDomain(
 }
 
 /** When DNS was last read for this domain, and whether the latest attempt failed. */
-export function dnsCheckLine(s: Pick<DomainCheckSummary, 'dns_checked_at' | 'dns_check_attempted_at' | 'dns_check_status'>): string {
-	const good = s.dns_checked_at ? `Last good check ${timeAgo(s.dns_checked_at)}.` : 'No successful check yet.';
-	if (s.dns_check_status === 'failed') return `Last check failed${s.dns_check_attempted_at ? ` ${timeAgo(s.dns_check_attempted_at)}` : ''}. ${good}`;
+export function dnsCheckLine(s: Pick<DomainCheckSummary, 'dns_checked_at' | 'dns_check_attempted_at' | 'dns_check_status'> & Partial<Pick<DomainCheckSummary, 'dns_last_good_status'>>): string {
+	const goodWhen = s.dns_checked_at ? timeAgo(s.dns_checked_at) : null;
+	const good = goodWhen ? `Last good check ${goodWhen}.` : 'No successful check yet.';
+	if (s.dns_check_status === 'failed') {
+		const failed = `Last check failed${s.dns_check_attempted_at ? ` ${timeAgo(s.dns_check_attempted_at)}` : ''}.`;
+		if (goodWhen && s.dns_last_good_status === 'nxdomain') return `${failed} At the last good check (${goodWhen}) this domain did not resolve.`;
+		return `${failed} ${good}`;
+	}
 	return s.dns_checked_at ? `Checked ${timeAgo(s.dns_checked_at)}` : 'Not checked yet';
 }
 
@@ -142,3 +147,7 @@ export function assessHostedDomain(s: LevelSummary, h: HostedLevelInput): LevelA
 	}));
 	return { ...a, findings: [...a.findings, ...extra] };
 }
+
+/** The last good check found the domain does not exist: now (the latest check agrees) or earlier (the latest attempt failed). */
+export const didNotResolve = (s: Pick<DomainCheckSummary, 'dns_check_status' | 'dns_last_good_status'>): 'now' | 'at-last-good-check' | null =>
+	s.dns_check_status === 'nxdomain' ? 'now' : s.dns_check_status === 'failed' && s.dns_last_good_status === 'nxdomain' ? 'at-last-good-check' : null;

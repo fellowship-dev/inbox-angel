@@ -103,7 +103,7 @@ describe('pdf', () => {
 		]);
 	});
 	it('recommendations grade severity', () => {
-		const recs = getRecommendations({ domain_id: 1, domain: 'a.com', dmarc_policy: 'none', spf_record: null, dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, total_messages: 100, pass_messages: 60, fail_messages: 40, dkim_total: 0, dkim_pass: 0, spf_total: 10, spf_pass: 5, mta_sts_enabled: 0, mta_sts_mode: null });
+		const recs = getRecommendations({ domain_id: 1, domain: 'a.com', dmarc_policy: 'none', spf_record: null, dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null, total_messages: 100, pass_messages: 60, fail_messages: 40, dkim_total: 0, dkim_pass: 0, spf_total: 10, spf_pass: 5, mta_sts_enabled: 0, mta_sts_mode: null });
 		expect(recs.map((r) => r.severity)).toEqual(['critical', 'critical', 'warning', 'info']);
 	});
 });

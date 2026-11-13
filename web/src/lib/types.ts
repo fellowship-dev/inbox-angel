@@ -241,6 +241,8 @@ export interface DomainCheckSummary {
   dmarc_issue: string | null;
   /** The organizational domain dmarc_policy was inherited from (the domain has no record of its own). */
   dmarc_inherited_from: string | null;
+  /** Status of the last check that read both records: 'ok' | 'nxdomain'. Unlike dns_check_status it survives a failed attempt. */
+  dns_last_good_status: string | null;
   total_messages: number;
   pass_messages: number;
   fail_messages: number;

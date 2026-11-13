@@ -37,14 +37,14 @@ describe('migrations', () => {
 });
 
 describe('0008 dns_checked_at', () => {
-	const NEW = ['dns_checked_at', 'dns_check_attempted_at', 'dns_check_status', 'dmarc_issue', 'dmarc_inherited_from'];
+	const NEW = ['dns_checked_at', 'dns_check_attempted_at', 'dns_check_status', 'dmarc_issue', 'dmarc_inherited_from', 'dns_last_good_status'];
 	it('adds nullable columns and leaves existing domains unchecked, keeping their stored values', () => {
 		const d = createTestD1();
 		applyMigrations(d.sqlite, { through: '0007_metrics.sql' });
 		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, spf_record, dmarc_policy) VALUES ('acme.com', 'r@x', 'v=spf1 -all', 'none')").run();
 		expect(applyMigrations(d.sqlite)).toEqual(['0008_dns_checked_at.sql']);
 		expect(d.sqlite.prepare('SELECT spf_record, dmarc_policy, ' + NEW.join(', ') + ' FROM domains').all()).toEqual([
-			{ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null },
+			{ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null },
 		]);
 		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name IN (" + NEW.map((n) => `'${n}'`).join(',') + ')').all() as any[];
 		expect(cols.map((c) => c.name).sort()).toEqual([...NEW].sort());

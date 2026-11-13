@@ -1,5 +1,7 @@
 /** Pure DMARC record helpers shared by the setup wizard, the graduation wizard and the domain page. */
 
+import { parseDmarcTags, readDmarcTag } from '@inbox-angel/dns-checks/dmarc-tags';
+
 /**
  * True when `rua` is a usable report address. A domain added before a reports domain was configured has an
  * empty one, and a missing field arrives as undefined: neither may end up in a record as `mailto:`.
@@ -8,23 +10,9 @@ export function hasReportAddress(rua: string | null | undefined): rua is string 
 	return typeof rua === 'string' && /^[^\s@;,]+@[^\s@;,]+$/.test(rua.trim());
 }
 
-/** One `tag=value` part of a record: key lower-cased, whitespace around the key, `=` and value ignored (RFC 7489 §6.4). */
-function readTag(part: string): { key: string; value: string } | null {
-	const i = part.indexOf('=');
-	if (i < 0) return null;
-	const key = part.slice(0, i).trim().toLowerCase();
-	return key ? { key, value: part.slice(i + 1).trim() } : null;
-}
-
-/** Every tag of a record, keys lower-cased, first occurrence wins. Values are trimmed, nothing else is interpreted. */
-export function parseDmarcTags(record: string | null | undefined): Record<string, string> {
-	const tags: Record<string, string> = {};
-	for (const part of (record ?? '').split(';')) {
-		const tag = readTag(part);
-		if (tag && !(tag.key in tags)) tags[tag.key] = tag.value;
-	}
-	return tags;
-}
+// The one RFC 7489 tag parser, shared with the server checks and the daily refresh.
+export { parseDmarcTags };
+const readTag = readDmarcTag;
 
 /** The record with its first `key` tag rewritten in place (its leading whitespace kept), or null when it has none. */
 function rewriteTag(record: string, key: string, value: (old: string) => string): string | null {
