@@ -3,8 +3,9 @@
 // It looks up public DNS only (SPF, DMARC, a scan of common DKIM selectors, MX), through one resolver, and returns a small view.
 // Nothing is stored and nothing of the workspace or the claim goes in: public DNS may be shown before ownership is proven, and the
 // answers are cached per domain (shared across workspaces) for a minute. A lookup that failed is `error`, never "missing".
-import { COMMON_DKIM_SELECTORS, analyzeSpf, createResolver, lookupDmarc, lookupMx, normalizeName, scanDkimSelectors, type Resolver, type SpfAnalysis } from '@inbox-angel/dns-checks';
+import { COMMON_DKIM_SELECTORS, SPF_LOOKUP_LIMIT, createResolver, lookupDmarc, lookupMx, normalizeName, scanDkimSelectors, type Resolver, type TxtResult } from '@inbox-angel/dns-checks';
 import { claimLookups, type DomainClaimRow } from '@inbox-angel/db';
+import { dmarcFactsFromLookup, observingResolver, snapshotDns } from '../email/dns-snapshot';
 import type { TenantContext } from '../tenancy/context';
 
 export interface ClaimPreview {
@@ -12,8 +13,12 @@ export interface ClaimPreview {
   checked_at: string;
   source: 'public_dns';
   cached: boolean;
-  spf: { status: 'found' | 'missing' | 'invalid' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean; issues: string[] };
-  dmarc: { status: 'found' | 'missing' | 'invalid' | 'multiple' | 'error'; record: string | null; policy: string | null; inherited: boolean; found_at: string | null };
+  /** DNS says the domain itself does not exist (as opposed to existing with no record). */
+  nxdomain: boolean;
+  /** `error`: the lookup failed, so nothing is known. `missing`: DNS answered that there is no record. */
+  spf: { status: 'found' | 'missing' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean };
+  /** The policy that applies to the domain (inherited from the organizational domain when it has no record of its own); `issue`: a record exists but gives no policy. */
+  dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null };
   /** `not_found` means none of the `scanned` common selectors: not that the domain has no DKIM. */
   dkim: { status: 'found' | 'not_found' | 'error'; selectors: string[]; scanned: number; failed: number };
   mx: { status: 'found' | 'none' | 'error' };
@@ -49,45 +54,45 @@ export function hasFreshPreview(domain: string, now = Date.now()): boolean {
   return !!hit && now - hit.at < PREVIEW_TTL_MS;
 }
 
-const FATAL_BESIDES_LIMIT: ReadonlySet<string> = new Set(['multiple-records', 'void-lookup-limit', 'mx-name-limit', 'loop', 'include-no-record', 'redirect-no-record', 'depth-limit', 'syntax']);
-
-export function mapSpf(a: SpfAnalysis): ClaimPreview['spf'] {
-  const issues = a.issues.map(i => i.message);
-  const record = a.record?.raw ?? null;
-  const base = { record, lookup_count: a.record ? a.lookupCount : null, over_limit: false, issues };
-  if (a.status === 'temperror') return { ...base, status: 'error' };
-  if (a.status === 'none') return { ...base, status: 'missing', lookup_count: null };
-  if (a.status === 'ok') return { ...base, status: 'found' };
-  // permerror: a record over the 10-lookup limit is published and parses; anything else (several records, a syntax error, a loop…) is broken.
-  const onlyLimit = a.record && a.lookupLimitExceeded && !a.issues.some(i => FATAL_BESIDES_LIMIT.has(i.code));
-  return onlyLimit ? { ...base, status: 'found', over_limit: true } : { ...base, status: 'invalid', record: a.rawRecords ? null : record };
-}
-
 /** Same lookups as the dashboard's checks; never throws: a lookup that throws is an error. */
 async function settle<T>(run: () => Promise<T>): Promise<T | null> {
   try { return await run(); } catch { return null; }
 }
 
-async function lookup(domain: string, resolver: Resolver, checkedAt: string): Promise<ClaimPreview> {
-  const [spfA, dmarcL, dkimS, mxL] = await Promise.all([
-    settle(() => analyzeSpf(domain, resolver)),
-    settle(() => lookupDmarc(resolver, domain)),
-    settle(() => scanDkimSelectors(resolver, domain, COMMON_DKIM_SELECTORS)),
-    settle(() => lookupMx(resolver, domain)),
+/** Remembers each TXT answer, so the DMARC record text can be read after the snapshot without a second subrequest. */
+function memoTxt(base: Resolver): Resolver {
+  const seen = new Map<string, Promise<TxtResult>>();
+  return { ...base, txt: name => { const k = name.toLowerCase(); if (!seen.has(k)) seen.set(k, base.txt(name)); return seen.get(k)!; } };
+}
+
+async function lookup(domain: string, base: Resolver, checkedAt: string): Promise<ClaimPreview> {
+  const memo = memoTxt(base);
+  // SPF and DMARC come from the same code the daily refresh stores (src/email/dns-snapshot.ts), so this view and the overview card agree.
+  const [snap, dkimS, mxL] = await Promise.all([
+    settle(() => snapshotDns(domain, memo)),
+    settle(() => scanDkimSelectors(base, domain, COMMON_DKIM_SELECTORS)),
+    settle(() => lookupMx(base, domain)),
   ]);
 
-  const spf: ClaimPreview['spf'] = spfA ? mapSpf(spfA) : { status: 'error', record: null, lookup_count: null, over_limit: false, issues: [] };
+  const spfRecord = snap?.spf_record;
+  const count = snap?.spf_lookup_count ?? null;
+  const spf: ClaimPreview['spf'] = {
+    status: spfRecord === undefined ? 'error' : spfRecord === null ? 'missing' : 'found',
+    record: spfRecord ?? null,
+    lookup_count: count,
+    over_limit: count !== null && count > SPF_LOOKUP_LIMIT,
+  };
 
-  let dmarc: ClaimPreview['dmarc'] = { status: 'error', record: null, policy: null, inherited: false, found_at: null };
-  if (dmarcL) {
-    const at = { inherited: dmarcL.inherited, found_at: dmarcL.foundAt };
-    if (dmarcL.status === 'found' && dmarcL.record) {
-      dmarc = dmarcL.record.valid
-        ? { status: 'found', record: dmarcL.record.raw, policy: dmarcL.record.policy, ...at }
-        : { status: 'invalid', record: dmarcL.record.raw, policy: null, ...at };
-    } else if (dmarcL.status === 'multiple') dmarc = { status: 'multiple', record: null, policy: null, ...at };
-    else if (dmarcL.status === 'none') dmarc = { status: 'missing', record: null, policy: null, inherited: false, found_at: null };
-  }
+  const facts = snap?.dmarc;
+  // The record text only: same answers as the snapshot (memoised), interpreted by the same dmarcFactsFromLookup.
+  const rawLookup = facts && (facts.policy || facts.issue) ? await settle(() => lookupDmarc(observingResolver(memo, domain), domain)) : null;
+  const dmarc: ClaimPreview['dmarc'] = {
+    status: !facts ? 'error' : facts.policy || facts.issue ? 'found' : 'missing',
+    policy: facts?.policy ?? null,
+    issue: facts?.issue ?? null,
+    inherited_from: facts?.inherited_from ?? null,
+    record: rawLookup && dmarcFactsFromLookup(rawLookup) ? (rawLookup.record?.raw ?? rawLookup.rawRecords?.join(' | ') ?? null) : null,
+  };
 
   let dkim: ClaimPreview['dkim'] = { status: 'error', selectors: [], scanned: 0, failed: 0 };
   if (dkimS) {
@@ -101,7 +106,7 @@ async function lookup(domain: string, resolver: Resolver, checkedAt: string): Pr
   const mx: ClaimPreview['mx'] = { status: !mxL || mxL.status === 'error' ? 'error' : mxL.status === 'found' ? 'found' : 'none' };
 
   const lookup_failed = (['spf', 'dmarc', 'dkim', 'mx'] as const).filter(k => ({ spf, dmarc, dkim, mx })[k].status === 'error');
-  return { domain, checked_at: checkedAt, source: 'public_dns', cached: false, spf, dmarc, dkim, mx, lookup_failed };
+  return { domain, checked_at: checkedAt, source: 'public_dns', cached: false, nxdomain: snap?.nxdomain ?? false, spf, dmarc, dkim, mx, lookup_failed };
 }
 
 /** The public-DNS view of a domain, from the 60 s cache when fresh. Reads nothing stored; writes nothing. */

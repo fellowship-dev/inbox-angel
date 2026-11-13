@@ -5,7 +5,10 @@ import { call, makeEnv, signupVerified } from '../auth/helpers';
 import { HOSTED_ENV } from '../hosted/world';
 import { dohFetch, fakeResolver, type Zone } from '../../packages/dns-checks/test/helpers';
 import { COMMON_DKIM_SELECTORS } from '@inbox-angel/dns-checks';
-import { __resetPreviewCacheForTests, mapSpf, previewClaimDns } from '../../src/domains/claim-preview';
+import { __resetPreviewCacheForTests, previewClaimDns } from '../../src/domains/claim-preview';
+import { snapshotDns } from '../../src/email/dns-snapshot';
+import { assessDomain } from '../../web/src/lib/levels';
+import { previewAssessment } from '../../web/src/lib/claim-preview';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 const json = async (r: Response) => await r.json() as any;
@@ -61,7 +64,8 @@ describe('GET /api/domains/claims/:id/preview', () => {
     expect(body).toMatchObject({
       domain: 'acme.com', source: 'public_dns', cached: false,
       spf: { status: 'found', record: 'v=spf1 include:_spf.google.com ~all', over_limit: false },
-      dmarc: { status: 'found', policy: 'none', inherited: false, found_at: '_dmarc.acme.com' },
+      nxdomain: false,
+      dmarc: { status: 'found', policy: 'none', issue: null, inherited_from: null, record: 'v=DMARC1; p=none; rua=mailto:x@acme.com' },
       dkim: { status: 'found', selectors: ['google._domainkey.acme.com'], scanned: COMMON_DKIM_SELECTORS.length, failed: 0 },
       mx: { status: 'found' }, lookup_failed: [],
     });
@@ -177,13 +181,21 @@ describe('previewClaimDns mapping', () => {
     expect(v.lookup_failed).toEqual([]);
   });
 
-  it('nothing published (NXDOMAIN): missing, not_found, none: and no error', async () => {
+  it('nothing published (NXDOMAIN at the apex): missing everywhere, and nxdomain says the name does not exist', async () => {
     const v = await run({});
-    expect(v.spf).toMatchObject({ status: 'missing', record: null });
-    expect(v.dmarc).toMatchObject({ status: 'missing', record: null, policy: null });
+    expect(v.nxdomain).toBe(true);
+    expect(v.spf).toMatchObject({ status: 'missing', record: null, over_limit: false });
+    expect(v.dmarc).toEqual({ status: 'missing', policy: null, issue: null, inherited_from: null, record: null });
     expect(v.dkim).toEqual({ status: 'not_found', selectors: [], scanned: COMMON_DKIM_SELECTORS.length, failed: 0 });
     expect(v.mx.status).toBe('none');
     expect(v.lookup_failed).toEqual([]);
+  });
+
+  it('a domain that exists with no records is missing, not nxdomain', async () => {
+    const v = await run({ 'TXT acme.com': 'NODATA' });
+    expect(v.nxdomain).toBe(false);
+    expect(v.spf.status).toBe('missing');
+    expect(v.dmarc.status).toBe('missing');
   });
 
   it('SERVFAIL everywhere is an error everywhere, never missing', async () => {
@@ -194,31 +206,48 @@ describe('previewClaimDns mapping', () => {
     expect(v.lookup_failed).toEqual(['spf', 'dmarc', 'dkim', 'mx']);
   });
 
-  it('SPF: several records and a dangling include are invalid; over 10 lookups is a found record flagged over_limit', async () => {
-    const multi = await run({ 'TXT acme.com': ['v=spf1 -all', 'v=spf1 +all'] });
-    expect(multi.spf).toMatchObject({ status: 'invalid', record: null });
-    expect(multi.spf.issues.join(' ')).toMatch(/2 SPF records/);
-
-    const dangling = await run({ 'TXT acme.com': ['v=spf1 include:nowhere.example.net -all'] });
-    expect(dangling.spf).toMatchObject({ status: 'invalid', record: 'v=spf1 include:nowhere.example.net -all' });
-
-    const includes = Array.from({ length: 11 }, (_, i) => `include:i${i}.example.net`);
-    const z: Zone = { 'TXT acme.com': [`v=spf1 ${includes.join(' ')} ~all`] };
-    for (let i = 0; i < 11; i++) z[`TXT i${i}.example.net`] = ['v=spf1 ip4:1.2.3.4 -all'];
-    const over = await run(z);
-    expect(over.spf).toMatchObject({ status: 'found', over_limit: true, lookup_count: 11 });
+  it('SPF: over 10 lookups is a found record flagged over_limit; exactly 10 is not', async () => {
+    const chain = (n: number) => {
+      const z: Zone = { 'TXT acme.com': [`v=spf1 ${Array.from({ length: n }, (_, i) => `include:i${i}.example.net`).join(' ')} ~all`] };
+      for (let i = 0; i < n; i++) z[`TXT i${i}.example.net`] = ['v=spf1 ip4:1.2.3.4 -all'];
+      return z;
+    };
+    expect((await run(chain(11))).spf).toMatchObject({ status: 'found', over_limit: true, lookup_count: 11 });
+    expect((await run(chain(10))).spf).toMatchObject({ status: 'found', over_limit: false, lookup_count: 10 });
   });
 
-  it('SPF: a failed include lookup is an error', async () => {
-    const v = await run({ 'TXT acme.com': ['v=spf1 include:broken.example.net ~all'], 'TXT broken.example.net': 'SERVFAIL' });
-    expect(v.spf.status).toBe('error');
+  it('SPF: a failed include lookup or a failed apex lookup is an error, never missing', async () => {
+    expect((await run({ 'TXT acme.com': ['v=spf1 include:broken.example.net ~all'], 'TXT broken.example.net': 'SERVFAIL' })).spf.status).toBe('error');
+    const v = await run({ 'TXT acme.com': 'SERVFAIL' });
+    expect(v.spf).toMatchObject({ status: 'error', record: null });
+    expect(v.lookup_failed).toContain('spf');
   });
 
-  it('DMARC: several records, and one inherited from the organisational domain', async () => {
-    expect((await run({ 'TXT _dmarc.acme.com': ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] })).dmarc.status).toBe('multiple');
+  it('DMARC: a subdomain with no record of its own gets its parent\'s sp=, inherited_from the parent', async () => {
+    const v = await previewClaimDns('mail.acme.com', { resolver: fakeResolver({ 'TXT _dmarc.acme.com': ['v=DMARC1; p=none; sp=reject'] }) });
+    expect(v.dmarc).toEqual({ status: 'found', policy: 'reject', issue: null, inherited_from: 'acme.com', record: 'v=DMARC1; p=none; sp=reject' });
+  });
+
+  it('DMARC: several records and an invalid record give no policy, with the issue named', async () => {
+    const multi = await run({ 'TXT _dmarc.acme.com': ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] });
+    expect(multi.dmarc).toMatchObject({ status: 'found', policy: null, issue: 'multiple', inherited_from: null });
+    expect(multi.dmarc.record).toContain('v=DMARC1; p=none');
+    const invalid = await run({ 'TXT _dmarc.acme.com': ['v=DMARC1; rua=mailto:a@acme.com'] });
+    expect(invalid.dmarc).toMatchObject({ status: 'found', policy: null, issue: 'invalid', record: 'v=DMARC1; rua=mailto:a@acme.com' });
+  });
+
+  it('DMARC: a failed lookup is an error, never missing', async () => {
+    const v = await run({ ...published, 'TXT _dmarc.acme.com': 'SERVFAIL' });
+    expect(v.dmarc).toEqual({ status: 'error', policy: null, issue: null, inherited_from: null, record: null });
+    expect(v.lookup_failed).toContain('dmarc');
+  });
+
+  it('makes no more DNS queries than the snapshot, DKIM scan and MX need (each name once)', async () => {
+    const calls: string[] = [];
     __resetPreviewCacheForTests();
-    const inherited = await previewClaimDns('mail.acme.com', { resolver: fakeResolver({ 'TXT _dmarc.acme.com': ['v=DMARC1; p=reject'] }) });
-    expect(inherited.dmarc).toMatchObject({ status: 'found', policy: 'reject', inherited: true, found_at: '_dmarc.acme.com' });
+    await previewClaimDns('acme.com', { resolver: fakeResolver(published, calls) });
+    expect(calls.filter(c => c === 'TXT acme.com')).toHaveLength(1);
+    expect(calls.filter(c => c === 'TXT _dmarc.acme.com')).toHaveLength(1);
   });
 
   it('DKIM: partial errors do not hide a found key, but make "none found" an error', async () => {
@@ -249,7 +278,38 @@ describe('previewClaimDns mapping', () => {
     expect((await previewClaimDns('d499.example.com', { resolver: quiet, now: t0 })).cached).toBe(true);
   });
 
-  it('mapSpf treats temperror as error', () => {
-    expect(mapSpf({ domain: 'x', status: 'temperror', record: null, lookupCount: 0, voidLookupCount: 0, lookupLimitExceeded: false, voidLimitExceeded: false, issues: [], includes: [] }).status).toBe('error');
+});
+
+describe('the preview and the overview card cannot disagree', () => {
+  // What the daily refresh stores for a domain, as the overview card's summary.
+  async function overviewInput(domain: string, z: Zone) {
+    const snap = await snapshotDns(domain, fakeResolver(z));
+    return {
+      spf_record: snap.spf_record ?? null,
+      dmarc_policy: snap.dmarc?.policy ?? null,
+      dmarc_issue: snap.dmarc?.issue ?? null,
+      dmarc_inherited_from: snap.dmarc?.inherited_from ?? null,
+      dns_checked_at: 1_800_000_000,
+      dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null,
+    };
+  }
+
+  const cases: Array<[string, string, Zone]> = [
+    ['everything published', 'acme.com', published],
+    ['enforced', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; p=reject'] }],
+    ['inherited sp=reject', 'mail.acme.com', { 'TXT mail.acme.com': ['v=spf1 -all'], 'TXT _dmarc.acme.com': ['v=DMARC1; p=none; sp=reject'] }],
+    ['inherited p=none', 'mail.acme.com', { 'TXT mail.acme.com': ['v=spf1 -all'], 'TXT _dmarc.acme.com': ['v=DMARC1; p=none'] }],
+    ['several DMARC records', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] }],
+    ['invalid DMARC record', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; rua=mailto:a@acme.com'] }],
+    ['no SPF', 'acme.com', { 'TXT acme.com': 'NODATA', 'TXT _dmarc.acme.com': ['v=DMARC1; p=none'] }],
+    ['nothing published', 'acme.com', {}],
+  ];
+
+  it.each(cases)('%s', async (_name, domain, z) => {
+    __resetPreviewCacheForTests();
+    const preview = await previewClaimDns(domain, { resolver: fakeResolver(z), now: 1_800_000_000_000 });
+    const stored = await overviewInput(domain, z);
+    if (preview.nxdomain) return expect(previewAssessment(preview as any)).toBeNull();
+    expect(previewAssessment(preview as any)).toEqual(assessDomain(stored));
   });
 });

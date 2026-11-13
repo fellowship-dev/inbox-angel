@@ -2,7 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ClaimCard } from '../src/components/domain/ClaimCard';
-import { ClaimPreview, type ClaimPreviewData } from '../src/components/domain/ClaimPreview';
+import { ClaimPreview } from '../src/components/domain/ClaimPreview';
+import type { ClaimPreviewData } from '../src/lib/claim-preview';
 import { fail, renderApp } from './render';
 
 const claim = { id: 4, domain: 'acme.io', status: 'pending' as const, txt_name: '_inboxangel.acme.io', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
@@ -12,8 +13,9 @@ const view = (over: Partial<ClaimPreviewData> = {}): ClaimPreviewData => ({
 	checked_at: new Date().toISOString(),
 	source: 'public_dns',
 	cached: false,
-	spf: { status: 'found', record: 'v=spf1 include:_spf.google.com ~all', lookup_count: 3, over_limit: false, issues: [] },
-	dmarc: { status: 'found', record: 'v=DMARC1; p=none', policy: 'none', inherited: false, found_at: '_dmarc.acme.io' },
+	nxdomain: false,
+	spf: { status: 'found', record: 'v=spf1 include:_spf.google.com ~all', lookup_count: 3, over_limit: false },
+	dmarc: { status: 'found', policy: 'none', issue: null, inherited_from: null, record: 'v=DMARC1; p=none' },
 	dkim: { status: 'found', selectors: ['google._domainkey.acme.io'], scanned: 36, failed: 0 },
 	mx: { status: 'found' },
 	lookup_failed: [],
@@ -33,56 +35,72 @@ describe('ClaimPreview', () => {
 		expect(screen.getByText("Anyone can look these records up. They're shown before you prove ownership so you can see where acme.io stands. Nothing is stored until it's verified.")).toBeInTheDocument();
 	});
 
-	it('found records: the level, and SPF, DMARC and DKIM rows with the records in mono', async () => {
+	it('found records: the overview own level and findings, the records in mono, DKIM as a row', async () => {
 		show(view());
-		expect(await screen.findByRole('group', { name: /Level 1/ })).toHaveTextContent('Authenticated');
-		expect(within(row('SPF')).getByText('SPF record published')).toBeInTheDocument();
-		expect(within(row('SPF')).getByText('v=spf1 include:_spf.google.com ~all')).toHaveClass('font-mono');
-		expect(within(row('DMARC')).getByText('Monitoring only (p=none)')).toBeInTheDocument();
-		expect(within(row('DMARC')).getByText('Failing mail is still delivered.')).toBeInTheDocument();
+		await loaded();
+		expect(screen.getByRole('group', { name: /Level 1/ })).toHaveTextContent('Authenticated');
+		const findings = screen.getByRole('list', { name: 'Findings' });
+		expect(findings).toHaveTextContent('SPF record published');
+		expect(findings).toHaveTextContent('DMARC is monitoring only (p=none)');
+		expect(screen.getByText('v=spf1 include:_spf.google.com ~all')).toHaveClass('font-mono');
+		expect(screen.getByText('v=DMARC1; p=none')).toHaveClass('font-mono');
 		expect(within(row('DKIM')).getByText('Key found')).toBeInTheDocument();
 		expect(within(row('DKIM')).getByText('google._domainkey.acme.io')).toHaveClass('font-mono');
-		// the level's findings are the rows: nothing is shown twice
-		expect(screen.queryByRole('list', { name: 'Findings' })).toBeNull();
+		// SPF and DMARC are findings of the card: no second row for them
+		expect(screen.queryByText('Monitoring only (p=none)')).toBeNull();
 	});
 
-	it('an enforced policy is Protected and inherited records say where they came from', async () => {
-		show(view({ dmarc: { status: 'found', record: 'v=DMARC1; p=reject', policy: 'reject', inherited: true, found_at: '_dmarc.io.example' } }));
-		expect(await screen.findByRole('group', { name: /Level 2/ })).toHaveTextContent('Protected');
-		expect(within(row('DMARC')).getByText('Enforced (p=reject)')).toBeInTheDocument();
-		expect(within(row('DMARC')).getByText('Inherited from _dmarc.io.example.')).toBeInTheDocument();
+	it('an inherited policy says where it came from, in the overview words', async () => {
+		show(view({ dmarc: { status: 'found', policy: 'reject', issue: null, inherited_from: 'acme.io', record: 'v=DMARC1; p=none; sp=reject' } }));
+		await loaded();
+		expect(screen.getByRole('group', { name: /Level 2/ })).toHaveTextContent('Protected');
+		expect(screen.getByRole('list', { name: 'Findings' })).toHaveTextContent('DMARC enforced (p=reject), inherited from acme.io');
 	});
 
-	it('missing records are findings: Level 0 and "Not found" with a plain sentence', async () => {
-		show(view({ spf: { status: 'missing', record: null, lookup_count: null, over_limit: false, issues: [] }, dmarc: { status: 'missing', record: null, policy: null, inherited: false, found_at: null }, dkim: { status: 'not_found', selectors: [], scanned: 36, failed: 0 } }));
-		expect(await screen.findByRole('group', { name: /Level 0/ })).toBeInTheDocument();
-		expect(within(row('SPF')).getByText("No SPF record. Receivers can't tell which servers may send for acme.io.")).toBeInTheDocument();
-		expect(within(row('DMARC')).getByText('No DMARC record.')).toBeInTheDocument();
+	it('missing records are findings: Level 0 and the overview sentences', async () => {
+		show(view({ spf: { status: 'missing', record: null, lookup_count: null, over_limit: false }, dmarc: { status: 'missing', policy: null, issue: null, inherited_from: null, record: null }, dkim: { status: 'not_found', selectors: [], scanned: 36, failed: 0 } }));
+		await loaded();
+		expect(screen.getByRole('group', { name: /Level 0/ })).toBeInTheDocument();
+		const findings = screen.getByRole('list', { name: 'Findings' });
+		expect(findings).toHaveTextContent('No SPF record found. Receivers cannot tell which servers may send for you.');
+		expect(findings).toHaveTextContent('No DMARC record found.');
 		const dkim = row('DKIM');
 		expect(within(dkim).getByText('Not found in common places')).toBeInTheDocument();
 		expect(dkim).toHaveAttribute('data-status', 'neutral');
 		expect(within(dkim).getByText("We checked 36 common selectors. Public DNS can't list every DKIM key, so a key may still exist under another name.")).toBeInTheDocument();
 	});
 
-	it('over 10 lookups and broken records get their own rows', async () => {
-		show(view({
-			spf: { status: 'found', record: 'v=spf1 include:a ~all', lookup_count: 12, over_limit: true, issues: [] },
-			dmarc: { status: 'multiple', record: null, policy: null, inherited: false, found_at: '_dmarc.acme.io' },
-		}));
+	it('several DMARC records and an invalid record are the overview warnings, with no level claimed for a policy', async () => {
+		const { unmount } = show(view({ dmarc: { status: 'found', policy: null, issue: 'multiple', inherited_from: null, record: 'v=DMARC1; p=none | v=DMARC1; p=reject' } }));
+		await loaded();
+		expect(screen.getByRole('list', { name: 'Findings' })).toHaveTextContent('Multiple DMARC records: receivers ignore them');
+		expect(screen.getByRole('group', { name: /Level 0/ })).toBeInTheDocument();
+		unmount();
+		show(view({ dmarc: { status: 'found', policy: null, issue: 'invalid', inherited_from: null, record: 'v=DMARC1; p=banana' } }));
+		await loaded();
+		expect(screen.getByRole('list', { name: 'Findings' })).toHaveTextContent('DMARC record is invalid');
+	});
+
+	it('over 10 lookups gets its own warning row', async () => {
+		show(view({ spf: { status: 'found', record: 'v=spf1 include:a ~all', lookup_count: 12, over_limit: true } }));
 		await loaded();
 		expect(within(row('SPF')).getByText('Over 10 lookups')).toBeInTheDocument();
 		expect(within(row('SPF')).getByText('Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs 12.')).toBeInTheDocument();
-		expect(within(row('DMARC')).getByText('More than one DMARC record is published, so receivers ignore them all.')).toBeInTheDocument();
 	});
 
-	it('an invalid SPF record explains itself with the first issue', async () => {
-		show(view({ spf: { status: 'invalid', record: 'v=spf1 include:gone.example', lookup_count: 1, over_limit: false, issues: ['gone.example has no SPF record'] } }));
+	it('a domain that does not exist: no level, no findings, one "Does not resolve" row', async () => {
+		show(view({ nxdomain: true, spf: { status: 'missing', record: null, lookup_count: null, over_limit: false }, dmarc: { status: 'missing', policy: null, issue: null, inherited_from: null, record: null }, dkim: { status: 'not_found', selectors: [], scanned: 36, failed: 0 } }));
 		await loaded();
-		expect(within(row('SPF')).getByText("The SPF record doesn't parse, so receivers treat it as broken. gone.example has no SPF record")).toBeInTheDocument();
+		expect(screen.queryByRole('group', { name: /Level/ })).toBeNull();
+		expect(screen.queryByRole('list', { name: 'Findings' })).toBeNull();
+		expect(screen.getAllByRole('listitem')).toHaveLength(1);
+		expect(screen.getByText('Does not resolve')).toBeInTheDocument();
+		expect(screen.getByText(/DNS says this name does not exist/)).toBeInTheDocument();
+		expect(screen.queryByText('Not found')).toBeNull();
 	});
 
-	it('a failed lookup is "Lookup failed", never "Not found", and there is no level to guess', async () => {
-		show(view({ dmarc: { status: 'error', record: null, policy: null, inherited: false, found_at: null }, lookup_failed: ['dmarc'] }));
+	it('a failed DMARC lookup is "Lookup failed", never "Not found", and there is no level to guess', async () => {
+		show(view({ dmarc: { status: 'error', policy: null, issue: null, inherited_from: null, record: null }, lookup_failed: ['dmarc'] }));
 		await loaded();
 		expect(screen.queryByRole('group', { name: /Level/ })).toBeNull();
 		const level = row('Protection level');
@@ -91,11 +109,12 @@ describe('ClaimPreview', () => {
 		expect(row('DMARC')).toHaveAttribute('data-status', 'error');
 		expect(within(row('DMARC')).getByText('Lookup failed')).toBeInTheDocument();
 		expect(screen.queryByText('Not found')).toBeNull();
+		expect(screen.queryByText('No DMARC record found.')).toBeNull();
 		expect(screen.getAllByRole('button', { name: 'Try again' }).length).toBeGreaterThan(0);
 	});
 
-	it('a DKIM lookup that failed is an error row, and a failed SPF hides the level too', async () => {
-		show(view({ spf: { status: 'error', record: null, lookup_count: null, over_limit: false, issues: [] }, dkim: { status: 'error', selectors: [], scanned: 36, failed: 5 } }));
+	it('a failed SPF or DKIM lookup is an error row too, and hides the level', async () => {
+		show(view({ spf: { status: 'error', record: null, lookup_count: null, over_limit: false }, dkim: { status: 'error', selectors: [], scanned: 36, failed: 5 } }));
 		await loaded();
 		expect(row('SPF')).toHaveAttribute('data-status', 'error');
 		expect(row('DKIM')).toHaveAttribute('data-status', 'error');

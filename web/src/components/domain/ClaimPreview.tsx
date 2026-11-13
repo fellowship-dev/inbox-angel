@@ -2,23 +2,11 @@ import { Alert, Button, CheckResult, CheckResultList, LevelCard, Skeleton } from
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api, ApiError } from '../../lib/api';
-import { assessDomain } from '../../lib/levels';
-
-/** GET /api/domains/claims/:id/preview: public DNS only, nothing stored (src/domains/claim-preview.ts). */
-export interface ClaimPreviewData {
-	domain: string;
-	checked_at: string;
-	source: 'public_dns';
-	cached: boolean;
-	spf: { status: 'found' | 'missing' | 'invalid' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean; issues: string[] };
-	dmarc: { status: 'found' | 'missing' | 'invalid' | 'multiple' | 'error'; record: string | null; policy: string | null; inherited: boolean; found_at: string | null };
-	dkim: { status: 'found' | 'not_found' | 'error'; selectors: string[]; scanned: number; failed: number };
-	mx: { status: 'found' | 'none' | 'error' };
-	lookup_failed: string[];
-}
+import { previewAssessment, type ClaimPreviewData } from '../../lib/claim-preview';
 
 const RATE_LIMITED = 'Checked too often. Try again in a minute.';
 
+export type { ClaimPreviewData };
 const Mono = ({ children }: { children: ReactNode }) => <code className="font-mono text-sm [overflow-wrap:anywhere]">{children}</code>;
 
 function ago(iso: string, now = Date.now()): string {
@@ -27,61 +15,6 @@ function ago(iso: string, now = Date.now()): string {
 	if (s < 3600) return `${Math.floor(s / 60)} min ago`;
 	if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
 	return `${Math.floor(s / 86400)} d ago`;
-}
-
-function SpfRow({ spf, domain, retry }: { spf: ClaimPreviewData['spf']; domain: string; retry: () => void }) {
-	const record = spf.record ? <Mono>{spf.record}</Mono> : null;
-	switch (spf.status) {
-		case 'found':
-			return spf.over_limit ? (
-				<CheckResult status="warn" title="SPF" statusLabel="Over 10 lookups" summary={`Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs ${spf.lookup_count ?? 'more than 10'}.`}>
-					{record}
-				</CheckResult>
-			) : (
-				<CheckResult status="pass" title="SPF" statusLabel="SPF record published">
-					{record}
-				</CheckResult>
-			);
-		case 'missing':
-			return <CheckResult status="missing" title="SPF" summary={`No SPF record. Receivers can't tell which servers may send for ${domain}.`} />;
-		case 'invalid':
-			return (
-				<CheckResult status="fail" title="SPF" summary={`The SPF record doesn't parse, so receivers treat it as broken.${spf.issues[0] ? ` ${spf.issues[0]}` : ''}`}>
-					{record}
-				</CheckResult>
-			);
-		default:
-			return <CheckResult status="error" title="SPF" onRetry={retry} />;
-	}
-}
-
-function DmarcRow({ dmarc, retry }: { dmarc: ClaimPreviewData['dmarc']; retry: () => void }) {
-	const record = dmarc.record ? <Mono>{dmarc.record}</Mono> : null;
-	const inherited = dmarc.inherited && dmarc.found_at ? `Inherited from ${dmarc.found_at}.` : '';
-	switch (dmarc.status) {
-		case 'found':
-			return dmarc.policy === 'none' ? (
-				<CheckResult status="warn" title="DMARC" statusLabel="Monitoring only (p=none)" summary={['Failing mail is still delivered.', inherited].filter(Boolean).join(' ')}>
-					{record}
-				</CheckResult>
-			) : (
-				<CheckResult status="pass" title="DMARC" statusLabel={`Enforced (p=${dmarc.policy})`} summary={inherited || undefined}>
-					{record}
-				</CheckResult>
-			);
-		case 'missing':
-			return <CheckResult status="missing" title="DMARC" summary="No DMARC record." />;
-		case 'invalid':
-			return (
-				<CheckResult status="fail" title="DMARC" summary="The DMARC record doesn't parse.">
-					{record}
-				</CheckResult>
-			);
-		case 'multiple':
-			return <CheckResult status="fail" title="DMARC" summary="More than one DMARC record is published, so receivers ignore them all." />;
-		default:
-			return <CheckResult status="error" title="DMARC" onRetry={retry} />;
-	}
 }
 
 function DkimRow({ dkim, retry }: { dkim: ClaimPreviewData['dkim']; retry: () => void }) {
@@ -96,31 +29,49 @@ function DkimRow({ dkim, retry }: { dkim: ClaimPreviewData['dkim']; retry: () =>
 	return <CheckResult status="error" title="DKIM" onRetry={retry} />;
 }
 
+const mono = (record: string | null) => (record ? <Mono>{record}</Mono> : null);
+
 function Result({ data, retry }: { data: ClaimPreviewData; retry: () => void }) {
-	const { spf, dmarc } = data;
-	// The level counts only what was read. If SPF or DMARC could not be read there is no level: a guess would be a made-up result.
-	const level = spf.status !== 'error' && dmarc.status !== 'error'
-		? assessDomain(
-				{
-					spf_record: spf.status === 'found' ? spf.record : null,
-					dmarc_policy: dmarc.status === 'found' ? dmarc.policy : null,
-					dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null,
-				},
-				{ nullMeans: 'missing' },
-			)
-		: null;
+	const { spf, dmarc, domain } = data;
+
+	// The name does not exist: no level and no findings. The overview card says the same, in the same words.
+	if (data.nxdomain) {
+		return (
+			<CheckResultList>
+				<CheckResult status="missing" statusLabel="Does not resolve" title="This domain does not resolve" summary="DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain." />
+			</CheckResultList>
+		);
+	}
+
+	// Level and SPF/DMARC findings are the overview's own (assessDomain). If SPF or DMARC could not be read there is no level: a guess would be a made-up result.
+	const a = previewAssessment(data);
+	const records = [spf.status === 'found' ? { name: 'SPF', record: spf.record } : null, dmarc.record ? { name: 'DMARC', record: dmarc.record } : null].filter((r): r is { name: string; record: string | null } => !!r);
 	return (
 		<div className="space-y-3">
-			{level ? (
-				<LevelCard level={level.level} domain={data.domain} description={level.description} />
+			{a ? (
+				<LevelCard level={a.level} domain={domain} description={a.description} findings={a.findings}>
+					{records.length > 0 ? (
+						<ul className="space-y-1 text-sm">
+							{records.map((r) => (
+								<li key={r.name}>
+									<span className="text-ink-2">{r.name}: </span>
+									{mono(r.record)}
+								</li>
+							))}
+						</ul>
+					) : null}
+				</LevelCard>
 			) : (
 				<CheckResultList>
 					<CheckResult status="error" title="Protection level" summary="Not shown, because a DNS lookup failed. We don't guess." onRetry={retry} />
+					{spf.status === 'error' ? <CheckResult status="error" title="SPF" onRetry={retry} /> : null}
+					{dmarc.status === 'error' ? <CheckResult status="error" title="DMARC" onRetry={retry} /> : null}
 				</CheckResultList>
 			)}
 			<CheckResultList>
-				<SpfRow spf={spf} domain={data.domain} retry={retry} />
-				<DmarcRow dmarc={dmarc} retry={retry} />
+				{spf.over_limit ? (
+					<CheckResult status="warn" title="SPF" statusLabel="Over 10 lookups" summary={`Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs ${spf.lookup_count}.`} />
+				) : null}
 				<DkimRow dkim={data.dkim} retry={retry} />
 			</CheckResultList>
 		</div>
