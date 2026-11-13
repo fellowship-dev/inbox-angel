@@ -77,6 +77,9 @@ export async function bulkInsertDomains(
   const results: BulkImportResult[] = [];
   const cap = domainCap(tenant);
   let atCap = false;
+  // One count up front, then a local tally. It is advisory: the capped INSERT below is what enforces the cap, so a stale tally
+  // can only send a row to that insert, never past the cap.
+  let held = cap === undefined ? 0 : (await tenant.scope.domains.list()).length;
 
   for (const typed of batch) {
     const named = normalizeDomainName(typed);
@@ -94,7 +97,7 @@ export async function bulkInsertDomains(
     }
 
     // Advisory (see service.ts): a domain that can never be added gets no claim. The INSERT below is what enforces the cap.
-    if (cap !== undefined && (atCap || (await tenant.scope.domains.list()).length >= cap)) { atCap = true; results.push(atCapRow(tenant, domain, cap)); continue; }
+    if (cap !== undefined && (atCap || held >= cap)) { atCap = true; results.push(atCapRow(tenant, domain, cap)); continue; }
 
     const admission = await admitDomain(tenant, domain);
     if (admission.kind === 'taken') { results.push({ domain, status: 'duplicate', error: 'already registered in another workspace' }); continue; }
@@ -105,6 +108,7 @@ export async function bulkInsertDomains(
     try {
       const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: admission.via }, undefined, { maxDomains: cap });
       domainId = result.meta.last_row_id as number;
+      held++;
     } catch (e: unknown) {
       if (e instanceof PlanLimitError) { atCap = true; results.push(atCapRow(tenant, domain, e.max)); continue; }
       const msg = e instanceof Error ? e.message : String(e);
