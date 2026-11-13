@@ -30,3 +30,40 @@ export function buildRecommendedRecord(current: string | null, policy: string, r
 export function parseDmarcPolicy(record: string | null): string | null {
 	return record?.match(/(?:^|;\s*)p=([a-z]+)/i)?.[1]?.toLowerCase() ?? null;
 }
+
+/** Every tag of a record, keys lower-cased, first occurrence wins. Values are trimmed, nothing else is interpreted. */
+export function parseDmarcTags(record: string | null | undefined): Record<string, string> {
+	const tags: Record<string, string> = {};
+	for (const part of (record ?? '').split(';')) {
+		const i = part.indexOf('=');
+		if (i < 0) continue;
+		const key = part.slice(0, i).trim().toLowerCase();
+		if (key && !(key in tags)) tags[key] = part.slice(i + 1).trim();
+	}
+	return tags;
+}
+
+/** The `sp=` value (subdomain policy) of a record, lower-cased, or null when the tag is absent or empty. */
+export function parseDmarcSp(record: string | null | undefined): string | null {
+	return parseDmarcTags(record).sp?.toLowerCase() || null;
+}
+
+/** The `pct=` share of mail the policy applies to, 0 to 100. An absent or unreadable tag means 100, as for receivers. */
+export function parseDmarcPct(record: string | null | undefined): number {
+	const raw = parseDmarcTags(record).pct;
+	if (raw === undefined || !/^\d{1,3}$/.test(raw)) return 100;
+	return Math.min(100, Number(raw));
+}
+
+/**
+ * How far a live record enforces: `full` only for p=reject applied to all mail, `partial` for quarantine/reject
+ * on part of it (pct below 100), `quarantine` for p=quarantine on all mail, `none` for p=none, `unknown` otherwise.
+ */
+export function enforcementLevel(record: string | null | undefined): { level: 'full' | 'quarantine' | 'partial' | 'none' | 'unknown'; policy: string | null; pct: number } {
+	const policy = parseDmarcPolicy(record ?? null);
+	const pct = parseDmarcPct(record);
+	if (policy === 'none') return { level: 'none', policy, pct };
+	if (policy !== 'quarantine' && policy !== 'reject') return { level: 'unknown', policy, pct };
+	if (pct < 100) return { level: 'partial', policy, pct };
+	return { level: policy === 'reject' ? 'full' : 'quarantine', policy, pct };
+}

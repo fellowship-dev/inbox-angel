@@ -12,6 +12,7 @@
     "./spf": "./src/spf.ts",
     "./dmarc": "./src/dmarc.ts",
     "./dkim": "./src/dkim.ts",
+    "./txt": "./src/txt.ts",
     "./mx": "./src/mx.ts",
     "./mta-sts": "./src/mta-sts.ts",
     "./bimi": "./src/bimi.ts",

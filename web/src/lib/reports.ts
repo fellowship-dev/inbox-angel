@@ -35,24 +35,54 @@ export function failLabel(src: Pick<AuthSource, 'spf_pass' | 'dkim_pass'>): 'SPF
  */
 export type KnownPolicy = string | null;
 
-/** What receivers do with mail that fails DMARC, from the policy. Only says what the policy actually asks for. */
-export function failingMailFate(policy: KnownPolicy): string {
-	if (policy === 'reject') return 'Your DMARC policy (p=reject) asks receivers to reject it.';
-	if (policy === 'quarantine') return 'Your DMARC policy (p=quarantine) asks receivers to send it to spam.';
+/** The live record's tags that change what failing mail meets: the domain it belongs to, `sp=` and `pct=`. */
+export interface LiveDmarc {
+	domain: string;
+	sp: string | null;
+	pct: number;
+}
+
+const isSubdomainOf = (from: string | null, domain: string) => !!from && from.toLowerCase().endsWith(`.${domain.toLowerCase()}`);
+
+/** What a policy value asks receivers to do with failing mail; `pct` below 100 limits it to that share. */
+function asks(policy: string, pct: number): string | null {
+	const verb = policy === 'reject' ? 'reject' : policy === 'quarantine' ? 'send to spam' : null;
+	if (!verb) return null;
+	return pct < 100 ? `${verb} only ${pct}% of it, and the rest is handled one policy level weaker` : verb === 'reject' ? 'reject it' : 'send it to spam';
+}
+
+/**
+ * What receivers do with mail that fails DMARC, from the policy. Only says what the record actually asks for:
+ * `pct=` limits it to a share of mail, and mail from a subdomain meets `sp=` when the record has one, else inherits `p=`.
+ */
+export function failingMailFate(policy: KnownPolicy, live?: LiveDmarc, headerFrom?: string | null): string {
+	const isPolicy = policy === 'none' || policy === 'quarantine' || policy === 'reject';
+	if (live && isPolicy && isSubdomainOf(headerFrom ?? null, live.domain)) {
+		const lead = live.sp
+			? `${headerFrom} is a subdomain, so sp=${live.sp} applies to it instead of p=${policy}`
+			: `${headerFrom} is a subdomain and your record has no sp= tag, so it inherits p=${policy}`;
+		const effective = live.sp ?? policy;
+		const ask = asks(effective, live.pct);
+		return `${lead}. ${ask ? `That asks receivers to ${ask}.` : 'Receivers still deliver it unless their own filters stop it.'} A DMARC record published on the subdomain itself would override this.`;
+	}
+	const pct = live?.pct ?? 100;
+	if (policy === 'reject' || policy === 'quarantine') {
+		return `Your DMARC policy (p=${policy}${pct < 100 ? `; pct=${pct}` : ''}) asks receivers to ${asks(policy, pct)}.`;
+	}
 	if (policy === 'none') return 'Your DMARC policy is p=none, so receivers still deliver it unless their own filters stop it.';
 	if (policy === 'no-record') return 'Your domain has no DMARC record, so receivers still deliver it unless their own filters stop it.';
 	return 'What receivers do with it depends on your DMARC policy, which could not be read right now.';
 }
 
 /** Plain-language explanation and fix for a source that failed SPF and/or DKIM. */
-export function explain(src: AuthSource, policy: KnownPolicy = null): string {
+export function explain(src: AuthSource, policy: KnownPolicy = null, live?: LiveDmarc): string {
 	const from = src.header_from ? `"${src.header_from}"` : 'your domain';
 	const service = serviceVia(src) ?? 'this server';
 
 	if (!src.spf_pass && !src.dkim_pass) {
 		return (
 			`${service} has no authorization to send as ${from}. ` +
-			`If you don't recognize it, it's likely spoofed mail. ${failingMailFate(policy)} ` +
+			`If you don't recognize it, it's likely spoofed mail. ${failingMailFate(policy, live, src.header_from)} ` +
 			`If it's a service you added recently, you'll need to configure both SPF and DKIM for it.`
 		);
 	}

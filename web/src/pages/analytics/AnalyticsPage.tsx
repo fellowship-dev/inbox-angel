@@ -1,7 +1,8 @@
-import { Button, PageHeader, Stat, StatGroup, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Badge } from '@inbox-angel/ui';
+import { Button, PageHeader, Stat, StatGroup, TableBody, TableCell, TableHead, TableHeader, TableRow, Badge } from '@inbox-angel/ui';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { FixList } from '../../components/analytics/FixList';
+import { ScrollCueTable } from '../../components/ScrollCueTable';
 import { ReadinessCard } from '../../components/analytics/ReadinessCard';
 import { SenderInventory } from '../../components/analytics/SenderInventory';
 import { TrendChart } from '../../components/analytics/TrendChart';
@@ -36,7 +37,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 					{data.domains.length === 0 ? (
 						<p className="text-sm text-ink-2">No domains yet.</p>
 					) : (
-						<Table label="Enforcement readiness by domain">
+						<ScrollCueTable label="Enforcement readiness by domain">
 							<TableHeader>
 								<TableRow>
 									<TableHead scope="col">Domain</TableHead>
@@ -64,7 +65,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 									</TableRow>
 								))}
 							</TableBody>
-						</Table>
+						</ScrollCueTable>
 					)}
 				</Section>
 			)}

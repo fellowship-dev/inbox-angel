@@ -135,9 +135,9 @@ export function assessReadiness(i: ReadinessInput): Readiness {
   if (i.newSenders > 0) warn(`${i.newSenders} sender${i.newSenders === 1 ? ' is' : 's are'} new this week. Give them time to show up in the reports before tightening.`);
   if (!known.length && !unknown.length) reasons.push({ level: 'ok', text: 'No recognised service seems to fail DMARC.' });
 
-  if (!enforcing) reasons.push({ level: 'ok', text: `${describeStep(next)} is testing mode: receivers treat failures one step weaker, so it is a low-risk half-step.` });
+  if (!enforcing) reasons.push({ level: 'ok', text: `The first step to ${next.policy} is testing mode: receivers treat failures one step weaker, so it is a low-risk half-step.` });
 
-  if (blocked) return done('blocked', `Not safe to move to ${describeStep(next)} yet`, reasons, next);
-  if (caution) return done('caution', `You can move to ${describeStep(next)}, with care`, reasons, next);
-  return done('ready', `Safe to move to ${describeStep(next)}`, reasons, next);
+  if (blocked) return done('blocked', `Not safe to move to ${next.policy} yet`, reasons, next);
+  if (caution) return done('caution', `You can move to ${next.policy}, with care`, reasons, next);
+  return done('ready', `Safe to move to ${next.policy}`, reasons, next);
 }

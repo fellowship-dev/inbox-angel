@@ -16,6 +16,7 @@ import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from 
 import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
+import { hasReportAddress } from '../../lib/dmarc-record';
 import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
@@ -129,6 +130,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const stats = useStats(domain.id, days);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
+	const { canWrite } = useSession();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0) : null;
@@ -194,7 +196,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 						{guidance ? (
 							<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
 								<p>{guidance.body}</p>
-								{guidance.upgradeTo ? (
+								{guidance.upgradeTo && canWrite ? (
 									<Button asChild size="sm" className="mt-3">
 										<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
 									</Button>
@@ -205,7 +207,11 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 											? 'We could not check your DNS record just now. See DNS records below.'
 											: dns.data.found && dns.data.has_rua
 												? 'DNS record detected. Reports will start arriving soon.'
-												: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
+												: dns.data.found
+													? hasReportAddress(domain.rua_address)
+														? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records below.'
+														: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
+													: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
 									</p>
 								) : null}
 							</Alert>
@@ -229,8 +235,12 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
 
-			<Section title="RUA reporting address" description={<>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</>}>
-				<CopyField label="RUA" value={`rua=mailto:${domain.rua_address}`} />
+			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
+				{hasReportAddress(domain.rua_address) ? (
+					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
+				) : (
+					<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
+				)}
 			</Section>
 
 			<Context domain={domain} all={all} />

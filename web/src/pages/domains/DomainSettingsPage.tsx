@@ -8,7 +8,8 @@ import { ConfirmDialog } from '../../components/domain/ConfirmDialog';
 import { CopyField } from '../../components/domain/CopyField';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section, WriteButton } from '../../components/states';
 import { ApiError, api, errorMessage } from '../../lib/api';
-import { domainKeys, invalidateDomain, useMonitorSubs, type MonitorSub } from '../../lib/domain-queries';
+import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
+import { domainKeys, invalidateDomain, useDnsCheck, useMonitorSubs, type MonitorSub } from '../../lib/domain-queries';
 import { downloadFile } from '../../lib/download';
 import { formatDate } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
@@ -211,6 +212,18 @@ function DangerZone({ domain }: { domain: Domain }) {
 	);
 }
 
+/**
+ * The DMARC record to publish, built from the record DNS serves now: every tag stays and p= never goes below the live
+ * policy. The stored policy is not used, it can lag DNS. Unknown (loading, lookup failed) is said, not guessed.
+ */
+function LiveDmarcRecord({ domain }: { domain: Domain }) {
+	const dns = useDnsCheck(domain.id);
+	if (dns.isPending) return <Info label="DMARC record">Checking the live DMARC record…</Info>;
+	if (dns.isError || dns.data.error) return <Info label="DMARC record">The live DMARC record could not be checked, so no record is offered. Reload to try again.</Info>;
+	const live = dns.data.found ? dns.data.current_record : null;
+	return <CopyField label="DMARC record" value={buildRecommendedRecord(live, parseDmarcPolicy(live) ?? 'none', domain.rua_address)} />;
+}
+
 function Settings({ domain }: { domain: Domain }) {
 	return (
 		<div className="max-w-3xl space-y-8">
@@ -232,8 +245,12 @@ function Settings({ domain }: { domain: Domain }) {
 							<Info label="Domain">{domain.domain}</Info>
 							<Info label="Added">{domain.created_at ? formatDate(domain.created_at) : 'n/a'}</Info>
 						</dl>
-						<CopyField label="RUA address" value={`rua=mailto:${domain.rua_address}`} />
-						<CopyField label="DMARC record" value={`v=DMARC1; p=${domain.dmarc_policy ?? 'none'}; rua=mailto:${domain.rua_address}`} />
+						{hasReportAddress(domain.rua_address) ? (
+							<CopyField label="RUA address" value={`rua=mailto:${domain.rua_address.trim()}`} />
+						) : (
+							<Info label="RUA address">No reports address is configured for this domain.</Info>
+						)}
+						<LiveDmarcRecord domain={domain} />
 					</CardContent>
 				</Card>
 			</Section>

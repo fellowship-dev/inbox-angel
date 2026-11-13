@@ -22,7 +22,7 @@ export function RadioCard({
 }) {
 	return (
 		<label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line bg-surface-1 p-4 has-checked:border-2 has-checked:border-brand has-checked:bg-brand-subtle has-checked:p-[calc(1rem-1px)] has-disabled:cursor-not-allowed has-disabled:opacity-60">
-			<input type="radio" name={name} value={value} checked={checked} disabled={disabled} onChange={() => onChange(value)} className="mt-1 size-4 shrink-0" />
+			<input type="radio" name={name} value={value} checked={checked} disabled={disabled} onChange={() => onChange(value)} className="mt-0.5 size-5 shrink-0" />
 			<span className="min-w-0 space-y-1">
 				<span className="flex flex-wrap items-center gap-2 font-semibold text-ink-1">
 					{title}

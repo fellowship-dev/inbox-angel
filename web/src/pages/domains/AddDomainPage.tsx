@@ -8,6 +8,7 @@ import { InheritanceBanner } from '../../components/domain/InheritanceBanner';
 import { ReadOnlyNotice, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
 import { normalizeDomain } from '../../lib/dmarc';
+import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
 import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
 import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
@@ -20,7 +21,7 @@ interface Zone {
 }
 
 /** Checks right away, then every 15 s until the record (with our rua) is seen. A failed lookup keeps polling and is never "not found". */
-function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string }) {
+function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string | null | undefined }) {
 	const q = useQuery({
 		queryKey: domainKeys.dnsCheck(domainId),
 		queryFn: () => api<DnsCheck>(`/api/domains/${domainId}/dns-check`),
@@ -44,8 +45,12 @@ function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string }) {
 		row = <CheckResult status="pass" title={title} statusLabel="Detected" summary="DNS record detected! Reports will start arriving within 24 hours." />;
 	} else if (q.data.found) {
 		row = (
-			<CheckResult status="warn" title={title} statusLabel="Missing rua" summary="TXT record found, but the rua= address is missing. Double-check you copied the full value above.">
-				Expected: <code className="font-mono">rua=mailto:{rua}</code>
+			<CheckResult status="warn" title={title} statusLabel={hasReportAddress(rua) ? 'Missing rua' : 'No reports address'} summary={hasReportAddress(rua) ? 'TXT record found, but the rua= address is missing. Double-check you copied the full value above.' : 'TXT record found. No reports address is configured for this domain, so there is no rua= to look for.'}>
+				{hasReportAddress(rua) ? (
+					<>
+						Expected: <code className="font-mono">rua=mailto:{rua.trim()}</code>
+					</>
+				) : null}
 			</CheckResult>
 		);
 	} else {
@@ -56,7 +61,7 @@ function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string }) {
 
 function SetupStep({ result }: { result: AddDomainResult }) {
 	const { domain } = result;
-	const record = `v=DMARC1; p=none; rua=mailto:${domain.rua_address}`;
+	const record = buildRecommendedRecord(null, 'none', domain.rua_address);
 	return (
 		<div className="max-w-2xl space-y-6">
 			<PageHeader

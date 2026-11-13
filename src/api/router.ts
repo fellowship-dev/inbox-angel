@@ -117,6 +117,7 @@ import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-
 import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
 import { dmarcPolicyFromTxt, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
+import { unquoteTxt } from '@inbox-angel/dns-checks/txt';
 import {
   provisionMtaSts,
   updateMtaStsTxtRecord,
@@ -818,7 +819,9 @@ async function _handleApi(
         }
         const records = txt.records;
         const found = records.length > 0;
-        const has_rua = records.some(r => r.includes(domain.rua_address));
+        // An empty address is contained in every string: with none configured, nothing has our rua.
+        const ourRua = domain.rua_address?.trim();
+        const has_rua = !!ourRua && records.some(r => r.includes(ourRua));
         const current_record = records[0] ?? null;
         const cf_managed = !!domain.dns_record_id;
         if (found) track(tenant, { event: 'domain.dns_verified' }); // fire-and-forget
@@ -904,7 +907,7 @@ async function _handleApi(
           }
           const policy = dmarcPolicyFromTxt(t.records);
           if (policy !== undefined) resolved.dmarc_policy = policy;
-          return { found: t.records.length > 0, has_our_rua: t.records.some(r => r.includes(domain.rua_address)), current_record: t.records[0] ?? null };
+          return { found: t.records.length > 0, has_our_rua: !!domain.rua_address?.trim() && t.records.some(r => r.includes(domain.rua_address.trim())), current_record: t.records[0] ?? null };
         }),
 
         // Routing: MX check + destination email verification
@@ -966,7 +969,7 @@ async function _handleApi(
                 cf.listDnsRecords(zone.id, { type: 'CNAME', per_page: 100 }),
               ]);
               const found = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
-              return { selectors: found.map(r => ({ name: r.name, record: r.content })), source: 'cf' as const };
+              return { selectors: found.map(r => ({ name: r.name, record: unquoteTxt(r.content) })), source: 'cf' as const };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
           // DoH fallback

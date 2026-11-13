@@ -11,7 +11,7 @@ import { useRouteDomainId } from '../../components/wizard/useRouteDomainId';
 import { WizardHeader } from '../../components/wizard/WizardHeader';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
-import { buildRecommendedRecord, parseDmarcPolicy } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, enforcementLevel, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
 
 type Policy = 'none' | 'quarantine' | 'reject';
@@ -102,6 +102,11 @@ export function DmarcWizardPage() {
 		const cfManaged = dns.data.cf_managed;
 		const currentRecord = appliedRecord ?? dns.data.current_record;
 		const newRecord = buildRecommendedRecord(currentRecord, copy.target, domain.rua_address);
+		// p=reject with pct below 100 applies to that share of mail only: that is not full enforcement.
+		const partial = enforced ? enforcementLevel(currentRecord) : null;
+		const partialPct = partial?.level === 'partial' ? partial.pct : null;
+		const sp = enforced ? parseDmarcSp(currentRecord) : null;
+		const spWeaker = sp === 'none' || sp === 'quarantine' ? sp : null;
 
 		body = (
 			<>
@@ -115,12 +120,30 @@ export function DmarcWizardPage() {
 					]}
 				/>
 				{enforced ? (
-					<StepCard title="Fully enforced">
-						<p className="text-sm text-ink-2">
-							DMARC is set to <strong className="text-ink-1">reject</strong>. Spoofed mail claiming to be from <strong className="text-ink-1">{domain.domain}</strong> is rejected
-							outright by receiving servers.
-						</p>
-						<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
+					<StepCard title={partialPct !== null ? `Partially enforced: ${partialPct}%` : 'Fully enforced'}>
+						{partialPct !== null ? (
+							<>
+								<p className="text-sm text-ink-2">
+									DMARC is set to <strong className="text-ink-1">reject</strong> with <strong className="text-ink-1">pct={partialPct}</strong>, so it applies to only {partialPct}% of mail
+									failing for <strong className="text-ink-1">{domain.domain}</strong>. Receivers handle the rest one policy level weaker.
+								</p>
+								{currentRecord ? <TxtRecord title="Current record" name="_dmarc" value={currentRecord} /> : null}
+								<Alert variant="warning">To enforce all of it, raise pct= to 100 (or remove it) at your DNS provider once your failing sources are fixed.</Alert>
+							</>
+						) : (
+							<>
+								<p className="text-sm text-ink-2">
+									DMARC is set to <strong className="text-ink-1">reject</strong>. Spoofed mail claiming to be from <strong className="text-ink-1">{domain.domain}</strong> is rejected
+									outright by receiving servers.
+								</p>
+								{spWeaker ? (
+									<Alert variant="warning">
+										Subdomains follow <strong>sp={spWeaker}</strong>, not p=reject, so mail from a subdomain without its own record is not rejected. Set sp=reject to enforce it there too.
+									</Alert>
+								) : null}
+								<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
+							</>
+						)}
 						<StepFooter
 							end={
 								<Button asChild>

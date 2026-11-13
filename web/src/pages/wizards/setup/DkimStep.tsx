@@ -6,7 +6,7 @@ import { StepNav } from '../../../components/wizard/StepNav';
 import { parseDmarcPolicy } from '../../../lib/dmarc-record';
 import { matchDkimProvider, type EmailProvider } from '@inbox-angel/dns-checks/email-service-providers';
 import type { StepProps } from './SpfStep';
-import { dkimSeverity, dnsErrorDetail, dnsErrorsFor, unsignedProviders } from './steps';
+import { dkimSeverity, dnsErrorDetail, dnsErrorsFor, splitDkimSelectors, unsignedProviders } from './steps';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -34,10 +34,11 @@ export function DkimStep({ status, onNext, onSkip, onRetry, retrying }: StepProp
 	const dmarcPolicy = parseDmarcPolicy(status.dmarc.current_record);
 	const selectorErrors = dnsErrorsFor(status, 'dkim');
 	const spfFailed = dnsErrorsFor(status, 'spf').length > 0;
-	const { groups, unknown } = groupSelectors(dkim.selectors);
+	const { usable, revoked } = splitDkimSelectors(dkim.selectors);
+	const { groups, unknown } = groupSelectors(usable);
 	const unsigned = unsignedProviders(dkim, status.spf.record);
 	const severity = dkimSeverity(dkim, dmarcPolicy, unsigned.length, selectorErrors.length > 0);
-	const none = dkim.selectors.length === 0 && unsigned.length === 0;
+	const none = usable.length === 0 && unsigned.length === 0;
 
 	return (
 		<StepCard title="DKIM signing" badge={<SeverityBadge severity={severity} />}>
@@ -47,6 +48,17 @@ export function DkimStep({ status, onNext, onSkip, onRetry, retrying }: StepProp
 					<CheckResultList>
 						{groups.map(({ provider, selectors }) => (
 							<CheckResult key={provider.name} status="pass" statusLabel="Signing" title={provider.name} summary={`Selectors: ${selectors.join(', ')}`} />
+						))}
+					</CheckResultList>
+				</section>
+			) : null}
+
+			{revoked.length > 0 ? (
+				<section aria-label="Revoked keys" className="space-y-2">
+					<p className="text-sm text-ink-2">{plural(revoked.length, 'selector')} with an empty key (p=), which means revoked. Nothing signed with {revoked.length === 1 ? 'it' : 'them'} can pass.</p>
+					<CheckResultList>
+						{revoked.map((sel) => (
+							<CheckResult key={sel.name} status="fail" statusLabel="Revoked" title={sel.name.replace(/\._domainkey.*$/, '')} summary="Empty key: revoked." />
 						))}
 					</CheckResultList>
 				</section>
@@ -124,7 +136,10 @@ export function DkimStep({ status, onNext, onSkip, onRetry, retrying }: StepProp
 
 			{none && selectorErrors.length === 0 ? (
 				<div className="space-y-2 text-sm text-ink-2">
-					<p className="font-medium text-ink-1">No DKIM selectors found{dkim.source === 'doh' ? ' (checked common selectors)' : ''}.</p>
+					<p className="font-medium text-ink-1">
+						{revoked.length > 0 ? 'No usable DKIM key found' : 'No DKIM selectors found'}
+						{dkim.source === 'doh' ? ' (checked common selectors)' : ''}.
+					</p>
 					{severity === 'warning' ? (
 						<p>
 							Your DMARC policy is <code className="font-mono text-ink-1">p={dmarcPolicy}</code> but mail lacks DKIM signatures. Without DKIM, some messages may fail DMARC

@@ -9,15 +9,17 @@ import { Button } from "./button.js";
 /**
  * - pass / warn / fail: we looked up the record and judged it.
  * - missing: the lookup worked and the record is not there (a finding).
+ * - neutral: nothing to look up because the thing it depends on is not configured. Not a finding, not a failure.
  * - error: the lookup itself failed (timeout, SERVFAIL, resolver down). We do NOT know if the record exists.
  */
-export type CheckStatus = "pass" | "warn" | "fail" | "missing" | "error";
+export type CheckStatus = "pass" | "warn" | "fail" | "missing" | "neutral" | "error";
 
 export const checkStatusMeta: Record<CheckStatus, { label: string; icon: LucideIcon }> = {
 	pass: { label: "Pass", icon: CheckCircle2 },
 	warn: { label: "Warning", icon: AlertTriangle },
 	fail: { label: "Fail", icon: XCircle },
 	missing: { label: "Not found", icon: CircleSlash },
+	neutral: { label: "Not configured", icon: CircleSlash },
 	error: { label: "Lookup failed", icon: CircleHelp },
 };
 
@@ -28,6 +30,7 @@ const row = cva("flex gap-3 rounded-lg border p-4", {
 			warn: "border-warning/40 bg-warning-subtle",
 			fail: "border-danger/40 bg-danger-subtle",
 			missing: "border-danger/40 bg-danger-subtle",
+			neutral: "border-line bg-surface-2",
 			// Neutral + dashed: "we could not check" must not read as pass or fail.
 			error: "border-dashed border-ink-3 bg-surface-2",
 		},
@@ -39,6 +42,7 @@ const iconTone: Record<CheckStatus, string> = {
 	warn: "text-warning",
 	fail: "text-danger",
 	missing: "text-danger",
+	neutral: "text-ink-2",
 	error: "text-ink-2",
 };
 const labelTone: Record<CheckStatus, string> = {
@@ -46,6 +50,7 @@ const labelTone: Record<CheckStatus, string> = {
 	warn: "text-warning",
 	fail: "text-danger",
 	missing: "text-danger",
+	neutral: "text-ink-1",
 	error: "text-ink-1",
 };
 

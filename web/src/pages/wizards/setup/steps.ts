@@ -1,5 +1,6 @@
 import type { Severity } from '../../../components/wizard/SeverityBadge';
 import { findUnsignedSpfProviders } from '@inbox-angel/dns-checks/email-service-providers';
+import { isRevokedDkimKey } from '../../../lib/dkim';
 import type { OnboardingStatus, WizardState } from '../../../lib/types';
 
 export const STEP_KEYS = ['domain', 'spf', 'dkim', 'dmarc', 'routing'] as const satisfies readonly (keyof WizardState)[];
@@ -54,8 +55,13 @@ export function spfSeverity(spf: OnboardingStatus['spf'], lookupFailed = false):
 	return 'good';
 }
 
+/** Selectors split the way the domain page counts them: an empty p= is a revoked key and never counts as present. */
+export function splitDkimSelectors(selectors: OnboardingStatus['dkim']['selectors']) {
+	return { usable: selectors.filter((s) => !isRevokedDkimKey(s.record)), revoked: selectors.filter((s) => isRevokedDkimKey(s.record)) };
+}
+
 export function dkimSeverity(dkim: OnboardingStatus['dkim'], dmarcPolicy: string | null, unsignedCount: number, lookupsFailed = false): Severity {
-	const hasDkim = dkim.selectors.length > 0;
+	const hasDkim = splitDkimSelectors(dkim.selectors).usable.length > 0;
 	// Some selector lookups failed and none succeeded: "no DKIM" would be a guess.
 	if (!hasDkim && lookupsFailed) return 'unknown';
 	const strict = dmarcPolicy === 'quarantine' || dmarcPolicy === 'reject';
@@ -79,4 +85,4 @@ export function routingSeverity(r: OnboardingStatus['routing'], lookupsFailed = 
 	return 'error';
 }
 
-export const unsignedProviders = (dkim: OnboardingStatus['dkim'], spfRecord: string | null) => findUnsignedSpfProviders(dkim.selectors, spfRecord);
+export const unsignedProviders = (dkim: OnboardingStatus['dkim'], spfRecord: string | null) => findUnsignedSpfProviders(splitDkimSelectors(dkim.selectors).usable, spfRecord);
