@@ -2,7 +2,7 @@ import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
-import { readSignupDomain } from '../../lib/signup-intent';
+import { bindSignupDomainToEmail, readSignupDomain } from '../../lib/signup-intent';
 import { useSession } from '../../lib/session';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
@@ -53,6 +53,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
+			if (mode === 'signup') bindSignupDomainToEmail(email);
 			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Inbox-Angel-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
 			if (res.verification_required) {

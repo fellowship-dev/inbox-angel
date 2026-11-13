@@ -90,6 +90,35 @@ describe('GET /api/domains/:id/onboarding-status', () => {
   });
 });
 
+describe('GET /api/domains/:id/onboarding-status with a wildcard TXT (gov.uk style)', () => {
+  const DMARC = 'v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@acme.com';
+  const answerAll = (record: string) => stubDns((n, t) => (t === 'TXT' && n.endsWith('._domainkey.acme.com') ? txt(record) : undefined));
+
+  it('does not report the DMARC record the wildcard answers with as a DKIM key', async () => {
+    answerAll(DMARC);
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv(), ctx)).json() as any;
+    expect(body.dkim.source).toBe('doh');
+    expect(body.dkim.selectors).toEqual([]);
+    expect(body.dkim.wildcard).toBe(true);
+    expect(body.dkim.wildcard_record).toBe(DMARC);
+    expect(body.dns_errors).toBeUndefined();
+  });
+
+  it('an identical DKIM key at every name is a wildcard too: no selector is named', async () => {
+    answerAll('v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A');
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv(), ctx)).json() as any;
+    expect(body.dkim.selectors).toEqual([]);
+    expect(body.dkim.wildcard).toBe(true);
+  });
+
+  it('a record that is not DKIM-shaped at one selector is not a key, and not a wildcard', async () => {
+    stubDns((n, t) => (t === 'TXT' && n === 'google._domainkey.acme.com' ? txt(DMARC) : t === 'TXT' && n === 's1._domainkey.acme.com' ? txt('v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A') : undefined));
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv(), ctx)).json() as any;
+    expect(body.dkim.selectors.map((s: any) => s.name)).toEqual(['s1._domainkey.acme.com']);
+    expect(body.dkim.wildcard).toBe(false);
+  });
+});
+
 describe('GET /api/domains/:id/onboarding-status stores what it resolved', () => {
   const COLS = 'spf_record, dmarc_policy, dmarc_issue, dmarc_inherited_from, dns_checked_at, dns_check_attempted_at, dns_check_status';
   const stored = (env: Env, id = 1) => (env.DB as any).sqlite.prepare(`SELECT ${COLS} FROM domains WHERE id = ?`).get(id) as any;

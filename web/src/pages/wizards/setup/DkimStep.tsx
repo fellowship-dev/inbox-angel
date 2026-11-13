@@ -6,6 +6,7 @@ import { StepNav } from '../../../components/wizard/StepNav';
 import { parseDmarcPolicy } from '../../../lib/dmarc-record';
 import { matchDkimProvider, type EmailProvider } from '@inbox-angel/dns-checks/email-service-providers';
 import type { StepProps } from './SpfStep';
+import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../../lib/dkim-wildcard';
 import { dkimSeverity, dnsErrorDetail, dnsErrorsFor, splitDkimSelectors, unsignedProviders } from './steps';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -38,7 +39,8 @@ export function DkimStep({ status, onNext, onSkip, onRetry, retrying }: StepProp
 	const { groups, unknown } = groupSelectors(usable);
 	const unsigned = unsignedProviders(dkim, status.spf.record);
 	const severity = dkimSeverity(dkim, dmarcPolicy, unsigned.length, selectorErrors.length > 0);
-	const none = usable.length === 0 && unsigned.length === 0;
+	const wildcard = dkim.wildcard === true;
+	const none = usable.length === 0 && unsigned.length === 0 && !wildcard;
 
 	return (
 		<StepCard title="DKIM signing" badge={<SeverityBadge severity={severity} />}>
@@ -51,6 +53,12 @@ export function DkimStep({ status, onNext, onSkip, onRetry, retrying }: StepProp
 						))}
 					</CheckResultList>
 				</section>
+			) : null}
+
+			{wildcard ? (
+				<CheckResultList>
+					<CheckResult status="neutral" statusLabel={DKIM_WILDCARD_LABEL} title="DKIM selectors" summary={dkimWildcardSummary(status.domain)} />
+				</CheckResultList>
 			) : null}
 
 			{revoked.length > 0 ? (

@@ -202,7 +202,12 @@ export async function handleWorkspaceRoutes(
     if (!to || to === user.id) return err('user_id must be another member of this workspace', 400);
     const target = await (await deps.tenantFor(id)).scope.team.getMember(to);
     if (!target) return err('that person is not a member of this workspace', 404);
-    if (!(await lifecycle.transferOwnership(id, user.id, to))) return err('could not transfer ownership; reload and try again', 409);
+    const caps = deps.mode === 'saas' ? planLimits({ ...deps.env, MODE: 'saas' }) : null;
+    if (!(await lifecycle.transferOwnership(id, user.id, to, caps?.workspacesPerUser))) {
+      // Nothing changed: the target is at the cap (and not already an owner here), or the request was stale.
+      if (caps && target.role !== 'owner' && (await lifecycle.ownedCount(to)) >= caps.workspacesPerUser) return planLimitResponse(deps.env ?? {}, 'workspaces_per_user', caps.workspacesPerUser);
+      return err('could not transfer ownership; reload and try again', 409);
+    }
     await globalQueries(deps.db).users.setLegacyRole(to, 'admin');
     audit(id, { action: 'workspace.ownership_transferred', resource_type: 'user', resource_id: to, resource_name: target.email, before_value: { owner: user.email }, after_value: { owner: target.email } });
     return json({ ok: true });

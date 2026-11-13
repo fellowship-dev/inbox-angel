@@ -63,7 +63,7 @@ export function domainReportOf(domain: string, dns: DnsCheckResult): DomainRepor
     mx,
     spf,
     dmarc: dmarcOf(domain, dns),
-    dkim: { found: [], errors: [], scanned: 0 },
+    dkim: { found: [], errors: [], scanned: 0, wildcard: false, wildcardRecord: null },
     mtaSts: { status: 'error', txt: null, policy: null, policyUrl: `https://mta-sts.${domain}/.well-known/mta-sts.txt`, issues: [], error: NOT_CHECKED },
     bimi: { status: 'error', raw: null, foundAt: null, logo: { ...notAsset }, vmc: { ...notAsset, validated: false }, error: NOT_CHECKED },
     providers: detectProviders({ mxHosts: mx.hosts.map(h => h.host), spfIncludes: spf.includes }),

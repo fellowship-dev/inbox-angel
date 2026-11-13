@@ -92,13 +92,26 @@ export function workspaceLifecycle(dbLike: DbLike) {
 		 * owner now and `toId` a member; the demotion only when `toId` is an owner by then, so a stale request changes nothing
 		 * and never leaves the workspace without an owner. Returns whether it applied.
 		 */
-		async transferOwnership(workspaceId: string, fromId: string, toId: string): Promise<boolean> {
-						await db.batch([
-				db.update(memberships).set({ role: 'owner' }).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, toId), sql`EXISTS (SELECT 1 FROM memberships o WHERE o.workspace_id = ${workspaceId} AND o.user_id = ${fromId} AND o.role = 'owner')`)),
+		async transferOwnership(workspaceId: string, fromId: string, toId: string, maxOwned?: number): Promise<boolean> {
+			// With a cap, the promotion also needs `toId` to own fewer than `maxOwned` workspaces now; the demotion follows the
+			// promotion, so a refused promotion leaves both roles as they were.
+			const underCap = maxOwned === undefined ? sql`1 = 1`
+				: sql`(SELECT COUNT(*) FROM memberships WHERE user_id = ${toId} AND role = 'owner' AND workspace_id IN (SELECT id FROM workspaces)) < ${maxOwned}`;
+			await db.batch([
+				db.update(memberships).set({ role: 'owner' }).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, toId), underCap, sql`EXISTS (SELECT 1 FROM memberships o WHERE o.workspace_id = ${workspaceId} AND o.user_id = ${fromId} AND o.role = 'owner')`)),
 				db.update(memberships).set({ role: 'admin' }).where(and(eq(memberships.workspace_id, workspaceId), eq(memberships.user_id, fromId), eq(memberships.role, 'owner'), sql`EXISTS (SELECT 1 FROM memberships n WHERE n.workspace_id = ${workspaceId} AND n.user_id = ${toId} AND n.role = 'owner')`)),
 			]);
 			return (await this.roleOf(toId, workspaceId)) === 'owner' && (await this.roleOf(fromId, workspaceId)) !== 'owner';
 		},
+
+		/** How many workspaces a person owns. */
+		ownedCount: (userId: string) =>
+			db
+				.select({ n: sql<number>`COUNT(*)` })
+				.from(memberships)
+				.where(/* workspace-scope-exempt: the cap counts the workspaces a person owns, across all of them */ and(eq(memberships.user_id, userId), eq(memberships.role, 'owner'), sql`${memberships.workspace_id} IN (SELECT id FROM workspaces)`))
+				.get()
+				.then((r) => r?.n ?? 0),
 
 		/** Delete a workspace and everything it owns (domains cascade to their reports and per-domain config). */
 		purge: (workspaceId: string) =>
