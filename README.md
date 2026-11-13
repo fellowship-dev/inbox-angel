@@ -3,6 +3,8 @@
 Cloudflare Workers backend for [InboxAngel](https://github.com/Fellowship-dev/inbox-angel).
 Self-hostable email authentication platform — DMARC monitoring, SPF management, MTA-STS provisioning, and TLS-RPT reporting, all running on your own Cloudflare account.
 
+**Coding agents:** asked to "set up DMARC monitoring for my domain" or to "self-host this"? Read [docs/coding-agents.md](docs/coding-agents.md) first: which path to take, what each costs, and the exact steps.
+
 ---
 
 ## What it does
@@ -42,7 +44,21 @@ Sending MTA → attempts TLS → policy says "enforce" → must succeed or rejec
 
 ---
 
-## Self-hosting
+<a id="self-hosting"></a>
+
+## Advanced: self-hosting
+
+Self-hosting runs the whole product on your own Cloudflare account. It is fully supported by the code in this repository; it also makes you the operator.
+
+### What self-hosting takes
+
+- **A Cloudflare account** holding a Worker, a D1 database and a KV namespace (`OAUTH_KV`), plus a runtime API token with the permissions below. One-click DNS changes and report intake need the domain's DNS on Cloudflare; with external DNS you copy records by hand.
+- **Configuration before first use:** a canonical HTTPS origin (`BETTER_AUTH_URL`) and a private, single-use installer proof (`BOOTSTRAP_SECRET`). A successful deploy is not a finished setup.
+- **For DMARC report ingestion:** Cloudflare Email Routing on a reports subdomain (MX records and a rule to the Worker) and the per-domain authorization records the Worker provisions. Live DNS checks work without it.
+- **For mail to arbitrary recipients** (free-check replies, alerts to addresses that are not verified destinations): a sending domain onboarded in Cloudflare Email Service, which needs Workers Paid. Without it, outbound mail reaches only verified Email Routing destinations.
+- **Costs:** whatever Cloudflare charges for Workers, D1, KV and email under your plan and usage. This project charges nothing.
+- **Upgrades are yours:** back up D1, run migrations, redeploy ([Upgrading](#upgrading)). `GET /api/version` shows when a newer release exists.
+- **No support guarantee:** MIT licensed and provided as is, with no warranty, support agreement or uptime commitment. Issues are welcome on GitHub.
 
 ### Before you start — create your Cloudflare API token
 

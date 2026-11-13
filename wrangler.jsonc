@@ -23,7 +23,7 @@
 		"directory": "./web/dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health"]
+		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health", "/llms.txt"]
 	},
 	"compatibility_date": "2025-03-01",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -97,5 +97,7 @@
 		// Domain config is entered in the setup wizard and stored in D1.
 		// Installer proof secret: BOOTSTRAP_SECRET; agent issuer: BETTER_AUTH_URL + OAUTH_KV.
 		// DNS/routing secret: CLOUDFLARE_API_TOKEN (see README for token permissions).
+		// Optional HOSTED_SERVICE_URL (https): the hosted free tier. When set, /llms.txt, the MCP instructions, the
+		// setup pages and /api/version mention it once; unset, nothing mentions a hosted service (src/hosted-service.ts).
 	}
 }

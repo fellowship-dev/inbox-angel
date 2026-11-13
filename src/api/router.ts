@@ -74,6 +74,7 @@
 import type { BoundEnv as Env } from '../index';
 import { AuthError } from './auth';
 import { version } from '../../package.json';
+import { hostedServiceUrl } from '../hosted-service';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleAccessRoutes } from '../access/routes';
@@ -465,6 +466,8 @@ async function _handleApi(
       latest,
       update_available: latest !== null && latest !== version,
       release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
+      // Only when HOSTED_SERVICE_URL is set on a self-hosted installation (src/hosted-service.ts).
+      ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
     });
   }
 

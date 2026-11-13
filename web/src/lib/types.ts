@@ -305,6 +305,8 @@ export interface LeadsResponse {
 export interface AuthStatus {
   configured: boolean;
   mode: 'self-host' | 'saas';
+  /** Self-host only, present when HOSTED_SERVICE_URL is set: the hosted free tier's https URL. */
+  hosted_service_url?: string;
   signup_open: boolean;
   oauth_providers: string[];
   prefill: { name: string; email: string };

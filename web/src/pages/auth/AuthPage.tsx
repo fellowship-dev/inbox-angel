@@ -6,6 +6,7 @@ import { useSession } from '../../lib/session';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
+import { HostedAlternative } from '../../components/HostedAlternative';
 
 const PROVIDER_LABELS: Record<string, string> = { github: 'GitHub', google: 'Google' };
 
@@ -121,6 +122,8 @@ export function AuthPage() {
 					{mode === 'signin' ? 'Sign in' : 'Create account'}
 				</Button>
 			</form>
+
+			{mode === 'setup' ? <HostedAlternative url={status.hosted_service_url} /> : null}
 
 			{mode === 'signin' ? (
 				<p className="text-center text-sm">
