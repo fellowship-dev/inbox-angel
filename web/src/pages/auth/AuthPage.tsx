@@ -2,6 +2,7 @@ import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
+import { readSignupDomain } from '../../lib/signup-intent';
 import { useSession } from '../../lib/session';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
@@ -18,10 +19,10 @@ type Mode = 'setup' | 'signup' | 'signin';
  *  - hosted mode: sign in, or create an account when sign-up is open;
  *  - otherwise: sign in (a self-hosted instance is closed after setup: new people come in by invite).
  */
-export function AuthPage() {
+export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const { status, signedIn } = useSession();
 	const navigate = useNavigate();
-	const [creating, setCreating] = useState(false);
+	const [creating, setCreating] = useState(initialMode === 'signup');
 	const [name, setName] = useState('');
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
@@ -83,12 +84,18 @@ export function AuthPage() {
 
 	if (verifyFor) return <CheckEmail email={verifyFor} onBack={() => setVerifyFor(null)} />;
 
+	const requestedDomain = mode === 'signup' ? readSignupDomain() : null;
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
 		mode === 'setup' ? "Create this installation's owner using the single-use proof held by its installer. No shared default password is used." : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
+			{mode === 'signup' && requestedDomain ? (
+				<p className="text-sm text-ink-2">
+					You're adding <span className="font-mono [overflow-wrap:anywhere]">{requestedDomain}</span>. You'll confirm it after you verify your email.
+				</p>
+			) : null}
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
 				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="Single-use secret supplied by the person who installed this instance. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
 				{registering ? (

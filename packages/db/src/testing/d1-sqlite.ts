@@ -58,25 +58,33 @@ export interface TestD1 extends D1Database {
 
 export function createTestD1(sqlite = new DatabaseSync(':memory:')): TestD1 {
 	sqlite.exec('PRAGMA foreign_keys = ON');
+	// D1 serialises writes: one batch finishes (COMMIT or ROLLBACK) before the next begins. Without this queue two overlapping
+	// batches here would nest BEGINs, so concurrent callers (Promise.all) would fail instead of queueing as they do on D1.
+	let queue: Promise<unknown> = Promise.resolve();
 	const db = {
 		sqlite,
 		prepare: (sql: string) => new Statement(sqlite, sql),
-		async batch(stmts: Statement[]) {
-			sqlite.exec('BEGIN');
-			try {
-				const out = [];
-				for (const s of stmts) out.push(await (/^\s*(select|with|pragma)/i.test(s.sql) ? s.all() : s.run()));
-				sqlite.exec('COMMIT');
-				return out;
-			} catch (e) {
-				sqlite.exec('ROLLBACK');
-				throw e;
-			}
+		batch(stmts: Statement[]) {
+			const run = queue.then(() => runBatch(stmts));
+			queue = run.catch(() => undefined);
+			return run;
 		},
 		async exec(sql: string) {
 			sqlite.exec(sql);
 			return { count: 1, duration: 0 };
 		},
 	};
+	async function runBatch(stmts: Statement[]) {
+		sqlite.exec('BEGIN');
+		try {
+			const out = [];
+			for (const s of stmts) out.push(await (/^\s*(select|with|pragma)/i.test(s.sql) ? s.all() : s.run()));
+			sqlite.exec('COMMIT');
+			return out;
+		} catch (e) {
+			sqlite.exec('ROLLBACK');
+			throw e;
+		}
+	}
 	return db as unknown as TestD1;
 }
