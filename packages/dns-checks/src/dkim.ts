@@ -106,27 +106,54 @@ export interface DkimScan {
 
 export const DKIM_WILDCARD_MIN_ANSWERS = 3;
 
+const answerKey = (a: readonly string[]) => [...a].sort().join('\n');
+
 /**
  * Given what each probed selector answered (empty array: no TXT record), the one record they all share, or null. At least
- * {@link DKIM_WILDCARD_MIN_ANSWERS} names must have answered and every answer must be identical.
+ * {@link DKIM_WILDCARD_MIN_ANSWERS} names must have answered and every answer must be identical. Identical answers alone do
+ * not prove a wildcard: {@link scanDkimSelectors} confirms it against a random name.
  */
 export function sharedWildcardRecord(answers: readonly (readonly string[])[]): string | null {
-  const answered = answers.filter(a => a.length > 0).map(a => [...a].sort().join('\n'));
+  const answered = answers.filter(a => a.length > 0).map(answerKey);
   if (answered.length < DKIM_WILDCARD_MIN_ANSWERS || answered.some(a => a !== answered[0])) return null;
   return answers.find(a => a.length > 0)![0];
 }
 
+export interface DkimScanOptions {
+  /** 16 hex digits naming the random probe selector. Injectable for tests; default: `crypto.getRandomValues`. */
+  randomHex?: () => string;
+}
+
+const randomHex16 = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Probes the selectors. When at least {@link DKIM_WILDCARD_MIN_ANSWERS} of them answer, all with one identical record, that is
+ * either a wildcard or one real key published under several selectors. One more request settles it: a random, unguessable
+ * selector (`ia-wc-<16 hex>`). It is a wildcard only if that name answers with the same record too. If the random name has
+ * no record, the identical answers are real. If the probe itself fails, nothing can be said: no wildcard is claimed and no
+ * key is named, and the failed probe is listed in `errors`, so callers report the scan as incomplete, never as "found" or "missing".
+ * No identical answers, no extra request.
+ */
 export async function scanDkimSelectors(
   resolver: Resolver,
   domain: string,
   selectors: readonly string[] = COMMON_DKIM_SELECTORS,
+  options: DkimScanOptions = {},
 ): Promise<DkimScan> {
   const results = await Promise.all(selectors.map(s => lookupDkim(resolver, domain, s)));
-  const wildcardRecord = sharedWildcardRecord(results.filter(r => r.status !== 'error').map(r => r.txt));
+  const errors = results.filter(r => r.status === 'error');
+  const shared = sharedWildcardRecord(results.filter(r => r.status !== 'error').map(r => r.txt));
+  let wildcardRecord: string | null = null;
+  let withheld = false;
+  if (shared !== null) {
+    const probe = await lookupDkim(resolver, domain, `ia-wc-${(options.randomHex ?? randomHex16)()}`);
+    if (probe.status === 'error') { errors.push(probe); withheld = true; }
+    else if (probe.txt.length > 0 && answerKey(probe.txt) === answerKey(results.find(r => r.txt.length > 0)!.txt)) wildcardRecord = shared;
+  }
   return {
-    // A wildcard cannot tell us which selector a sender uses, whatever it answers.
-    found: wildcardRecord === null ? results.filter(r => r.status === 'found') : [],
-    errors: results.filter(r => r.status === 'error'),
+    // A wildcard cannot tell us which selector a sender uses, whatever it answers; an unconfirmed one cannot say that these keys are real.
+    found: wildcardRecord === null && !withheld ? results.filter(r => r.status === 'found') : [],
+    errors,
     scanned: results.length,
     wildcard: wildcardRecord !== null,
     wildcardRecord,

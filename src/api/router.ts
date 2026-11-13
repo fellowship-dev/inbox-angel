@@ -118,7 +118,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
@@ -1005,19 +1005,11 @@ async function _handleApi(
               return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const, wildcard: false };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
-          // DoH fallback
-          const answers = await Promise.all(DKIM_SELECTORS.map(async sel => {
-            const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
-            if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
-            return { name: `${sel}._domainkey.${domain.domain}`, records: t.records };
-          }));
-          // Every name answering with one identical record is a wildcard: it says nothing about which selectors exist.
-          const wildcardRecord = sharedWildcardRecord(answers.filter(a => a !== null).map(a => a!.records));
-          if (wildcardRecord !== null) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: wildcardRecord };
-          const hits = answers.flatMap(a => {
-            const record = a?.records.find(isDkimRecord);
-            return a && record ? [{ name: a.name, record }] : [];
-          });
+          // DoH fallback: the shared scan, so the wildcard rule (identical answers, confirmed by a random name) is the same everywhere.
+          const scan = await scanDkimSelectors(dnsResolver, domain.domain, DKIM_SELECTORS);
+          for (const e of scan.errors) dns_errors.push(`dkim ${e.selector}: ${e.error}`);
+          if (scan.wildcard) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: scan.wildcardRecord };
+          const hits = scan.found.map(f => ({ name: f.name, record: f.txt.find(isDkimRecord)! }));
           return { selectors: hits, source: 'doh' as const, wildcard: false };
         })(),
 
