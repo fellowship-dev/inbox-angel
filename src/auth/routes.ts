@@ -16,6 +16,7 @@ import type { SignupIntent } from './signup-policy';
 import { currentUser, passesCsrfCheck } from './session';
 import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
+import { hostedServiceUrl } from '../hosted-service';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
@@ -181,6 +182,8 @@ export async function handleAuthRoute(
     return json({
       configured,
       mode: saas ? 'saas' : 'self-host',
+      // Self-host only, and only when HOSTED_SERVICE_URL is set: the installer-proof screen mentions it once.
+      ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
       signup_open: saas,
       oauth_providers: enabledOAuthProviders(env),
       prefill: { name: '', email: '' },
