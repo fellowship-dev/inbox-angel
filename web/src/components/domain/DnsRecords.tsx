@@ -9,6 +9,7 @@ import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '
 import { useHosted } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 import { Section, WriteButton } from '../states';
+import { HELP_PRIORITY, TalkToMax } from '../TalkToMax';
 import { ConfirmDialog } from './ConfirmDialog';
 
 const SPF_LOOKUP_LIMIT = 10;
@@ -230,7 +231,9 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 						title="This domain does not resolve"
 						summary="DNS says this name does not exist, so there are no SPF, DKIM or DMARC records to check. Check the spelling, or register the domain."
 						onRetry={retryOnboarding}
-					/>
+					>
+						<TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="Sure this is the right name?" about={`about ${domain.domain}`} />
+					</CheckResult>
 				) : (
 					<>
 						{dmarcRow}

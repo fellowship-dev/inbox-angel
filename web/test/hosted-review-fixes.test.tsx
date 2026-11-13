@@ -145,6 +145,7 @@ describe('hosted domain page DMARC row', () => {
 		records(onboarding({ nxdomain: true, spf: { record: null, lookup_count: null, flattening_active: false } }, none));
 		expect(await screen.findByText('This domain does not resolve')).toBeInTheDocument();
 		expect(screen.queryByText(/No SPF record found|No DMARC policy applies/)).not.toBeInTheDocument();
+		expect(screen.getByText(/Sure this is the right name\?/)).toBeInTheDocument();
 	});
 });
 
