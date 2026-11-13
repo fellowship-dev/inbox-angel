@@ -1,0 +1,2 @@
+import worker from './index';
+export default { ...(worker as any), async fetch(req: Request, env: any, ctx: any) { const u = new URL(req.url); if (u.pathname === '/api/__rv_cron') { const t0 = Date.now(); await (worker as any).scheduled({ cron: u.searchParams.get('cron') ?? '0 8 * * *', scheduledTime: Date.now(), noRetry() {} }, env, ctx); return new Response('cron done ' + (Date.now() - t0) + 'ms'); } return (worker as any).fetch(req, env, ctx); } };
