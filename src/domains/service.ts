@@ -96,6 +96,14 @@ export async function enrollDomain(tenant: TenantContext, input: string, userEma
   return commitVerifiedDomain(tenant, domain, admission.via, userEmail, ctx, actorId, options);
 }
 
+/** The domain, when this workspace already has it live: the answer for a repeat of something that already worked. Null otherwise. */
+export async function resumeExistingDomain(tenant: TenantContext, domain: string, options: EnrollmentOptions = {}) {
+  const existing = await tenant.scope.domains.getByName(domain);
+  if (!existing) return null;
+  await assertExistingProductMapping(tenant, existing, options);
+  return { ...enrollmentView(existing, tenant.settings.reportsDomain), resumed: true as const };
+}
+
 /** Inserts a domain whose ownership is established, with the side effects of adding one. */
 export async function commitVerifiedDomain(tenant: TenantContext, domain: string, via: VerifiedVia, userEmail?: string, ctx?: ExecutionContext, actorId?: string, options: EnrollmentOptions = {}) {
   await authorizeProductEnrollment(tenant, domain, options);
@@ -116,7 +124,12 @@ export async function commitVerifiedDomain(tenant: TenantContext, domain: string
     const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via }, options.productId, { maxDomains: domainCap(tenant) });
     domainId = result.meta.last_row_id as number;
   } catch (e: any) {
-    if (e instanceof PlanLimitError) throw planLimitError(tenant, e.max);
+    if (e instanceof PlanLimitError) {
+      // A concurrent verify of the same domain may have taken the last place: that is this domain being added, not a cap.
+      const raced = await resumeExistingDomain(tenant, domain, options);
+      if (raced) return raced;
+      throw planLimitError(tenant, e.max);
+    }
     if (e?.message?.includes('UNIQUE')) {
       // Concurrent replay may have won the insert; only resume a row in this workspace.
       const raced = await tenant.scope.domains.getByName(domain);

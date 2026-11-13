@@ -20,3 +20,13 @@ export async function hosted(extra: Record<string, unknown> = {}) {
   const api = (who: { token: string }, method: string, path: string, body?: unknown) => call(env, method, path, { key: who.token, body });
   return { db, env, rows, user, api };
 }
+
+export const fillDomains = (db: ReturnType<typeof createMigratedD1>, ws: string, n: number, prefix = 'f') => {
+  for (let i = 0; i < n; i++) db.sqlite.prepare("INSERT INTO domains (domain, rua_address, workspace_id, verified_via) VALUES (?, 'x', ?, 'txt')").run(`${prefix}${i}.example.com`, ws);
+};
+
+/** DNS where `host` has the TXT `txt` and everything else does not exist. */
+export const provenDns = (host: string, txt: string) => vi.stubGlobal('fetch', async (url: string) => {
+  const name = new URL(url).searchParams.get('name');
+  return new Response(JSON.stringify(name === host ? { Status: 0, Answer: [{ name, type: 16, TTL: 60, data: `"${txt}"` }] } : { Status: 3 }));
+});

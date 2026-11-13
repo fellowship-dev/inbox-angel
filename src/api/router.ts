@@ -101,7 +101,7 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
 import { claimPreviewResponse } from '../domains/claim-preview';
@@ -736,6 +736,9 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
+      // Already added (a second tab, a double click, two requests at once): say so, whatever the cap and whatever DNS says now.
+      const added = await resumeExistingDomain(tenant, claim.domain);
+      if (added) return json(added, 200);
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
