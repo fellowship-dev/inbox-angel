@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-13T12:22:53.705Z",
+  "title": "Design System: Inbox Angel Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "navy": {
+        "role": "primary",
+        "displayName": "Sober Navy",
+        "canonical": "#0B1F3A",
+        "tonalRamp": [
+          "#040B17",
+          "#16273E",
+          "#304664",
+          "#506787",
+          "#738BAD",
+          "#9CB0CB",
+          "#C2CFE1",
+          "#EAEFF5"
+        ]
+      },
+      "halo-gold": {
+        "role": "primary",
+        "displayName": "Halo Gold",
+        "canonical": "#FAD172",
+        "tonalRamp": [
+          "#160800",
+          "#3C2000",
+          "#613D00",
+          "#855F00",
+          "#AA8317",
+          "#C9AA64",
+          "#DFCCA0",
+          "#F5EEDF"
+        ]
+      },
+      "blush": {
+        "role": "secondary",
+        "displayName": "Blush",
+        "canonical": "#FCA0A4",
+        "tonalRamp": [
+          "#1D0104",
+          "#490C16",
+          "#74262F",
+          "#9B494F",
+          "#C26C71",
+          "#DF989B",
+          "#F0C0C1",
+          "#FBEAEA"
+        ]
+      },
+      "surface-page": {
+        "role": "neutral",
+        "displayName": "Cool Page",
+        "canonical": "#F7F8FA",
+        "tonalRamp": [
+          "#0B0B0C",
+          "#262628",
+          "#444547",
+          "#656668",
+          "#88898B",
+          "#ADAEAF",
+          "#CDCECF",
+          "#EEEEEF"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Slate Ink",
+        "canonical": "#526175",
+        "tonalRamp": [
+          "#060B13",
+          "#1C2735",
+          "#384659",
+          "#58677C",
+          "#7B8BA0",
+          "#A2AFC1",
+          "#C6CFDA",
+          "#ECEFF3"
+        ]
+      },
+      "success": {
+        "role": "semantic",
+        "displayName": "Success",
+        "canonical": "#147A3A",
+        "tonalRamp": [
+          "#001200",
+          "#003302",
+          "#005718",
+          "#147A3A",
+          "#439F5D",
+          "#7DC18B",
+          "#B0DBB7",
+          "#E4F3E7"
+        ]
+      },
+      "warning": {
+        "role": "semantic",
+        "displayName": "Warning",
+        "canonical": "#AA4F08",
+        "tonalRamp": [
+          "#200000",
+          "#4E0700",
+          "#7B2300",
+          "#A24800",
+          "#CA6C32",
+          "#E5996F",
+          "#F4C1A6",
+          "#FDEAE1"
+        ]
+      },
+      "danger": {
+        "role": "semantic",
+        "displayName": "Danger",
+        "canonical": "#B91C1C",
+        "tonalRamp": [
+          "#270000",
+          "#5D0000",
+          "#900000",
+          "#BB1E1E",
+          "#E54D43",
+          "#FE8679",
+          "#FFB6AC",
+          "#FFE7E3"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "page-title": {
+        "displayName": "Page title",
+        "purpose": "PageHeader h1, one per screen."
+      },
+      "card-title": {
+        "displayName": "Card / section title",
+        "purpose": "CardTitle and section headings."
+      },
+      "stat-value": {
+        "displayName": "Stat value",
+        "purpose": "Headline numbers, tabular figures."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Working text, 14px; 16px for large."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Nav section labels and record field names."
+      },
+      "record": {
+        "displayName": "Record",
+        "purpose": "DNS record values, addresses, codes (Geist Mono)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "soft",
+        "value": "0 1px 2px 0 rgb(15 23 42 / 0.05)",
+        "purpose": "Cards (shadow-soft = --shadow-sm)."
+      },
+      {
+        "name": "lift",
+        "value": "0 4px 6px -1px rgb(15 23 42 / 0.07), 0 2px 4px -2px rgb(15 23 42 / 0.05)",
+        "purpose": "Auth card only (--shadow-md)."
+      },
+      {
+        "name": "pop",
+        "value": "0 10px 15px -3px rgb(15 23 42 / 0.07), 0 4px 6px -4px rgb(15 23 42 / 0.05)",
+        "purpose": "Menus and toasts (--shadow-lg)."
+      },
+      {
+        "name": "float",
+        "value": "0 20px 25px -5px rgb(15 23 42 / 0.08), 0 8px 10px -6px rgb(15 23 42 / 0.04)",
+        "purpose": "Dialogs (--shadow-xl). Dark mode uses rgb(0 0 0) at 0.3 to 0.5 alpha."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ia-fade-in",
+        "value": "150ms ease",
+        "purpose": "Opacity entrance."
+      },
+      {
+        "name": "ia-pop",
+        "value": "120ms ease",
+        "purpose": "Menus and popovers."
+      },
+      {
+        "name": "ia-scale-in",
+        "value": "200ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Dialogs."
+      },
+      {
+        "name": "ia-slide-up",
+        "value": "200ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Toasts."
+      },
+      {
+        "name": "ia-slide-left",
+        "value": "220ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Mobile drawer."
+      },
+      {
+        "name": "ia-shimmer",
+        "value": "1.5s infinite",
+        "purpose": "Skeleton loading."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Brand fill, one per section.",
+      "html": "<button class=\"ds-btn-primary\">Check domain</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:10px;font:500 14px var(--font-geist-sans),system-ui,sans-serif;background:var(--brand);color:var(--brand-fg);border:0;cursor:pointer;transition:background-color .15s,color .15s}.ds-btn-primary:hover{background:var(--brand-hover)}.ds-btn-primary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral action beside a primary.",
+      "html": "<button class=\"ds-btn-secondary\">Export</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:10px;font:500 14px var(--font-geist-sans),system-ui,sans-serif;background:var(--surface-1);color:var(--ink-1);border:1px solid var(--line-strong);cursor:pointer;transition:background-color .15s,color .15s}.ds-btn-secondary:hover{background:var(--surface-2)}.ds-btn-secondary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action.",
+      "html": "<button class=\"ds-btn-danger\">Delete domain</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:10px;font:500 14px var(--font-geist-sans),system-ui,sans-serif;background:var(--danger-subtle);color:var(--danger);border:1px solid var(--danger);cursor:pointer;transition:background-color .15s,color .15s}.ds-btn-danger:hover{background:var(--surface-2)}.ds-btn-danger:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Hairline card on the page surface.",
+      "html": "<div class=\"ds-card\"><h3>Authentication</h3><p>3 of 3 checks passed.</p></div>",
+      "css": ".ds-card{background:var(--surface-1);color:var(--ink-1);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px 0 rgb(15 23 42/.05);padding:24px;font-family:var(--font-geist-sans),system-ui,sans-serif}.ds-card h3{margin:0 0 6px;font-size:18px;font-weight:600;letter-spacing:-.025em;line-height:1.375}.ds-card p{margin:0;font-size:14px;color:var(--ink-2)}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "40px field with a 3:1 control edge.",
+      "html": "<input class=\"ds-input\" placeholder=\"yourdomain.com\" />",
+      "css": ".ds-input{width:100%;box-sizing:border-box;height:40px;padding:0 12px;border:1px solid var(--control-border);border-radius:10px;background:var(--surface-1);color:var(--ink-1);font:14px var(--font-geist-sans),system-ui,sans-serif}.ds-input::placeholder{color:var(--ink-3)}.ds-input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}.ds-input[aria-invalid=true]{border:2px solid var(--danger)}"
+    },
+    {
+      "name": "Navigation Item",
+      "kind": "nav",
+      "refersTo": "nav-item-current",
+      "description": "Current item: tint, weight and a 2px marker.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item\" href=\"#\">Domains</a><a class=\"ds-nav-item ds-nav-current\" aria-current=\"page\" href=\"#\">Reports</a></nav>",
+      "css": ".ds-nav{display:grid;gap:2px;font-family:var(--font-geist-sans),system-ui,sans-serif}.ds-nav-item{position:relative;display:flex;align-items:center;height:40px;padding:0 12px;border-radius:10px;font-size:14px;font-weight:500;color:var(--ink-2);text-decoration:none;transition:background-color .15s,color .15s}.ds-nav-item:hover{background:var(--surface-2);color:var(--ink-1)}.ds-nav-current{background:var(--brand-subtle);color:var(--brand-ink);font-weight:600}.ds-nav-current:before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:9999px;background:var(--brand-ink)}.ds-nav-item:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-success",
+      "description": "Pill with icon and word; never colour alone.",
+      "html": "<span class=\"ds-badge\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg>Pass</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border:1px solid color-mix(in srgb,var(--success) 40%,transparent);border-radius:9999px;background:var(--success-subtle);color:var(--success);font:500 12px/20px var(--font-geist-sans),system-ui,sans-serif}"
+    },
+    {
+      "name": "DNS Record Block",
+      "kind": "custom",
+      "refersTo": "record-block",
+      "description": "Monospace record fields with copy controls.",
+      "html": "<div class=\"ds-record\"><div class=\"ds-rec-row\"><dt>Type</dt><dd>TXT</dd></div><div class=\"ds-rec-row\"><dt>Name</dt><dd>_dmarc</dd></div><div class=\"ds-rec-row\"><dt>Value</dt><dd>v=DMARC1; p=none; rua=mailto:rua@reports.example.test</dd></div></div>",
+      "css": ".ds-record{overflow:hidden;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);color:var(--ink-1)}.ds-rec-row{display:grid;grid-template-columns:5rem 1fr;gap:12px;padding:8px 16px;border-top:1px solid var(--line)}.ds-rec-row:first-child{border-top:0}.ds-rec-row dt{padding-top:6px;font:600 12px var(--font-geist-sans),system-ui,sans-serif;letter-spacing:.025em;text-transform:uppercase;color:var(--ink-2)}.ds-rec-row dd{margin:0;padding:4px 0;font:14px/1.625 var(--font-geist-mono),ui-monospace,monospace;overflow-wrap:anywhere}"
+    }
+  ],
+  "narrative": {
+    "northStar": null,
+    "overview": "Shared brand with the Inbox Angel website: Calm, Competent, Honest. Sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion. Creative North Star is an open decision.",
+    "keyCharacteristics": [
+      "Navy fill (light) or gold fill (dark) for the one primary action per section; everything else is neutral.",
+      "Hairline-bordered cards on a cool-grey page; depth is tonal first, shadow second.",
+      "Status is always icon + word, never colour alone.",
+      "Visible 2px focus ring on every interactive element."
+    ],
+    "rules": [
+      {
+        "name": "The Fill-Versus-Ink Rule",
+        "body": "`brand` is a fill and takes `brand-fg` labels (white on navy, navy on gold); brand-coloured text and links use `brand-ink`.",
+        "section": "colors"
+      },
+      {
+        "name": "The Blush Rule",
+        "body": "Blush is decorative only.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Colour-Alone Rule",
+        "body": "Every status pairs colour with an icon and a word.",
+        "section": "colors"
+      },
+      {
+        "name": "The Records-Are-Content Rule",
+        "body": "Anything copy-pasteable is monospace, selectable and copyable.",
+        "section": "typography"
+      },
+      {
+        "name": "The Quiet-Shadow Rule",
+        "body": "Cards carry only the soft shadow; larger shadows are for layers that float over content.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the brand fill (`bg-brand text-brand-fg`) for the single primary action of a section and `text-brand-ink` for brand-coloured text.",
+      "Do pair every status with an icon and a word.",
+      "Do keep the 2px `--focus` outline on every interactive element.",
+      "Do show DNS records, addresses and codes in Geist Mono with a copy control.",
+      "Do use `control-border` for form edges and keep text pairs at 4.5:1 (3:1 for large text and UI borders).",
+      "Do honour `prefers-reduced-motion`."
+    ],
+    "donts": [
+      "Don't use sky blue as a primary, gradients, or a mascot face.",
+      "Don't use blush for text or as the only signal.",
+      "Don't use enterprise-security imagery (shields, padlocks, badge walls) or hype-landing devices (counters, \"trusted by\").",
+      "Don't use `accent-fg` on `accent-subtle` in dark mode (fails AA; listed in `forbiddenPairs`) or `--line-strong` for form-control edges.",
+      "Don't invent proof: no user counts, customer logos or testimonials."
+    ]
+  }
+}

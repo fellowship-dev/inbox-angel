@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────────────────
-   DESIGN TOKENS — Light Mode (Inbox Angel; see .impeccable.md)
+   DESIGN TOKENS — Light Mode (Inbox Angel; see DESIGN.md)
    --brand is a FILL (navy in light mode, gold in dark mode): text on it uses --brand-fg,
    brand-coloured text on surfaces uses --brand-ink.
    ───────────────────────────────────────────────────────── */
