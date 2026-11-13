@@ -1,0 +1,71 @@
+// node ~/work/shots.cjs <label> [only-name-substring]
+// Full-page captures at 1440 and 375, light and dark, as owner, member and the empty workspace. Heights to heights.json.
+const { chromium } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const BASE = 'https://localhost:8787';
+const label = process.argv[2] || 'run';
+const only = process.argv[3] || '';
+const W = path.join(os.homedir(), 'work');
+const creds = JSON.parse(fs.readFileSync(path.join(W, 'creds.json'), 'utf8'));
+const ids = JSON.parse(fs.readFileSync(path.join(W, 'ids.json'), 'utf8'));
+const OUT = path.join(os.homedir(), 'shots', label);
+fs.mkdirSync(OUT, { recursive: true });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const shots = [
+	{ name: 'overview', who: 'owner', url: '#/w/ws_default/' },
+	{ name: 'overview-member', who: 'member', url: '#/w/ws_default/' },
+	{ name: 'empty', who: 'owner', url: `#/w/${ids.emptyWs}/` },
+	{ name: 'domain-iana', who: 'owner', url: `#/w/ws_default/domains/${ids.domains['iana.org']}`, pace: true },
+	{ name: 'domain-google', who: 'owner', url: `#/w/ws_default/domains/${ids.domains['google.com']}`, pace: true },
+	{ name: 'domain-curl-member', who: 'member', url: `#/w/ws_default/domains/${ids.domains['curl.se']}`, pace: true },
+];
+const variants = [
+	{ w: 1440, h: 900, scheme: 'light' },
+	{ w: 1440, h: 900, scheme: 'dark' },
+	{ w: 375, h: 812, scheme: 'light' },
+	{ w: 375, h: 812, scheme: 'dark' },
+];
+
+(async () => {
+	const browser = await chromium.launch();
+	// One login per user (the auth limiter allows 10 a minute), reused through storage state.
+	const states = {};
+	for (const who of ['owner', 'member']) {
+		const c = await browser.newContext({ ignoreHTTPSErrors: true });
+		const r = await c.request.post(BASE + '/api/auth/login', { headers: { Origin: BASE }, data: creds[who] });
+		console.log('login', who, r.status());
+		states[who] = await c.storageState();
+		await c.close();
+	}
+	const heights = {};
+	const hpath = path.join(OUT, 'heights.json');
+	if (fs.existsSync(hpath)) Object.assign(heights, JSON.parse(fs.readFileSync(hpath, 'utf8')));
+	for (const s of shots.filter((x) => x.name.includes(only))) {
+		for (const v of variants) {
+			const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: v.w, height: v.h }, colorScheme: v.scheme, storageState: states[s.who] });
+			await ctx.addInitScript((wsIds) => {
+				try { for (const w of wsIds) sessionStorage.setItem(`ia_setup_redirected:${w}`, '1'); } catch {}
+			}, ['ws_default', ids.emptyWs]);
+			const page = await ctx.newPage();
+			const errors = [];
+			page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 160)); });
+			await page.goto(BASE + '/' + s.url);
+			await page.waitForLoadState('networkidle').catch(() => {});
+			await sleep(2500);
+			const m = await page.evaluate(() => ({ h: document.documentElement.scrollHeight, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, h1: [...document.querySelectorAll('h1,h2,h3,h4,h5')].map((e) => e.tagName + ':' + e.textContent.trim().slice(0, 40)) }));
+			const file = `${s.name}--${v.w}-${v.scheme}.png`;
+			await page.screenshot({ path: path.join(OUT, file), fullPage: true });
+			heights[`${s.name}--${v.w}-${v.scheme}`] = { height: m.h, overflowX: m.sw - m.cw, errors: errors.length };
+			if (v.w === 1440 && v.scheme === 'light') heights[`${s.name}--headings`] = m.h1;
+			console.log(file, m.h, 'overflowX', m.sw - m.cw, 'errors', errors.length, errors[0] ?? '');
+			await ctx.close();
+			await sleep(s.pace ? 12000 : 8000);
+		}
+	}
+	fs.writeFileSync(hpath, JSON.stringify(heights, null, 1));
+	await browser.close();
+	console.log('SHOTS-DONE');
+})();
