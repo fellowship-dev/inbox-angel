@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d0fd4097-14c5-4b3d-ab89-bd998d5265f9",
+  "id": "9f4ced7a-8d16-45e1-8cb6-e7826e4202dd",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -1680,13 +1680,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "dns_checked_at": {
-          "name": "dns_checked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "workspace_id": {
           "name": "workspace_id",
           "type": "text",
@@ -1719,6 +1712,41 @@
         },
         "evicted_name": {
           "name": "evicted_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dns_checked_at": {
+          "name": "dns_checked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dns_check_attempted_at": {
+          "name": "dns_check_attempted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dns_check_status": {
+          "name": "dns_check_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dmarc_issue": {
+          "name": "dmarc_issue",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dmarc_inherited_from": {
+          "name": "dmarc_inherited_from",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

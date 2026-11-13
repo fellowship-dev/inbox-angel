@@ -145,3 +145,71 @@ describe('OverviewPage: when DNS was last checked', () => {
 		expect(within(card).queryByText(/^Checked /)).not.toBeInTheDocument();
 	});
 });
+
+describe('OverviewPage: what the stored DNS facts say', () => {
+	const hoursAgo = (h: number) => Math.floor(Date.now() / 1000) - h * 3600;
+	const page = (sum: object, name = 'mail.example.org') => renderApp(<OverviewPage />, {
+		routes: {
+			'GET /api/domains': { domains: [domain(3, name, { dmarc_policy: null })] },
+			'GET /api/domains/3/check-summary': summary(3, name, { dns_checked_at: hoursAgo(3), dns_check_attempted_at: hoursAgo(3), dns_check_status: 'ok', ...sum }),
+			'GET /api/domains/3/stats': { domain: name, days: 7, stats: [] },
+			'GET /api/domains/3/wizard-state': wizard(0),
+		},
+	});
+
+	it('a subdomain covered by its parent\'s DMARC is Protected and says where the policy comes from, not "no DMARC"', async () => {
+		page({ dmarc_policy: 'reject', dmarc_inherited_from: 'example.org' });
+		const card = await screen.findByRole('group', { name: /Level 2/ });
+		expect(within(card).getByText('DMARC enforced (p=reject), inherited from example.org')).toBeInTheDocument();
+		expect(within(card).queryByText(/No DMARC record/)).not.toBeInTheDocument();
+		expect(within(card).queryByText(/Publish a DMARC record/)).not.toBeInTheDocument();
+	});
+
+	it('inherited p=none is monitoring only, from the parent', async () => {
+		page({ dmarc_policy: 'none', dmarc_inherited_from: 'example.org' });
+		const card = await screen.findByRole('group', { name: /Level 1/ });
+		expect(within(card).getByText('DMARC is monitoring only (p=none), inherited from example.org')).toBeInTheDocument();
+	});
+
+	it('several DMARC records: says receivers ignore them, shows no policy, and is not "not checked yet"', async () => {
+		page({ dmarc_policy: null, dmarc_issue: 'multiple' });
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getByText('Multiple DMARC records: receivers ignore them')).toBeInTheDocument();
+		expect(within(card).getByText('Next: Remove the extra DMARC records so only one remains.')).toBeInTheDocument();
+		expect(within(card).queryByText(/p=none/)).not.toBeInTheDocument();
+		expect(within(card).queryByText(/No DMARC record found/)).not.toBeInTheDocument();
+		expect(within(card).queryByText(/DMARC not checked yet/)).not.toBeInTheDocument();
+	});
+
+	it('an invalid DMARC record is called invalid, even if SPF was the lookup that never succeeded', async () => {
+		page({ dmarc_policy: null, dmarc_issue: 'invalid', spf_record: null, dns_checked_at: null, dns_check_status: 'failed' });
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getByText('DMARC record is invalid')).toBeInTheDocument();
+		expect(within(card).getByText('SPF not checked yet')).toBeInTheDocument();
+	});
+
+	it('when the latest attempt failed, says so next to the last good time', async () => {
+		page({ dns_checked_at: hoursAgo(72), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed' });
+		const card = await screen.findByRole('group', { name: /Level 2/ });
+		expect(within(card).getByText('Last check failed 1 hour ago. Last good check 3 days ago.')).toBeInTheDocument();
+		expect(within(card).queryByText(/^Checked /)).not.toBeInTheDocument();
+	});
+
+	it('a failed attempt with no good check yet says so, and counts nothing as known', async () => {
+		page({ dmarc_policy: null, spf_record: null, dns_checked_at: null, dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed' });
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getByText('Last check failed 1 hour ago. No successful check yet.')).toBeInTheDocument();
+		expect(within(card).getByText('SPF not checked yet')).toBeInTheDocument();
+	});
+
+	it('a domain that does not exist says so instead of showing a level or "Delivering"', async () => {
+		page({ dmarc_policy: null, spf_record: null, dns_check_status: 'nxdomain' }, 'no-such-host.example');
+		const card = await screen.findByRole('group', { name: 'no-such-host.example' });
+		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		expect(within(card).getByText(/DNS says this name does not exist/)).toBeInTheDocument();
+		expect(within(card).getByText('Checked 3 hours ago')).toBeInTheDocument();
+		expect(screen.queryByText(/Delivering/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/Mail is being sent/)).not.toBeInTheDocument();
+		expect(screen.queryByRole('group', { name: /Level \d/ })).not.toBeInTheDocument();
+	});
+});

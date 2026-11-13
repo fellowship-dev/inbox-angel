@@ -234,6 +234,13 @@ export interface DomainCheckSummary {
   spf_record: string | null;
   /** Unix seconds both records were last read from DNS; null: never. */
   dns_checked_at: number | null;
+  /** Unix seconds of the last attempt, and its result: 'ok' | 'failed' | 'nxdomain'. Null: never attempted. */
+  dns_check_attempted_at: number | null;
+  dns_check_status: string | null;
+  /** Why DMARC gave no usable policy: 'multiple' | 'invalid'. */
+  dmarc_issue: string | null;
+  /** The organizational domain dmarc_policy was inherited from (the domain has no record of its own). */
+  dmarc_inherited_from: string | null;
   total_messages: number;
   pass_messages: number;
   fail_messages: number;

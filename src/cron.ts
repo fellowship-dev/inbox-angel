@@ -14,9 +14,7 @@ import { sendWeeklyDigests } from './digest/weekly';
 import { logAudit } from './audit/log';
 import { track } from './telemetry';
 import { flattenSpf } from './email/spf-flattener';
-import { lookupSpf } from './email/dns-check';
-import { dmarcPolicyFromTxt } from './email/dns-snapshot';
-import { createResolver } from '@inbox-angel/dns-checks';
+import { snapshotDns } from './email/dns-snapshot';
 import { runRetention } from './lifecycle/retention';
 import { retryRevocations } from './lifecycle/revoke';
 import { expireUnconfirmedMonitors, runFunnelCron } from './funnel/cron';
@@ -119,33 +117,22 @@ async function runCron(event: ScheduledController, tenant: TenantContext, ctx: E
 
   // Daily monitor check — every day 8am UTC (default / catch-all)
   await expireUnconfirmedMonitors(tenant);
-  // Also refresh every domain's stored DNS facts: SPF lookup count, SPF record, DMARC policy, and when both were read.
+  // Also refresh every domain's stored DNS facts: SPF lookup count, SPF record, the effective DMARC policy, and when read.
   // Subrequest cost per domain: the SPF walk (1 TXT at the apex + 1 per include/redirect/a/mx/exists term, 10 at most by
-  // RFC 7208; mx terms can add address lookups) + 1 DMARC TXT at _dmarc.<domain>: 2 DoH fetches for a plain record, ~12 for a
-  // deep one. Workers allow 50 subrequests per invocation on free, 1000 on paid: roughly 4-25 domains (free) or 80-500 (paid).
-  // The cron is not queued or chunked, so past that the later domains' lookups fail and are skipped (their stored values are kept).
+  // RFC 7208; mx terms can add address lookups) + 1 DMARC TXT at _dmarc.<domain>, + 1 more at the organizational domain
+  // when the domain has no record of its own (RFC 7489): 2-3 DoH fetches for a plain record, ~12 for a deep one.
+  // Workers allow 50 external subrequests per invocation on the free plan and 10,000 by default on paid: roughly 4-25
+  // domains (free) or 800-5,000 (paid). The cron is not queued or chunked, so past that the later domains' lookups fail
+  // and are skipped (their stored values are kept, the attempt is recorded as failed). Domains are visited never-checked
+  // first, then the longest since a successful check, so the same ones are not skipped every day.
   // A failed lookup leaves that stored field alone (see recordDnsCheck); "no record" is stored as null.
-  const allDomains = await tenant.scope.domains.list();
+  const allDomains = await tenant.scope.domains.listForDnsRefresh();
   // Awaited (a floating promise can be cut off when the invocation ends), a few at a time.
   await mapLimit(allDomains, SPF_REFRESH_CONCURRENCY, async d => {
-    const found: { spf_record?: string | null; dmarc_policy?: string | null } = {};
-    // One after the other, so each domain holds one DoH request at a time and the pool stays at SPF_REFRESH_CONCURRENCY.
+    const found = await snapshotDns(d.domain); // one lookup after the other, so the pool stays at SPF_REFRESH_CONCURRENCY requests
     try {
-      const spf = await lookupSpf(d.domain); // throws on a DNS failure; null is an authoritative "no SPF"
-      found.spf_record = spf?.raw ?? null;
-      if (spf?.lookup_count !== undefined) await tenant.scope.domains.updateSpfLookupCount(d.id, spf.lookup_count);
-    } catch (e) {
-      console.warn(`[monitor] SPF lookup refresh failed for ${d.domain}:`, e);
-    }
-    try {
-      const t = await createResolver().txt(`_dmarc.${d.domain}`);
-      if (t.status === 'error') console.warn(`[monitor] DMARC lookup refresh failed for ${d.domain}: ${t.error}`);
-      else found.dmarc_policy = dmarcPolicyFromTxt(t.records);
-    } catch (e) {
-      console.warn(`[monitor] DMARC lookup refresh failed for ${d.domain}:`, e);
-    }
-    try {
-      await tenant.scope.domains.recordDnsCheck(d.id, { ...found, checkedAt: Math.floor(Date.now() / 1000) });
+      if (found.spf_lookup_count !== undefined) await tenant.scope.domains.updateSpfLookupCount(d.id, found.spf_lookup_count);
+      await tenant.scope.domains.recordDnsCheck(d.id, { spf_record: found.spf_record, dmarc: found.dmarc, nxdomain: found.nxdomain, at: Math.floor(Date.now() / 1000) });
     } catch (e) {
       console.warn(`[monitor] storing DNS check failed for ${d.domain}:`, e);
     }

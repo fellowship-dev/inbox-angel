@@ -93,7 +93,7 @@ import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@inbox-angel/db';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
@@ -115,7 +115,7 @@ import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/sp
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
 import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
-import { dmarcPolicyFromTxt, spfFromTxt } from '../email/dns-snapshot';
+import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import {
   provisionMtaSts,
@@ -886,24 +886,25 @@ async function _handleApi(
       const dnsResolver = createResolver();
       const dns_errors: string[] = [];
       // What this read resolved, stored below. A key stays unset when its lookup failed (unknown is never stored as absent).
-      const resolved: { spf_record?: string | null; dmarc_policy?: string | null } = {};
+      const resolved: { spf_record?: string | null; dmarc?: DmarcFacts; nxdomain?: boolean } = {};
 
       const [spfLiveData, dmarcData, routingData, dkimData, nullSenderData, authRecordData] = await Promise.all([
         // SPF: TXT lookup for {domain} → find v=spf1
         dnsResolver.txt(domain.domain).then(t => {
           if (t.status === 'error') { dns_errors.push(`spf: ${t.error}`); return null; }
           resolved.spf_record = spfFromTxt(t.records);
+          resolved.nxdomain = t.status === 'nxdomain';
           return t.records.find(isSpfRecord) ?? null;
         }),
 
         // DMARC: TXT lookup for _dmarc.{domain}
-        dnsResolver.txt(`_dmarc.${domain.domain}`).then(t => {
+        dnsResolver.txt(`_dmarc.${domain.domain}`).then(async t => {
           if (t.status === 'error') {
             dns_errors.push(`dmarc: ${t.error}`);
             return { found: false, has_our_rua: false, current_record: null as string | null, error: t.error };
           }
-          const policy = dmarcPolicyFromTxt(t.records);
-          if (policy !== undefined) resolved.dmarc_policy = policy;
+          // The effective policy (RFC 7489): the parent's is read only when this domain has no record of its own (1 extra subrequest).
+          resolved.dmarc = await dmarcFactsFor(dnsResolver, domain.domain, t).catch(() => undefined);
           return { found: t.records.length > 0, has_our_rua: t.records.some(r => r.includes(domain.rua_address)), current_record: t.records[0] ?? null };
         }),
 
@@ -1010,7 +1011,7 @@ async function _handleApi(
 
       // Same store as the daily cron, from lookups this request already made (no extra DNS). A write failure must not fail the read.
       try {
-        await tenant.scope.domains.recordDnsCheck(domain.id, { ...resolved, checkedAt: Math.floor(Date.now() / 1000) });
+        await tenant.scope.domains.recordDnsCheck(domain.id, { ...resolved, at: Math.floor(Date.now() / 1000) });
       } catch (e) {
         console.warn(`[onboarding-status] storing DNS check failed for ${domain.domain}:`, e);
       }

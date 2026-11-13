@@ -150,49 +150,151 @@ describe('listCronWorkspaces', () => {
   });
 });
 
-describe('daily cron stores SPF record, DMARC policy and when they were read', () => {
+describe('daily cron stores what DNS says: SPF, the effective DMARC policy, and how the check went', () => {
   const DAILY = { cron: '0 8 * * *' } as ScheduledController;
-  const row = (db: any, id: number) => db.sqlite.prepare('SELECT spf_record, dmarc_policy, dns_checked_at, spf_lookup_count FROM domains WHERE id = ?').get(id) as any;
+  const COLS = 'spf_record, dmarc_policy, dmarc_issue, dmarc_inherited_from, dns_checked_at, dns_check_attempted_at, dns_check_status, spf_lookup_count';
+  const row = (db: any, id: number) => db.sqlite.prepare(`SELECT ${COLS} FROM domains WHERE id = ?`).get(id) as any;
+  const NOW = 1_700_000_000;
+  /** Answer one DoH name with a raw response instead of the fake's table (SERVFAIL, NOERROR-empty, ...). */
+  const override = (cf: FakeCloudflare, name: string, respond: () => Response) => {
+    const base = cf.fetch.getMockImplementation()!;
+    cf.fetch.mockImplementation(async (input, init) => {
+      const u = new URL(String(input));
+      return u.hostname === 'cloudflare-dns.com' && u.searchParams.get('name') === name ? respond() : base(input, init);
+    });
+  };
+  const servfail = () => new Response(JSON.stringify({ Status: 2 }), { status: 200 });
+  const http503 = () => new Response('', { status: 503 });
+  /** A subdomain of a-corp.com in the same workspace, with SPF of its own. */
+  const addSub = (db: any, cf: FakeCloudflare) => {
+    db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (4, 'ws_a', 'mail.a-corp.com', 'rua@reports.a-corp.com')").run();
+    cf.doh['mail.a-corp.com'] = ['v=spf1 include:_spf.mail.test -all'];
+  };
+  const runA = (env: BoundEnv, load: any) => runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a'], load });
 
-  it('writes what DNS answered, null for "no record"', async () => {
+  it('writes what DNS answered: an own record is stored as its p=, "no record" as null', async () => {
     const { db, cf, env, load } = setup();
     cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; sp=reject; p=quarantine; rua=mailto:x@y.z'];
-    // b-corp.org: SPF present, no DMARC record (NXDOMAIN). c-corp.net: nothing published at all.
+    // b-corp.org: SPF present, no DMARC record anywhere. c-corp.net: nothing published at all (does not exist).
     delete cf.doh['c-corp.net'];
     await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a', 'ws_b', 'ws_c'], load });
 
-    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'quarantine', spf_lookup_count: 1 });
-    expect(row(db, 1).dns_checked_at).toBeGreaterThan(1_700_000_000);
-    expect(row(db, 2)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: null });
-    expect(row(db, 2).dns_checked_at).toBeGreaterThan(1_700_000_000);
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'quarantine', dmarc_issue: null, dmarc_inherited_from: null, dns_check_status: 'ok', spf_lookup_count: 1 });
+    expect(row(db, 1).dns_checked_at).toBeGreaterThan(NOW);
+    expect(row(db, 1).dns_check_attempted_at).toBe(row(db, 1).dns_checked_at);
+    expect(row(db, 2)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: null, dmarc_issue: null, dns_check_status: 'ok' });
+    expect(row(db, 2).dns_checked_at).toBeGreaterThan(NOW);
     expect(row(db, 3)).toMatchObject({ spf_record: null, dmarc_policy: null });
-    expect(row(db, 3).dns_checked_at).toBeGreaterThan(1_700_000_000);
   });
 
-  it('a failed DMARC lookup keeps the stored policy and the old check time', async () => {
+  it('a subdomain with no DMARC record of its own gets the parent\'s sp= (RFC 7489), and says it is inherited', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=none; sp=reject'];
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: 'reject', dmarc_inherited_from: 'a-corp.com', dmarc_issue: null, dns_check_status: 'ok' });
+    expect(row(db, 1)).toMatchObject({ dmarc_policy: 'none', dmarc_inherited_from: null }); // the parent itself uses p=
+  });
+
+  it('inherits the parent\'s p= when it has no sp=', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=quarantine'];
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: 'quarantine', dmarc_inherited_from: 'a-corp.com' });
+  });
+
+  it('a subdomain\'s own record wins over the parent\'s sp=', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=reject; sp=reject'];
+    cf.doh['_dmarc.mail.a-corp.com'] = ['v=DMARC1; p=none'];
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: 'none', dmarc_inherited_from: null });
+  });
+
+  it('no DMARC at the subdomain or its parent: null, and the check counts as done', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: null, dmarc_issue: null, dmarc_inherited_from: null, dns_check_status: 'ok' });
+    expect(row(db, 4).dns_checked_at).toBeGreaterThan(NOW);
+  });
+
+  it('the parent lookup failing stores nothing for DMARC: the old policy stays and the check time does not advance', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    db.sqlite.prepare("UPDATE domains SET dmarc_policy = 'reject', dmarc_inherited_from = 'a-corp.com', dns_checked_at = 5 WHERE id = 4").run();
+    override(cf, '_dmarc.a-corp.com', servfail);
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: 'reject', dmarc_inherited_from: 'a-corp.com', dns_checked_at: 5, dns_check_status: 'failed' });
+    expect(row(db, 4).dns_check_attempted_at).toBeGreaterThan(NOW);
+  });
+
+  it('several DMARC records, or an invalid one: no policy is invented, and the check is recorded', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    db.sqlite.prepare("UPDATE domains SET dmarc_policy = 'reject' WHERE id IN (1, 4)").run();
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=none', 'v=DMARC1; p=reject'];
+    cf.doh['_dmarc.mail.a-corp.com'] = ['v=DMARC1; p=banana'];
+    await runA(env, load);
+    expect(row(db, 1)).toMatchObject({ dmarc_policy: null, dmarc_issue: 'multiple', dmarc_inherited_from: null, dns_check_status: 'ok' });
+    expect(row(db, 1).dns_checked_at).toBeGreaterThan(NOW);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: null, dmarc_issue: 'invalid', dns_check_status: 'ok' });
+  });
+
+  it('a parent with several records covers the subdomain with nothing, and says whose records they are', async () => {
+    const { db, cf, env, load } = setup();
+    addSub(db, cf);
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=none', 'v=DMARC1; p=reject'];
+    await runA(env, load);
+    expect(row(db, 4)).toMatchObject({ dmarc_policy: null, dmarc_issue: 'multiple', dmarc_inherited_from: 'a-corp.com' });
+  });
+
+  it('a failed DMARC lookup keeps the stored policy and the old check time, and records the failed attempt', async () => {
     const { db, cf, env, load } = setup();
     db.sqlite.prepare("UPDATE domains SET spf_record = 'v=spf1 -all', dmarc_policy = 'reject', dns_checked_at = 5 WHERE id = 1").run();
-    const base = cf.fetch.getMockImplementation()!;
-    cf.fetch.mockImplementation(async (input, init) => {
-      const u = new URL(String(input));
-      if (u.hostname === 'cloudflare-dns.com' && u.searchParams.get('name') === '_dmarc.a-corp.com') return new Response(JSON.stringify({ Status: 2 }), { status: 200 });
-      return base(input, init);
-    });
-    await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a'], load });
-    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'reject', dns_checked_at: 5 });
+    override(cf, '_dmarc.a-corp.com', servfail);
+    await runA(env, load);
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'reject', dns_checked_at: 5, dns_check_status: 'failed' });
+    expect(row(db, 1).dns_check_attempted_at).toBeGreaterThan(NOW);
   });
 
-  it('a failed SPF lookup is unknown, not "no SPF": the stored record survives', async () => {
+  it('a failed SPF lookup is unknown, not "no SPF": the stored record survives and the attempt is recorded as failed', async () => {
     const { db, cf, env, load } = setup();
     db.sqlite.prepare("UPDATE domains SET spf_record = 'v=spf1 -all', dmarc_policy = 'reject', dns_checked_at = 5 WHERE id = 1").run();
     cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=none'];
-    const base = cf.fetch.getMockImplementation()!;
-    cf.fetch.mockImplementation(async (input, init) => {
-      const u = new URL(String(input));
-      if (u.hostname === 'cloudflare-dns.com' && u.searchParams.get('name') === 'a-corp.com') return new Response('', { status: 503 });
-      return base(input, init);
-    });
-    await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a'], load });
-    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 5 });
+    override(cf, 'a-corp.com', http503);
+    await runA(env, load);
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 5, dns_check_status: 'failed' });
+  });
+
+  it('a domain that does not exist (NXDOMAIN) is recorded as such, not as a delivering domain with no records', async () => {
+    const { db, env, load, cf } = setup();
+    delete cf.doh['a-corp.com'];
+    await runA(env, load);
+    expect(row(db, 1)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_check_status: 'nxdomain' });
+    expect(row(db, 1).dns_checked_at).toBeGreaterThan(NOW);
+  });
+
+  it('NOERROR with no TXT (the name exists, nothing published) is not NXDOMAIN', async () => {
+    const { db, env, load, cf } = setup();
+    override(cf, 'a-corp.com', () => new Response(JSON.stringify({ Status: 0 }), { status: 200 }));
+    await runA(env, load);
+    expect(row(db, 1)).toMatchObject({ spf_record: null, dns_check_status: 'ok' });
+  });
+
+  it('visits never-checked domains first, then the longest since a successful check', async () => {
+    const { db, cf, env, load } = setup();
+    for (const [id, name, at] of [[4, 'old.a-corp.com', 100], [5, 'recent.a-corp.com', 900], [6, 'never.a-corp.com', null]] as const) {
+      db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, dns_checked_at) VALUES (?, 'ws_a', ?, 'r@x', ?)").run(id, name, at);
+    }
+    db.sqlite.prepare('UPDATE domains SET dns_checked_at = 500 WHERE id = 1').run();
+    await runA(env, load);
+    const firstAsks = cf.fetch.mock.calls
+      .map(([u]) => new URL(String(u)))
+      .filter(u => u.hostname === 'cloudflare-dns.com' && u.searchParams.get('type') === 'TXT' && !u.searchParams.get('name')!.startsWith('_'))
+      .map(u => u.searchParams.get('name'));
+    expect(firstAsks.slice(0, 4)).toEqual(['never.a-corp.com', 'old.a-corp.com', 'a-corp.com', 'recent.a-corp.com']);
   });
 });

@@ -276,51 +276,91 @@ describe('global queries', () => {
 });
 
 describe('domains.recordDnsCheck', () => {
+	const NONE = { policy: null, issue: null, inherited_from: null } as const;
 	const row = async (id: number) => (await a.domains.getById(id))!;
 	const seed = async () => {
 		const id = Number((await a.domains.insert({ domain: 'acme.com', rua_address: 'x@r.test' })).meta.last_row_id);
-		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc_policy: 'reject', checkedAt: 1000 });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc: { policy: 'reject', issue: null, inherited_from: null }, at: 1000 });
 		return id;
 	};
 
 	it('a new domain has never been checked', async () => {
 		const id = Number((await a.domains.insert({ domain: 'new.com', rua_address: 'x@r.test' })).meta.last_row_id);
-		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: null });
+		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null });
 	});
 
-	it('stores both answers and when they were read', async () => {
+	it('stores both answers, when they were read, and that the attempt was ok', async () => {
 		const id = await seed();
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000 });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000, dns_check_attempted_at: 1000, dns_check_status: 'ok', dmarc_issue: null, dmarc_inherited_from: null });
 	});
 
 	it('"no record" is evidence: null is stored and the check time advances', async () => {
 		const id = await seed();
-		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc_policy: null, checkedAt: 2000 });
-		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: 2000 });
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: NONE, at: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: 2000, dns_check_status: 'ok' });
 	});
 
-	it('a failed lookup (key left out) keeps the stored value and does not advance the check time', async () => {
+	it('an inherited policy is stored with the domain it came from', async () => {
 		const id = await seed();
-		await a.domains.recordDnsCheck(id, { dmarc_policy: 'none', checkedAt: 2000 }); // SPF lookup failed
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 1000 });
-		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 ~all', checkedAt: 3000 }); // DMARC lookup failed
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 ~all', dmarc_policy: 'none', dns_checked_at: 1000 });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc: { policy: 'reject', issue: null, inherited_from: 'acme.com' }, at: 2000 });
+		expect(await row(id)).toMatchObject({ dmarc_policy: 'reject', dmarc_inherited_from: 'acme.com', dmarc_issue: null });
 	});
 
-	it('both lookups failed: nothing changes', async () => {
+	it('an unusable DMARC setup advances the check time without inventing a policy, and replaces an old policy', async () => {
 		const id = await seed();
-		await a.domains.recordDnsCheck(id, { checkedAt: 2000 });
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000 });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc: { policy: null, issue: 'multiple', inherited_from: null }, at: 2000 });
+		expect(await row(id)).toMatchObject({ dmarc_policy: null, dmarc_issue: 'multiple', dns_checked_at: 2000, dns_check_status: 'ok' });
+	});
+
+	it('a failed lookup (key left out) keeps the stored value, does not advance the check time, and records the failed attempt', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { dmarc: { policy: 'none', issue: null, inherited_from: null }, at: 2000 }); // SPF lookup failed
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 1000, dns_check_attempted_at: 2000, dns_check_status: 'failed' });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 ~all', at: 3000 }); // DMARC lookup failed
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 ~all', dmarc_policy: 'none', dns_checked_at: 1000, dns_check_attempted_at: 3000, dns_check_status: 'failed' });
+	});
+
+	it('both lookups failed: stored facts stay, only the attempt is recorded', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { at: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000, dns_check_attempted_at: 2000, dns_check_status: 'failed' });
+	});
+
+	it('a domain that does not exist is recorded as nxdomain', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: NONE, nxdomain: true, at: 2000 });
+		expect(await row(id)).toMatchObject({ dns_check_status: 'nxdomain', dns_checked_at: 2000 });
+	});
+
+	it('a publish through the app clears inherited and issue: the policy is now the domain\'s own', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc: { policy: null, issue: 'invalid', inherited_from: 'acme.com' }, at: 2000 });
+		await a.domains.updateDmarcPolicy(id, 'none');
+		expect(await row(id)).toMatchObject({ dmarc_policy: 'none', dmarc_issue: null, dmarc_inherited_from: null });
 	});
 
 	it('cannot write another workspace\'s domain', async () => {
 		const id = await seed();
-		await b.domains.recordDnsCheck(id, { spf_record: null, dmarc_policy: null, checkedAt: 2000 });
-		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dns_checked_at: 1000 });
+		await b.domains.recordDnsCheck(id, { spf_record: null, dmarc: NONE, at: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dns_checked_at: 1000, dns_check_status: 'ok' });
 	});
 
-	it('the check summary returns dns_checked_at', async () => {
+	it('the check summary returns the stored DNS facts', async () => {
 		const id = await seed();
-		expect(await a.reports.checkSummary(id, 0)).toMatchObject({ dns_checked_at: 1000, spf_record: 'v=spf1 -all' });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc: { policy: 'reject', issue: null, inherited_from: 'acme.com' }, at: 1500 });
+		expect(await a.reports.checkSummary(id, 0)).toMatchObject({ dns_checked_at: 1500, dns_check_attempted_at: 1500, dns_check_status: 'ok', dmarc_inherited_from: 'acme.com', dmarc_issue: null, spf_record: 'v=spf1 -all' });
+	});
+});
+
+describe('domains.listForDnsRefresh', () => {
+	it('never-checked first, then the longest since a successful check; a failed attempt does not move a domain back', async () => {
+		const add = async (d: string) => Number((await a.domains.insert({ domain: d, rua_address: 'x@r.test' })).meta.last_row_id);
+		const [recent, old, never, oldFailing] = [await add('recent.com'), await add('old.com'), await add('never.com'), await add('old-failing.com')];
+		const ok = { spf_record: null, dmarc: { policy: null, issue: null, inherited_from: null } } as const;
+		await a.domains.recordDnsCheck(recent, { ...ok, at: 3000 });
+		await a.domains.recordDnsCheck(old, { ...ok, at: 1000 });
+		await a.domains.recordDnsCheck(oldFailing, { ...ok, at: 2000 });
+		await a.domains.recordDnsCheck(oldFailing, { at: 9000 }); // later attempt failed: dns_checked_at stays 2000
+		expect((await a.domains.listForDnsRefresh()).map((d) => d.id)).toEqual([never, old, oldFailing, recent]);
 	});
 });

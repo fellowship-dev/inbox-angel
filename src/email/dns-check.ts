@@ -12,6 +12,7 @@ import {
   analyzeSpf,
   analyzeSpfRecord,
   createResolver,
+  type Resolver,
   lookupDkim as pkgLookupDkim,
   lookupDmarc as pkgLookupDmarc,
   lookupMx,
@@ -69,8 +70,8 @@ function spfDnsError(a: SpfAnalysis): string | null {
  * `null` = no SPF record (authoritative). Throws DnsLookupError ONLY on a real DNS failure.
  * A permerror (multiple records, too many lookups, loop…) returns the record with `permerror` set.
  */
-export async function lookupSpf(domain: string): Promise<SpfRecord | null> {
-  const a = await analyzeSpf(domain, createResolver());
+export async function lookupSpf(domain: string, resolver: Resolver = createResolver()): Promise<SpfRecord | null> {
+  const a = await analyzeSpf(domain, resolver);
   const dnsErr = spfDnsError(a);
   if (dnsErr) throw new DnsLookupError(`SPF lookup for ${domain} failed: ${dnsErr}`);
   if (a.status === 'none') return null;

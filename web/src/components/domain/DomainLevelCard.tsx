@@ -2,10 +2,10 @@ import { Badge, Button, Card, CardContent, CheckResult, CheckResultList, LevelCa
 import { Link } from 'react-router';
 import { sumStats, wizardProgress } from '../../lib/dmarc';
 import { useCheckSummary, useStats, useWizardState } from '../../lib/domain-queries';
-import { formatNumber, timeAgo } from '../../lib/format';
+import { formatNumber } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
-import { assessDomain, assessHostedDomain } from '../../lib/levels';
+import { assessDomain, assessHostedDomain, dnsCheckLine } from '../../lib/levels';
 import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
@@ -59,6 +59,23 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 		);
 	}
 
+	// DNS says the name does not exist: there is no level to show, and "Delivering" would claim mail is flowing.
+	if (!hosted && summary.data.dns_check_status === 'nxdomain') {
+		return (
+			<Card role="group" aria-label={domain.domain}>
+				<CardContent className="space-y-3">
+					<h2 className="break-all font-mono text-base font-semibold">
+						<DomainLink domain={domain} />
+					</h2>
+					<CheckResultList>
+						<CheckResult status="error" statusLabel="Does not resolve" title="This domain does not resolve" summary="DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain." />
+					</CheckResultList>
+					<p className="text-sm text-ink-2">{dnsCheckLine(summary.data)}</p>
+				</CardContent>
+			</Card>
+		);
+	}
+
 	const a = hosted ? assessHostedDomain(summary.data, hosted) : assessDomain(summary.data);
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const progress = wizard.data ? wizardProgress(wizard.data) : null;
@@ -77,7 +94,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 				</p>
 				{/* The hosted level comes from pointer checks, not from these stored records, so only self-managed cards say when. */}
 				{hosted ? null : (
-					<p className="text-ink-2">{summary.data.dns_checked_at ? `Checked ${timeAgo(summary.data.dns_checked_at)}` : 'Not checked yet'}</p>
+					<p className="text-ink-2">{dnsCheckLine(summary.data)}</p>
 				)}
 				{a.next ? <p className="text-ink-1">Next: {a.next}</p> : null}
 				<div className="flex flex-wrap items-center gap-2">

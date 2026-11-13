@@ -4,6 +4,13 @@ import { cloudflareConnections, domains, productDomains } from '../schema';
 
 export type DomainRow = typeof domains.$inferSelect;
 
+/** What DMARC says for one domain, as stored: the effective policy, why there is none, and where it was inherited from. */
+export interface DmarcFacts {
+	policy: string | null;
+	issue: 'multiple' | 'invalid' | null;
+	inherited_from: string | null;
+}
+
 export function domainQueries(db: Db, workspaceId: string) {
 	const mine = eq(domains.workspace_id, workspaceId);
 	// Evicted (detached) domains keep their reports for export but are not domains any more: reads skip them.
@@ -77,21 +84,43 @@ export function domainQueries(db: Db, workspaceId: string) {
 			return db.update(domains).set({ spf_lookup_count: count, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},
 
+		/** A policy published at the domain itself (Cloudflare edit): its own record now, so nothing is inherited or broken. */
 		updateDmarcPolicy(id: number, policy: string) {
-			return db.update(domains).set({ dmarc_policy: policy, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
+			return db.update(domains).set({ dmarc_policy: policy, dmarc_issue: null, dmarc_inherited_from: null, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
+		},
+
+		/**
+		 * Domains in the order the daily DNS refresh should visit them: never-checked first, then the longest since a
+		 * successful check. The run is not queued (it can stop early on the subrequest limit), so a fixed order would
+		 * skip the same domains every day. Ordered by dns_checked_at, not by attempt: a domain starved by the limit
+		 * records a failed attempt, and sorting on attempts would keep sending the ones that succeeded to the front.
+		 */
+		listForDnsRefresh() {
+			return db.select().from(domains).where(and(mine, live)).orderBy(sql`${domains.dns_checked_at} IS NOT NULL`, asc(domains.dns_checked_at), asc(domains.id)).all();
 		},
 
 		/**
 		 * Store what a live DNS read resolved. A field is written only when its key is present: `null` means DNS answered
-		 * "no record" (evidence, stored); a failed lookup must be left out so the stored value is kept, never nulled.
+		 * "no record" (evidence, stored); a lookup that got no answer must be left out (undefined) so the stored value is
+		 * kept, never nulled. `dmarc` carries the three DMARC columns together: the effective policy, why there is none
+		 * (`multiple`/`invalid`), and the organizational domain it was inherited from.
 		 * `dns_checked_at` advances only when both SPF and DMARC resolved, so "Checked <time>" is true of both.
+		 * The attempt itself is always recorded: 'failed' when either lookup got no answer, 'nxdomain' when the domain
+		 * does not exist, else 'ok'.
 		 */
-		recordDnsCheck(id: number, r: { spf_record?: string | null; dmarc_policy?: string | null; checkedAt: number }) {
-			const set: Partial<typeof domains.$inferInsert> = {};
+		recordDnsCheck(id: number, r: { spf_record?: string | null; dmarc?: DmarcFacts; nxdomain?: boolean; at: number }) {
+			const complete = r.spf_record !== undefined && r.dmarc !== undefined;
+			const set: Partial<typeof domains.$inferInsert> = {
+				dns_check_attempted_at: r.at,
+				dns_check_status: !complete ? 'failed' : r.nxdomain ? 'nxdomain' : 'ok',
+			};
 			if (r.spf_record !== undefined) set.spf_record = r.spf_record;
-			if (r.dmarc_policy !== undefined) set.dmarc_policy = r.dmarc_policy;
-			if (Object.keys(set).length === 0) return Promise.resolve(null);
-			if (r.spf_record !== undefined && r.dmarc_policy !== undefined) set.dns_checked_at = r.checkedAt;
+			if (r.dmarc !== undefined) {
+				set.dmarc_policy = r.dmarc.policy;
+				set.dmarc_issue = r.dmarc.issue;
+				set.dmarc_inherited_from = r.dmarc.inherited_from;
+			}
+			if (complete) set.dns_checked_at = r.at;
 			return db.update(domains).set({ ...set, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},
 

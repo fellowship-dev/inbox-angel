@@ -238,12 +238,16 @@ CREATE TABLE `domains` (
 	`is_default` integer DEFAULT 0 NOT NULL,
 	`alerts_enabled` integer DEFAULT 1 NOT NULL,
 	`spf_lookup_count` integer,
-	`dns_checked_at` integer,
 	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`cf_connection_id` text,
 	`verified_via` text DEFAULT 'legacy' NOT NULL,
 	`evicted_at` integer,
 	`evicted_name` text,
+	`dns_checked_at` integer,
+	`dns_check_attempted_at` integer,
+	`dns_check_status` text,
+	`dmarc_issue` text,
+	`dmarc_inherited_from` text,
 	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`cf_connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE set null
 );
