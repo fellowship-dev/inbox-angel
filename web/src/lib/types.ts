@@ -326,3 +326,22 @@ export interface ApiKey {
   expires_at: number | null;
   revoked_at: number | null;
 }
+
+/** GET /api/agents/status: can agents connect to this instance, and at which MCP server URL. */
+export interface AgentStatus {
+  available: boolean;
+  server_url: string | null;
+}
+
+/** GET /api/instance/preflight (instance owner only): configuration problems by setting name, never a value. */
+export interface PreflightItem {
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration';
+  severity: 'action' | 'note';
+  setting: string;
+  message: string;
+}
+export interface Preflight {
+  mode: 'self-host' | 'saas';
+  agents: AgentStatus;
+  items: PreflightItem[];
+}

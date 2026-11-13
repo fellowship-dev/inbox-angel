@@ -74,6 +74,7 @@ const AnalyticsPage = lazy(() => import('./pages/analytics/AnalyticsPage').then(
 const DomainAnalyticsPage = lazy(() => import('./pages/analytics/AnalyticsPage').then((m) => ({ default: m.DomainAnalyticsPage })));
 const AnomaliesPage = lazy(() => import('./pages/reports/AnomaliesPage').then((m) => ({ default: m.AnomaliesPage })));
 const LeadsPage = lazy(() => import('./pages/leads/LeadsPage').then((m) => ({ default: m.LeadsPage })));
+const AgentSetupPage = lazy(() => import('./pages/agent/AgentSetupPage').then((m) => ({ default: m.AgentSetupPage })));
 const AuditLogPage = lazy(() => import('./pages/audit/AuditLogPage').then((m) => ({ default: m.AuditLogPage })));
 const ApiKeysPage = lazy(() => import('./pages/keys/ApiKeysPage').then((m) => ({ default: m.ApiKeysPage })));
 const EmailCheckPage = lazy(() => import('./pages/check/EmailCheckPage').then((m) => ({ default: m.EmailCheckPage })));
@@ -117,6 +118,7 @@ function AppRoutes() {
 				<Route path="ct-discover" element={<CtDiscoverPage />} />
 				<Route path="analytics" element={<AnalyticsPage />} />
 				<Route path="check" element={<EmailCheckPage />} />
+				<Route path="agents" element={<AgentSetupPage />} />
 				<Route path="members" element={<MembersPage />} />
 				<Route path="keys" element={<ApiKeysPage />} />
 				<Route path="audit" element={<AuditLogPage />} />

@@ -188,7 +188,7 @@ export function EmailCheckPage() {
 	return (
 		<div className="space-y-8">
 			<PageHeader
-				eyebrow={<BackLink to="/">Overview</BackLink>}
+				eyebrow={<BackLink to="/">Domains</BackLink>}
 				title="Email check"
 				description="Send a test email and we audit SPF, DKIM and DMARC for the sending domain, with specific recommendations."
 			/>

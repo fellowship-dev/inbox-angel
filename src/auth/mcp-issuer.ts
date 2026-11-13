@@ -7,6 +7,7 @@ import { isSaas } from './config';
 import { resolveApiKey } from './api-keys';
 import { mcpInstallation } from '../mcp/discovery';
 import { handleMcpConnections } from '../mcp/connections';
+import { limitBrowserRequest, limitMcpRequest } from '../mcp/rate-limit';
 
 export interface McpIdentity { principalId: string; issuer: string; resource: string; credentialId?: string }
 export type McpHandler = { fetch(request: Request, env: BoundEnv, ctx: ExecutionContext & { props: McpIdentity }): Promise<Response> | Response };
@@ -58,6 +59,9 @@ export async function createMcpProvider(env: BoundEnv, origin: string, handler: 
    const props = ctx.props as McpIdentity;
    const subject = await resolveMcpIdentity(env, props);
    if (!subject) return Response.json({ error: 'invalid_token' }, { status: 401 });
+   // Limited per connection and per workspace, never per IP: agent clients share cloud egress addresses.
+   const limited = await limitMcpRequest(env, subject);
+   if (limited) return limited;
    ctx.waitUntil(recordAgentUse(env, subject).catch(() => {}));
    return handler.fetch(request, env, ctx as ExecutionContext & { props: McpIdentity });
   } },
@@ -91,7 +95,13 @@ export function isMcpOAuthPath(path: string): boolean {
 
 export function withMcpAuthorization<T extends DefaultHandler>(worker: T, handler: McpHandler): T {
  return { ...worker, async fetch(request: Request, env: BoundEnv, ctx: ExecutionContext) {
-  if (!isMcpOAuthPath(new URL(request.url).pathname)) return worker.fetch(request, env, ctx);
+  const path = new URL(request.url).pathname;
+  if (!isMcpOAuthPath(path)) return worker.fetch(request, env, ctx);
+  // Browser pages (consent, the connection list, revoke) keep the dashboard's per-IP budget; /mcp is limited per connection.
+  if (path === '/oauth/authorize' || path.startsWith('/api/mcp/connections')) {
+   const limited = await limitBrowserRequest(env, request);
+   if (limited) return limited;
+  }
   try { return await (await createMcpProvider(env, new URL(request.url).origin, handler, worker)).fetch(request, env, ctx); }
   catch { return Response.json({ error: 'Agent authorization unavailable' }, { status: 503 }); }
  } };

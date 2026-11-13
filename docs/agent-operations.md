@@ -48,6 +48,23 @@ Apply migrations and build before serving the new code (`npm run deploy` perform
 
 Installation, tool reload, browser authorization, a successful identity call and a useful report are separate checkpoints. Never label an installed plugin connected just because its configuration exists. Direct MCP clients may use the same HTTPS endpoint without the plugin. Client-ID metadata documents are supported; dynamic client registration is off by default and requires the operator's explicit `MCP_DCR_ENABLED=1` setting for clients that need it.
 
+## Agents page, limits and the setup check
+
+**Agents** in the dashboard navigation explains what an agent can do on this installation, shows the MCP server URL and a first prompt to paste into Claude or ChatGPT, and links to the connection list in Settings. It shows the setup only when the installation can accept agents (`OAUTH_KV` bound and `BETTER_AUTH_URL` a canonical HTTPS origin); otherwise the instance owner sees what to configure and everyone else sees that agents are not set up yet.
+
+`/mcp` is answered by the OAuth provider before the API router, so it has its own limits (`src/mcp/rate-limit.ts`):
+
+| Limit | Value | Answer when exceeded |
+|---|---|---|
+| Requests per agent connection | 200 per 60 s (`API_LIMITER`, key `mcp:connection:<principal>`) | HTTP 429, `Retry-After: 60` |
+| Requests per workspace, all its agents together | 200 per 60 s (`API_LIMITER`, key `mcp:workspace:<id>`) | HTTP 429, `Retry-After: 60` |
+| Live DNS checks per connection (`inspect_domain`, `get_email_report`, `query_email_metrics`, `plan_remediation`, `get_source_status`) | 10 per 60 s (D1 counter) | Tool error `rate_limited` with `retryAfterSeconds` |
+| Live DNS checks per workspace | 30 per 60 s (D1 counter) | Tool error `rate_limited` with `retryAfterSeconds` |
+
+Agent requests are never limited per IP address: assistants share cloud egress addresses. Each live DNS check sends about 45–60 DNS-over-HTTPS lookups to each of two resolvers, so roughly 90–120 Worker subrequests per call. The consent page and the connection list keep the dashboard's per-IP budget.
+
+The instance owner (and nobody else) sees a configuration check in **Settings → Instance**, and a banner on every page while a setting needs action. It names missing or inconsistent settings (mode, `BETTER_AUTH_URL`, `OAUTH_KV`, mail sender, Turnstile keys, `BOOKING_URL`, open client registration) and never shows a configured value (`GET /api/instance/preflight`).
+
 ## Unattended product workers
 
 Only a browser **owner** can administer product access or Google Postmaster connections; the admin role alone is insufficient. In owner Settings:
