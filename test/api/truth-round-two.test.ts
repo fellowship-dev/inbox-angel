@@ -70,6 +70,25 @@ describe('item 2 (server): Cloudflare-sourced DKIM content is unquoted', () => {
   });
 });
 
+describe('onboarding-status: Cloudflare-zone DKIM records are DKIM-shaped', () => {
+  it('leaves out a TXT under _domainkey that is a DMARC record, and keeps a real key and a CNAME', async () => {
+    cf.seed('zone-acme', { type: 'TXT', name: 'dmarcish._domainkey.acme.com', content: '"v=DMARC1; p=reject"' });
+    cf.seed('zone-acme', { type: 'TXT', name: 'real._domainkey.acme.com', content: '"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOC"' });
+    cf.seed('zone-acme', { type: 'CNAME', name: 'c._domainkey.acme.com', content: 'c.dkim.provider.test' });
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv('r@reports.test.com', 'tok'), ctx)).json() as any;
+    expect(body.dkim.source).toBe('cf');
+    expect(body.dkim.selectors.map((s: any) => s.name).sort()).toEqual(['c._domainkey.acme.com', 'real._domainkey.acme.com']);
+    expect(body.dkim.wildcard).toBe(false);
+  });
+
+  it('a *._domainkey TXT in the zone is a wildcard: no selector is named', async () => {
+    cf.seed('zone-acme', { type: 'TXT', name: '*._domainkey.acme.com', content: '"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOC"' });
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv('r@reports.test.com', 'tok'), ctx)).json() as any;
+    expect(body.dkim.selectors).toEqual([]);
+    expect(body.dkim.wildcard).toBe(true);
+  });
+});
+
 describe('review item 8: report addresses compare case-insensitively', () => {
   it('dns-check and onboarding-status see our address in another letter case', async () => {
     cf.doh['_dmarc.acme.com'] = ['v=DMARC1; p=none; rua=mailto:RUA@Reports.Test.com'];

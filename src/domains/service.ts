@@ -6,10 +6,24 @@ import { logAudit } from '../audit/log';
 import { track } from '../telemetry';
 import { lookupSpf, lookupDmarc } from '../email/dns-check';
 import { planLimitBody, planLimits } from '../hosted/plan-limits';
+import { INVALID_DOMAIN_MESSAGE, normalizeDomainName, specialUseMessage, type DomainNameResult } from '@inbox-angel/dns-checks';
 
 export class DomainServiceError extends Error {
   /** `body`, when set, is the whole JSON answer (e.g. a plan_limit with its `code`, `limit` and `help_url`). */
   constructor(message: string, readonly status: number, readonly body?: Record<string, unknown>) { super(message); }
+}
+
+/** The 400 body for a refused domain name: `invalid domain format`, or the special-use sentence with its code. */
+export function domainRefusal(refused: Exclude<DomainNameResult, { ok: true }>): { error: string; code?: 'special_use_domain' } {
+  return refused.reason === 'special_use' ? { error: specialUseMessage(refused.name), code: 'special_use_domain' } : { error: INVALID_DOMAIN_MESSAGE };
+}
+
+/** The domain, normalised, or a DomainServiceError (400) saying why it cannot be monitored. */
+export function requireDomainName(raw: string): string {
+  const n = normalizeDomainName(raw);
+  if (n.ok) return n.domain;
+  const body = domainRefusal(n);
+  throw new DomainServiceError(body.error, 400, body.code ? body : undefined);
 }
 
 // Hosted plan cap on domains per workspace (src/hosted/plan-limits.ts). Margin: the INSERT itself is conditional on the count
@@ -69,8 +83,7 @@ export function enrollmentView(domain: DomainRow, reportsDomain?: string) {
 
 /** Proof and monitoring are independent of the optional report intake hub. No DNS writes. */
 export async function enrollDomain(tenant: TenantContext, input: string, userEmail?: string, ctx?: ExecutionContext, actorId?: string, options: EnrollmentOptions = {}) {
-  const domain = input.toLowerCase().trim();
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new DomainServiceError('invalid domain format', 400);
+  const domain = requireDomainName(input);
   await authorizeProductEnrollment(tenant, domain, options);
   await assertAgentEnrollmentSafe(tenant, domain);
   const existing = await tenant.scope.domains.getByName(domain);
@@ -81,6 +94,14 @@ export async function enrollDomain(tenant: TenantContext, input: string, userEma
   if (admission.kind === 'limit') throw new DomainServiceError('too many unverified domains — verify or remove some first', 429);
   if (admission.kind === 'pending') return { pending: true as const, claim: claimView(admission.claim), domain: null };
   return commitVerifiedDomain(tenant, domain, admission.via, userEmail, ctx, actorId, options);
+}
+
+/** The domain, when this workspace already has it live: the answer for a repeat of something that already worked. Null otherwise. */
+export async function resumeExistingDomain(tenant: TenantContext, domain: string, options: EnrollmentOptions = {}) {
+  const existing = await tenant.scope.domains.getByName(domain);
+  if (!existing) return null;
+  await assertExistingProductMapping(tenant, existing, options);
+  return { ...enrollmentView(existing, tenant.settings.reportsDomain), resumed: true as const };
 }
 
 /** Inserts a domain whose ownership is established, with the side effects of adding one. */
@@ -103,7 +124,12 @@ export async function commitVerifiedDomain(tenant: TenantContext, domain: string
     const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via }, options.productId, { maxDomains: domainCap(tenant) });
     domainId = result.meta.last_row_id as number;
   } catch (e: any) {
-    if (e instanceof PlanLimitError) throw planLimitError(tenant, e.max);
+    if (e instanceof PlanLimitError) {
+      // A concurrent verify of the same domain may have taken the last place: that is this domain being added, not a cap.
+      const raced = await resumeExistingDomain(tenant, domain, options);
+      if (raced) return raced;
+      throw planLimitError(tenant, e.max);
+    }
     if (e?.message?.includes('UNIQUE')) {
       // Concurrent replay may have won the insert; only resume a row in this workspace.
       const raced = await tenant.scope.domains.getByName(domain);

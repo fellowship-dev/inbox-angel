@@ -5,6 +5,9 @@
  * ever pre-fills a field the person must confirm with Continue. It is never submitted on its own and never used in a URL, a
  * redirect, a callback or as HTML (React text only). It expires with the verification link (24 hours), and a value that does not
  * pass `normalizeDomainInput` is never stored and is dropped when read.
+ *
+ * The entry belongs to an account: the sign-up form records the email it was submitted with, and a session for a different
+ * email (or a sign-out) clears it, so the next person on a shared browser never sees someone else's domain.
  */
 import { normalizeDomainInput } from './domain-input';
 
@@ -28,6 +31,43 @@ export function clearSignupDomain(): void {
 	} catch {
 		/* ignore */
 	}
+}
+
+function readEntry(): Record<string, unknown> | null {
+	try {
+		const raw = localStorage.getItem(SIGNUP_DOMAIN_KEY);
+		const entry = raw === null ? null : JSON.parse(raw);
+		return entry && typeof entry === 'object' ? entry : null;
+	} catch {
+		return null;
+	}
+}
+
+function bindEmail(email: string): void {
+	const entry = readEntry();
+	if (!entry || !readSignupDomain()) return;
+	try {
+		localStorage.setItem(SIGNUP_DOMAIN_KEY, JSON.stringify({ ...entry, email: email.trim().toLowerCase() }));
+	} catch {
+		/* storage unavailable */
+	}
+}
+
+/** The sign-up form was submitted with this email: the remembered domain now belongs to that account. */
+export function bindSignupDomainToEmail(email: string): void {
+	if (email.trim()) bindEmail(email);
+}
+
+/**
+ * A session is now signed in as `email`. Keep the remembered domain only if it was recorded for this email (case-insensitive);
+ * one with no email yet is bound to this account; anything else is someone else's and is cleared.
+ */
+export function reconcileSignupDomain(email: string): void {
+	const entry = readEntry();
+	if (!entry) return;
+	const owner = typeof entry.email === 'string' ? entry.email : null;
+	if (owner === null) bindEmail(email);
+	else if (owner.toLowerCase() !== email.trim().toLowerCase()) clearSignupDomain();
 }
 
 /** The remembered domain, re-validated; an expired, invalid or garbage entry is removed and reads as null. */
@@ -65,11 +105,11 @@ const SIGNUP_URL = '/#/signup';
  * the URL to replace the address bar with, which is a fixed string and never contains the input. Null: nothing to do.
  */
 export function captureSignupIntent(loc: { pathname: string; search: string; hash: string }, now = Date.now()): string | null {
-	if (loc.pathname === '/signup') {
+	if (loc.pathname === '/signup' || loc.pathname === '/signup/') {
 		rememberSignupDomain(new URLSearchParams(loc.search).get('domain'), now);
 		return SIGNUP_URL;
 	}
-	const m = /^#\/signup\?(.*)$/.exec(loc.hash);
+	const m = /^#\/signup\/?\?(.*)$/.exec(loc.hash);
 	if (m) {
 		rememberSignupDomain(new URLSearchParams(m[1]).get('domain'), now);
 		return '#/signup';

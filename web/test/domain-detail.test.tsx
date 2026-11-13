@@ -64,6 +64,15 @@ describe('DomainDetailPage DKIM keys', () => {
 		expect(within(row).getAllByText('Revoked: empty key')).toHaveLength(2);
 	});
 
+	it('a wildcard answer is neutral: not a pass, not a missing record', async () => {
+		page({ routes: routes({ 'GET /api/domains/1/onboarding-status': { ...onboarding, dkim: { selectors: [], source: 'doh', wildcard: true, wildcard_record: 'v=DMARC1; p=reject' } } }) });
+		const row = (await screen.findByText('DKIM selectors')).closest('li') as HTMLElement;
+		expect(row).toHaveAttribute('data-status', 'neutral');
+		expect(within(row).getByText("Can't tell from public DNS")).toBeInTheDocument();
+		expect(within(row).getByText("Every name under example.com answers with the same TXT record, so public DNS can't show which DKIM keys exist.")).toBeInTheDocument();
+		expect(within(row).queryByText(/No DKIM record found/)).not.toBeInTheDocument();
+	});
+
 	it('counts only usable keys when some are revoked', async () => {
 		page({ routes: withSelectors([{ name: 'google._domainkey.example.com', record: 'v=DKIM1; k=rsa; p=AAA' }, { name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' }]) });
 		const row = (await screen.findByText('DKIM selectors')).closest('li') as HTMLElement;
