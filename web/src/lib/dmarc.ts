@@ -1,3 +1,4 @@
+import { parseDmarcSp } from './dmarc-record';
 import type { Domain, WizardState } from './types';
 
 /** What people paste into the box: trim, lowercase, drop a scheme and one trailing slash. */
@@ -9,7 +10,7 @@ export { buildRecommendedRecord } from './dmarc-record';
 
 /** `sp=` tag of a live record, if any. */
 export function spTag(record: string | null): string | null {
-	return record ? (record.match(/\bsp=([a-z]+)/)?.[1] ?? null) : null;
+	return parseDmarcSp(record);
 }
 
 export type GuidanceTone = 'neutral' | 'warning' | 'info' | 'danger' | 'success';
