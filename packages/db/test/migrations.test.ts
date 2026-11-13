@@ -35,3 +35,15 @@ describe('migrations', () => {
 		expect(REQUIRED_MIGRATION).toBe(migrationFiles().at(-1));
 	});
 });
+
+describe('0008 dns_checked_at', () => {
+	it('adds a nullable column and leaves existing domains unchecked, keeping their stored values', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0007_metrics.sql' });
+		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, spf_record, dmarc_policy) VALUES ('acme.com', 'r@x', 'v=spf1 -all', 'none')").run();
+		expect(applyMigrations(d.sqlite)).toEqual(['0008_dns_checked_at.sql']);
+		expect(d.sqlite.prepare("SELECT spf_record, dmarc_policy, dns_checked_at FROM domains").all()).toEqual([{ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: null }]);
+		const col = d.sqlite.prepare("SELECT \"notnull\" AS nn FROM pragma_table_info('domains') WHERE name = 'dns_checked_at'").get() as any;
+		expect(col.nn).toBe(0);
+	});
+});

@@ -7,6 +7,7 @@ function makeSummary(overrides: Partial<DomainCheckSummary> = {}): DomainCheckSu
     domain_id: 1,
     domain: 'example.com',
     dmarc_policy: 'reject',
+    dns_checked_at: null,
     spf_record: 'v=spf1 include:_spf.example.com ~all',
     total_messages: 1000,
     pass_messages: 980,

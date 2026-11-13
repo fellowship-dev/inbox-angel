@@ -29,7 +29,7 @@ describe('reports.checkSummary', () => {
     // with report_records, so they are multiplied by the number of records in each report (2 here).
     // Fixing that is a behaviour change, deliberately out of scope for the db lane.
     expect(await q.reports.checkSummary(id, NOW - 30 * 86400)).toEqual({
-      domain_id: id, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 ~all',
+      domain_id: id, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 ~all', dns_checked_at: null,
       total_messages: 2000, pass_messages: 1960, fail_messages: 40,
       dkim_total: 1000, dkim_pass: 950, spf_total: 1000, spf_pass: 950,
       mta_sts_enabled: 0, mta_sts_mode: null,

@@ -149,3 +149,50 @@ describe('listCronWorkspaces', () => {
     expect(await listCronWorkspaces({ ...env, MODE: 'saas' } as any)).toEqual(['ws_default', 'ws_a', 'ws_b', 'ws_c']);
   });
 });
+
+describe('daily cron stores SPF record, DMARC policy and when they were read', () => {
+  const DAILY = { cron: '0 8 * * *' } as ScheduledController;
+  const row = (db: any, id: number) => db.sqlite.prepare('SELECT spf_record, dmarc_policy, dns_checked_at, spf_lookup_count FROM domains WHERE id = ?').get(id) as any;
+
+  it('writes what DNS answered, null for "no record"', async () => {
+    const { db, cf, env, load } = setup();
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; sp=reject; p=quarantine; rua=mailto:x@y.z'];
+    // b-corp.org: SPF present, no DMARC record (NXDOMAIN). c-corp.net: nothing published at all.
+    delete cf.doh['c-corp.net'];
+    await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a', 'ws_b', 'ws_c'], load });
+
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'quarantine', spf_lookup_count: 1 });
+    expect(row(db, 1).dns_checked_at).toBeGreaterThan(1_700_000_000);
+    expect(row(db, 2)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: null });
+    expect(row(db, 2).dns_checked_at).toBeGreaterThan(1_700_000_000);
+    expect(row(db, 3)).toMatchObject({ spf_record: null, dmarc_policy: null });
+    expect(row(db, 3).dns_checked_at).toBeGreaterThan(1_700_000_000);
+  });
+
+  it('a failed DMARC lookup keeps the stored policy and the old check time', async () => {
+    const { db, cf, env, load } = setup();
+    db.sqlite.prepare("UPDATE domains SET spf_record = 'v=spf1 -all', dmarc_policy = 'reject', dns_checked_at = 5 WHERE id = 1").run();
+    const base = cf.fetch.getMockImplementation()!;
+    cf.fetch.mockImplementation(async (input, init) => {
+      const u = new URL(String(input));
+      if (u.hostname === 'cloudflare-dns.com' && u.searchParams.get('name') === '_dmarc.a-corp.com') return new Response(JSON.stringify({ Status: 2 }), { status: 200 });
+      return base(input, init);
+    });
+    await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a'], load });
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 include:_spf.mail.test -all', dmarc_policy: 'reject', dns_checked_at: 5 });
+  });
+
+  it('a failed SPF lookup is unknown, not "no SPF": the stored record survives', async () => {
+    const { db, cf, env, load } = setup();
+    db.sqlite.prepare("UPDATE domains SET spf_record = 'v=spf1 -all', dmarc_policy = 'reject', dns_checked_at = 5 WHERE id = 1").run();
+    cf.doh['_dmarc.a-corp.com'] = ['v=DMARC1; p=none'];
+    const base = cf.fetch.getMockImplementation()!;
+    cf.fetch.mockImplementation(async (input, init) => {
+      const u = new URL(String(input));
+      if (u.hostname === 'cloudflare-dns.com' && u.searchParams.get('name') === 'a-corp.com') return new Response('', { status: 503 });
+      return base(input, init);
+    });
+    await runCronForWorkspaces(DAILY, env, ctx, { workspaces: ['ws_a'], load });
+    expect(row(db, 1)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 5 });
+  });
+});

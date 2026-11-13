@@ -81,6 +81,20 @@ export function domainQueries(db: Db, workspaceId: string) {
 			return db.update(domains).set({ dmarc_policy: policy, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},
 
+		/**
+		 * Store what a live DNS read resolved. A field is written only when its key is present: `null` means DNS answered
+		 * "no record" (evidence, stored); a failed lookup must be left out so the stored value is kept, never nulled.
+		 * `dns_checked_at` advances only when both SPF and DMARC resolved, so "Checked <time>" is true of both.
+		 */
+		recordDnsCheck(id: number, r: { spf_record?: string | null; dmarc_policy?: string | null; checkedAt: number }) {
+			const set: Partial<typeof domains.$inferInsert> = {};
+			if (r.spf_record !== undefined) set.spf_record = r.spf_record;
+			if (r.dmarc_policy !== undefined) set.dmarc_policy = r.dmarc_policy;
+			if (Object.keys(set).length === 0) return Promise.resolve(null);
+			if (r.spf_record !== undefined && r.dmarc_policy !== undefined) set.dns_checked_at = r.checkedAt;
+			return db.update(domains).set({ ...set, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
+		},
+
 		updateRollout(id: number, policy: string, pct: number) {
 			return db.update(domains).set({ rollout_rec_policy: policy, rollout_rec_pct: pct, updated_at: touch as any }).where(and(mine, eq(domains.id, id))).run();
 		},

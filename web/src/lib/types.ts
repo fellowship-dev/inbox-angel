@@ -232,6 +232,8 @@ export interface DomainCheckSummary {
   domain: string;
   dmarc_policy: string | null;
   spf_record: string | null;
+  /** Unix seconds both records were last read from DNS; null: never. */
+  dns_checked_at: number | null;
   total_messages: number;
   pass_messages: number;
   fail_messages: number;

@@ -2,7 +2,7 @@ import { Badge, Button, Card, CardContent, CheckResult, CheckResultList, LevelCa
 import { Link } from 'react-router';
 import { sumStats, wizardProgress } from '../../lib/dmarc';
 import { useCheckSummary, useStats, useWizardState } from '../../lib/domain-queries';
-import { formatNumber } from '../../lib/format';
+import { formatNumber, timeAgo } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
 import { assessDomain, assessHostedDomain } from '../../lib/levels';
@@ -75,6 +75,10 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 								? 'No reports in the last 7 days.'
 								: `${sums.passRate}% pass rate over 7 days, ${formatNumber(sums.total)} messages${sums.failed > 0 ? `, ${formatNumber(sums.failed)} failed` : ''}.`}
 				</p>
+				{/* The hosted level comes from pointer checks, not from these stored records, so only self-managed cards say when. */}
+				{hosted ? null : (
+					<p className="text-ink-2">{summary.data.dns_checked_at ? `Checked ${timeAgo(summary.data.dns_checked_at)}` : 'Not checked yet'}</p>
+				)}
 				{a.next ? <p className="text-ink-1">Next: {a.next}</p> : null}
 				<div className="flex flex-wrap items-center gap-2">
 					{summary.data.dmarc_policy ? <Badge variant="outline">p={summary.data.dmarc_policy}</Badge> : null}

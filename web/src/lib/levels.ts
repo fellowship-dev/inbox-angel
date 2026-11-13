@@ -9,9 +9,9 @@ import type { DomainCheckSummary } from './types';
  *  - Level 1 Authenticated: SPF and a DMARC record exist; DMARC only monitors (p=none).
  *  - Level 2 Protected:     DMARC enforces (p=quarantine or p=reject) on top of SPF.
  *
- * The stored SPF record and DMARC policy are null until something writes them, so for a self-managed domain null
- * means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only what is
- * confirmed. A lookup that failed never reaches this function: callers show an error state instead of a level.
+ * The stored SPF record and DMARC policy are null until DNS has been read (`dns_checked_at`), so for a self-managed domain
+ * null before that means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only
+ * what is confirmed. Once both were read, null is DNS's answer that there is no record. A lookup that failed never reaches this function: callers show an error state instead of a level.
  * Hosted domains pass `nullMeans: 'missing'`, because there null means the record is not live in our zone.
  */
 export interface LevelAssessment {
@@ -27,8 +27,8 @@ const DKIM_HEALTHY = 0.95;
 const NOT_CHECKED_DETAIL = 'The overview has no stored result for this yet. The domain page reads it live from DNS.';
 
 export function assessDomain(
-	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'>,
-	{ nullMeans = 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
+	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record'> & Partial<Pick<DomainCheckSummary, 'dns_checked_at'>> & Pick<DomainCheckSummary, 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'>,
+	{ nullMeans = s.dns_checked_at ? 'missing' : 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
 ): LevelAssessment {
 	const hasSpf = !!s.spf_record;
 	const policy = s.dmarc_policy;

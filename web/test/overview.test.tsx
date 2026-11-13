@@ -117,3 +117,31 @@ describe('OverviewPage', () => {
 		await waitFor(() => expect(screen.getByRole('button', { name: /Add domain/ })).toBeDisabled());
 	});
 });
+
+describe('OverviewPage: when DNS was last checked', () => {
+	const page = (sum: object) => renderApp(<OverviewPage />, {
+		routes: {
+			'GET /api/domains': { domains: [domain(3, 'example.org', { dmarc_policy: null })] },
+			'GET /api/domains/3/check-summary': summary(3, 'example.org', sum),
+			'GET /api/domains/3/stats': { domain: 'example.org', days: 7, stats: [] },
+			'GET /api/domains/3/wizard-state': wizard(0),
+		},
+	});
+
+	it('says "Checked <relative time>" and, once checked, calls a missing record missing instead of "not checked yet"', async () => {
+		page({ dmarc_policy: null, spf_record: null, dns_checked_at: Math.floor(Date.now() / 1000) - 3 * 3600 });
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getByText('Checked 3 hours ago')).toBeInTheDocument();
+		expect(within(card).queryByText(/not checked yet/i)).not.toBeInTheDocument();
+		expect(within(card).getByText('No SPF record found. Receivers cannot tell which servers may send for you.')).toBeInTheDocument();
+		expect(within(card).getByText('No DMARC record found.')).toBeInTheDocument();
+	});
+
+	it('says "Not checked yet" when nothing has been read from DNS', async () => {
+		page({ dmarc_policy: null, spf_record: null, dns_checked_at: null });
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getAllByText(/not checked yet/i).length).toBeGreaterThanOrEqual(3); // the line, SPF and DMARC findings
+		expect(within(card).getByText('Not checked yet')).toBeInTheDocument();
+		expect(within(card).queryByText(/^Checked /)).not.toBeInTheDocument();
+	});
+});

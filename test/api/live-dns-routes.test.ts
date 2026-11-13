@@ -89,3 +89,44 @@ describe('GET /api/domains/:id/onboarding-status', () => {
     expect(body.dmarc.error).toBeUndefined();
   });
 });
+
+describe('GET /api/domains/:id/onboarding-status stores what it resolved', () => {
+  const stored = (env: Env) => (env.DB as any).sqlite.prepare('SELECT spf_record, dmarc_policy, dns_checked_at FROM domains WHERE id = 1').get() as any;
+  const seeded = (env: Env, spf: string | null, dmarc: string | null, at: number) =>
+    (env.DB as any).sqlite.prepare('UPDATE domains SET spf_record = ?, dmarc_policy = ?, dns_checked_at = ? WHERE id = 1').run(spf, dmarc, at);
+
+  it('persists SPF, the DMARC p= and the check time from the lookups it already makes', async () => {
+    stubDns((n, t) => (t !== 'TXT' ? undefined : n === 'acme.com' ? txt('v=spf1 include:a.test -all') : n === '_dmarc.acme.com' ? txt('v=DMARC1; sp=none; p=quarantine') : undefined));
+    const env = makeEnv();
+    await handleApi(get('/api/domains/1/onboarding-status'), env, ctx);
+    const row = stored(env);
+    expect(row).toMatchObject({ spf_record: 'v=spf1 include:a.test -all', dmarc_policy: 'quarantine' });
+    expect(row.dns_checked_at).toBeGreaterThan(1_700_000_000);
+  });
+
+  it('authoritatively absent records are stored as null, replacing stale values', async () => {
+    stubDns(() => undefined);
+    const env = makeEnv();
+    seeded(env, 'v=spf1 -all', 'reject', 5);
+    await handleApi(get('/api/domains/1/onboarding-status'), env, ctx);
+    const row = stored(env);
+    expect(row).toMatchObject({ spf_record: null, dmarc_policy: null });
+    expect(row.dns_checked_at).toBeGreaterThan(5);
+  });
+
+  it('a failed DMARC lookup keeps the stored policy and the old check time; SPF still updates', async () => {
+    stubDns((n, t) => (t === 'TXT' && n === '_dmarc.acme.com' ? doh({ Status: 2 }) : t === 'TXT' && n === 'acme.com' ? txt('v=spf1 ~all') : undefined));
+    const env = makeEnv();
+    seeded(env, 'v=spf1 -all', 'reject', 5);
+    await handleApi(get('/api/domains/1/onboarding-status'), env, ctx);
+    expect(stored(env)).toEqual({ spf_record: 'v=spf1 ~all', dmarc_policy: 'reject', dns_checked_at: 5 });
+  });
+
+  it('every lookup failing changes nothing', async () => {
+    stubDns(() => doh({ Status: 2 }));
+    const env = makeEnv();
+    seeded(env, 'v=spf1 -all', 'reject', 5);
+    await handleApi(get('/api/domains/1/onboarding-status'), env, ctx);
+    expect(stored(env)).toEqual({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 5 });
+  });
+});

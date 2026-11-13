@@ -105,6 +105,8 @@ export const domains = sqliteTable(
 		is_default: integer('is_default').notNull().default(0),
 		alerts_enabled: integer('alerts_enabled').notNull().default(1),
 		spf_lookup_count: integer('spf_lookup_count'),
+		/** Unix seconds when spf_record and dmarc_policy were both last read from live DNS (0008). Null: never. */
+		dns_checked_at: integer('dns_checked_at'),
 		workspace_id: workspaceId(),
 		/** The Cloudflare connection that manages this domain's zone (0015). Null: the self-host env token, or none. */
 		cf_connection_id: text('cf_connection_id').references((): any => cloudflareConnections.id, { onDelete: 'set null' }),

@@ -274,3 +274,53 @@ describe('global queries', () => {
 		expect(await g.ipInfo.get('1.1.1.1')).toMatchObject({ reverse_dns: 'uno', org: 'Cloudflare' });
 	});
 });
+
+describe('domains.recordDnsCheck', () => {
+	const row = async (id: number) => (await a.domains.getById(id))!;
+	const seed = async () => {
+		const id = Number((await a.domains.insert({ domain: 'acme.com', rua_address: 'x@r.test' })).meta.last_row_id);
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 -all', dmarc_policy: 'reject', checkedAt: 1000 });
+		return id;
+	};
+
+	it('a new domain has never been checked', async () => {
+		const id = Number((await a.domains.insert({ domain: 'new.com', rua_address: 'x@r.test' })).meta.last_row_id);
+		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: null });
+	});
+
+	it('stores both answers and when they were read', async () => {
+		const id = await seed();
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000 });
+	});
+
+	it('"no record" is evidence: null is stored and the check time advances', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { spf_record: null, dmarc_policy: null, checkedAt: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: null, dmarc_policy: null, dns_checked_at: 2000 });
+	});
+
+	it('a failed lookup (key left out) keeps the stored value and does not advance the check time', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { dmarc_policy: 'none', checkedAt: 2000 }); // SPF lookup failed
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: 1000 });
+		await a.domains.recordDnsCheck(id, { spf_record: 'v=spf1 ~all', checkedAt: 3000 }); // DMARC lookup failed
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 ~all', dmarc_policy: 'none', dns_checked_at: 1000 });
+	});
+
+	it('both lookups failed: nothing changes', async () => {
+		const id = await seed();
+		await a.domains.recordDnsCheck(id, { checkedAt: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dmarc_policy: 'reject', dns_checked_at: 1000 });
+	});
+
+	it('cannot write another workspace\'s domain', async () => {
+		const id = await seed();
+		await b.domains.recordDnsCheck(id, { spf_record: null, dmarc_policy: null, checkedAt: 2000 });
+		expect(await row(id)).toMatchObject({ spf_record: 'v=spf1 -all', dns_checked_at: 1000 });
+	});
+
+	it('the check summary returns dns_checked_at', async () => {
+		const id = await seed();
+		expect(await a.reports.checkSummary(id, 0)).toMatchObject({ dns_checked_at: 1000, spf_record: 'v=spf1 -all' });
+	});
+});
