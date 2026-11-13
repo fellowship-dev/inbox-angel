@@ -19,6 +19,8 @@ export interface RecOptions {
   mx?: [DomainReport['mx']['status'], string[]];
   providers?: DetectedProvider[];
   dkim?: string[];
+  /** Every probed name answered with the same TXT record. */
+  dkimWildcard?: string;
   mtaSts?: DomainReport['mtaSts']['status'];
   errors?: DomainReport['errors'];
   /** A dns-checks DNS host id. */
@@ -35,7 +37,7 @@ export function makeRec(domain = 'example.com', o: RecOptions = {}): DomainRepor
   const {
     spf = 'none', spfRaw, spfRaws, spfIssues = [], spfIncludes = [], lookups = 0,
     dmarc = 'none', dmarcRaw, dmarcPolicy = 'none', rua = [], dmarcRaws, valid = true,
-    mx = ['found', ['aspmx.l.google.com']], providers = [], dkim = [], mtaSts = 'none', errors = [],
+    mx = ['found', ['aspmx.l.google.com']], providers = [], dkim = [], dkimWildcard, mtaSts = 'none', errors = [],
     dnsHost = 'cloudflare', verdict = 'strict', pct = 100, bimi,
   } = o;
   const spfRec = spfRaw ? { raw: spfRaw, mechanisms: [], terms: [], verdict, lookup_count: lookups } : null;
@@ -55,8 +57,8 @@ export function makeRec(domain = 'example.com', o: RecOptions = {}): DomainRepor
       ...(dmarcRaws ? { rawRecords: dmarcRaws } : {}),
     },
     dkim: {
-      found: dkim.map(s => ({ status: 'found' as const, selector: s, name: `${s}._domainkey.${domain}`, record: { raw: 'v=DKIM1; p=abc', version: 'DKIM1', keyType: 'rsa', present: true, revoked: false } })),
-      errors: [], scanned: 36,
+      found: dkim.map(s => ({ status: 'found' as const, selector: s, name: `${s}._domainkey.${domain}`, record: { raw: 'v=DKIM1; p=abc', version: 'DKIM1', keyType: 'rsa', present: true, revoked: false }, txt: ['v=DKIM1; p=abc'] })),
+      errors: [], scanned: 36, wildcard: dkimWildcard !== undefined, wildcardRecord: dkimWildcard ?? null,
     },
     mtaSts: { status: mtaSts, txt: null, policy: null, policyUrl: `https://mta-sts.${domain}/.well-known/mta-sts.txt`, issues: [] },
     bimi: bimi ?? { status: 'none', raw: null, foundAt: null, logo: { ...NO_ASSET }, vmc: { ...NO_ASSET, validated: false } },

@@ -67,6 +67,8 @@ export function splitDkimSelectors(selectors: OnboardingStatus['dkim']['selector
 }
 
 export function dkimSeverity(dkim: OnboardingStatus['dkim'], dmarcPolicy: string | null, unsignedCount: number, lookupsFailed = false): Severity {
+	// A wildcard answer says nothing either way: "no DKIM" would be a guess.
+	if (dkim.wildcard) return 'unknown';
 	const hasDkim = splitDkimSelectors(dkim.selectors).usable.length > 0;
 	// Some selector lookups failed and none succeeded: "no DKIM" would be a guess.
 	if (!hasDkim && lookupsFailed) return 'unknown';
@@ -91,4 +93,4 @@ export function routingSeverity(r: OnboardingStatus['routing'], lookupsFailed = 
 	return 'error';
 }
 
-export const unsignedProviders = (dkim: OnboardingStatus['dkim'], spfRecord: string | null) => findUnsignedSpfProviders(splitDkimSelectors(dkim.selectors).usable, spfRecord);
+export const unsignedProviders = (dkim: OnboardingStatus['dkim'], spfRecord: string | null) => dkim.wildcard ? [] : findUnsignedSpfProviders(splitDkimSelectors(dkim.selectors).usable, spfRecord);

@@ -50,6 +50,17 @@ describe('ClaimPreview', () => {
 		expect(screen.queryByText('Monitoring only (p=none)')).toBeNull();
 	});
 
+	it('a wildcard under _domainkey is neutral and says public DNS cannot tell, never "Key found"', async () => {
+		show(view({ dkim: { status: 'wildcard', selectors: [], scanned: 36, failed: 0 } }));
+		await loaded();
+		const dkim = row('DKIM');
+		expect(dkim).toHaveAttribute('data-status', 'neutral');
+		expect(within(dkim).getByText("Can't tell from public DNS")).toBeInTheDocument();
+		expect(within(dkim).getByText("Every name under acme.io answers with the same TXT record, so public DNS can't show which DKIM keys exist.")).toBeInTheDocument();
+		expect(screen.queryByText('Key found')).toBeNull();
+		expect(screen.queryByText('Not found in common places')).toBeNull();
+	});
+
 	it('an inherited policy says where it came from, in the overview words', async () => {
 		show(view({ dmarc: { status: 'found', policy: 'reject', issue: null, inherited_from: 'acme.io', record: 'v=DMARC1; p=none; sp=reject' } }));
 		await loaded();

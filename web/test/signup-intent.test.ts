@@ -121,3 +121,32 @@ describe('#/signup is a public page', () => {
 		expect(localStorage.getItem(LAST_WORKSPACE_KEY)).toBeNull();
 	});
 });
+
+describe('captureSignupIntent with a trailing slash', () => {
+	it('path form /signup/?domain=… is captured and replaced with the fixed address', () => {
+		const to = captureSignupIntent({ pathname: '/signup/', search: '?domain=Example.com', hash: '' });
+		expect(to).toBe('/#/signup');
+		expect(readSignupDomain()).toBe('example.com');
+	});
+
+	it('path form /signup/ with no domain still goes to the sign-up screen', () => {
+		expect(captureSignupIntent({ pathname: '/signup/', search: '', hash: '' })).toBe('/#/signup');
+		expect(localStorage.getItem(SIGNUP_DOMAIN_KEY)).toBeNull();
+	});
+
+	it('hash form #/signup/?domain=… is captured and the query stripped', () => {
+		const to = captureSignupIntent({ pathname: '/', search: '', hash: '#/signup/?domain=acme.io' });
+		expect(to).toBe('#/signup');
+		expect(readSignupDomain()).toBe('acme.io');
+	});
+
+	it('hash form with a slash rejects an invalid domain but still strips the query', () => {
+		expect(captureSignupIntent({ pathname: '/', search: '', hash: '#/signup/?domain=a%40b.com' })).toBe('#/signup');
+		expect(localStorage.getItem(SIGNUP_DOMAIN_KEY)).toBeNull();
+	});
+
+	it('does not match other paths that merely start with signup', () => {
+		expect(captureSignupIntent({ pathname: '/signupx', search: '?domain=a.io', hash: '' })).toBeNull();
+		expect(captureSignupIntent({ pathname: '/', search: '', hash: '#/signup/x?domain=a.io' })).toBeNull();
+	});
+});

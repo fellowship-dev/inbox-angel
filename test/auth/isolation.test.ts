@@ -411,7 +411,7 @@ describe('self-host: the shared Cloudflare token stays with the instance owner',
   it('adding the base domain in such a workspace asks Cloudflare nothing', async () => {
     const { env, owner, cf } = await shared();
     const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
-    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example' } });
+    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example.net' } });
     expect(res.status).toBe(201);
     expect((await res.json() as any).zone_id).toBeNull();
     expect(cf.calls).toEqual([]);

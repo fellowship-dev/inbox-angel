@@ -220,6 +220,9 @@ export interface OnboardingStatus {
   dkim: {
     selectors: { name: string; record: string }[];
     source: 'cf' | 'doh';
+    /** Every name under _domainkey answers with the same TXT record: `selectors` is empty because public DNS cannot say which exist. */
+    wildcard?: boolean;
+    wildcard_record?: string;
   };
   routing: {
     mx_found: boolean;
@@ -275,6 +278,8 @@ export type Role = 'owner' | 'admin' | 'member';
 
 /** GET /api/me */
 export interface Me {
+  /** Hosted instance owner only: which limiter answers the claim DNS preview. `fallback` means the DNS_PREVIEW_LIMITER binding is missing. */
+  dns_preview_limiter?: 'binding' | 'fallback';
   user: { id: string; email: string; name: string } | null;
   /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
   role: Role | null;
@@ -312,6 +317,8 @@ export interface LeadsResponse {
 export interface AuthStatus {
   configured: boolean;
   mode: 'self-host' | 'saas';
+  /** Self-host only, present when HOSTED_SERVICE_URL is set: the hosted free tier's https URL. */
+  hosted_service_url?: string;
   signup_open: boolean;
   oauth_providers: string[];
   prefill: { name: string; email: string };

@@ -65,3 +65,12 @@ describe('normalizeDomainInput', () => {
 		expect(normalizeDomainInput(null as unknown as string)).toBeNull();
 	});
 });
+
+describe('normalizeDomainInput: the server rule, shared', () => {
+	it.each(['printer.local', 'nas.internal', 'abc.onion', 'site.test', 'x.invalid', 'printer.example', 'app.localhost', 'router.home.arpa'])('refuses the special-use name %s', (d) => {
+		expect(normalizeDomainInput(d)).toBeNull();
+	});
+	it.each(['example.com', 'example.org', 'xn--mnchen-3ya.de', 'a-b.co.uk'])('still takes %s', (d) => {
+		expect(normalizeDomainInput(d)).toBe(d);
+	});
+});

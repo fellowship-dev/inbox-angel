@@ -7,6 +7,7 @@ import { COMMON_DKIM_SELECTORS, SPF_LOOKUP_LIMIT, createResolver, lookupDmarc, l
 import { claimLookups, type DomainClaimRow } from '@inbox-angel/db';
 import { dmarcFactsFromLookup, observingResolver, snapshotDns } from '../email/dns-snapshot';
 import type { TenantContext } from '../tenancy/context';
+import { getMode } from '../tenancy/mode';
 
 export interface ClaimPreview {
   domain: string;
@@ -19,8 +20,8 @@ export interface ClaimPreview {
   spf: { status: 'found' | 'missing' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean };
   /** The policy that applies to the domain (inherited from the organizational domain when it has no record of its own); `issue`: a record exists but gives no policy. */
   dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null };
-  /** `not_found` means none of the `scanned` common selectors: not that the domain has no DKIM. */
-  dkim: { status: 'found' | 'not_found' | 'error'; selectors: string[]; scanned: number; failed: number };
+  /** `not_found` means none of the `scanned` common selectors: not that the domain has no DKIM. `wildcard`: every name answered with the same TXT record, so nothing can be said about which selectors exist. */
+  dkim: { status: 'found' | 'not_found' | 'wildcard' | 'error'; selectors: string[]; scanned: number; failed: number };
   mx: { status: 'found' | 'none' | 'error' };
   /** The checks whose lookup errored. */
   lookup_failed: Array<'spf' | 'dmarc' | 'dkim' | 'mx'>;
@@ -39,6 +40,8 @@ export const PREVIEW_WINDOW_MS = 60_000;
 class PreviewState {
   readonly cache = new Map<string, { at: number; view: ClaimPreview }>();
   readonly windows = new Map<string, { start: number; count: number }>();
+  /** The missing-limiter warning has been logged by this isolate. */
+  warnedNoLimiter = false;
 }
 const state = new PreviewState();
 const { cache, windows } = state;
@@ -46,7 +49,13 @@ const { cache, windows } = state;
 export function __resetPreviewCacheForTests(): void {
   state.cache.clear();
   state.windows.clear();
+  state.warnedNoLimiter = false;
 }
+
+/** Which limiter answers: the Workers ratelimit binding, or this isolate's own counter (which a hosted instance should not rely on). */
+export const dnsPreviewLimiter = (env: Pick<TenantContext['env'], 'DNS_PREVIEW_LIMITER'>): 'binding' | 'fallback' => (env.DNS_PREVIEW_LIMITER ? 'binding' : 'fallback');
+
+const NO_LIMITER_WARNING = '[claim-preview] DNS_PREVIEW_LIMITER binding missing: falling back to a per-isolate counter; add the ratelimit binding for hosted mode.';
 
 /** Is a fresh answer for this domain cached? Such a request costs no DNS, so it does not count against the limit. */
 export function hasFreshPreview(domain: string, now = Date.now()): boolean {
@@ -98,7 +107,7 @@ async function lookup(domain: string, base: Resolver, checkedAt: string): Promis
   if (dkimS) {
     const selectors = dkimS.found.map(f => f.name);
     dkim = {
-      status: selectors.length > 0 ? 'found' : dkimS.errors.length === 0 ? 'not_found' : 'error',
+      status: dkimS.wildcard ? 'wildcard' : selectors.length > 0 ? 'found' : dkimS.errors.length === 0 ? 'not_found' : 'error',
       selectors, scanned: dkimS.scanned, failed: dkimS.errors.length,
     };
   }
@@ -150,6 +159,10 @@ export async function claimPreviewResponse(tenant: TenantContext, claim: DomainC
   // Only a cache miss runs DNS, so only a miss counts.
   if (!hasFreshPreview(claim.domain, now)) {
     const key = previewLimitKey({ userId: who.userId, workspaceId: tenant.workspaceId });
+    if (!tenant.env.DNS_PREVIEW_LIMITER && getMode(tenant.env) === 'saas' && !state.warnedNoLimiter) {
+      state.warnedNoLimiter = true;
+      console.warn(NO_LIMITER_WARNING);
+    }
     const allowed = tenant.env.DNS_PREVIEW_LIMITER ? (await tenant.env.DNS_PREVIEW_LIMITER.limit({ key })).success : windowAllows(key, now);
     if (!allowed) return json({ error: 'Checked too often. Try again in a minute.', code: 'rate_limited', retry_after: 60 }, 429, { 'Retry-After': '60' });
   }

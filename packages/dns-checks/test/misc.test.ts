@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookupDkim, parseDkimRecord, scanDkimSelectors, COMMON_DKIM_SELECTORS } from '../src/dkim';
+import { isDkimRecord, lookupDkim, parseDkimRecord, scanDkimSelectors, COMMON_DKIM_SELECTORS } from '../src/dkim';
 import { lookupMx, parseMxData } from '../src/mx';
 import { detectProviders } from '../src/providers';
 import { fakeResolver } from './helpers';
@@ -67,5 +67,87 @@ describe('providers', () => {
     const p = detectProviders({ mxHosts: ['mail.example.com', 'aspmx.l.google.com.evil.test'], spfIncludes: ['notamazonses.com'] });
     expect(p).toEqual([]);
     expect(detectProviders({ mxHosts: ['ASPMX.L.GOOGLE.COM.'] })[0].evidence).toEqual(['mx:aspmx.l.google.com']);
+  });
+});
+
+describe('isDkimRecord', () => {
+  const KEY = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3QxK7lY1b5y0kXk4dQ7sN0v2wZkq8J7u0cV8mB0pQwJ3v1sXx8m4H+oYtq9uQ8Zp3b2hP6s5r1nJ0Wk7oQd4eF2yTg9cLxA8vR3kS0uN6pZ1mI5jH7bV9wE2tY4aG0fDqXz8cKuO5nM3sP1rL6iU7oQIDAQAB';
+  it('rejects a DMARC record, however it is quoted or spaced', () => {
+    expect(isDkimRecord('v=DMARC1; p=reject; rua=mailto:a@x.com')).toBe(false);
+    expect(isDkimRecord('  "v=dmarc1; p=none"')).toBe(false);
+  });
+  it('rejects an SPF record', () => {
+    expect(isDkimRecord('v=spf1 include:_spf.google.com p=all -all')).toBe(false);
+    expect(isDkimRecord('V=SPF1 -all')).toBe(false);
+  });
+  it('accepts a real DKIM key, with or without v=', () => {
+    expect(isDkimRecord(`v=DKIM1; k=rsa; p=${KEY}`)).toBe(true);
+    expect(isDkimRecord(`v=DKIM1;p=${KEY}`)).toBe(true);
+    expect(isDkimRecord(`k=rsa; p=${KEY}`)).toBe(true);
+    expect(isDkimRecord(`"v=DKIM1; k=rsa; p=${KEY.slice(0, 40)} ${KEY.slice(40)}"`)).toBe(true);
+    expect(isDkimRecord('v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=')).toBe(true);
+  });
+  it('accepts a revoked key (empty p=)', () => {
+    expect(isDkimRecord('v=DKIM1; p=')).toBe(true);
+    expect(isDkimRecord('p=')).toBe(true);
+    expect(isDkimRecord('k=rsa; p=;')).toBe(true);
+  });
+  it('rejects v=DKIM1 without a p= tag, other versions, and records with no v= and no p=', () => {
+    expect(isDkimRecord('v=DKIM1; k=rsa')).toBe(false);
+    expect(isDkimRecord('v=BIMI1; p=abc')).toBe(false);
+    expect(isDkimRecord('k=rsa')).toBe(false);
+  });
+  it('rejects garbage that merely contains p=', () => {
+    expect(isDkimRecord('google-site-verification=p=abc')).toBe(false);
+    expect(isDkimRecord('hello p=world!!')).toBe(false);
+    expect(isDkimRecord('p=not base64 !!!')).toBe(false);
+    expect(isDkimRecord('foo=bar; p=abc')).toBe(false);
+    expect(isDkimRecord('')).toBe(false);
+  });
+});
+
+describe('scanDkimSelectors on a wildcard', () => {
+  const govUk = 'v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@x.gov.uk';
+  const wildcardZone = (record: string) => Object.fromEntries(COMMON_DKIM_SELECTORS.map(s => [`TXT ${s}._domainkey.x.gov.uk`, [record]]));
+
+  it('a name that answers every selector with the DMARC record gives no keys, and is reported as a wildcard', async () => {
+    const scan = await scanDkimSelectors(fakeResolver(wildcardZone(govUk)), 'x.gov.uk');
+    expect(scan.found).toEqual([]);
+    expect(scan.wildcard).toBe(true);
+    expect(scan.wildcardRecord).toBe(govUk);
+    expect(scan.errors).toEqual([]);
+  });
+
+  it('a wildcard that answers with an identical DKIM key is still a wildcard, with no keys', async () => {
+    const key = 'v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA';
+    const scan = await scanDkimSelectors(fakeResolver(wildcardZone(key)), 'x.gov.uk');
+    expect(scan.wildcard).toBe(true);
+    expect(scan.wildcardRecord).toBe(key);
+    expect(scan.found).toEqual([]);
+  });
+
+  it('is not a wildcard with fewer than 3 answers, or when the answers differ', async () => {
+    const two = await scanDkimSelectors(fakeResolver({ 'TXT google._domainkey.x.com': ['v=DKIM1; p=AAA'], 'TXT s1._domainkey.x.com': ['v=DKIM1; p=AAA'] }), 'x.com');
+    expect(two.wildcard).toBe(false);
+    expect(two.found.map(f => f.selector)).toEqual(['google', 's1']);
+    const differ = await scanDkimSelectors(fakeResolver({ 'TXT google._domainkey.x.com': ['v=DKIM1; p=AAA'], 'TXT s1._domainkey.x.com': ['v=DKIM1; p=BBB'], 'TXT s2._domainkey.x.com': ['v=DKIM1; p=CCC'] }), 'x.com');
+    expect(differ.wildcard).toBe(false);
+    expect(differ.found).toHaveLength(3);
+  });
+
+  it('a shared DMARC record plus one real key is not a wildcard, and only the real key is found', async () => {
+    const zone = { ...wildcardZone(govUk), 'TXT google._domainkey.x.gov.uk': ['v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A'] };
+    const scan = await scanDkimSelectors(fakeResolver(zone), 'x.gov.uk');
+    expect(scan.wildcard).toBe(false);
+    expect(scan.found.map(f => f.selector)).toEqual(['google']);
+  });
+
+  it('a failed lookup is an error, never an answer: it neither breaks nor fakes a wildcard', async () => {
+    const zone: Record<string, any> = wildcardZone(govUk);
+    zone['TXT k1._domainkey.x.gov.uk'] = 'TIMEOUT';
+    const scan = await scanDkimSelectors(fakeResolver(zone), 'x.gov.uk');
+    expect(scan.errors.map(e => e.selector)).toEqual(['k1']);
+    expect(scan.wildcard).toBe(true);
+    expect(scan.found).toEqual([]);
   });
 });
