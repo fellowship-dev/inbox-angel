@@ -1,0 +1,241 @@
+// Review fixes for hosted self-serve (PR 142): inherited DMARC is never undercut, no report promises without reports,
+// one contextual "Talk to Max" per screen, the email check hidden where it cannot work, and a name that does not
+// resolve says so on its page.
+import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { App } from '../src/app';
+import { DnsRecords } from '../src/components/domain/DnsRecords';
+import { TalkToMax, TalkToMaxScope } from '../src/components/TalkToMax';
+import { dmarcCoverage } from '../src/lib/dmarc-coverage';
+import { wizardProgress } from '../src/lib/dmarc';
+import { assessDomain } from '../src/lib/levels';
+import { createQueryClient } from '../src/lib/query';
+import type { AuthStatus, OnboardingStatus, WizardState } from '../src/lib/types';
+import { AddDomainPage } from '../src/pages/domains/AddDomainPage';
+import { DmarcWizardPage } from '../src/pages/wizards/DmarcWizardPage';
+import { SetupWizardPage } from '../src/pages/wizards/SetupWizardPage';
+import { fail, me, mockApi, renderApp, STATUS } from './render';
+
+const BOOKING = 'https://cal.example.com/max/30min';
+const HOSTED: Partial<AuthStatus> = { mode: 'saas', signup_open: true, configured: true, base_domain: null, help_url: BOOKING };
+const talkLinks = () => screen.queryAllByRole('link', { name: /Talk to Max/ });
+
+beforeEach(() => {
+	localStorage.clear();
+	sessionStorage.clear();
+});
+
+type Effective = NonNullable<OnboardingStatus['dmarc']['effective']>;
+const none: Effective = { policy: null, inherited_from: null, issue: null };
+const inherits = (policy: string | null, issue: string | null = null): Effective => ({ policy, inherited_from: 'mozilla.test', issue });
+
+const onboarding = (over: Partial<OnboardingStatus> = {}, effective: Effective | null = none): OnboardingStatus => ({
+	domain_id: 7,
+	domain: 'developer.mozilla.test',
+	rua_address: '',
+	cf_available: false,
+	dmarc: { found: false, has_our_rua: false, current_record: null, auth_record: { found: false, record_name: null }, effective },
+	spf: { record: 'v=spf1 -all', lookup_count: 0, flattening_active: false },
+	dkim: { selectors: [], source: 'doh' },
+	routing: { mx_found: false, destination_verified: false, reports_domain: null, admin_email: 'o@x.test', null_sender_spf: false, null_sender_dmarc: false },
+	...over,
+});
+const domain = { id: 7, domain: 'developer.mozilla.test', dmarc_policy: null, rua_address: '', parent_id: null, created_at: 1, alerts_enabled: 1, is_default: 0 };
+const wizard: WizardState = { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'not_started', routing: 'not_started' };
+
+describe('dmarcCoverage', () => {
+	it('own record, inherited, none, unknown', () => {
+		expect(dmarcCoverage(onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' } }))).toEqual({ kind: 'own' });
+		expect(dmarcCoverage(onboarding({}, inherits('reject')))).toEqual({ kind: 'inherited', parent: 'mozilla.test', policy: 'reject', issue: null });
+		expect(dmarcCoverage(onboarding({}, none))).toEqual({ kind: 'none' });
+		expect(dmarcCoverage(onboarding({}, null))).toEqual({ kind: 'unknown' });
+		expect(dmarcCoverage(onboarding({}, none), true)).toEqual({ kind: 'unknown' });
+	});
+});
+
+function dmarcStep(ob: OnboardingStatus) {
+	return renderApp(
+		<Routes>
+			<Route path="/domains/:id/setup/:step" element={<SetupWizardPage />} />
+		</Routes>,
+		{
+			route: '/domains/7/setup/4',
+			status: HOSTED,
+			routes: { 'GET /api/domains': { domains: [domain] }, 'GET /api/domains/7/onboarding-status': ob, 'GET /api/domains/7/wizard-state': wizard, 'PUT /api/domains/7/wizard-state': {} },
+		},
+	);
+}
+
+const offered = () => screen.queryAllByText('v=DMARC1; p=none').length > 0;
+
+describe('hosted wizard DMARC step: never weaker than the policy that applies', () => {
+	it.each(['reject', 'quarantine'])('inherited p=%s: explains it and offers no record', async (policy) => {
+		dmarcStep(onboarding({}, inherits(policy)));
+		expect(await screen.findByText(new RegExp(`inherits p=${policy} from mozilla\\.test`))).toBeInTheDocument();
+		expect(screen.getByText(/There is nothing to publish here/)).toBeInTheDocument();
+		expect(offered()).toBe(false);
+		expect(screen.queryByText('Recommended record')).not.toBeInTheDocument();
+	});
+
+	it('inherited p=none: says so, offers no record of its own', async () => {
+		dmarcStep(onboarding({}, inherits('none')));
+		expect(await screen.findByText(/inherits p=none from mozilla\.test/)).toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+
+	it('no policy at all: offers p=none', async () => {
+		dmarcStep(onboarding({}, none));
+		expect(await screen.findByText(/No DMARC policy applies to this name/)).toBeInTheDocument();
+		expect(offered()).toBe(true);
+	});
+
+	it('lookup failed: no offer', async () => {
+		dmarcStep(onboarding({ dns_errors: ['dmarc: timeout'] }, null));
+		expect(await screen.findByText(/The DNS lookup failed \(timeout\)/)).toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+
+	it('the parent could not be read: no offer, says why', async () => {
+		dmarcStep(onboarding({}, null));
+		expect(await screen.findByText(/could not tell which DMARC policy applies/)).toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+});
+
+function records(ob: OnboardingStatus | ReturnType<typeof fail>, dns: unknown = { found: false, has_rua: false, current_record: null, cf_managed: false }) {
+	return renderApp(<DnsRecords domain={domain as never} />, { status: HOSTED, routes: { 'GET /api/domains/7/dns-check': dns, 'GET /api/domains/7/onboarding-status': ob } });
+}
+
+describe('hosted domain page DMARC row', () => {
+	it.each(['reject', 'quarantine'])('inherited p=%s: "Inherited", nothing to add', async (policy) => {
+		records(onboarding({}, inherits(policy)));
+		expect(await screen.findByText(`Inherited (p=${policy})`)).toBeInTheDocument();
+		expect(screen.queryByText('Add this record')).not.toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+
+	it('inherited p=none: worth fixing at the parent, nothing to add here', async () => {
+		records(onboarding({}, inherits('none')));
+		expect(await screen.findByText('Inherited (p=none)')).toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+
+	it('no policy at all: offers p=none', async () => {
+		records(onboarding({}, none));
+		expect(await screen.findByText('Add this record')).toBeInTheDocument();
+		expect(offered()).toBe(true);
+	});
+
+	it('lookup failed: no offer', async () => {
+		records(onboarding({ dns_errors: ['dmarc: timeout'] }, null));
+		expect(await screen.findByText(/could not tell whether a parent domain's policy covers this name/)).toBeInTheDocument();
+		expect(offered()).toBe(false);
+	});
+
+	it('own p=none record: "Worth fixing", not a green "Published"', async () => {
+		records(onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' } }), { found: true, has_rua: false, current_record: 'v=DMARC1; p=none', cf_managed: false });
+		expect(await screen.findByText('Worth fixing')).toBeInTheDocument();
+		expect(screen.queryByText('Published')).not.toBeInTheDocument();
+	});
+
+	it('a name that does not resolve: one verdict that matches the card, no "No SPF record"', async () => {
+		records(onboarding({ nxdomain: true, spf: { record: null, lookup_count: null, flattening_active: false } }, none));
+		expect(await screen.findByText('This domain does not resolve')).toBeInTheDocument();
+		expect(screen.queryByText(/No SPF record found|No DMARC policy applies/)).not.toBeInTheDocument();
+	});
+});
+
+describe('levels without reports (hosted)', () => {
+	const base = { spf_record: 'v=spf1 -all', dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, dns_checked_at: 1 };
+	it('never promises or leans on reports', () => {
+		const monitoring = assessDomain({ ...base, dmarc_policy: 'none' }, { reports: false });
+		const missing = assessDomain({ ...base, dmarc_policy: null }, { reports: false });
+		const text = JSON.stringify([monitoring, missing]);
+		expect(text).not.toMatch(/reports look clean|start receiving reports|Review your reports/);
+		expect(missing.next).toBe('Publish a DMARC record with p=none.');
+		expect(monitoring.next).toBe('Confirm every service that sends as this domain passes SPF or DKIM, then move DMARC to quarantine.');
+	});
+	it('self-host wording unchanged', () => {
+		expect(assessDomain({ ...base, dmarc_policy: null }).next).toBe('Publish a DMARC record with p=none to start receiving reports.');
+	});
+});
+
+describe('wizard progress, hosted', () => {
+	it('the Reports step is not counted', () => {
+		const all = { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' } as const;
+		expect(wizardProgress(all, { hosted: true })).toMatchObject({ done: 4, total: 4 });
+		expect(wizardProgress(all)).toMatchObject({ done: 5, total: 5 });
+	});
+});
+
+describe('one contextual Talk to Max per screen', () => {
+	it('a scope shows only the most specific line', () => {
+		renderApp(
+			<TalkToMaxScope>
+				<TalkToMax priority={10} lead="Generic?" />
+				<TalkToMax priority={50} lead="Specific?" />
+				<TalkToMax priority={50} lead="Also specific?" />
+			</TalkToMaxScope>,
+			{ status: HOSTED },
+		);
+		return screen.findByText(/Specific\?/).then(() => {
+			expect(talkLinks()).toHaveLength(1);
+			expect(screen.queryByText(/Generic\?|Also specific\?/)).not.toBeInTheDocument();
+		});
+	});
+
+	it('a plan limit on Add domain shows one link, not two', async () => {
+		renderApp(<AddDomainPage />, {
+			status: HOSTED,
+			routes: {
+				'GET /api/zones': fail(400),
+				'POST /api/domains': { __status: 403, body: { error: 'This workspace has reached its limit of 10 domains.', code: 'plan_limit', limit: { kind: 'domains_per_workspace', max: 10 }, help_url: BOOKING } },
+			},
+		});
+		const user = (await import('@testing-library/user-event')).default.setup();
+		await user.type(await screen.findByLabelText('Your domain'), 'acme.test');
+		await user.click(screen.getByRole('button', { name: 'Continue' }));
+		expect(await screen.findByText('This workspace has reached its limit of 10 domains.')).toBeInTheDocument();
+		expect(talkLinks()).toHaveLength(1);
+	});
+
+	it('the top-bar link is named "Talk to Max", without a duplicate of its title', async () => {
+		const at = ({ children }: { children: ReactNode }) => <MemoryRouter initialEntries={['/keys']}>{children}</MemoryRouter>;
+		mockApi({
+			'GET /api/auth/status': { ...STATUS, ...HOSTED, email_check: false },
+			'GET /api/me': me('owner'),
+			'GET /api/keys': { keys: [] },
+			'GET /api/version': { current: '1.2.0', latest: '1.2.0', update_available: false, release_url: '' },
+			'GET /api/mcp/connections': { connections: [] },
+			'GET /api/access': { products: [], principals: [], credentials: [], grants: [] },
+			'GET /api/resources': { domains: [] },
+			'GET /api/metrics/google/connections': { configured: false, connections: [] },
+			'GET /api/workspaces': { workspaces: [] },
+		});
+		render(<App queryClient={createQueryClient()} Router={at} />);
+		const nav = await screen.findByRole('navigation', { name: 'Main' });
+		expect(screen.getAllByRole('link', { name: 'Talk to Max' }).length).toBeGreaterThan(0);
+		// email_check false: the Email check item is hidden.
+		expect(nav.textContent).not.toContain('Email check');
+	});
+});
+
+describe('hosted DMARC graduation wizard', () => {
+	it('says what DNS alone can and cannot confirm, with no pass-rate advice', async () => {
+		renderApp(
+			<Routes>
+				<Route path="/domains/:id/dmarc-wizard" element={<DmarcWizardPage />} />
+			</Routes>,
+			{
+				route: '/domains/7/dmarc-wizard',
+				status: HOSTED,
+				routes: { 'GET /api/domains': { domains: [domain] }, 'GET /api/domains/7/dns-check': { found: true, has_rua: false, current_record: 'v=DMARC1; p=none', cf_managed: false } },
+			},
+		);
+		expect(await screen.findByText(/From DNS alone we can confirm/)).toBeInTheDocument();
+		expect(screen.queryByText(/pass rate/i)).not.toBeInTheDocument();
+		expect(screen.getByText(/Not sure every sender passes\?/)).toBeInTheDocument();
+	});
+});

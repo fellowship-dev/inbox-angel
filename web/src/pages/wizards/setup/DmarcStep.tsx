@@ -8,6 +8,7 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
+import { dmarcCoverage, inheritedSentence } from '../../../lib/dmarc-coverage';
 import { useHosted } from '../../../lib/session';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../../lib/dmarc-record';
 import type { OnboardingStatus } from '../../../lib/types';
@@ -35,22 +36,29 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	// Hosted, before report intake is connected: no domain has a report address, so the step judges only what DNS shows
 	// (a record or none) and never asks for an rua= that does not exist.
 	const hostedNoReports = useHosted() && !rua;
+	// What covers this name when it has no record of its own: a parent's policy, nothing, or unknown (lookup failed).
+	const coverage = dmarcCoverage(status, dmarcFailed.length > 0);
 	// Without a report address nothing reaches Inbox Angel, whatever the record says, so it is never "configured".
 	const severity = hostedNoReports
-		? dmarcFailed.length > 0
+		? coverage.kind === 'unknown'
 			? 'unknown'
-			: dmarc.found
+			: coverage.kind === 'own'
 				? 'info'
-				: 'error'
+				: coverage.kind === 'none'
+					? 'error'
+					: coverage.policy === 'quarantine' || coverage.policy === 'reject'
+						? 'info'
+						: 'warning'
 		: !rua && lookupSeverity === 'info'
 			? 'warning'
 			: lookupSeverity;
 	// Adding our rua= must never relax an existing policy, so keep p= as it is and only default to none for a new record.
 	// No report address, no recommended record: a record ending in `mailto:` is broken, so there is nothing to copy.
-	// Hosted with no record at all: a plain p=none record (no rua=) is still worth publishing, so offer that.
+	// Hosted: a plain p=none record (no rua=) only when no policy applies at all. A record of its own would replace an
+	// inherited policy, so an inherited, unknown or failed lookup gets no offer: never weaker than the effective policy.
 	const recommended = rua
 		? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua)
-		: hostedNoReports && !dmarc.found
+		: hostedNoReports && coverage.kind === 'none'
 			? buildRecommendedRecord(null, 'none', null)
 			: null;
 
@@ -103,11 +111,15 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 					)}
 					{hostedNoReports ? (
 						<>
-							{!dmarc.found ? (
+							{coverage.kind === 'none' ? (
 								<p className="text-sm text-ink-2">
-									Without a DMARC record, receiving servers have no instruction for mail that fails SPF and DKIM. Publish this record with{' '}
+									No DMARC policy applies to this name, so receiving servers have no instruction for mail that fails SPF and DKIM. Publish this record with{' '}
 									<code className="font-mono text-ink-1">p=none</code>: it only monitors, so no mail is blocked or redirected.
 								</p>
+							) : coverage.kind === 'inherited' ? (
+								<p className="text-sm text-ink-2">{inheritedSentence(status.domain, coverage)}</p>
+							) : coverage.kind === 'unknown' ? (
+								<p className="text-sm text-ink-2">We could not tell which DMARC policy applies to this name, so no record is offered. Try again in a moment.</p>
 							) : (
 								<p className="text-sm text-ink-2">
 									{applied ? 'The record was written to Cloudflare. Public DNS can take a few minutes to show it.' : 'Your DMARC record is published, read from public DNS.'}
@@ -115,10 +127,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							)}
 							<div className="space-y-1">
 								<StatusDot status="unknown" label="Reports not connected yet" className="font-medium" />
-								<p className="text-sm text-ink-2">
-									This record sends no reports to Inbox Angel, so nobody can confirm yet that every sender passes. Keep that in mind before you tighten{' '}
-									<code className="font-mono text-ink-1">p=</code> to quarantine or reject.
-								</p>
+								<p className="text-sm text-ink-2">No reports reach Inbox Angel for this name, so nobody can confirm yet that every service sending as it passes.</p>
 							</div>
 						</>
 					) : null}

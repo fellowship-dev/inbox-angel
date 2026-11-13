@@ -101,7 +101,10 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { DomainServiceError, assertDomainRoom, domainCap, enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { PlanLimitError } from '@inbox-angel/db';
+import { planLimitResponse } from '../hosted/plan-limits';
+import { claimPreviewResponse } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -498,6 +501,8 @@ async function _handleApi(
       const canary = await issueCanary(env);
       return json(canary, 201);
     }
+    // Hosted without a canary domain: no address can receive the test email, so say so instead of a 500.
+    if (getMode(env) === 'saas') return err('The email check is not available here: no address is set up to receive the test email.', 503);
     // Self-host: the same expiring, single-use check+<token>@<reports domain> address. Mail to any other local part is dropped.
     const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
@@ -569,7 +574,7 @@ async function _handleApi(
       if (viaCookie && !passesCsrfCheck(request, env)) return err('cross-origin request rejected', 403);
       const me = await currentUser(request, env, ctx).catch(() => null);
       if (me) {
-        const deps = { db: env.DB as D1Database, mode: getMode(env), preflight: cloudflarePreflight, tenantFor: (workspaceId: string) => loadTenant(env, { workspaceId }), deleteDomain };
+        const deps = { db: env.DB as D1Database, mode: getMode(env), env, preflight: cloudflarePreflight, tenantFor: (workspaceId: string) => loadTenant(env, { workspaceId }), deleteDomain };
         const res = await handleWorkspaceRoutes(request, ctx, { kind: 'session', user: { id: me.id, email: me.email, name: me.name } }, deps);
         if (res) return res;
       }
@@ -595,6 +600,7 @@ async function _handleApi(
     const deps = {
       db: env.DB as D1Database,
       mode: getMode(env),
+      env,
       preflight: cloudflarePreflight,
       tenantFor: (workspaceId: string) => loadTenant(env, { workspaceId }),
       deleteDomain,
@@ -634,22 +640,28 @@ async function _handleApi(
       const domain = body.domain.toLowerCase().trim();
       if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return err('invalid domain format', 400);
 
+      // Hosted plan cap, advisory: no claim for a domain that can never be added (the insert below enforces it exactly).
+      if (!(await tenant.scope.domains.getByName(domain))) await assertDomainRoom(tenant);
+
       // SaaS: the hub domain is a claim like any other until its owner is proven.
       const admission = await admitDomain(tenant, domain);
       if (admission.kind === 'taken') return err('this domain is already registered in another workspace', 409);
       if (admission.kind === 'limit') return err('too many unverified domains — verify or remove some first', 429);
       if (admission.kind === 'pending') return json({ ok: false, pending: true, claim: claimView(admission.claim), domain }, 202);
 
-      // Persist base domain + derived values to D1
-      const rd = `reports.${domain}`;
-      const fe = `noreply@${rd}`;
-      const ruaAddress = `rua@${rd}`;
+      // Persist base domain + derived values to D1.
+      // Hosted: nothing is derived. Report intake is not connected, so there is no reports.<domain>, no rua@ address and
+      // no base_domain setting (from which loadTenant would derive reports.<domain> again).
+      const hostedMode = getMode(env) === 'saas';
+      const rd = hostedMode ? null : `reports.${domain}`;
+      const fe = rd ? `noreply@${rd}` : null;
+      const ruaAddress = rd ? `rua@${rd}` : '';
 
       // Inbound mail is routed by reports domain and a hostname is monitored by one workspace only:
       // refuse what another workspace already owns before anything is written.
       const lifecycle = workspaceLifecycle(env.DB as D1Database);
       const hostOwner = await lifecycle.byDomain(domain);
-      const reportsOwner = await lifecycle.byReportsDomain(rd);
+      const reportsOwner = rd ? await lifecycle.byReportsDomain(rd) : null;
       if ((hostOwner && hostOwner !== tenant.workspaceId) || (reportsOwner && reportsOwner !== tenant.workspaceId)) {
         return err('this domain is already registered in another workspace', 409);
       }
@@ -660,8 +672,13 @@ async function _handleApi(
       let domainId: number | undefined;
       let created: number | null;
       try {
-        created = await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, verified_via: admission.via, settings: { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } });
+        const settings: Record<string, string> = rd && fe ? { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } : {};
+        // Hosted with the domain already in the workspace: there is nothing to write (no settings, no row).
+        created = hostedMode && (await tenant.scope.domains.getByName(domain))
+          ? null
+          : await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, verified_via: admission.via, settings }, { maxDomains: domainCap(tenant) });
       } catch (e: any) {
+        if (e instanceof PlanLimitError) return planLimitResponse(env, 'domains_per_workspace', e.max);
         if (e?.message?.includes('UNIQUE')) return err('this domain is already registered in another workspace', 409);
         throw e;
       }
@@ -727,11 +744,19 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
+      await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
       if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
       const result = await commitVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
       return json(result, result.resumed ? 200 : 201);
+    }
+    // GET /api/domains/claims/:id/preview — public DNS of a claimed-but-unverified domain. Read-only: writes nothing.
+    const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);
+    if (claimPreviewMatch && method === 'GET') {
+      const claim = await tenant.scope.claims.getById(parseInt(claimPreviewMatch[1], 10));
+      if (!claim) return err('claim not found', 404);
+      return await claimPreviewResponse(tenant, claim, { userId: workspace.userId });
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
@@ -1025,7 +1050,11 @@ async function _handleApi(
         domain: domain.domain,
         rua_address: domain.rua_address,
         cf_available: tenant.hasCloudflare(),
-        dmarc: { ...dmarcData, auth_record: authRecordData },
+        // `effective`: the policy that applies (RFC 7489), own or inherited from the organizational domain; null when DNS
+        // could not say. The dashboard never offers a record weaker than this.
+        dmarc: { ...dmarcData, auth_record: authRecordData, effective: resolved.dmarc ? { policy: resolved.dmarc.policy, inherited_from: resolved.dmarc.inherited_from, issue: resolved.dmarc.issue } : null },
+        // DNS said the name itself does not exist.
+        nxdomain: resolved.nxdomain === true,
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },
         dkim: dkimData,
         routing: { ...routingData, reports_domain: rd ?? null, null_sender_spf: nullSenderData.spf, null_sender_dmarc: nullSenderData.dmarc },
@@ -1924,6 +1953,7 @@ async function _handleApi(
     return err('not found', 404);
   } catch (e: any) {
     if (e instanceof CfConnectionError || e instanceof CfZoneNotAllowedError || e instanceof TokenKeyError || e instanceof TokenEnvelopeError) return cfFailure(e);
+    if (e instanceof DomainServiceError && e.body) return json(e.body, e.status);
     if (e?.status && e?.message) return err(e.message, e.status);
     console.error('API error', e);
     return err('internal server error', 500);

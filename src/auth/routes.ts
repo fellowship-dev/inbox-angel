@@ -17,6 +17,7 @@ import { currentUser, passesCsrfCheck } from './session';
 import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
 import { helpUrl } from '../funnel/config';
+import { emailCheckAvailable } from '../hosted/config';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
@@ -193,6 +194,8 @@ export async function handleAuthRoute(
       // Hosted only: the booking link behind "Talk to Max" (BOOKING_URL, https). A self-hosted instance's
       // BOOKING_URL belongs to its own funnel mail, so its dashboard never shows it.
       help_url: saas ? helpUrl(env) : null,
+      // Whether the free email check can work: hosted needs a canary domain to receive the test email.
+      email_check: emailCheckAvailable(env),
     });
   }
 

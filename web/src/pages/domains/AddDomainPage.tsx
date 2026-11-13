@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { ClaimCard } from '../../components/domain/ClaimCard';
 import { InheritanceBanner } from '../../components/domain/InheritanceBanner';
+import { PlanLimitNotice, planLimitOf } from '../../components/PlanLimitNotice';
 import { ReadOnlyNotice, WriteButton } from '../../components/states';
 import { DomainRefusalHelp } from '../../components/TalkToMax';
 import { ReportsNotConnected } from '../../components/ReportsNotConnected';
@@ -13,6 +14,7 @@ import { useHosted } from '../../lib/session';
 import { normalizeDomain } from '../../lib/dmarc';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
 import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
+import { clearSignupDomainIf, readSignupDomain } from '../../lib/signup-intent';
 import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
 const POLL_MS = 15_000;
@@ -176,18 +178,21 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 
 export function AddDomainPage() {
 	const qc = useQueryClient();
-	const [input, setInput] = useState('');
+	// The domain asked for on the website, if any: a prefill the person confirms with Continue.
+	const [input, setInput] = useState(() => readSignupDomain() ?? '');
 	const [manual, setManual] = useState(false);
 	const [result, setResult] = useState<AddDomainResult | null>(null);
 	const [pending, setPending] = useState<PendingDomainResult | null>(null);
 
 	// A missing Cloudflare token (400) or any failure just means "type it in".
 	const zonesQ = useQuery({ queryKey: domainKeys.zones, queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
-	const zones = !manual && zonesQ.data && zonesQ.data.length > 0 ? zonesQ.data : null;
+	// A prefilled domain that is not one of the listed zones is typed, not picked.
+	const zones = !manual && zonesQ.data && zonesQ.data.length > 0 && (input === '' || zonesQ.data.some((z) => z.name === input)) ? zonesQ.data : null;
 
 	const add = useMutation({
 		mutationFn: (domain: string) => api<AddDomainResult | PendingDomainResult>('/api/domains', { method: 'POST', body: { domain } }),
-		onSuccess: async (res) => {
+		onSuccess: async (res, domain) => {
+			clearSignupDomainIf(domain);
 			// 202: ownership has to be proven first; nothing is monitored yet.
 			if ('pending' in res && res.pending) setPending(res);
 			else setResult(res as AddDomainResult);
@@ -200,7 +205,7 @@ export function AddDomainPage() {
 		return (
 			<div className="max-w-2xl space-y-6">
 				<PageHeader title="Verify you own this domain" description="One DNS record and we can start. Nothing is monitored until it is verified." />
-				<ClaimCard claim={pending.claim} onVerified={(d) => setResult({ domain: d, rua_hint: '' })} onRemoved={() => { setPending(null); setInput(''); }} />
+				<ClaimCard claim={pending.claim} preview onVerified={(d) => setResult({ domain: d, rua_hint: '' })} onRemoved={() => { setPending(null); setInput(''); }} />
 				<p className="text-sm text-ink-2">
 					You can leave this page: the domain stays under “Waiting for verification” on the <Link className="text-brand-ink underline underline-offset-4" to="/">Domains</Link> page.
 				</p>
@@ -254,10 +259,11 @@ export function AddDomainPage() {
 							</FieldHint>
 						</>
 					) : (
-						<Input id="domain-input" placeholder="yourcompany.com" value={input} onChange={(e) => setInput(e.target.value)} autoFocus autoComplete="off" autoCapitalize="none" spellCheck={false} aria-invalid={add.isError || undefined} aria-describedby={add.isError ? 'domain-error' : undefined} />
+						<Input id="domain-input" placeholder="yourcompany.com" value={input} onChange={(e) => setInput(e.target.value)} autoFocus autoComplete="off" autoCapitalize="none" spellCheck={false} aria-invalid={(add.isError && !planLimitOf(add.error)) || undefined} aria-describedby={add.isError && !planLimitOf(add.error) ? 'domain-error' : undefined} />
 					)}
-					{add.isError ? <FieldError id="domain-error">{errorMessage(add.error)}</FieldError> : null}
-					{add.isError ? <DomainRefusalHelp error={add.error} /> : null}
+					{add.isError && !planLimitOf(add.error) ? <FieldError id="domain-error">{errorMessage(add.error)}</FieldError> : null}
+					{add.isError && !planLimitOf(add.error) ? <DomainRefusalHelp error={add.error} /> : null}
+					{add.isError && planLimitOf(add.error) ? <PlanLimitNotice limit={planLimitOf(add.error)!} /> : null}
 				</div>
 				<WriteButton type="submit" loading={add.isPending} disabled={!normalizeDomain(input)}>
 					{add.isPending ? 'Setting up…' : 'Continue'}

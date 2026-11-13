@@ -13,6 +13,8 @@ import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
 import { buildRecommendedRecord, enforcementLevel, invalidDmarcSp, parseDmarcPolicy, weakerSubdomainPolicy } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
+import { useReportsNotConnected } from '../../components/ReportsNotConnected';
+import { HELP_PRIORITY, TalkToMax } from '../../components/TalkToMax';
 
 type Policy = 'none' | 'quarantine' | 'reject';
 
@@ -41,6 +43,15 @@ const STEP_COPY = [
 	},
 ] as const;
 
+/**
+ * Hosted, before report intake: no pass rate exists, so the steps say what DNS alone can and cannot confirm. Records
+ * being published is checkable; every sender passing is not.
+ */
+const HOSTED_STEP_BODY = [
+	'Quarantine tells receiving servers to put mail that fails DMARC in the spam folder. From DNS alone we can confirm that your SPF and DMARC records are published, not that every service sending as this domain passes: reports are not connected. Check each one (your mail provider, newsletter, invoicing and support tools) before you switch.',
+	'Reject tells receiving servers to refuse mail that fails DMARC. DNS alone cannot show whether every service sending as this domain passes, because reports are not connected. Switch only once you have checked each sender yourself.',
+] as const;
+
 interface DnsCheck {
 	found: boolean;
 	has_rua: boolean;
@@ -57,6 +68,7 @@ export function DmarcWizardPage() {
 	const dns = useQuery({ queryKey: ['dns-check', domainId], queryFn: () => api<DnsCheck>(`/api/domains/${domainId}/dns-check`), staleTime: 0, refetchOnMount: 'always' });
 
 	const [step, setStep] = useState<number | null>(null);
+	const hosted = useReportsNotConnected(domain);
 	const [appliedRecord, setAppliedRecord] = useState<string | null>(null);
 
 	const apply = useMutation({
@@ -99,6 +111,7 @@ export function DmarcWizardPage() {
 		const current = Math.max(step ?? floor, floor);
 		const enforced = current >= 2;
 		const copy = STEP_COPY[Math.min(current, 1)] ?? STEP_COPY[0];
+		const stepBody = hosted ? HOSTED_STEP_BODY[Math.min(current, 1)] : copy.body;
 		const cfManaged = dns.data.cf_managed;
 		const currentRecord = appliedRecord ?? dns.data.current_record;
 		const newRecord = buildRecommendedRecord(currentRecord, copy.target, domain.rua_address);
@@ -154,9 +167,9 @@ export function DmarcWizardPage() {
 								</p>
 								{spNotes}
 								{spWeaker ? (
-									<Alert variant="info">One thing left: set sp=reject at your DNS provider so subdomains are rejected too. Keep an eye on your pass rate in the domain overview.</Alert>
+									<Alert variant="info">One thing left: set sp=reject at your DNS provider so subdomains are rejected too.{hosted ? '' : ' Keep an eye on your pass rate in the domain overview.'}</Alert>
 								) : (
-									<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
+									<Alert variant="success">{hosted ? 'Nothing more to do here.' : 'Nothing more to do here. Keep an eye on your pass rate in the domain overview.'}</Alert>
 								)}
 							</>
 						)}
@@ -170,7 +183,8 @@ export function DmarcWizardPage() {
 					</StepCard>
 				) : (
 					<StepCard title={copy.title}>
-						<p className="text-sm text-ink-2">{copy.body}</p>
+						<p className="text-sm text-ink-2">{stepBody}</p>
+						{hosted ? <TalkToMax priority={HELP_PRIORITY.tightening} lead="Not sure every sender passes?" about="before you tighten the policy" /> : null}
 						{currentRecord ? <TxtRecord title="Current record" name="_dmarc" value={currentRecord} /> : null}
 						<TxtRecord title="New record" name="_dmarc" value={newRecord} />
 						{apply.isError ? (

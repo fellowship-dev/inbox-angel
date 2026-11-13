@@ -1,6 +1,6 @@
 import { cn } from '@inbox-angel/ui';
 import { ExternalLink, MessageCircle } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError } from '../lib/api';
 import { useHelpUrl } from '../lib/session';
 
@@ -27,9 +27,67 @@ export function TalkToMaxLink({ className }: { className?: string }) {
 			)}
 		>
 			<MessageCircle aria-hidden className="size-4 shrink-0" />
-			<span>Talk to Max</span>
-			<span className="sr-only">: book a call about your email setup (opens in a new tab)</span>
+			Talk to Max
 		</a>
+	);
+}
+
+/**
+ * How specific a stuck moment is. One screen shows the top-bar link plus at most ONE contextual line: the most
+ * specific one present (ties: the first on the page).
+ */
+export const HELP_PRIORITY = {
+	planLimit: 90,
+	domainRefused: 80,
+	claimStuck: 70,
+	dnsFailing: 50,
+	loadError: 40,
+	tightening: 30,
+	reportsNotConnected: 10,
+	page: 10,
+} as const;
+
+interface SlotApi {
+	register: (id: string, priority: number) => void;
+	unregister: (id: string) => void;
+}
+const SlotApiContext = createContext<SlotApi | null>(null);
+const SlotWinnerContext = createContext<string | null>(null);
+
+/** One screen's contextual "Talk to Max" slot. Without a scope (isolated components, tests) every line renders. */
+export function TalkToMaxScope({ children }: { children: ReactNode }) {
+	const [entries, setEntries] = useState<ReadonlyMap<string, { priority: number; order: number }>>(new Map());
+	const order = useRef(0);
+	const register = useCallback((id: string, priority: number) => {
+		setEntries((m) => {
+			const had = m.get(id);
+			if (had?.priority === priority) return m;
+			const next = new Map(m);
+			next.set(id, { priority, order: had?.order ?? order.current++ });
+			return next;
+		});
+	}, []);
+	const unregister = useCallback((id: string) => {
+		setEntries((m) => {
+			if (!m.has(id)) return m;
+			const next = new Map(m);
+			next.delete(id);
+			return next;
+		});
+	}, []);
+	const api = useMemo(() => ({ register, unregister }), [register, unregister]);
+	let winner: string | null = null;
+	let best: { priority: number; order: number } | null = null;
+	for (const [id, e] of entries) {
+		if (!best || e.priority > best.priority || (e.priority === best.priority && e.order < best.order)) {
+			winner = id;
+			best = e;
+		}
+	}
+	return (
+		<SlotApiContext.Provider value={api}>
+			<SlotWinnerContext.Provider value={winner}>{children}</SlotWinnerContext.Provider>
+		</SlotApiContext.Provider>
 	);
 }
 
@@ -37,9 +95,32 @@ export function TalkToMaxLink({ className }: { className?: string }) {
  * One plain line at a stuck moment: `lead` says the situation, `about` what the call is for.
  * "Lookups keep failing? Talk to Max about this domain." Renders nothing without a booking link.
  */
-export function TalkToMax({ lead, about, className }: { lead?: ReactNode; about?: string; className?: string }) {
-	const url = useHelpUrl();
+export function TalkToMax({
+	lead,
+	about,
+	className,
+	priority = HELP_PRIORITY.page,
+	href,
+}: {
+	lead?: ReactNode;
+	about?: string;
+	className?: string;
+	priority?: number;
+	/** A link the caller already holds (e.g. a plan-limit response's help_url), used only when it is https. Default: the session's. */
+	href?: string | null;
+}) {
+	const sessionUrl = useHelpUrl();
+	const url = href === undefined ? sessionUrl : href && href.startsWith('https://') ? href : null;
+	const id = useId();
+	const slot = useContext(SlotApiContext);
+	const winner = useContext(SlotWinnerContext);
+	useLayoutEffect(() => {
+		if (!slot || !url) return;
+		slot.register(id, priority);
+		return () => slot.unregister(id);
+	}, [slot, id, priority, url]);
 	if (!url) return null;
+	if (slot && winner !== id) return null;
 	return (
 		<p className={cn('text-sm text-ink-2', className)} data-testid="talk-to-max">
 			{lead ? <>{lead} </> : null}
@@ -52,7 +133,6 @@ export function TalkToMax({ lead, about, className }: { lead?: ReactNode; about?
 			>
 				Talk to Max
 				<ExternalLink aria-hidden className="size-3.5 shrink-0" />
-				<span className="sr-only"> (opens in a new tab)</span>
 			</a>
 			{about ? <> {about}</> : null}.
 		</p>
@@ -60,23 +140,24 @@ export function TalkToMax({ lead, about, className }: { lead?: ReactNode; about?
 }
 
 /**
- * Why adding a domain was refused, when a person can help: another workspace already owns it (409), or a limit was
- * reached (the pending-claims cap, or a plan limit with `code: plan_limit`). Anything else (bad input, a rate limit,
+ * Why adding a domain was refused, when a person can help: another workspace already owns it (409), or the
+ * pending-claims cap was reached (429). Anything else (bad input, a rate limit,
  * a server error) gets no line: retrying or fixing the input is the answer. Only for domain-adding requests, where
  * 409 means "taken".
  */
 export function domainRefusal(e: unknown): 'taken' | 'limit' | null {
 	if (!(e instanceof ApiError)) return null;
-	const code = (e.body as { code?: string } | undefined)?.code;
+	// A plan limit (code `plan_limit`) is PlanLimitNotice's, which carries its own single Talk to Max line.
+	if ((e.body as { code?: string } | undefined)?.code === 'plan_limit') return null;
 	if (e.status === 409) return 'taken';
-	if (code === 'plan_limit' || (e.status === 429 && /unverified domains/i.test(e.message))) return 'limit';
+	if (e.status === 429 && /unverified domains/i.test(e.message)) return 'limit';
 	return null;
 }
 
 /** The "Talk to Max" line under a refused domain add, worded for why it was refused. Nothing for other errors. */
 export function DomainRefusalHelp({ error, className }: { error: unknown; className?: string }) {
 	const why = domainRefusal(error);
-	if (why === 'taken') return <TalkToMax className={className} lead="Is this domain yours?" about="about getting access to it" />;
-	if (why === 'limit') return <TalkToMax className={className} lead="Need more domains than this allows?" about="about your domains" />;
+	if (why === 'taken') return <TalkToMax className={className} priority={HELP_PRIORITY.domainRefused} lead="Is this domain yours?" about="about getting access to it" />;
+	if (why === 'limit') return <TalkToMax className={className} priority={HELP_PRIORITY.domainRefused} lead="Need more domains than this allows?" about="about your domains" />;
 	return null;
 }

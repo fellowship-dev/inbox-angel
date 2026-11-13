@@ -1,13 +1,35 @@
-import { claimLookups, type DomainRow } from '@inbox-angel/db';
+import { PlanLimitError, claimLookups, type DomainRow } from '@inbox-angel/db';
 import { authorizeResource } from '../access/resolve';
 import type { TenantContext } from '../tenancy/context';
 import { admitDomain, claimView, settleClaims, type VerifiedVia } from './ownership';
 import { logAudit } from '../audit/log';
 import { track } from '../telemetry';
 import { lookupSpf, lookupDmarc } from '../email/dns-check';
+import { planLimitBody, planLimits } from '../hosted/plan-limits';
 
 export class DomainServiceError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  /** `body`, when set, is the whole JSON answer (e.g. a plan_limit with its `code`, `limit` and `help_url`). */
+  constructor(message: string, readonly status: number, readonly body?: Record<string, unknown>) { super(message); }
+}
+
+// Hosted plan cap on domains per workspace (src/hosted/plan-limits.ts). Margin: the INSERT itself is conditional on the count
+// (scope.domains.insert / baseDomain.apply with maxDomains), one statement in one D1 transaction, and D1 serialises writes, so the
+// cap holds exactly (margin 0) for direct inserts. The check before a claim is created is advisory only: it keeps people from
+// publishing a TXT record for a domain that cannot be added, but two requests may both pass it; the INSERT is what enforces.
+
+/** The cap in force for this tenant (hosted only), or undefined. */
+export const domainCap = (tenant: TenantContext): number | undefined => planLimits(tenant.env)?.domainsPerWorkspace;
+
+/** The refusal for a workspace at its domain cap, as an error the callers turn into the 403 body. */
+export function planLimitError(tenant: TenantContext, max: number): DomainServiceError {
+  const body = planLimitBody(tenant.env, 'domains_per_workspace', max);
+  return new DomainServiceError(body.error, 403, body);
+}
+
+/** Early, non-atomic: is the workspace already at its domain cap? Throws the refusal when so. Never run for a domain it already has. */
+export async function assertDomainRoom(tenant: TenantContext): Promise<void> {
+  const max = domainCap(tenant);
+  if (max !== undefined && (await tenant.scope.domains.list()).length >= max) throw planLimitError(tenant, max);
 }
 
 export interface EnrollmentOptions { productId?: string }
@@ -53,6 +75,7 @@ export async function enrollDomain(tenant: TenantContext, input: string, userEma
   await assertAgentEnrollmentSafe(tenant, domain);
   const existing = await tenant.scope.domains.getByName(domain);
   if (existing) await assertExistingProductMapping(tenant, existing, options);
+  if (!existing) await assertDomainRoom(tenant); // before a claim exists: nobody publishes a TXT record for a domain that can never be added
   const admission = await admitDomain(tenant, domain);
   if (admission.kind === 'taken') throw new DomainServiceError('domain already registered in another workspace', 409);
   if (admission.kind === 'limit') throw new DomainServiceError('too many unverified domains — verify or remove some first', 429);
@@ -64,7 +87,8 @@ export async function enrollDomain(tenant: TenantContext, input: string, userEma
 export async function commitVerifiedDomain(tenant: TenantContext, domain: string, via: VerifiedVia, userEmail?: string, ctx?: ExecutionContext, actorId?: string, options: EnrollmentOptions = {}) {
   await authorizeProductEnrollment(tenant, domain, options);
   await assertAgentEnrollmentSafe(tenant, domain);
-  const rdomain = tenant.settings.reportsDomain;
+  // Hosted: never a reports domain, so never an rua@reports.<domain> address (report intake is not connected).
+  const rdomain = tenant.mode === 'saas' ? undefined : tenant.settings.reportsDomain;
   const existing = await tenant.scope.domains.getByName(domain);
   if (existing) {
     await assertExistingProductMapping(tenant, existing, options);
@@ -77,9 +101,10 @@ export async function commitVerifiedDomain(tenant: TenantContext, domain: string
   // Insert domain row — no DNS writes here; all DNS changes require explicit user action
   let domainId: number;
   try {
-    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via }, options.productId);
+    const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: via }, options.productId, { maxDomains: domainCap(tenant) });
     domainId = result.meta.last_row_id as number;
   } catch (e: any) {
+    if (e instanceof PlanLimitError) throw planLimitError(tenant, e.max);
     if (e?.message?.includes('UNIQUE')) {
       // Concurrent replay may have won the insert; only resume a row in this workspace.
       const raced = await tenant.scope.domains.getByName(domain);

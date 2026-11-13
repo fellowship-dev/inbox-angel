@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import type { Domain, DomainClaim } from '../../lib/types';
-import { TalkToMax } from '../TalkToMax';
+import { HELP_PRIORITY, TalkToMax } from '../TalkToMax';
+import { PlanLimitNotice, planLimitOf, type PlanLimit } from '../PlanLimitNotice';
+import { ClaimPreview } from './ClaimPreview';
 import { CopyField } from './CopyField';
 
 export const LOST_EXPLANATION = 'Another workspace verified this domain first, so it cannot be added to this one.';
@@ -22,12 +24,13 @@ function verifyFailure(e: unknown): string {
  * A domain that is not ours to monitor yet: add this TXT record to prove ownership, then Verify.
  * `pending` has no reports, stats or DNS: only the claim exists. `lost` can only be removed.
  */
-export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { claim: DomainClaim; onVerified?: (domain: Domain) => void; onRemoved?: () => void; canWrite?: boolean }) {
+export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, preview }: { claim: DomainClaim; onVerified?: (domain: Domain) => void; onRemoved?: () => void; canWrite?: boolean; /** Show what public DNS says about the domain: `true` loads it now, `'lazy'` waits for a click. */ preview?: boolean | 'lazy' }) {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const [error, setError] = useState('');
 	/** Failed Verify presses on this card: after two, a person is offered. */
 	const [failures, setFailures] = useState(0);
+	const [limit, setLimit] = useState<PlanLimit | null>(null);
 	const refresh = () => qc.invalidateQueries({ queryKey: ['domains'] });
 
 	const verify = useMutation({
@@ -38,6 +41,8 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 			else navigate(`/domains/${res.domain.id}`);
 		},
 		onError: (e) => {
+			const atLimit = planLimitOf(e);
+			if (atLimit) return setLimit(atLimit);
 			setError(verifyFailure(e));
 			setFailures((n) => n + 1);
 			if (e instanceof ApiError && e.status === 409) void refresh();
@@ -62,10 +67,11 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 			{lost ? (
 				<>
 					<Alert variant="warning">{LOST_EXPLANATION}</Alert>
-					<TalkToMax lead="Is it yours?" about="about getting access to it" />
+					<TalkToMax priority={HELP_PRIORITY.claimStuck} lead="Is it yours?" about="about getting access to it" />
 				</>
 			) : (
 				<>
+					{preview ? <ClaimPreview claimId={claim.id} domain={claim.domain} lazy={preview === 'lazy'} /> : null}
 					<p className="text-sm text-ink-2">
 						Prove you own <strong>{claim.domain}</strong> by adding this DNS record where you manage it, then press Verify. DNS changes can take a few minutes to propagate.
 					</p>
@@ -77,15 +83,16 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 					{claim.last_error && !error ? <p className="text-sm text-ink-2 [overflow-wrap:anywhere]">Last check: {claim.last_error}</p> : null}
 				</>
 			)}
+			{limit ? <PlanLimitNotice limit={limit} /> : null}
 			{error ? (
 				<Alert variant="warning" role="alert">
 					<span className="[overflow-wrap:anywhere]">{error}</span>
 				</Alert>
 			) : null}
-			{!lost && failures >= 2 ? <TalkToMax lead="Added the record and it still does not verify?" about={`about ${claim.domain}`} /> : null}
+			{!lost && failures >= 2 ? <TalkToMax priority={HELP_PRIORITY.claimStuck} lead="Added the record and it still does not verify?" about={`about ${claim.domain}`} /> : null}
 			<div className="flex flex-wrap gap-2">
 				{!lost ? (
-					<Button loading={verify.isPending} disabled={!canWrite} onClick={() => { setError(''); verify.mutate(); }}>
+					<Button loading={verify.isPending} disabled={!canWrite} onClick={() => { setError(''); setLimit(null); verify.mutate(); }}>
 						Verify
 					</Button>
 				) : null}

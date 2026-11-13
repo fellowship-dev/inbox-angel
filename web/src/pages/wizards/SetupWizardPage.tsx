@@ -8,7 +8,7 @@ import { api } from '../../lib/api';
 import { wizardProgress } from '../../lib/dmarc';
 import { keys, useDomains } from '../../lib/queries';
 import { useHosted, useSession } from '../../lib/session';
-import { TalkToMax } from '../../components/TalkToMax';
+import { HELP_PRIORITY, TalkToMax } from '../../components/TalkToMax';
 import type { WizardState, WizardStepState } from '../../lib/types';
 import { DkimStep } from './setup/DkimStep';
 import { DmarcStep } from './setup/DmarcStep';
@@ -48,7 +48,8 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 					current={current}
 					steps={stepLabels(hosted).map((label, i) => ({
 						label,
-						state: wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
+						// Hosted: the Reports step only reports "not connected", so it is never shown as done.
+						state: hosted && STEP_KEYS[i] === 'routing' ? 'pending' : wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
 					}))}
 				/>
 			</header>
@@ -60,6 +61,7 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 
 /** No domain id in the URL: if a domain exists, continue with the first one; if not, this is a fresh instance. */
 function EntryFlow() {
+	const hosted = useHosted();
 	const domains = useDomains();
 	const qc = useQueryClient();
 	const navigate = useNavigate();
@@ -70,7 +72,7 @@ function EntryFlow() {
 	if (first) return <Navigate to={`/domains/${first.id}/setup/1`} replace />;
 
 	return (
-		<Frame title="Let's set up Inbox Angel" subtitle="0 of 5 steps complete" skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
+		<Frame title="Let's set up Inbox Angel" subtitle={`0 of ${hosted ? 4 : 5} steps complete`} skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
 			<DomainStep
 				onDomainSet={(newId) => {
 					void qc.invalidateQueries({ queryKey: keys.domains });
@@ -119,7 +121,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 
 	const index = resolved - 1;
 	const done = () => navigate(`/domains/${domainId}`);
-	const progress = wizardProgress(wizard);
+	const progress = wizardProgress(wizard, { hosted });
 
 	function finish(state: WizardStepState) {
 		const key = STEP_KEYS[index];
@@ -158,8 +160,9 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 			{index === 1 ? <SpfStep {...props} /> : null}
 			{index === 2 ? <DkimStep {...props} /> : null}
 			{index === 3 ? <DmarcStep {...props} /> : null}
-			{index === 4 ? (hosted ? <ReportsStep {...props} /> : <RoutingStep {...props} />) : null}
-			{(status.dns_errors?.length ?? 0) > 0 ? <TalkToMax lead="DNS lookups still failing after a retry?" about={`about ${status.domain}`} /> : null}
+			{/* Hosted: leaving the Reports step saves nothing, because there is nothing to complete there yet. */}
+			{index === 4 ? (hosted ? <ReportsStep {...props} onNext={done} /> : <RoutingStep {...props} />) : null}
+			{(status.dns_errors?.length ?? 0) > 0 ? <TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="DNS lookups still failing after a retry?" about={`about ${status.domain}`} /> : null}
 		</Frame>
 	);
 }

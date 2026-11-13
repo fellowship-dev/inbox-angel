@@ -20,7 +20,7 @@ import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { useTheme } from '../lib/theme';
 import { useSession } from '../lib/session';
 import { Banners } from './Banners';
-import { TalkToMaxLink } from './TalkToMax';
+import { TalkToMaxLink, TalkToMaxScope } from './TalkToMax';
 
 const renderLink: RenderNavLink = ({ href, ...rest }) => <Link to={href} {...rest} />;
 
@@ -43,7 +43,8 @@ export function Shell() {
 	const items = [
 		{ label: 'Domains', href: '/', icon: <Globe /> },
 		{ label: 'Analytics', href: '/analytics', icon: <BarChart3 /> },
-		{ label: 'Email check', href: '/check', icon: <Mail /> },
+		// Hidden where it cannot work (hosted without a canary domain), instead of a page that ends in an error.
+		...(status?.email_check === false ? [] : [{ label: 'Email check', href: '/check', icon: <Mail /> }]),
 		{ label: 'Members', href: '/members', icon: <Users /> },
 		{ label: 'Audit log', href: '/audit', icon: <History /> },
 		...(me?.instance_owner ? [{ label: 'Leads', href: '/leads', icon: <MailPlus /> }] : []),
@@ -98,8 +99,10 @@ export function Shell() {
 				</>
 			}
 		>
-			<Banners />
-			<Outlet />
+			<TalkToMaxScope>
+				<Banners />
+				<Outlet />
+			</TalkToMaxScope>
 			<CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
 		</AppShell>
 	);

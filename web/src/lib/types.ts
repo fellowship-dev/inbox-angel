@@ -204,7 +204,14 @@ export interface OnboardingStatus {
       found: boolean;
       record_name: string | null;
     };
+    /**
+     * The policy that applies (RFC 7489): the domain's own record, else its organizational domain's (`inherited_from`).
+     * Null when DNS could not say; absent from older servers. Never offer a record weaker than this policy.
+     */
+    effective?: { policy: string | null; inherited_from: string | null; issue: string | null } | null;
   };
+  /** DNS said the name itself does not exist (NXDOMAIN). */
+  nxdomain?: boolean;
   spf: {
     record: string | null;
     lookup_count: number | null;
@@ -315,6 +322,8 @@ export interface AuthStatus {
   has_domain: boolean;
   /** Hosted only: the https booking link behind "Talk to Max". Null (or absent) = show no link anywhere. */
   help_url?: string | null;
+  /** False when the free email check cannot work here (hosted without a canary domain): its menu item is hidden. */
+  email_check?: boolean;
 }
 
 /** GET /api/keys: prefixes only, never the secret. */

@@ -74,6 +74,8 @@ export interface Env {
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string; // distinct claimed sender domains with their own bucket per token per day; the rest share one (default 50)
   INTAKE_MAX_NEW_IPS_PER_REPORT?: string; // uncached source IPs enriched per report (default 50)
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string; // hosted-records domains per workspace (default 10)
+  MAX_WORKSPACES_PER_USER?: string;     // hosted plan cap: workspaces one person may own (default 5; self-host: none)
+  MAX_DOMAINS_PER_WORKSPACE?: string;   // hosted plan cap: domains one workspace may hold (default 10; self-host: none)
   HOSTED_RECORDS_TOKEN?: string; // secret: least-privilege DNS:Edit token for that one zone
   // Email funnel and compliance (docs/email-funnel.md)
   RESEND_API_KEY?: string;       // secret: Resend API key; the onboarding sequence is sent with Resend (Cloudflare Email Service is transactional-only)
@@ -93,6 +95,7 @@ export interface Env {
   SEND_EMAIL?: SendEmail;        // CF Email Workers outbound binding
   AUTH_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // auth rate limiting (10/min)
   API_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };  // global rate limiting (200/min)
+  DNS_PREVIEW_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // claim DNS preview, per user (10/min)
 }
 
 /** Env after the DB-bound guard: entry points serve the setup page / bail out when DB is unbound. */

@@ -2,7 +2,7 @@ import { StatusDot, cn } from '@inbox-angel/ui';
 import { hasReportAddress } from '../lib/dmarc-record';
 import { useDomains } from '../lib/queries';
 import { useHosted } from '../lib/session';
-import { TalkToMax } from './TalkToMax';
+import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
 
 /**
  * Hosted only: a domain whose DMARC reports cannot reach this dashboard, because it has no report address (hosted
@@ -35,7 +35,7 @@ export function ReportsNotConnected({ domain, className }: { domain?: string; cl
 				senders and whether it is safe to enforce cannot be shown.
 			</p>
 			<p className="text-sm text-ink-2">Still checked from live DNS: your SPF, DKIM and DMARC records, each domain&apos;s level, and the exact records to fix.</p>
-			<TalkToMax lead="Want reports for your domains?" about="about connecting them" />
+			<TalkToMax priority={HELP_PRIORITY.reportsNotConnected} lead="Want reports for your domains?" about="about connecting them" />
 		</section>
 	);
 }

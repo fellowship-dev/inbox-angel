@@ -15,11 +15,11 @@ import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
-import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
+import { useDnsCheck, useFailingSources, useOnboardingStatus, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
 import { hasReportAddress } from '../../lib/dmarc-record';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
 const WINDOWS = [7, 30, 60] as const;
@@ -38,9 +38,15 @@ function PolicyBadge({ policy }: { policy: Domain['dmarc_policy'] }) {
  */
 function LivePolicyBadge({ domain }: { domain: Domain }) {
 	const dns = useDnsCheck(domain.id);
+	const onboarding = useOnboardingStatus(domain.id); // same query as the DNS records card: nxdomain and the inherited policy
 	if (dns.isPending) return <Badge variant="outline">Checking DMARC policy…</Badge>;
+	if (onboarding.data?.nxdomain) return <Badge variant="outline">Does not resolve</Badge>;
 	const lastKnown = domain.dmarc_policy && domain.dmarc_policy !== 'none' ? ` (last known policy: p=${domain.dmarc_policy})` : '';
 	if (dns.isError || dns.data.error) return <Badge variant="outline">DMARC lookup failed{lastKnown}</Badge>;
+	const inherited = onboarding.data?.dmarc.effective;
+	if ((!dns.data.found || !dns.data.current_record) && inherited?.inherited_from && inherited.policy) {
+		return <Badge variant="outline">No record of its own: inherits p={inherited.policy} from {inherited.inherited_from}</Badge>;
+	}
 	if (!dns.data.found || !dns.data.current_record) return <Badge variant="outline">No DMARC record found{lastKnown}</Badge>;
 	const live = dns.data.current_record.match(/(^|;\s*)p=([a-z]+)/i)?.[2]?.toLowerCase();
 	return live ? <PolicyBadge policy={live as Domain['dmarc_policy']} /> : <Badge variant="outline">DMARC record has no p= tag</Badge>;
@@ -49,9 +55,10 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
 	const { canWrite } = useSession();
+	const hosted = useHosted();
 	if (!canWrite) return null; // read-only members cannot run the setup wizard
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
-	const { done, total, nextStep } = wizardProgress(q.data);
+	const { done, total, nextStep } = wizardProgress(q.data, { hosted });
 	if (done >= total) return null;
 	return (
 		<Alert variant="warning" title={`Setup incomplete: ${done}/${total} steps done`}>

@@ -141,13 +141,12 @@ export function OverviewPage() {
 							Waiting for verification
 						</h2>
 						<p className="text-sm text-ink-2">
-							{hosted
-								? 'Prove you own each one with a DNS record. Then it joins this workspace, and its SPF, DKIM and DMARC are checked from live DNS.'
-								: 'These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.'}
+							{/* Both modes show a live DNS preview on these cards, so "not monitored" must not read as "nothing to see". */}
+							Prove you own each one with a DNS record. Until then a domain is not monitored: there are no stored checks, stats or alerts, only a live look at its DNS.
 						</p>
 					</div>
 					{claims.map((c) => (
-						<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
+						<ClaimCard key={c.id} claim={c} canWrite={canWrite} preview="lazy" />
 					))}
 				</section>
 			) : null}

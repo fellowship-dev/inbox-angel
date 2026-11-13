@@ -3,7 +3,7 @@ import { Moon, Sun, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useTheme } from '../lib/theme';
-import { TalkToMaxLink } from './TalkToMax';
+import { TalkToMaxLink, TalkToMaxScope } from './TalkToMax';
 
 /** Full-screen chrome for wizards: no sidebar, a way out, room to focus. */
 export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { children: ReactNode; exitTo?: string; exitLabel?: string }) {
@@ -28,7 +28,7 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 				</div>
 			</header>
 			<main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-6">
-				{children}
+				<TalkToMaxScope>{children}</TalkToMaxScope>
 			</main>
 		</div>
 	);

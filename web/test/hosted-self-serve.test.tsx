@@ -81,9 +81,10 @@ describe('Talk to Max: always visible when the booking link is set, absent other
 });
 
 describe('hosted sign-in, sign-up and check-your-email', () => {
-	it('sign-in and sign-up both offer Talk to Max; sign-up says what works and what is not connected', async () => {
+	it('sign-in has no contextual line; sign-up offers Talk to Max and says what works and what is not connected', async () => {
 		renderApp(<AuthPage />, { role: null, status: HOSTED });
-		expectSafeTalkLink(await screen.findByRole('link', { name: /Talk to Max/ }));
+		await screen.findByRole('button', { name: 'Sign in' });
+		expect(talkLinks()).toHaveLength(0);
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Create an account' }));
 		expect(await screen.findByText(/checked from live DNS\. DMARC reports are not connected yet\./)).toBeInTheDocument();
 		expect(screen.getByText('Used to sign in.')).toBeInTheDocument();
@@ -145,7 +146,7 @@ const onboarding = (over: Partial<OnboardingStatus> = {}): OnboardingStatus => (
 	domain: 'acme.com',
 	rua_address: '',
 	cf_available: false,
-	dmarc: { found: false, has_our_rua: false, current_record: null, auth_record: { found: false, record_name: null } },
+	dmarc: { found: false, has_our_rua: false, current_record: null, auth_record: { found: false, record_name: null }, effective: { policy: null, inherited_from: null, issue: null } },
 	spf: { record: 'v=spf1 include:_spf.google.com ~all', lookup_count: 2, flattening_active: false },
 	dkim: { selectors: [], source: 'doh' },
 	routing: { mx_found: false, destination_verified: false, reports_domain: null, admin_email: 'owner@acme.com', null_sender_spf: false, null_sender_dmarc: false },
@@ -183,10 +184,14 @@ describe('hosted setup wizard', () => {
 		expect(screen.queryByRole('button', { name: /Set up email routing|Register email destination/ })).not.toBeInTheDocument();
 		expect(document.body.textContent).not.toMatch(/reports\.acme\.com|rua@reports/);
 		expectSafeTalkLink(screen.getAllByRole('link', { name: /Talk to Max/ })[0]!);
+		// Not counted and not ticked: progress is out of four, and leaving the step saves nothing.
+		expect(screen.getByText('4 of 4 steps complete')).toBeInTheDocument();
+		expect(screen.getByRole('navigation', { name: 'Setup progress' }).textContent).not.toContain('Reports(complete)');
 		const user = userEvent.setup();
 		await user.click(screen.getByRole('button', { name: 'Go to dashboard' }));
 		expect(await screen.findByText('Domain page')).toBeInTheDocument();
 		expect(calls.some((c) => c.path === '/api/setup/email-routing' || c.path === '/api/settings/register-destination')).toBe(false);
+		expect(calls.some((c) => c.method === 'PUT' && c.body && 'routing' in c.body)).toBe(false);
 	});
 
 	it('self-host step 5 is still Routing', async () => {
@@ -299,13 +304,14 @@ describe('overview level cards: Talk to Max at stuck states', () => {
 		expectSafeTalkLink(within(card).getByRole('link', { name: /Talk to Max/ }));
 	});
 
-	it('a check that keeps failing offers a person, and the card says reports are not connected', async () => {
+	it('a check that keeps failing offers a person, and the card does not lean on reports', async () => {
 		overview(summary({ dns_checked_at: hoursAgo(72), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed', dns_last_good_status: 'ok' }));
 		const card = await screen.findByRole('group', { name: /Level \d/ });
 		expect(within(card).getByText(/Last check failed 1 hour ago/)).toBeInTheDocument();
 		expect(within(card).getByText(/DNS checks keep failing\?/)).toBeInTheDocument();
-		expect(within(card).getByText('Reports not connected yet, so there are no 7-day results.')).toBeInTheDocument();
-		expect(within(card).queryByText('No reports in the last 7 days.')).not.toBeInTheDocument();
+		// The block above the cards says reports are not connected; the card does not repeat it or claim "no reports".
+		expect(within(card).queryByText(/7-day results|No reports in the last 7 days/)).not.toBeInTheDocument();
+		expect(within(card).queryByText(/reports look clean|start receiving reports|Review your reports/)).not.toBeInTheDocument();
 	});
 
 	it('a summary that cannot load offers a person', async () => {
