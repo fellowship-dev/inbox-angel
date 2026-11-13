@@ -106,6 +106,42 @@ describe('isDkimRecord', () => {
   });
 });
 
+describe('isDkimRecord ignores unknown tags (RFC 6376 §3.6.1)', () => {
+  const KEY = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3QxK7lY1b5y0kXk4dQ7sN0v2wZkq8J7u0cV8mB0pQwJ3v1sXx8m4H+oYtq9uQ8Zp3b2hP6s5r1nJ0Wk7oQIDAQAB';
+  it.each([
+    ['r=y', `v=DKIM1; k=rsa; p=${KEY}; r=y`],
+    ['o=-', `v=DKIM1; p=${KEY}; o=-`],
+    ['x=foo', `v=DKIM1; k=rsa; p=${KEY}; x=foo`],
+    ['notes=…', `v=DKIM1; p=${KEY}; notes=signing key for the mailer, rotated 2026`],
+    ['an escaped semicolon', `v=DKIM1; p=${KEY}; notes=a\\;b; k=rsa`],
+    ['an unknown tag before p=', `v=DKIM1; r=y; p=${KEY}`],
+  ])('accepts a key with %s', (_n, txt) => expect(isDkimRecord(txt)).toBe(true));
+  it('accepts a revoked key, also with an unknown tag', () => {
+    expect(isDkimRecord('v=DKIM1; p=')).toBe(true);
+    expect(isDkimRecord('v=DKIM1; p=; r=y')).toBe(true);
+    expect(isDkimRecord('v=DKIM1; p= ; notes=revoked')).toBe(true);
+  });
+  it('refuses a tag name that is not syntactically valid', () => {
+    expect(isDkimRecord(`v=DKIM1; p=${KEY}; 9x=1`)).toBe(false);
+    expect(isDkimRecord(`v=DKIM1; p=${KEY}; bad-name=1`)).toBe(false);
+    expect(isDkimRecord(`v=DKIM1; p=${KEY}; =1`)).toBe(false);
+    expect(isDkimRecord(`v=DKIM1; p=${KEY}; justtext`)).toBe(false);
+  });
+  it('still refuses DMARC and SPF records, whatever tags they carry', () => {
+    expect(isDkimRecord('v=DMARC1; p=reject; rua=mailto:a@x.com; r=y')).toBe(false);
+    expect(isDkimRecord('v=spf1 include:_spf.x.com -all')).toBe(false);
+  });
+  it('refuses a p= that is not base64, or a v= that is not first', () => {
+    expect(isDkimRecord('v=DKIM1; p=not base64 !!!; r=y')).toBe(false);
+    expect(isDkimRecord(`k=rsa; v=DKIM1; p=${KEY}`)).toBe(false);
+  });
+  it('keeps the strict shape for a record without v=: an unknown tag refuses it', () => {
+    expect(isDkimRecord(`k=rsa; p=${KEY}; r=y`)).toBe(false);
+    expect(isDkimRecord(`p=${KEY}; notes=x`)).toBe(false);
+    expect(isDkimRecord(`k=rsa; p=${KEY}`)).toBe(true);
+  });
+});
+
 describe('scanDkimSelectors on a wildcard', () => {
   const govUk = 'v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@x.gov.uk';
   const wildcardZone = (record: string) => Object.fromEntries(COMMON_DKIM_SELECTORS.map(s => [`TXT ${s}._domainkey.x.gov.uk`, [record]]));

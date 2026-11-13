@@ -33,29 +33,34 @@ export function parseDkimRecord(rawContent: string): DkimRecord {
 
 const DKIM_TAGS = new Set(['v', 'p', 'k', 'h', 's', 't', 'n', 'g']);
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const TAG_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /**
  * Is this TXT record shaped like a DKIM key record? A wildcard TXT (gov.uk answers every name with its DMARC record) must not
- * read as a key, so a DMARC or SPF record is refused first. `v=DKIM1` needs a `p=` tag. Without `v=`, the record needs a
- * `p=` tag that is empty (revoked) or base64, and no tags other than the DKIM ones (k, h, s, t, n, g).
+ * read as a key, so a DMARC or SPF record is refused first. A record that opens with `v=DKIM1` and has a `p=` tag is a key
+ * whatever other tags it carries: RFC 6376 §3.6.1 says unknown tags are ignored. Their names must still be well formed, and
+ * `p=` must be empty (revoked) or base64. Without `v=`, the record needs the same `p=` and no tags other than the DKIM ones
+ * (k, h, s, t, n, g). An escaped semicolon (`\;`) stays inside the value of the tag it sits in.
  */
 export function isDkimRecord(txt: string): boolean {
   const t = txt.trim().replace(/^["'\s]+/, '').replace(/["'\s]+$/, '');
   if (/^v=\s*(DMARC1|spf1)/i.test(t)) return false;
   const tags = new Map<string, string>();
-  for (const part of t.split(';')) {
+  let first: string | undefined;
+  for (const part of t.split(/(?<!\\);/)) {
     if (!part.trim()) continue;
     const i = part.indexOf('=');
     if (i < 0) return false;
     const k = part.slice(0, i).trim().toLowerCase();
-    if (!/^[a-z]$/.test(k) || !DKIM_TAGS.has(k)) return false;
+    if (!TAG_NAME.test(k)) return false;
+    first ??= k;
     if (!tags.has(k)) tags.set(k, part.slice(i + 1).replace(/[\s"']+/g, ''));
   }
   const p = tags.get('p');
-  if (p === undefined) return false;
+  if (p === undefined || !BASE64.test(p)) return false;
   const v = tags.get('v');
-  if (v !== undefined) return v.toUpperCase() === 'DKIM1';
-  return BASE64.test(p);
+  if (v !== undefined) return first === 'v' && v.toUpperCase() === 'DKIM1';
+  return [...tags.keys()].every(k => DKIM_TAGS.has(k));
 }
 
 export type DkimLookupStatus = 'found' | 'none' | 'error';
