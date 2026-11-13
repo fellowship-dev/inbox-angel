@@ -113,6 +113,19 @@ export const domains = sqliteTable(
 		/** Set when a legacy holder lost the name to a proven claim: the row is detached (renamed, hidden) and purged after 30 days (0005). */
 		evicted_at: integer('evicted_at'),
 		evicted_name: text('evicted_name'),
+		// What was last read from live DNS (0008). The overview shows these; see recordDnsCheck for the write rules.
+		/** Unix seconds spf_record and dmarc_policy were both last read successfully. Null: never. */
+		dns_checked_at: integer('dns_checked_at'),
+		/** Unix seconds of the last attempt, successful or not. */
+		dns_check_attempted_at: integer('dns_check_attempted_at'),
+		/** Last attempt: 'ok' | 'failed' (a lookup got no answer, stored values kept) | 'nxdomain' (the domain does not exist). */
+		dns_check_status: text('dns_check_status'),
+		/** Why the DMARC lookup gave no usable policy: 'multiple' | 'invalid'. Null with a null policy after a check: no DMARC record. */
+		dmarc_issue: text('dmarc_issue'),
+		/** Organizational domain whose DMARC record covers this domain when it has none of its own (dmarc_policy is that record's sp=, or p=). */
+		dmarc_inherited_from: text('dmarc_inherited_from'),
+		/** Result of the last check that read both SPF and DMARC: 'ok' | 'nxdomain'. Kept when a later attempt fails, so the card can still say the domain did not resolve at that check. */
+		dns_last_good_status: text('dns_last_good_status'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),

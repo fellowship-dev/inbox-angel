@@ -1,3 +1,46 @@
+CREATE TABLE `access_credentials` (
+	`id` text PRIMARY KEY NOT NULL,
+	`workspace_id` text NOT NULL,
+	`principal_id` text NOT NULL,
+	`name` text NOT NULL,
+	`prefix` text NOT NULL,
+	`key_hash` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`revoked_at` integer,
+	`last_used_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`principal_id`) REFERENCES `access_principals`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `access_credentials_key_hash_unique` ON `access_credentials` (`key_hash`);--> statement-breakpoint
+CREATE TABLE `access_grants` (
+	`id` text PRIMARY KEY NOT NULL,
+	`workspace_id` text NOT NULL,
+	`principal_id` text NOT NULL,
+	`product_id` text,
+	`domain` text,
+	`actions` text NOT NULL,
+	`expires_at` integer NOT NULL,
+	`revoked_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`principal_id`) REFERENCES `access_principals`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`product_id`) REFERENCES `products`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `access_principals` (
+	`id` text PRIMARY KEY NOT NULL,
+	`workspace_id` text NOT NULL,
+	`kind` text NOT NULL,
+	`user_id` text,
+	`name` text NOT NULL,
+	`disabled_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `aggregate_reports` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`domain_id` integer NOT NULL,
@@ -200,6 +243,12 @@ CREATE TABLE `domains` (
 	`verified_via` text DEFAULT 'legacy' NOT NULL,
 	`evicted_at` integer,
 	`evicted_name` text,
+	`dns_checked_at` integer,
+	`dns_check_attempted_at` integer,
+	`dns_check_status` text,
+	`dmarc_issue` text,
+	`dmarc_inherited_from` text,
+	`dns_last_good_status` text,
 	FOREIGN KEY (`parent_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`cf_connection_id`) REFERENCES `cloudflare_connections`(`id`) ON UPDATE no action ON DELETE set null
 );
@@ -211,6 +260,19 @@ CREATE INDEX `idx_domains_parent` ON `domains` (`parent_id`);--> statement-break
 CREATE INDEX `idx_domains_evicted` ON `domains` (`evicted_at`) WHERE "domains"."evicted_at" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `idx_domains_workspace` ON `domains` (`workspace_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_domains_is_default` ON `domains` (`workspace_id`) WHERE "domains"."is_default" = 1;--> statement-breakpoint
+CREATE TABLE `google_postmaster_connections` (
+	`id` text PRIMARY KEY NOT NULL,
+	`workspace_id` text NOT NULL,
+	`domain_id` integer NOT NULL,
+	`token_envelope` text,
+	`status` text DEFAULT 'connected' NOT NULL,
+	`last_attempt_at` integer,
+	`last_success_at` integer,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `google_postmaster_connections_workspace_id_domain_id_unique` ON `google_postmaster_connections` (`workspace_id`,`domain_id`);--> statement-breakpoint
 CREATE TABLE `hosted_domains` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -325,6 +387,21 @@ CREATE TABLE `memberships` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_memberships_user` ON `memberships` (`user_id`);--> statement-breakpoint
+CREATE TABLE `metric_observations` (
+	`workspace_id` text NOT NULL,
+	`connection_id` text NOT NULL,
+	`domain_id` integer NOT NULL,
+	`metric` text NOT NULL,
+	`period_start` text NOT NULL,
+	`period_end` text NOT NULL,
+	`source_id` text NOT NULL,
+	`payload` text NOT NULL,
+	PRIMARY KEY(`connection_id`, `domain_id`, `metric`, `period_start`, `period_end`, `source_id`),
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`connection_id`) REFERENCES `google_postmaster_connections`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `monitor_subscriptions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`email` text NOT NULL,
@@ -371,6 +448,25 @@ CREATE TABLE `password_reset_tokens` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_prt_user` ON `password_reset_tokens` (`user_id`);--> statement-breakpoint
+CREATE TABLE `product_domains` (
+	`workspace_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`domain_id` integer NOT NULL,
+	PRIMARY KEY(`product_id`, `domain_id`),
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`product_id`) REFERENCES `products`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `products` (
+	`id` text PRIMARY KEY NOT NULL,
+	`workspace_id` text NOT NULL,
+	`name` text NOT NULL,
+	`archived_at` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `report_records` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`report_id` integer NOT NULL,
@@ -508,59 +604,3 @@ CREATE TABLE `workspaces` (
 	`name` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL
 );
-
---> statement-breakpoint
-CREATE TABLE products (
- id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- name TEXT NOT NULL, archived_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE TABLE product_domains (
- workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
- domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
- PRIMARY KEY(product_id, domain_id)
-);
-CREATE TABLE access_principals (
- id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- kind TEXT NOT NULL, user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
- name TEXT NOT NULL, disabled_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE TABLE access_grants (
- id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- principal_id TEXT NOT NULL REFERENCES access_principals(id) ON DELETE CASCADE,
- product_id TEXT REFERENCES products(id) ON DELETE CASCADE, domain TEXT,
- actions TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER,
- created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE TABLE access_credentials (
- id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- principal_id TEXT NOT NULL REFERENCES access_principals(id) ON DELETE CASCADE,
- name TEXT NOT NULL, prefix TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE,
- expires_at INTEGER NOT NULL, revoked_at INTEGER, last_used_at INTEGER,
- created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-
---> statement-breakpoint
-CREATE TABLE google_postmaster_connections (
- id TEXT PRIMARY KEY NOT NULL,
- workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
- token_envelope TEXT,
- status TEXT NOT NULL DEFAULT 'connected',
- last_attempt_at INTEGER,
- last_success_at INTEGER,
- UNIQUE(workspace_id, domain_id)
-);
---> statement-breakpoint
-CREATE TABLE metric_observations (
- workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
- connection_id TEXT NOT NULL REFERENCES google_postmaster_connections(id) ON DELETE CASCADE,
- domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
- metric TEXT NOT NULL,
- period_start TEXT NOT NULL,
- period_end TEXT NOT NULL,
- source_id TEXT NOT NULL,
- payload TEXT NOT NULL,
- PRIMARY KEY(connection_id, domain_id, metric, period_start, period_end, source_id)
-);
---> statement-breakpoint

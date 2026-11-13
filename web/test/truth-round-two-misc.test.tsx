@@ -10,7 +10,9 @@ import { SetupWizardPage } from '../src/pages/wizards/SetupWizardPage';
 import { renderApp } from './render';
 
 const summary = (over: Partial<DomainCheckSummary> = {}): DomainCheckSummary => ({
-	domain_id: 1, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 -all', total_messages: 1000, pass_messages: 990, fail_messages: 10,
+	domain_id: 1, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 -all',
+	dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null,
+	total_messages: 1000, pass_messages: 990, fail_messages: 10,
 	dkim_total: 1000, dkim_pass: 990, spf_total: 1000, spf_pass: 990, mta_sts_enabled: 1, mta_sts_mode: 'enforce', ...over,
 });
 
