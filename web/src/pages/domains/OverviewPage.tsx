@@ -169,7 +169,7 @@ export function OverviewPage() {
 								<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
 							</div>
 							{claims.map((c) => (
-								<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
+								<ClaimCard key={c.id} claim={c} canWrite={canWrite} preview="lazy" />
 							))}
 						</section>
 					) : null}

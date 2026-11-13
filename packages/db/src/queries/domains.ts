@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { unwrapDriverError, type Db } from '../client';
+import { batchStatements, unwrapDriverError, type Db } from '../client';
 import { cloudflareConnections, domains, productDomains } from '../schema';
+import { PlanLimitError, changesOf } from './plan-limit';
 
 export type DomainRow = typeof domains.$inferSelect;
 
@@ -39,7 +40,12 @@ export function domainQueries(db: Db, workspaceId: string) {
 			return db.select().from(domains).where(and(mine, live, eq(domains.is_default, 1))).limit(1).get().then((r) => r ?? null);
 		},
 
-		async insert(d: { domain: string; rua_address: string; verified_via?: string }, productId?: string) {
+		/**
+		 * `maxDomains` (hosted plan cap): the INSERT is one conditional statement, so the count and the write are a single
+		 * transaction. D1 serialises writes, so concurrent inserts cannot exceed the cap: the margin is exactly 0. A refusal
+		 * throws PlanLimitError and writes nothing (the product mapping, if any, selects the new row and so inserts nothing either).
+		 */
+		async insert(d: { domain: string; rua_address: string; verified_via?: string }, productId?: string, opts: { maxDomains?: number } = {}) {
 			// Auto-detect parent: strip the leftmost label and check if the apex exists
 			const parts = d.domain.split('.');
 			let parentId: number | null = null;
@@ -52,8 +58,18 @@ export function domainQueries(db: Db, workspaceId: string) {
 				if (parent) parentId = parent.id;
 			}
 			try {
+				const max = opts.maxDomains;
+				// One conditional statement: the row is selected (so inserted) only while the workspace is under its cap.
+				const capped = max === undefined ? null : sql`INSERT INTO domains (workspace_id, domain, rua_address, parent_id, verified_via)
+					SELECT ${workspaceId}, ${d.domain}, ${d.rua_address}, ${parentId}, ${d.verified_via ?? 'legacy'}
+					WHERE (SELECT COUNT(*) FROM domains WHERE workspace_id = ${workspaceId} AND evicted_at IS NULL) < ${max}`;
 				const insert = db.insert(domains).values({ workspace_id: workspaceId, domain: d.domain, rua_address: d.rua_address, parent_id: parentId, verified_via: d.verified_via });
-				if (!productId) return await insert.run();
+				if (!productId) {
+					if (!capped) return await insert.run();
+					const [res] = await batchStatements(db, [capped]);
+					if (changesOf(res) === 0) throw new PlanLimitError('domains_per_workspace', max!);
+					return res;
+				}
 				// The binding exists iff this exact insert succeeds. A duplicate or a failed
 				// mapping rolls back the whole batch, so reconnect cannot adopt an old row.
 				const mapping = db.insert(productDomains).select(db.select({
@@ -61,9 +77,11 @@ export function domainQueries(db: Db, workspaceId: string) {
 					product_id: sql<string>`${productId}`.as('product_id'),
 					domain_id: domains.id,
 				}).from(domains).where(and(mine, eq(domains.domain, d.domain), eq(domains.id, sql`last_insert_rowid()`))));
-				const result = await db.batch([insert, mapping]);
+				const result = capped ? await batchStatements(db, [capped, mapping]) : await db.batch([insert, mapping]);
+				if (capped && changesOf(result[0]) === 0) throw new PlanLimitError('domains_per_workspace', max!);
 				return result[0];
 			} catch (e) {
+				if (e instanceof PlanLimitError) throw e;
 				throw unwrapDriverError(e); // callers match on 'UNIQUE'
 			}
 		},
