@@ -1,4 +1,5 @@
-// One configuration check for the person who runs this instance. Workers have no startup hook, so the dashboard
+// One configuration check for the person who runs this instance. On the hosted service (MODE=saas) that person is the
+// verified account whose email is OWNER_EMAIL: without OWNER_EMAIL nobody can see this check (src/funnel/routes.ts isInstanceOwner). Workers have no startup hook, so the dashboard
 // asks for it (GET /api/instance/preflight, instance owner only). Every message names a setting and what it breaks;
 // none ever contains a configured value, so a secret cannot leak through it.
 import { forImplicitWorkspace } from '@inbox-angel/db';
@@ -9,7 +10,7 @@ import { bookingUrl, sequenceEnabled } from '../funnel/config';
 
 export interface PreflightItem {
   /** Stable id for tests and the UI key. */
-  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration';
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
   /** `action`: something does not work until it is fixed. `note`: works, but worth knowing. */
   severity: 'action' | 'note';
   /** The setting(s) to change, by name. */
@@ -96,6 +97,18 @@ export async function instancePreflight(env: BoundEnv, requestOrigin: string): P
     items.push({ id: 'bot_check', severity: 'action', setting: 'TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY', message: 'Sign-up is closed: the bot check is not configured. Set both Turnstile keys to open it.' });
   } else if (secret !== siteKey) {
     items.push({ id: 'bot_check', severity: 'action', setting: 'TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY', message: 'Only one of the two Turnstile keys is set. Set both, or neither.' });
+  }
+
+  // Rate limits: a missing ratelimit binding fails open, so the hosted service must have every one.
+  // This is the one place that reports them (it replaces reading /api/me's dns_preview_limiter).
+  if (hosted) {
+    const missing = (['API_LIMITER', 'AUTH_LIMITER', 'MCP_LIMITER', 'DNS_PREVIEW_LIMITER'] as const).filter(name => !env[name]);
+    if (missing.length) {
+      items.push({
+        id: 'rate_limits', severity: 'action', setting: missing.join(', '),
+        message: `${missing.length === 1 ? 'A rate limit binding is' : `${missing.length} rate limit bindings are`} missing, so the requests ${missing.length === 1 ? 'it counts' : 'they count'} are not limited${missing.includes('MCP_LIMITER') || missing.includes('API_LIMITER') ? ', and agents are refused until MCP_LIMITER and API_LIMITER are both bound' : ''}. Add the ratelimit bindings from wrangler.jsonc to this Worker.`,
+      });
+    }
   }
 
   // Booking link: the day-14 follow-up email offers a call through it.

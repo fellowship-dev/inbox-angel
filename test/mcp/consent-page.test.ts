@@ -80,8 +80,28 @@ describe('consent page', () => {
 
  it('warns about unverified self-registered clients and local redirects', () => {
   const text = visible(renderConsentPage(model({ client: { name: 'Totally Claude', redirectHost: '127.0.0.1', loopback: true } })));
-  expect(text).toContain('Not verified.');
+  expect(text).toContain('Not verified:');
   expect(text).toContain('This sends access to an app on your own computer.');
+ });
+
+ it('never states a self-registered name as fact: generic heading, the claimed name below as unverified, nothing pre-ticked', () => {
+  const html = renderConsentPage(model({
+   client: { name: 'Claude', redirectHost: 'evil.example', loopback: false },
+   workspaces: [{ id: 'w', name: 'Solo', choices: [{ value: '{"workspaceId":"w","domain":"solo.example"}', domain: 'solo.example' }] }],
+  }));
+  expect(html).toContain('<h1>An app is asking to work with your domains</h1>');
+  expect(html).toContain('<title>An app is asking for access · Inbox Angel</title>');
+  expect(html).not.toMatch(/<h1>[^<]*Claude/);
+  const text = visible(html);
+  expect(text).toContain('Name it gives "Claude". Not verified: the app chose this name itself');
+  expect(text).toContain('Access goes to evil.example . Allow only if that is the app you are using right now.');
+  expect(html).not.toContain(' checked');
+ });
+
+ it('says changes are made in the dashboard or at the DNS provider, and makes form controls 44px on touch screens', () => {
+  const html = renderConsentPage(model());
+  expect(visible(html)).toContain('You make those changes yourself, in the dashboard or at your DNS provider.');
+  expect(html).toContain('@media (pointer:coarse){select,input[type=text]{height:44px}}');
  });
 
  it('preselects the only domain when there is exactly one, and explains an empty portfolio', () => {

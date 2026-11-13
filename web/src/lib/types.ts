@@ -271,8 +271,6 @@ export type Role = 'owner' | 'admin' | 'member';
 
 /** GET /api/me */
 export interface Me {
-  /** Hosted instance owner only: which limiter answers the claim DNS preview. `fallback` means the DNS_PREVIEW_LIMITER binding is missing. */
-  dns_preview_limiter?: 'binding' | 'fallback';
   user: { id: string; email: string; name: string } | null;
   /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
   role: Role | null;
@@ -342,7 +340,7 @@ export interface AgentStatus {
 
 /** GET /api/instance/preflight (instance owner only): configuration problems by setting name, never a value. */
 export interface PreflightItem {
-  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration';
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
   severity: 'action' | 'note';
   setting: string;
   message: string;

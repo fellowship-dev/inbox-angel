@@ -15,12 +15,13 @@ export const ACTION_COPY: Readonly<Record<Exclude<AccessAction, 'access:manage'>
  'remediation:plan': { label: 'Suggest fixes', detail: 'Writes the DNS changes it recommends, for you to review. It cannot apply them.' },
  'domains:manage': { label: 'Add domains and check ownership', detail: 'Starts monitoring a domain and checks its ownership record. It does not edit DNS or send email.' },
 });
-/** Pre-selected: the two permissions a first useful answer needs (list the domains, read their report). */
+/** Pre-selected for a verified client only: the two permissions a first useful answer needs (list the domains, read their report). */
 const DEFAULT_ACTIONS: readonly string[] = Object.freeze(['resources:read', 'reports:read']);
 export const EXPIRY_CHOICES = [1, 7, 14, 30] as const;
 const DEFAULT_EXPIRY = 7;
 
 export interface ConsentModel {
+ /** `publisher` is set only for a client whose identity is verified (a Client ID Metadata Document on its own HTTPS domain). */
  client: { name: string; publisher?: string; redirectHost: string; loopback: boolean };
  /** Email of the signed-in person approving. */
  account: string;
@@ -71,6 +72,7 @@ legend{font-size:1rem;font-weight:600;padding:0;margin-bottom:4px}
 label.field{display:block;margin-top:12px;font-size:.875rem;font-weight:500}
 select,input[type=text]{display:block;width:100%;height:40px;margin-top:6px;padding:0 12px;font:inherit;font-size:.875rem;color:var(--ink-1);background:var(--surface-1);border:1px solid var(--control-border);border-radius:10px}
 .hint{font-size:.8125rem;color:var(--ink-2);margin-top:4px}
+@media (pointer:coarse){select,input[type=text]{height:44px}}
 .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
 .button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 20px;border-radius:10px;font:inherit;font-size:.875rem;font-weight:600;cursor:pointer;text-decoration:none}
 .primary{background:var(--brand);color:var(--brand-fg);border:1px solid var(--brand)}
@@ -110,22 +112,25 @@ const expiryDate = (now: number, days: number) => new Date((now + days * 86400) 
 
 export function renderConsentPage(m: ConsentModel): string {
  const client = escape(m.client.name);
+ // Only a verified client is named in the heading and gets anything pre-ticked; a self-registered name is a claim.
+ const verified = !!m.client.publisher;
  const total = m.workspaces.reduce((n, w) => n + w.choices.length, 0);
  const identity = [
-  m.client.publisher
+  verified
    ? `<li><strong>Published by</strong> <span class="mono">${escape(m.client.publisher)}</span></li>`
-   : `<li><strong>Not verified.</strong> This app registered its own name, so "${client}" may not be who it says.</li>`,
-  `<li><strong>Access goes to</strong> <span class="mono">${escape(m.client.redirectHost)}</span></li>`,
+   : `<li><strong>Name it gives</strong> "${client}". <strong>Not verified:</strong> the app chose this name itself, so it may not be who it says.</li>`,
+  `<li><strong>Access goes to</strong> <span class="mono">${escape(m.client.redirectHost)}</span>${verified ? '' : '. Allow only if that is the app you are using right now.'}</li>`,
   `<li><strong>You are signed in as</strong> ${escape(m.account)}</li>`,
  ].join('');
  const loopback = m.client.loopback ? '<p class="notice" role="note"><strong>This sends access to an app on your own computer.</strong> Continue only if you started this connection from that app just now.</p>' : '';
  const domains = total === 0
   ? '<p class="muted small">You have no domains yet. Add one below, or add domains in the dashboard first.</p>'
-  : m.workspaces.filter(w => w.choices.length).map(w => `<div class="group" role="group" aria-label="${escape(w.name)}"><p class="group-name">${escape(w.name)}</p>${w.choices.map(c => `<label class="option"><input type="checkbox" name="selection" value="${escape(c.value)}"${total === 1 ? ' checked' : ''}><span><span class="mono">${escape(c.domain)}</span>${c.product ? `<span class="detail">Only for ${escape(c.product)}</span>` : ''}</span></label>`).join('')}</div>`).join('');
- const actions = (Object.keys(ACTION_COPY) as Array<keyof typeof ACTION_COPY>).map(a => `<label class="option"><input type="checkbox" name="actions" value="${a}"${DEFAULT_ACTIONS.includes(a) ? ' checked' : ''}><span><span>${escape(ACTION_COPY[a].label)}</span><span class="detail">${escape(ACTION_COPY[a].detail)}</span><span class="scope">${a}</span></span></label>`).join('');
+  : m.workspaces.filter(w => w.choices.length).map(w => `<div class="group" role="group" aria-label="${escape(w.name)}"><p class="group-name">${escape(w.name)}</p>${w.choices.map(c => `<label class="option"><input type="checkbox" name="selection" value="${escape(c.value)}"${verified && total === 1 ? ' checked' : ''}><span><span class="mono">${escape(c.domain)}</span>${c.product ? `<span class="detail">Only for ${escape(c.product)}</span>` : ''}</span></label>`).join('')}</div>`).join('');
+ const actions = (Object.keys(ACTION_COPY) as Array<keyof typeof ACTION_COPY>).map(a => `<label class="option"><input type="checkbox" name="actions" value="${a}"${verified && DEFAULT_ACTIONS.includes(a) ? ' checked' : ''}><span><span>${escape(ACTION_COPY[a].label)}</span><span class="detail">${escape(ACTION_COPY[a].detail)}</span><span class="scope">${a}</span></span></label>`).join('');
  const expiry = EXPIRY_CHOICES.map(d => `<option value="${d}"${d === DEFAULT_EXPIRY ? ' selected' : ''}>${d === 1 ? '1 day' : `${d} days`}, until ${expiryDate(m.now, d)}</option>`).join('');
  const workspaceOptions = m.workspaces.map(w => `<option value="${escape(w.id)}">${escape(w.name)}</option>`).join('');
- return agentPage(`Allow ${client}?`, `<h1>Allow ${client} to work with your domains?</h1>
+ const heading = verified ? `Allow ${client} to work with your domains?` : 'An app is asking to work with your domains';
+ return agentPage(verified ? `Allow ${client}?` : 'An app is asking for access', `<h1>${heading}</h1>
 <p class="muted">Choose exactly what it may see and do. It gets nothing else, and access ends on the date you pick.</p>
 <ul class="facts">${identity}</ul>${loopback}
 <form method="post">
@@ -137,7 +142,7 @@ export function renderConsentPage(m: ConsentModel): string {
 </fieldset>
 <fieldset><legend>What it may do</legend>${actions}</fieldset>
 <fieldset><legend>When access ends</legend><label class="field">Access ends<select name="days">${expiry}</select></label><p class="hint">Dates are in UTC. You can revoke access sooner in Settings, under Agents and product access.</p></fieldset>
-<div class="never"><h2>It can never do these</h2><ul><li>Change your DNS records</li><li>Tighten your DMARC policy</li><li>Send email or invite people</li><li>Give itself more access</li></ul><p class="muted last">You make those changes yourself, in the dashboard.</p></div>
+<div class="never"><h2>It can never do these</h2><ul><li>Change your DNS records</li><li>Tighten your DMARC policy</li><li>Send email or invite people</li><li>Give itself more access</li></ul><p class="muted last">You make those changes yourself, in the dashboard or at your DNS provider.</p></div>
 <div class="actions"><button class="button primary" type="submit" name="decision" value="allow">Allow access</button><button class="button secondary" type="submit" name="decision" value="deny" formnovalidate>Don't allow</button></div>
 </form>`);
 }

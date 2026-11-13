@@ -60,30 +60,33 @@ describe('the missing-limiter warning', () => {
   });
 });
 
-describe('GET /api/me: dns_preview_limiter', () => {
+describe('the owner learns about a missing DNS_PREVIEW_LIMITER from the setup check, the one place for limiter gaps', () => {
   const OWNER = 'owner@example.com';
-  it('the instance owner sees "fallback" without the binding and "binding" with it', async () => {
-    const w = await hosted({ OWNER_EMAIL: OWNER });
-    const owner = await w.user(OWNER);
-    expect((await json(await w.api(owner, 'GET', '/api/me'))).dns_preview_limiter).toBe('fallback');
-    const bound = await hosted({ OWNER_EMAIL: OWNER, DNS_PREVIEW_LIMITER: { limit: async () => ({ success: true }) } });
-    const owner2 = await bound.user(OWNER);
-    expect((await json(await bound.api(owner2, 'GET', '/api/me'))).dns_preview_limiter).toBe('binding');
+  const limiters = { API_LIMITER: { limit: async () => ({ success: true }) }, AUTH_LIMITER: { limit: async () => ({ success: true }) }, MCP_LIMITER: { limit: async () => ({ success: true }) } };
+  const rateItem = async (w: Awaited<ReturnType<typeof hosted>>, who: { token: string; ws: string; id: string }) =>
+    (await json(await w.api(who, 'GET', '/api/instance/preflight'))).items.find((i: { id: string }) => i.id === 'rate_limits');
+  it('lists it as action needed without the binding, and not with it', async () => {
+    const w = await hosted({ OWNER_EMAIL: OWNER, ...limiters });
+    expect(await rateItem(w, await w.user(OWNER))).toMatchObject({ severity: 'action', setting: 'DNS_PREVIEW_LIMITER' });
+    const bound = await hosted({ OWNER_EMAIL: OWNER, ...limiters, DNS_PREVIEW_LIMITER: { limit: async () => ({ success: true }) } });
+    expect(await rateItem(bound, await bound.user(OWNER))).toBeUndefined();
   });
 
-  it('nobody else sees the field', async () => {
+  it('nobody else sees it, and /api/me no longer carries a limiter field', async () => {
     const w = await hosted({ OWNER_EMAIL: OWNER });
     const other = await w.user('someone@example.com');
+    expect((await w.api(other, 'GET', '/api/instance/preflight')).status).toBe(403);
     const me = await json(await w.api(other, 'GET', '/api/me'));
     expect(me.instance_owner).toBe(false);
     expect('dns_preview_limiter' in me).toBe(false);
+    const owner = await w.user(OWNER);
+    expect('dns_preview_limiter' in await json(await w.api(owner, 'GET', '/api/me'))).toBe(false);
   });
 
-  it('a self-hosted owner does not get it (no hosted limiter to report on)', async () => {
+  it('a self-hosted owner is not told to add hosted limiters', async () => {
     const env = makeEnv(createMigratedD1());
     const owner = await setupOwner(env);
-    const me = await json(await call(env, 'GET', '/api/me', { key: owner }));
-    expect(me.instance_owner).toBe(true);
-    expect('dns_preview_limiter' in me).toBe(false);
+    const preflight = await json(await call(env, 'GET', '/api/instance/preflight', { key: owner }));
+    expect(preflight.items.some((i: { id: string }) => i.id === 'rate_limits')).toBe(false);
   });
 });

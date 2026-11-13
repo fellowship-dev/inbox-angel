@@ -108,7 +108,7 @@ import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '.
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
-import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
+import { claimPreviewResponse } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -625,7 +625,6 @@ async function _handleApi(
   if (path === '/api/me' && method === 'GET') {
     return json({
       instance_owner: instanceOwner,
-      ...(instanceOwner && getMode(env) === 'saas' ? { dns_preview_limiter: dnsPreviewLimiter(env) } : {}),
       user: userBySession,
       role: workspace.role ?? 'member',
       workspace_id: tenant.workspaceId,

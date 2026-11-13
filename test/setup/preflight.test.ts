@@ -7,6 +7,8 @@ import { call, inviteAndAccept, makeEnv, setupOwner, type TestDb } from '../auth
 const ORIGIN = 'https://ia.example.com';
 const kv = {} as KVNamespace;
 const sendEmail = { send: async () => {} } as unknown as SendEmail;
+const bound = { limit: async () => ({ success: true }) };
+const limiters = { API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound, DNS_PREVIEW_LIMITER: bound };
 function env(extra: Record<string, unknown> = {}): BoundEnv {
  const db = createMigratedD1();
  return { DB: db as unknown as D1Database, ...extra } as BoundEnv;
@@ -30,8 +32,8 @@ describe('instance preflight', () => {
 
  it('hosted mode needs the bot check and a mail sender to open sign-up, and a booking link for the follow-up email', async () => {
   const hosted = env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN });
-  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'note:booking_link']);
-  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max' });
+  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'action:rate_limits', 'note:booking_link']);
+  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max' });
   (ready.DB as unknown as TestDb).sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'example.com')").run();
   expect(await ids(ready)).toEqual([]);
  });
@@ -57,6 +59,18 @@ describe('instance preflight', () => {
   expect(agentAvailability({ BETTER_AUTH_URL: ORIGIN })).toEqual({ available: false, server_url: null });
   expect(agentAvailability({ OAUTH_KV: kv })).toEqual({ available: false, server_url: null });
   expect(agentAvailability({ OAUTH_KV: kv, BETTER_AUTH_URL: 'http://ia.example.com' })).toEqual({ available: false, server_url: null });
+ });
+});
+
+describe('rate limit bindings', () => {
+ it('hosted: every missing ratelimit binding is action needed, in one item, by name', async () => {
+  const item = async (extra: Record<string, unknown>) => (await instancePreflight(env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, ...extra }), ORIGIN)).items.find(i => i.id === 'rate_limits');
+  expect(await item({})).toMatchObject({ severity: 'action', setting: 'API_LIMITER, AUTH_LIMITER, MCP_LIMITER, DNS_PREVIEW_LIMITER', message: expect.stringContaining('agents are refused until MCP_LIMITER and API_LIMITER are both bound') });
+  expect(await item({ API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound })).toMatchObject({ setting: 'DNS_PREVIEW_LIMITER', message: 'A rate limit binding is missing, so the requests it counts are not limited. Add the ratelimit bindings from wrangler.jsonc to this Worker.' });
+  expect(await item(limiters)).toBeUndefined();
+ });
+ it('self-host: missing bindings are not reported (they are optional there)', async () => {
+  expect(await ids(env({ OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail }))).not.toContain('action:rate_limits');
  });
 });
 

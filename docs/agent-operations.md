@@ -56,14 +56,17 @@ Installation, tool reload, browser authorization, a successful identity call and
 
 | Limit | Value | Answer when exceeded |
 |---|---|---|
-| Requests per agent connection | 200 per 60 s (`API_LIMITER`, key `mcp:connection:<principal>`) | HTTP 429, `Retry-After: 60` |
+| Requests per agent connection | 100 per 60 s (`MCP_LIMITER`, key `mcp:connection:<principal>`) | HTTP 429, `Retry-After: 60` |
 | Requests per workspace, all its agents together | 200 per 60 s (`API_LIMITER`, key `mcp:workspace:<id>`) | HTTP 429, `Retry-After: 60` |
+| `/oauth/register`, `/oauth/token`, and `/mcp` without a valid token, per IP | 10 per 60 s (`AUTH_LIMITER`, key `oauth:<ip>`) | HTTP 429, `Retry-After: 60` |
 | Live DNS checks per connection (`inspect_domain`, `get_email_report`, `query_email_metrics`, `plan_remediation`, `get_source_status`) | 10 per 60 s (D1 counter) | Tool error `rate_limited` with `retryAfterSeconds` |
 | Live DNS checks per workspace | 30 per 60 s (D1 counter) | Tool error `rate_limited` with `retryAfterSeconds` |
 
-Agent requests are never limited per IP address: assistants share cloud egress addresses. Each live DNS check sends about 45–60 DNS-over-HTTPS lookups to each of two resolvers, so roughly 90–120 Worker subrequests per call. The consent page and the connection list keep the dashboard's per-IP budget.
+A Workers ratelimit binding has one fixed number, so the per-connection limit has its own binding at half the workspace limit: one agent at full speed leaves room for the others. Authenticated agent requests are never limited per IP address, because assistants share cloud egress addresses. A refused live DNS check spends neither count, and expired counter rows are deleted now and then as checks run. Each live DNS check sends about 45–60 DNS-over-HTTPS lookups to each of two resolvers, so roughly 90–120 Worker subrequests per call (more than the Workers Free plan's 50). The consent page and the connection list keep the dashboard's per-IP budget.
 
-The instance owner (and nobody else) sees a configuration check in **Settings → Instance**, and a banner on every page while a setting needs action. It names missing or inconsistent settings (mode, `BETTER_AUTH_URL`, `OAUTH_KV`, mail sender, Turnstile keys, `BOOKING_URL`, open client registration) and never shows a configured value (`GET /api/instance/preflight`).
+**Missing bindings.** On a self-hosted instance a missing ratelimit binding means that limit does not apply. On the hosted service (`MODE=saas`) `/mcp` answers 503 instead of running unlimited when `MCP_LIMITER` or `API_LIMITER` is missing, and the setup check lists every missing binding (`API_LIMITER`, `AUTH_LIMITER`, `MCP_LIMITER`, `DNS_PREVIEW_LIMITER`) as action needed.
+
+The instance owner (and nobody else) sees a configuration check in **Settings → Instance**, and a banner on every page while a setting needs action. It names missing or inconsistent settings (mode, `BETTER_AUTH_URL`, `OAUTH_KV`, mail sender, Turnstile keys, ratelimit bindings, `BOOKING_URL`, open client registration) and never shows a configured value (`GET /api/instance/preflight`). On a self-hosted instance the owner is the owner of the first workspace, or the account in `OWNER_EMAIL` when set. **On the hosted service the owner is only the verified account whose email is `OWNER_EMAIL`: without `OWNER_EMAIL` nobody can see the setup check.**
 
 ## Unattended product workers
 

@@ -7,7 +7,7 @@ import { isSaas } from './config';
 import { resolveApiKey } from './api-keys';
 import { mcpInstallation } from '../mcp/discovery';
 import { handleMcpConnections } from '../mcp/connections';
-import { limitBrowserRequest, limitMcpRequest } from '../mcp/rate-limit';
+import { limitAnonymousAgentRequest, limitBrowserRequest, limitMcpRequest } from '../mcp/rate-limit';
 
 export interface McpIdentity { principalId: string; issuer: string; resource: string; credentialId?: string }
 export type McpHandler = { fetch(request: Request, env: BoundEnv, ctx: ExecutionContext & { props: McpIdentity }): Promise<Response> | Response };
@@ -102,7 +102,20 @@ export function withMcpAuthorization<T extends DefaultHandler>(worker: T, handle
    const limited = await limitBrowserRequest(env, request);
    if (limited) return limited;
   }
-  try { return await (await createMcpProvider(env, new URL(request.url).origin, handler, worker)).fetch(request, env, ctx); }
+  // Registration, token requests and /mcp without a token: AUTH_LIMITER per IP, before any work.
+  const agentPath = path === '/mcp' || path.startsWith('/mcp/');
+  if (path === '/oauth/token' || path === '/oauth/register' || (agentPath && !request.headers.has('authorization'))) {
+   const limited = await limitAnonymousAgentRequest(env, request);
+   if (limited) return limited;
+  }
+  let response: Response;
+  try { response = await (await createMcpProvider(env, new URL(request.url).origin, handler, worker)).fetch(request, env, ctx); }
   catch { return Response.json({ error: 'Agent authorization unavailable' }, { status: 503 }); }
+  // A presented token that did not authenticate counts against the same per-IP budget, after the fact.
+  if (agentPath && response.status === 401 && request.headers.has('authorization')) {
+   const limited = await limitAnonymousAgentRequest(env, request);
+   if (limited) return limited;
+  }
+  return response;
  } };
 }

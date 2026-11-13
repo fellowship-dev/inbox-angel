@@ -27,20 +27,25 @@ export function SetupCheck({ compact = false }: { compact?: boolean }) {
 		if (!actions.length) return null;
 		return (
 			<Alert variant="warning" role="status" title={actions.length === 1 ? 'One setting needs your attention' : `${actions.length} settings need your attention`}>
-				<p>Only you see this, because you run this instance. Settings are changed where the Worker is deployed; none of their values are shown here.</p>
+				<p>Only you see this, because you run this instance (on the hosted service, the verified account in OWNER_EMAIL). Settings are changed where the Worker is deployed; none of their values are shown here.</p>
 				<Items items={actions} />
 			</Alert>
 		);
 	}
+	const who = <p className="text-sm text-ink-2">Setup check. Only the person who runs this instance sees it; on the hosted service, that is the verified account in OWNER_EMAIL.</p>;
 	if (!actions.length && !notes.length) {
 		return (
-			<Alert variant="success" title="Nothing to fix">
-				Checked: mode, dashboard address, agent storage, mail sender, bot check and booking link.
-			</Alert>
+			<div className="space-y-3">
+				{who}
+				<Alert variant="success" title="Nothing to fix">
+					Checked: mode, dashboard address, agent storage, mail sender, bot check, rate limits and booking link.
+				</Alert>
+			</div>
 		);
 	}
 	return (
 		<div className="space-y-3">
+			{who}
 			{actions.length ? (
 				<Alert variant="warning" title="Needs your attention">
 					<Items items={actions} />
