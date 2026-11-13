@@ -108,7 +108,7 @@ function Ready({ serverUrl }: { serverUrl: string }) {
 						<Step n={1} title="Add this server URL to your assistant">
 							<p className="text-sm text-ink-2">In Claude or ChatGPT, add a custom connector (it may be called an MCP server) and paste this address.</p>
 							<div className="flex flex-wrap items-center gap-2">
-								<code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface-2 px-3 py-2 font-mono text-sm">{serverUrl}</code>
+								<code className="w-full min-w-0 break-all rounded-md sm:w-auto sm:flex-1 border border-line bg-surface-2 px-3 py-2 font-mono text-sm">{serverUrl}</code>
 								<Button variant="secondary" onClick={() => void copy(serverUrl, 'Server URL')}>
 									<Copy aria-hidden />
 									Copy URL
