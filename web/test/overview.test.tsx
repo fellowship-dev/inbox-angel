@@ -208,6 +208,8 @@ describe('OverviewPage: what the stored DNS facts say', () => {
 		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
 		expect(within(card).getByText(/DNS says this name does not exist/)).toBeInTheDocument();
 		expect(within(card).getByText('Checked 3 hours ago')).toBeInTheDocument();
+		// DNS answered (the name does not exist): this is a finding, not a lookup that failed.
+		expect(within(card).queryByText(/could not check this/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/Delivering/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/Mail is being sent/)).not.toBeInTheDocument();
 		expect(screen.queryByRole('group', { name: /Level \d/ })).not.toBeInTheDocument();

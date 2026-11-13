@@ -68,7 +68,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 						<DomainLink domain={domain} />
 					</h2>
 					<CheckResultList>
-						<CheckResult status="error" statusLabel="Does not resolve" title="This domain does not resolve" summary="DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain." />
+						<CheckResult status="missing" statusLabel="Does not resolve" title="This domain does not resolve" summary="DNS says this name does not exist, so there are no SPF or DMARC records to check. Check the spelling, or register the domain." />
 					</CheckResultList>
 					<p className="text-sm text-ink-2">{dnsCheckLine(summary.data)}</p>
 				</CardContent>
