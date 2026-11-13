@@ -104,7 +104,8 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 				<>
 					{dmarc.current_record ? (
 						<TxtRecord title="Current record" name="_dmarc" value={dmarc.current_record} />
-					) : (
+					) : hostedNoReports && coverage.kind === 'inherited' ? null : (
+						// An inherited policy is explained below ("no DMARC record of its own…"): "No DMARC record found" would contradict it.
 						<p className="text-sm text-ink-2">
 							No DMARC record found for <strong className="text-ink-1">_dmarc.{status.domain}</strong>.
 						</p>

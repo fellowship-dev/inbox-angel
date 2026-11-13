@@ -144,6 +144,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const stats = useStats(domain.id, days);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
+	const onboarding = useOnboardingStatus(domain.id); // shared with the DNS records card: is the name resolvable at all?
 	const { canWrite } = useSession();
 	// Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros.
 	const reportsOff = useReportsNotConnected(domain);
@@ -181,7 +182,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			/>
 			<ReadOnlyNotice />
 			<SetupBanner domainId={domain.id} />
-			<HealthReportSection domainId={domain.id} />
+			{/* A name DNS says does not exist has no records to report on: the DNS records card says so once. */}
+			{onboarding.data?.nxdomain ? null : <HealthReportSection domainId={domain.id} />}
 
 			{reportsOff ? (
 				<Section title="Results">

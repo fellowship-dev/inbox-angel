@@ -75,6 +75,7 @@ describe('hosted wizard DMARC step: never weaker than the policy that applies', 
 		dmarcStep(onboarding({}, inherits(policy)));
 		expect(await screen.findByText(new RegExp(`inherits p=${policy} from mozilla\\.test`))).toBeInTheDocument();
 		expect(screen.getByText(/There is nothing to publish here/)).toBeInTheDocument();
+		expect(screen.queryByText(/No DMARC record found/)).not.toBeInTheDocument();
 		expect(offered()).toBe(false);
 		expect(screen.queryByText('Recommended record')).not.toBeInTheDocument();
 	});
