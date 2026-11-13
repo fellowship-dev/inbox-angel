@@ -11,6 +11,8 @@
 //
 // Only `nodata` and `nxdomain` mean "no record". `error` means "unknown".
 
+import { decodeTxtData } from './txt';
+
 export type DnsStatus = 'ok' | 'nodata' | 'nxdomain' | 'error';
 
 export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'NS' | 'TXT' | 'CNAME' | 'PTR';
@@ -102,41 +104,7 @@ export function normalizeName(name: string): string {
   return name.trim().replace(/\.$/, '').toLowerCase();
 }
 
-/**
- * Decode TXT presentation data into the logical record string.
- * Handles `"a" "b"` (multiple character-strings, joined), backslash escapes inside
- * quotes, and unquoted data (returned verbatim, as Google's DoH does).
- */
-export function decodeTxtData(data: string): string {
-  const s = data.trim();
-  if (!s.startsWith('"')) return s;
-  let out = '';
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === '"') {
-      i++;
-      while (i < s.length && s[i] !== '"') {
-        if (s[i] === '\\' && i + 1 < s.length) {
-          const next = s[i + 1];
-          // \DDD decimal escape
-          if (/\d/.test(next) && /^\d{3}$/.test(s.slice(i + 1, i + 4))) {
-            out += String.fromCharCode(parseInt(s.slice(i + 1, i + 4), 10));
-            i += 4;
-            continue;
-          }
-          out += next;
-          i += 2;
-          continue;
-        }
-        out += s[i++];
-      }
-      i++; // closing quote
-    } else {
-      i++; // whitespace between character-strings
-    }
-  }
-  return out;
-}
+export { decodeTxtData };
 
 function errorResponse(error: string, rcode?: number): DnsResponse {
   return { status: 'error', answers: [], error, ...(rcode !== undefined ? { rcode } : {}) };

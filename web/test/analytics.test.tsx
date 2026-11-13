@@ -30,7 +30,7 @@ const fix = (o: Partial<Fix> = {}): Fix => ({
 });
 
 const readiness = (o: Partial<Readiness> = {}): Readiness => ({
-	status: 'caution', headline: 'You can move to p=quarantine; t=y, with care', current: { policy: 'none', testing: false, step: 0, label: 'p=none' }, next: { policy: 'quarantine', testing: true, label: 'p=quarantine; t=y' },
+	status: 'caution', headline: 'You can move to quarantine, with care', current: { policy: 'none', testing: false, step: 0, label: 'p=none' }, next: { policy: 'quarantine', testing: true, label: 'p=quarantine; t=y' },
 	total_steps: 5, reasons: [{ level: 'ok', text: '1,910 messages over 20 days with reports.' }, { level: 'warn', text: 'Mailchimp fails DMARC on 12% of your mail.' }, { level: 'block', text: 'A blocker.' }],
 	metrics: { messages: 1910, pass_rate: 86.4, days_with_reports: 20, window_days: 30 }, policy_source: 'dns', ...o,
 });
@@ -141,7 +141,7 @@ describe('FixList', () => {
 describe('ReadinessCard', () => {
 	it('shows the verdict, step, and each reason with a word, not only colour', async () => {
 		await renderReady(<ReadinessCard readiness={readiness()} />);
-		expect(screen.getByText('You can move to p=quarantine; t=y, with care')).toBeInTheDocument();
+		expect(screen.getByText('You can move to quarantine, with care')).toBeInTheDocument();
 		expect(screen.getByText('Proceed with care')).toBeInTheDocument();
 		expect(screen.getByText(/step 1 of 5/)).toBeInTheDocument();
 		expect(screen.getByText('OK:')).toBeInTheDocument();
@@ -182,7 +182,7 @@ describe('analytics pages', () => {
 			routes: {
 				'GET /api/analytics': {
 					...domainData, domain: undefined, readiness: undefined,
-					domains: [{ domain_id: 1, domain: 'acme.com', dmarc_policy: 'none', messages: 1910, pass_rate: 84.3, readiness: { status: 'blocked', headline: 'Not safe to move to p=quarantine; t=y yet', next: null, policy_source: 'stored' } }],
+					domains: [{ domain_id: 1, domain: 'acme.com', dmarc_policy: 'none', messages: 1910, pass_rate: 84.3, readiness: { status: 'blocked', headline: 'Not safe to move to quarantine yet', next: null, policy_source: 'stored' } }],
 				},
 			},
 		});

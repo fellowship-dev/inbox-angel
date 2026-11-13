@@ -18,7 +18,7 @@ describe('AddDomainPage', () => {
 		expect(screen.getByRole('link', { name: /find subdomains from certificate logs/ })).toHaveAttribute('href', '/ct-discover');
 	});
 
-	it('normalises the input, then shows the record and a failed live check as "Lookup failed"', async () => {
+	it('normalises the input, then offers no record and shows a failed live check as "Lookup failed"', async () => {
 		const { calls } = renderApp(<AddDomainPage />, {
 			routes: {
 				'GET /api/zones': fail(400),
@@ -33,8 +33,9 @@ describe('AddDomainPage', () => {
 		expect(await screen.findByText('Lookup failed')).toBeInTheDocument();
 		expect(screen.queryByText('Not found')).toBeNull();
 		expect(calls.find((c) => c.path === '/api/domains' && c.method === 'POST')?.body).toEqual({ domain: 'new.example.org' });
-		expect(screen.getByText('v=DMARC1; p=none; rua=mailto:r@reports.test')).toBeInTheDocument();
-		expect(screen.getByText('_dmarc.new.example.org')).toBeInTheDocument();
+		// The lookup failed, so a stronger live policy could be hiding: no record is offered.
+		expect(screen.getByText(/so no record is offered until the lookup works/)).toBeInTheDocument();
+		expect(document.body.textContent).not.toContain('v=DMARC1');
 	});
 
 	it('shows the subdomain inheritance summary', async () => {

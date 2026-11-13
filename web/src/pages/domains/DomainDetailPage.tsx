@@ -12,10 +12,12 @@ import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
+import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
 import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
+import { hasReportAddress } from '../../lib/dmarc-record';
 import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
@@ -64,6 +66,7 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 	if (!parent && children.length === 0) return null;
 	const record = dns.data?.current_record ?? null;
 	const sp = spTag(record);
+	const badSp = invalidDmarcSp(record);
 	const ownRecord = !!dns.data && !dns.data.error && dns.data.found;
 	const lookupFailed = dns.isError || !!dns.data?.error;
 	return (
@@ -99,6 +102,10 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 						<Alert variant="success" title="sp=reject">
 							All subdomains without their own record are protected.
 						</Alert>
+					) : badSp ? (
+						<Alert variant="warning" title="sp= is not a valid policy">
+							The record has sp={badSp}, which is not none, quarantine or reject, so it is ignored: subdomains without their own record inherit p={policyLabel(domain.dmarc_policy)}.
+						</Alert>
 					) : sp ? (
 						<Alert variant="warning" title={`sp=${sp}: not enforced`}>
 							Subdomains without their own DMARC record are NOT enforced. Consider adding sp=reject.
@@ -129,9 +136,10 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const stats = useStats(domain.id, days);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
+	const { canWrite } = useSession();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
-	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0) : null;
+	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
 
 	return (
 		<div className="space-y-8">
@@ -194,7 +202,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 						{guidance ? (
 							<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
 								<p>{guidance.body}</p>
-								{guidance.upgradeTo ? (
+								{guidance.upgradeTo && canWrite ? (
 									<Button asChild size="sm" className="mt-3">
 										<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
 									</Button>
@@ -205,7 +213,11 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 											? 'We could not check your DNS record just now. See DNS records below.'
 											: dns.data.found && dns.data.has_rua
 												? 'DNS record detected. Reports will start arriving soon.'
-												: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
+												: dns.data.found
+													? hasReportAddress(domain.rua_address)
+														? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records below.'
+														: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
+													: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
 									</p>
 								) : null}
 							</Alert>
@@ -229,8 +241,12 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
 
-			<Section title="RUA reporting address" description={<>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</>}>
-				<CopyField label="RUA" value={`rua=mailto:${domain.rua_address}`} />
+			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
+				{hasReportAddress(domain.rua_address) ? (
+					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
+				) : (
+					<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
+				)}
 			</Section>
 
 			<Context domain={domain} all={all} />

@@ -6,15 +6,15 @@ import { useParams } from 'react-router';
 import { AuthBadge, BackLink, ProviderName, useRouteDomainId } from '../../components/reports';
 import { LoadError, PageSkeleton, Section } from '../../components/states';
 import { api } from '../../lib/api';
-import { parseDmarcPolicy } from '../../lib/dmarc-record';
+import { invalidDmarcSp, parseDmarcPct, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
 import { useDnsCheck } from '../../lib/domain-queries';
 import { useDomain } from '../../lib/queries';
-import { explain, formatDayWithRelative, isFailing, passRate, type KnownPolicy } from '../../lib/reports';
+import { explain, formatDayWithRelative, isFailing, passRate, type KnownPolicy, type LiveDmarc } from '../../lib/reports';
 import type { DayReport, ReportSource } from '../../lib/types';
 
 const sourceKey = (s: ReportSource) => `${s.source_ip}-${s.header_from}-${s.spf_domain}-${s.dkim_domain}`;
 
-function FailingCard({ src, policy }: { src: ReportSource; policy: KnownPolicy }) {
+function FailingCard({ src, policy, live }: { src: ReportSource; policy: KnownPolicy; live?: LiveDmarc }) {
 	return (
 		<Card className="space-y-3 border-danger/40 p-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -27,7 +27,7 @@ function FailingCard({ src, policy }: { src: ReportSource; policy: KnownPolicy }
 					<span className="ml-1 text-xs text-ink-2">{src.count === 1 ? 'message' : 'messages'}</span>
 				</p>
 			</div>
-			<p className="text-sm leading-relaxed text-ink-1">{explain(src, policy)}</p>
+			<p className="text-sm leading-relaxed text-ink-1">{explain(src, policy, live)}</p>
 			<div className="flex flex-wrap items-center gap-2">
 				<AuthBadge protocol="SPF" pass={!!src.spf_pass} />
 				<AuthBadge protocol="DKIM" pass={!!src.dkim_pass} />
@@ -102,6 +102,8 @@ export function ReportDetailPage() {
 	});
 
 	const name = q.data?.domain ?? domain?.domain;
+	const record = dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null;
+	const live: LiveDmarc | undefined = name && record ? { domain: name, sp: parseDmarcSp(record), invalidSp: invalidDmarcSp(record), pct: parseDmarcPct(record), monitoredSubdomain: !!domain?.parent_id } : undefined;
 	const header = (title: string, description?: string) => (
 		<PageHeader eyebrow={<BackLink to={`/domains/${id}`}>{name ?? 'Back'}</BackLink>} title={title} description={description} />
 	);
@@ -162,7 +164,7 @@ export function ReportDetailPage() {
 						<Section title="Needs attention" description="These sources failed SPF or DKIM for this day.">
 							<div className="space-y-3">
 								{failing.map((s) => (
-									<FailingCard key={sourceKey(s)} src={s} policy={policy} />
+									<FailingCard key={sourceKey(s)} src={s} policy={policy} live={live} />
 								))}
 							</div>
 						</Section>

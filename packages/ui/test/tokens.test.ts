@@ -102,12 +102,12 @@ describe("known failing pairs stay documented", () => {
 	}
 });
 
-/** The No-Gradients Rule (DESIGN.md): every colour is a solid token. Scans the shipped sources of both packages. */
+/** The No-Gradients Rule (DESIGN.md): every colour is a solid token. Scans everything the product ships: the UI package, the dashboard (sources, index.html, public/) and the Worker. */
 describe("no gradients anywhere", () => {
-	const roots = ["../src/", "../../../web/src/"];
-	const exts = /\.(css|ts|tsx|js|jsx|html|svg)$/;
+	const roots = ["../src/", "../../../web/src/", "../../../web/public/", "../../../src/", "../../../web/index.html"];
+	const exts = /\.(css|ts|tsx|js|jsx|mjs|html|svg)$/;
 	// CSS gradient functions, Tailwind gradient utilities (v3 and v4 names) and SVG gradient elements.
-	const banned = /\b(?:repeating-)?(?:linear|radial|conic)-gradient\s*\(|\bbg-gradient-|\bbg-(?:linear|radial|conic)(?:-|\b)|<\s*(?:linear|radial)Gradient\b/i;
+	const banned = /\b(?:repeating-)?(?:linear|radial|conic)-gradient\s*\(|-webkit-gradient\s*\(|\bbg-gradient-|\bbg-(?:linear|radial|conic)(?:-|\b)|<\s*(?:linear|radial)Gradient\b/i;
 	const files: string[] = [];
 	const walk = (dir: URL) => {
 		for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -115,11 +115,18 @@ describe("no gradients anywhere", () => {
 			else if (exts.test(e.name)) files.push(fileURLToPath(new URL(e.name, dir)));
 		}
 	};
-	for (const r of roots) walk(new URL(r, import.meta.url));
+	for (const r of roots) {
+		if (r.endsWith("/")) walk(new URL(r, import.meta.url));
+		else files.push(fileURLToPath(new URL(r, import.meta.url)));
+	}
 
 	it("finds the sources it scans", () => {
 		expect(files.some((f) => f.endsWith("base.css"))).toBe(true);
 		expect(files.some((f) => f.endsWith("SenderInventory.tsx"))).toBe(true);
+		// The Worker, the dashboard shell and its static assets are scanned too, not only the two packages.
+		expect(files.some((f) => f.endsWith("/src/api/router.ts"))).toBe(true);
+		expect(files.some((f) => f.endsWith("web/index.html"))).toBe(true);
+		expect(files.some((f) => f.endsWith("web/public/theme-init.js"))).toBe(true);
 	});
 	it("no source file uses a gradient", () => {
 		const hits = files.flatMap((f) =>
@@ -130,7 +137,7 @@ describe("no gradients anywhere", () => {
 		expect(hits).toEqual([]);
 	});
 	it("the pattern catches the forms it bans", () => {
-		for (const s of ["background: linear-gradient(90deg, red, blue)", "radial-gradient(circle, red, blue)", "bg-gradient-to-r", "bg-linear-to-r", "<linearGradient id='x'>"]) expect(banned.test(s), s).toBe(true);
+		for (const s of ["background: linear-gradient(90deg, red, blue)", "radial-gradient(circle, red, blue)", "bg-gradient-to-r", "bg-linear-to-r", "<linearGradient id='x'>", "background: -webkit-gradient(linear, left top, right top, from(red), to(blue))"]) expect(banned.test(s), s).toBe(true);
 		for (const s of ["No gradients anywhere", "ia-pulse", "bg-surface-2"]) expect(banned.test(s), s).toBe(false);
 	});
 });
