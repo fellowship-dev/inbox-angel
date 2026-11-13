@@ -34,6 +34,40 @@ describe('OverviewPage', () => {
 		expect(continueLinks[0]).toHaveAttribute('href', '/domains/2/setup/3');
 	});
 
+	it('has no second status model: no "Protected 0" beside a Protected card', async () => {
+		renderApp(<OverviewPage />, {
+			routes: {
+				'GET /api/domains': { domains: [domain(1, 'example.net', { dmarc_policy: 'quarantine' })] },
+				'GET /api/domains/1/check-summary': summary(1, 'example.net', { dmarc_policy: 'quarantine' }),
+				'GET /api/domains/1/stats': stats(1),
+				'GET /api/domains/1/wizard-state': wizard(2),
+			},
+		});
+		const card = await screen.findByRole('group', { name: /Level 2/ });
+		expect(within(card).getByRole('heading')).toHaveTextContent('Level 2 · Protected');
+		const summaryStats = screen.getByLabelText('Summary');
+		expect(within(summaryStats).queryByText('Protected')).not.toBeInTheDocument();
+		expect(within(summaryStats).queryByText('Needs action')).not.toBeInTheDocument();
+		expect(within(summaryStats).getByText('97%')).toBeInTheDocument();
+	});
+
+	it('shows unchecked SPF and DMARC as "not checked yet", never as "No ... record found"', async () => {
+		renderApp(<OverviewPage />, {
+			routes: {
+				'GET /api/domains': { domains: [domain(3, 'example.org', { dmarc_policy: null })] },
+				'GET /api/domains/3/check-summary': summary(3, 'example.org', { dmarc_policy: null, spf_record: null }),
+				'GET /api/domains/3/stats': { domain: 'example.org', days: 7, stats: [] },
+				'GET /api/domains/3/wizard-state': wizard(0),
+			},
+		});
+		const card = await screen.findByRole('group', { name: /Level 0/ });
+		expect(within(card).getByText('SPF not checked yet')).toBeInTheDocument();
+		expect(within(card).getByText('DMARC not checked yet')).toBeInTheDocument();
+		expect(within(card).queryByText(/No (SPF|DMARC) record found/)).not.toBeInTheDocument();
+		// The domain exists, so its setup counts the domain step: never "0/5".
+		expect(within(card).getByRole('link', { name: 'Continue setup (1/5)' })).toBeInTheDocument();
+	});
+
 	it('shows an error instead of a level when a summary fails, and does not downgrade the domain', async () => {
 		const { calls } = renderApp(<OverviewPage />, {
 			routes: {

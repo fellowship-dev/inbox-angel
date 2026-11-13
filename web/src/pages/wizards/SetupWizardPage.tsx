@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { LoadError, PageSkeleton, ReadOnlyNotice } from '../../components/states';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api } from '../../lib/api';
+import { wizardProgress } from '../../lib/dmarc';
 import { keys, useDomains } from '../../lib/queries';
 import { useSession } from '../../lib/session';
 import type { WizardState, WizardStepState } from '../../lib/types';
@@ -14,7 +15,7 @@ import { DomainStep } from './setup/DomainStep';
 import { setupKeys, useOnboardingStatus, useWizardState } from './setup/hooks';
 import { RoutingStep } from './setup/RoutingStep';
 import { SpfStep } from './setup/SpfStep';
-import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, STEP_LABELS, completedCount, parseStep, resolveStep } from './setup/steps';
+import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, STEP_LABELS, parseStep, resolveStep } from './setup/steps';
 
 /**
  * `#/setup` (no domain yet) and `#/domains/:id/setup[/:step]`. The step lives in the URL, 1-indexed, so
@@ -114,6 +115,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 
 	const index = resolved - 1;
 	const done = () => navigate(`/domains/${domainId}`);
+	const progress = wizardProgress(wizard);
 
 	function finish(state: WizardStepState) {
 		const key = STEP_KEYS[index];
@@ -144,7 +146,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 					Let's verify your email security for <span className="text-brand-ink">{status.domain}</span>
 				</>
 			}
-			subtitle={`${completedCount(wizard)} of ${STEP_COUNT} steps complete`}
+			subtitle={`${progress.done} of ${progress.total} steps complete${progress.skipped > 0 ? `, ${progress.skipped} skipped` : ''}`}
 			skipTo={`/domains/${domainId}`}
 			wizard={wizard}
 			current={index}

@@ -9,8 +9,10 @@ import type { DomainCheckSummary } from './types';
  *  - Level 1 Authenticated: SPF and a DMARC record exist; DMARC only monitors (p=none).
  *  - Level 2 Protected:     DMARC enforces (p=quarantine or p=reject) on top of SPF.
  *
- * "Not found" here means a lookup that worked and found nothing. A lookup that failed never reaches this
- * function: callers show an error state instead of a level, so a resolver outage cannot downgrade a domain.
+ * The stored SPF record and DMARC policy are null until something writes them, so for a self-managed domain null
+ * means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only what is
+ * confirmed. A lookup that failed never reaches this function: callers show an error state instead of a level.
+ * Hosted domains pass `nullMeans: 'missing'`, because there null means the record is not live in our zone.
  */
 export interface LevelAssessment {
 	level: Level;
@@ -22,19 +24,29 @@ export interface LevelAssessment {
 
 const DKIM_HEALTHY = 0.95;
 
-export function assessDomain(s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'>): LevelAssessment {
+const NOT_CHECKED_DETAIL = 'The overview has no stored result for this yet. The domain page reads it live from DNS.';
+
+export function assessDomain(
+	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'>,
+	{ nullMeans = 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
+): LevelAssessment {
 	const hasSpf = !!s.spf_record;
 	const policy = s.dmarc_policy;
 	const enforcing = policy === 'quarantine' || policy === 'reject';
+	const spfUnknown = !hasSpf && nullMeans === 'unknown';
+	const dmarcUnknown = !policy && nullMeans === 'unknown';
 
 	let level: Level = 0;
 	if (hasSpf && policy) level = 1;
 	if (hasSpf && enforcing) level = 2;
 
 	const findings: Finding[] = [];
-	findings.push(hasSpf ? { status: 'pass', label: 'SPF record published' } : { status: 'missing', label: 'SPF record', detail: 'No SPF record found. Receivers cannot tell which servers may send for you.' });
+	if (hasSpf) findings.push({ status: 'pass', label: 'SPF record published' });
+	else if (spfUnknown) findings.push({ status: 'unknown', label: 'SPF not checked yet', detail: NOT_CHECKED_DETAIL });
+	else findings.push({ status: 'missing', label: 'SPF record', detail: 'No SPF record found. Receivers cannot tell which servers may send for you.' });
 
-	if (!policy) findings.push({ status: 'missing', label: 'DMARC record', detail: 'No DMARC record found.' });
+	if (dmarcUnknown) findings.push({ status: 'unknown', label: 'DMARC not checked yet', detail: NOT_CHECKED_DETAIL });
+	else if (!policy) findings.push({ status: 'missing', label: 'DMARC record', detail: 'No DMARC record found.' });
 	else if (enforcing) findings.push({ status: 'pass', label: `DMARC enforced (p=${policy})` });
 	else findings.push({ status: 'warn', label: 'DMARC is monitoring only (p=none)', detail: 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.' });
 
@@ -44,14 +56,18 @@ export function assessDomain(s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_r
 	}
 	if (s.mta_sts_enabled) findings.push({ status: 'pass', label: `MTA-STS ${s.mta_sts_mode ?? 'enabled'}` });
 
-	const description = [
-		'Mail is being sent, but receivers cannot fully verify it yet.',
-		'Receivers can verify your mail. DMARC is not blocking spoofed messages yet.',
-		'Spoofed mail from your domain is quarantined or rejected.',
-	][level] as string;
+	const unchecked = spfUnknown || dmarcUnknown;
+	const description = unchecked
+		? 'This level counts only what has been checked. Open the domain to see its records in DNS.'
+		: ([
+				'Mail is being sent, but receivers cannot fully verify it yet.',
+				'Receivers can verify your mail. DMARC is not blocking spoofed messages yet.',
+				'Spoofed mail from your domain is quarantined or rejected.',
+			][level] as string);
 
 	let next: string | null = null;
-	if (!hasSpf) next = 'Publish an SPF record.';
+	if (unchecked) next = 'Open the domain to check its SPF and DMARC records in DNS.';
+	else if (!hasSpf) next = 'Publish an SPF record.';
 	else if (!policy) next = 'Publish a DMARC record with p=none to start receiving reports.';
 	else if (!enforcing) next = 'Review your reports, then move DMARC to quarantine.';
 
@@ -99,7 +115,7 @@ const HOSTED_NAME = { spf: 'SPF', dmarc: 'DMARC', mta_sts: 'MTA-STS' } as const;
 /** assessDomain for a hosted domain: levels from `level_inputs`, plus a finding for each pointer not verified yet. */
 export function assessHostedDomain(s: LevelSummary, h: HostedLevelInput): LevelAssessment {
 	const { summary, unverified } = applyHostedInputs(s, h);
-	const a = assessDomain(summary);
+	const a = assessDomain(summary, { nullMeans: 'missing' });
 	const extra: Finding[] = unverified.map((p) => ({
 		status: 'warn',
 		label: `${HOSTED_NAME[p]} pointer not verified yet`,

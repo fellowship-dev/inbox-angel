@@ -7,7 +7,7 @@ import { ClaimCard } from '../../components/domain/ClaimCard';
 import { DomainLevelCard } from '../../components/domain/DomainLevelCard';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
 import { errorMessage } from '../../lib/api';
-import { computeStatus, sumStats } from '../../lib/dmarc';
+import { sumStats } from '../../lib/dmarc';
 import { domainKeys, fetchStats, fetchSummary } from '../../lib/domain-queries';
 import { useDomainClaims, useDomains } from '../../lib/queries';
 import { useSession } from '../../lib/session';
@@ -50,13 +50,9 @@ export function OverviewPage() {
 
 	// Same keys as the cards use, so each request is made once.
 	const stats = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.stats(d.id, 7), queryFn: () => fetchStats(d.id, 7) })) });
-	const rows = domains.map((d, i) => {
-		const s = stats[i]?.data ? sumStats(stats[i].data.stats) : null;
-		return { domain: d, sums: s, status: computeStatus(d.dmarc_policy, s?.passRate != null ? s.passRate / 100 : null) };
-	});
-	const protectedCount = rows.filter((r) => r.status === 'good').length;
-	const needsAction = rows.filter((r) => r.status === 'danger').length;
-	const all = sumStats(rows.flatMap((r) => (r.sums ? [{ total: r.sums.total, passed: r.sums.passed, failed: r.sums.failed }] : [])));
+	// Where each domain stands is the level on its card. A second count here ("Protected", "Needs action") used another
+	// model and contradicted the cards, so the summary only states facts both agree on.
+	const all = sumStats(stats.flatMap((q) => (q.data ? q.data.stats : [])));
 
 	async function exportPdf() {
 		setExporting(true);
@@ -146,10 +142,8 @@ export function OverviewPage() {
 
 			{!list.isPending && !list.isError && domains.length > 0 ? (
 				<>
-					<StatGroup className="sm:grid-cols-4" aria-label="Summary">
+					<StatGroup className="sm:grid-cols-2" aria-label="Summary">
 						<Stat label={domains.length === 1 ? 'Domain' : 'Domains'} value={domains.length} />
-						<Stat label="Protected" value={protectedCount} />
-						<Stat label="Needs action" value={needsAction} />
 						<Stat label="Pass rate, 7 days" value={all.passRate !== null ? `${all.passRate}%` : 'n/a'} />
 					</StatGroup>
 					<div className="space-y-6">

@@ -237,15 +237,41 @@ describe('DMARC graduation wizard', () => {
 		expect(screen.getByText('v=DMARC1; p=reject; sp=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
 	});
 
-	it('starts from the current policy and shows the finished state for reject', async () => {
-		renderApp(ui, { route: '/domains/3/dmarc-wizard', routes: { ...routesFor(), 'GET /api/domains': { domains: [{ ...domain, dmarc_policy: 'reject' }] } } });
+	it('starts from the live policy and shows the finished state for reject', async () => {
+		renderApp(ui, { route: '/domains/3/dmarc-wizard', routes: routesFor({}, { found: true, has_rua: true, current_record: 'v=DMARC1; p=reject; rua=mailto:r@reports.example.com', cf_managed: false }) });
 		expect(await screen.findByRole('heading', { name: 'Fully enforced' })).toBeInTheDocument();
 		expect(screen.getAllByRole('link', { name: 'Back to domain' }).every((l) => l.getAttribute('href') === '/domains/3')).toBe(true);
 	});
 
 	it('quarantine starts at step 2 of 2', async () => {
-		renderApp(ui, { route: '/domains/3/dmarc-wizard', routes: { ...routesFor(), 'GET /api/domains': { domains: [{ ...domain, dmarc_policy: 'quarantine' }] } } });
+		renderApp(ui, { route: '/domains/3/dmarc-wizard', routes: routesFor({}, { found: true, has_rua: true, current_record: 'v=DMARC1; p=quarantine; rua=mailto:r@reports.example.com', cf_managed: false }) });
 		expect(await screen.findByText('Step 2: switch to reject')).toBeInTheDocument();
+		// Already at quarantine: there is no step back to offer.
+		expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+	});
+
+	it('never proposes a downgrade when the stored policy lags a live p=reject', async () => {
+		const live = 'v=DMARC1; p=reject; rua=mailto:r@reports.example.com';
+		renderApp(ui, {
+			route: '/domains/3/dmarc-wizard',
+			routes: { 'GET /api/domains': { domains: [{ ...domain, dmarc_policy: 'none' }] }, 'GET /api/domains/3/dns-check': { found: true, has_rua: true, current_record: live, cf_managed: false } },
+		});
+		expect(await screen.findByRole('heading', { name: 'Fully enforced' })).toBeInTheDocument();
+		expect(screen.queryByText(/p=quarantine/)).not.toBeInTheDocument();
+		expect(screen.queryByText('Step 1: switch to quarantine')).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: "I've updated it manually" })).not.toBeInTheDocument();
+	});
+
+	it('a live p=quarantine with a stored p=none starts at reject, not at quarantine', async () => {
+		renderApp(ui, {
+			route: '/domains/3/dmarc-wizard',
+			routes: {
+				'GET /api/domains': { domains: [{ ...domain, dmarc_policy: 'none' }] },
+				'GET /api/domains/3/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=quarantine; rua=mailto:r@reports.example.com', cf_managed: false },
+			},
+		});
+		expect(await screen.findByText('Step 2: switch to reject')).toBeInTheDocument();
+		expect(screen.getAllByText('v=DMARC1; p=reject; rua=mailto:r@reports.example.com').length).toBeGreaterThan(0);
 	});
 
 	it('a failed DNS lookup offers nothing to apply, instead of building a record from nothing', async () => {

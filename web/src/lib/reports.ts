@@ -29,15 +29,30 @@ export function failLabel(src: Pick<AuthSource, 'spf_pass' | 'dkim_pass'>): 'SPF
 	return !src.spf_pass ? 'SPF' : 'DKIM';
 }
 
+/**
+ * The domain's DMARC policy as the page knows it: a `p=` value, `'no-record'` when DNS has no DMARC record,
+ * or null when it could not be read.
+ */
+export type KnownPolicy = string | null;
+
+/** What receivers do with mail that fails DMARC, from the policy. Only says what the policy actually asks for. */
+export function failingMailFate(policy: KnownPolicy): string {
+	if (policy === 'reject') return 'Your DMARC policy (p=reject) asks receivers to reject it.';
+	if (policy === 'quarantine') return 'Your DMARC policy (p=quarantine) asks receivers to send it to spam.';
+	if (policy === 'none') return 'Your DMARC policy is p=none, so receivers still deliver it unless their own filters stop it.';
+	if (policy === 'no-record') return 'Your domain has no DMARC record, so receivers still deliver it unless their own filters stop it.';
+	return 'What receivers do with it depends on your DMARC policy, which could not be read right now.';
+}
+
 /** Plain-language explanation and fix for a source that failed SPF and/or DKIM. */
-export function explain(src: AuthSource): string {
+export function explain(src: AuthSource, policy: KnownPolicy = null): string {
 	const from = src.header_from ? `"${src.header_from}"` : 'your domain';
 	const service = serviceVia(src) ?? 'this server';
 
 	if (!src.spf_pass && !src.dkim_pass) {
 		return (
 			`${service} has no authorization to send as ${from}. ` +
-			`If you don't recognize it, it's likely spoofed mail — your DMARC policy will handle it. ` +
+			`If you don't recognize it, it's likely spoofed mail. ${failingMailFate(policy)} ` +
 			`If it's a service you added recently, you'll need to configure both SPF and DKIM for it.`
 		);
 	}

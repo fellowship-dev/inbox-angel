@@ -111,6 +111,7 @@ describe('ReportDetailPage', () => {
 	it('splits failing from passing sources and expands passing rows', async () => {
 		const user = userEvent.setup();
 		page(<ReportDetailPage />, '/domains/:id/reports/:date', '/domains/1/reports/2026-10-01', {
+			'GET /api/domains/1/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=reject', cf_managed: false },
 			'GET /api/domains/1/reports': {
 				date: '2026-10-01',
 				domain: 'example.com',
@@ -131,8 +132,23 @@ describe('ReportDetailPage', () => {
 		expect(screen.getByText('yahoo.com')).toBeInTheDocument();
 	});
 
+	it('under a live p=none, says spoofed mail is still delivered', async () => {
+		page(<ReportDetailPage />, '/domains/:id/reports/:date', '/domains/1/reports/2026-10-01', {
+			'GET /api/domains/1/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=none; rua=mailto:r@reports.test', cf_managed: false },
+			'GET /api/domains/1/reports': {
+				date: '2026-10-01',
+				domain: 'example.com',
+				summary: { total: 5, passed: 0, failed: 5 },
+				sources: [{ source_ip: '9.9.9.9', header_from: 'example.com', spf_domain: null, dkim_domain: null, count: 5, spf_pass: 0, dkim_pass: 0, disposition: 'none', reporters: 'google.com', base_domain: null, org: null }],
+			},
+		});
+		expect(await screen.findByText(/p=none, so receivers still deliver it/)).toBeInTheDocument();
+		expect(screen.queryByText(/your DMARC policy will handle it/)).not.toBeInTheDocument();
+	});
+
 	it('says when nothing was received', async () => {
 		page(<ReportDetailPage />, '/domains/:id/reports/:date', '/domains/1/reports/2026-10-01', {
+			'GET /api/domains/1/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=none', cf_managed: false },
 			'GET /api/domains/1/reports': { date: '2026-10-01', domain: 'example.com', summary: { total: 0, passed: 0, failed: 0 }, sources: [] },
 		});
 		expect(await screen.findByText('No reports received for this date')).toBeInTheDocument();
