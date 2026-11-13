@@ -114,6 +114,29 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 4. **Pointer verification** for every hosted domain.
 5. Forgets expired canary addresses.
 
+### 6. Plan, DNS preview limiter and caps
+
+**Workers Paid plan.** A hosted instance needs the Workers Paid plan. The claim preview (`GET /api/domains/claims/:id/preview`) answers from public DNS over DNS-over-HTTPS, and one preview costs 39 to 45 subrequests for the domains measured below, and up to about 52 for a domain whose SPF record uses all 10 allowed lookups: the SPF walk, the DMARC lookup (one more when it falls back to the organizational domain), 36 DKIM selectors, and the MX lookup. The Workers free plan allows 50 subrequests per invocation, so a domain with a longer SPF chain can fail there, and the Worker's other requests in the same invocation count too. Paid raises the limit to 10,000.
+
+Measured with `npx tsx scripts/measure-preview-subrequests.ts <domain>...` (the fetches `previewClaimDns` makes against Cloudflare DoH, 2026-11-13):
+
+| Domain | Subrequests | What it did |
+|--------|-------------|-------------|
+| google.com | 40 | SPF 1 lookup, DMARC, 36 DKIM selectors, MX |
+| gov.uk | 39 | no SPF lookups, DMARC, 36 DKIM selectors (all answered alike: a wildcard), no MX |
+| salesforce.com | 41 | SPF 4 lookups |
+| hubspot.com | 43 | SPF 4 lookups |
+| microsoft.com | 45 | SPF 6 lookups |
+
+**`DNS_PREVIEW_LIMITER` binding.** The preview is limited to 10 per person per minute (a cached answer does not count). The limit is a Workers ratelimit binding named `DNS_PREVIEW_LIMITER` (in `wrangler.jsonc`: `"type": "ratelimit"`, `"simple": { "limit": 10, "period": 60 }`), shared by every isolate. Without it the Worker falls back to a counter kept inside one isolate, which another isolate does not see, so the limit is not reliable at scale. A `MODE=saas` Worker without the binding logs one warning per isolate on first use (`[claim-preview] DNS_PREVIEW_LIMITER binding missing: …`), and `GET /api/me` shows the instance owner `dns_preview_limiter: "binding"` or `"fallback"` (nobody else sees the field).
+
+**Plan caps.** Variables in `wrangler.jsonc` `vars`, hosted mode only (self-host has no caps):
+
+| Variable | Default | |
+|----------|---------|-|
+| `MAX_WORKSPACES_PER_USER` | `5` | workspaces one person may own; workspaces they were only invited to do not count, and a hand-over of ownership counts like a new workspace |
+| `MAX_DOMAINS_PER_WORKSPACE` | `10` | domains one workspace may hold; a value that is not a positive integer keeps the default |
+
 ### Adding a second records zone later
 
 `configuredZones()` in `src/hosted/zones.ts` is the only place that knows which zones exist, and each hosted domain stores its `zone_key`.

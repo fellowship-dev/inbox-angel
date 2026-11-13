@@ -271,6 +271,8 @@ export type Role = 'owner' | 'admin' | 'member';
 
 /** GET /api/me */
 export interface Me {
+  /** Hosted instance owner only: which limiter answers the claim DNS preview. `fallback` means the DNS_PREVIEW_LIMITER binding is missing. */
+  dns_preview_limiter?: 'binding' | 'fallback';
   user: { id: string; email: string; name: string } | null;
   /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
   role: Role | null;
