@@ -116,14 +116,14 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 
 ### 6. Plan, DNS preview limiter and caps
 
-**Workers Paid plan.** A hosted instance needs the Workers Paid plan. The claim preview (`GET /api/domains/claims/:id/preview`) answers from public DNS over DNS-over-HTTPS, and one preview costs 39 to 45 subrequests for the domains measured below, and up to about 52 for a domain whose SPF record uses all 10 allowed lookups: the SPF walk, the DMARC lookup (one more when it falls back to the organizational domain), 36 DKIM selectors, and the MX lookup. The Workers free plan allows 50 subrequests per invocation, so a domain with a longer SPF chain can fail there, and the Worker's other requests in the same invocation count too. Paid raises the limit to 10,000.
+**Workers Paid plan.** A hosted instance needs the Workers Paid plan. The claim preview (`GET /api/domains/claims/:id/preview`) answers from public DNS over DNS-over-HTTPS, and one preview costs 40 to 45 subrequests for the domains measured below, and up to about 53 for a domain whose SPF record uses all 10 allowed lookups: the SPF walk, the DMARC lookup (one more when it falls back to the organizational domain), 36 DKIM selectors, and the MX lookup, plus one random-name lookup when the DKIM selectors all answer alike (it tells a wildcard from one real key published under several selectors). The Workers free plan allows 50 subrequests per invocation, so a domain with a longer SPF chain can fail there, and the Worker's other requests in the same invocation count too. Paid raises the limit to 10,000.
 
 Measured with `npx tsx scripts/measure-preview-subrequests.ts <domain>...` (the fetches `previewClaimDns` makes against Cloudflare DoH, 2026-11-13):
 
 | Domain | Subrequests | What it did |
 |--------|-------------|-------------|
 | google.com | 40 | SPF 1 lookup, DMARC, 36 DKIM selectors, MX |
-| gov.uk | 39 | no SPF lookups, DMARC, 36 DKIM selectors (all answered alike: a wildcard), no MX |
+| gov.uk | 40 | no SPF lookups, DMARC, 36 DKIM selectors (all answered alike), 1 random-name probe (answered alike too: a wildcard), no MX |
 | salesforce.com | 41 | SPF 4 lookups |
 | hubspot.com | 43 | SPF 4 lookups |
 | microsoft.com | 45 | SPF 6 lookups |
