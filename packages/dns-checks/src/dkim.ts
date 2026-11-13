@@ -12,7 +12,9 @@ export interface DkimRecord {
   revoked: boolean;
 }
 
-export function parseDkimRecord(raw: string): DkimRecord {
+/** Reads a record's text as the resolver returns it (already decoded: see `decodeTxtData`). Decoding happens once, at the boundary. */
+export function parseDkimRecord(rawContent: string): DkimRecord {
+  const raw = rawContent.trim();
   const tags: Record<string, string> = {};
   for (const part of raw.split(';')) {
     const i = part.indexOf('=');

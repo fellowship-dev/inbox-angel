@@ -15,7 +15,14 @@ export function getRecommendations(summary: DomainCheckSummary): Recommendation[
 	const recs: Recommendation[] = [];
 
 	// DMARC policy
-	if (!summary.dmarc_policy || summary.dmarc_policy === 'none') {
+	if (!summary.dmarc_policy) {
+		// Not checked is not "none": say so, and do not tell anyone to change a policy we have not seen.
+		recs.push({
+			domain: summary.domain,
+			severity: 'info',
+			message: 'DMARC policy has not been checked yet.',
+		});
+	} else if (summary.dmarc_policy === 'none') {
 		recs.push({
 			domain: summary.domain,
 			severity: 'critical',

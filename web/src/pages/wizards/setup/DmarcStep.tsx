@@ -141,6 +141,13 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							/>
 						) : authFound ? (
 							<CheckResult status="pass" statusLabel="Found" title="Authorization record" summary={`${auth.record_name ?? 'The record'} authorizes this domain to receive DMARC reports.`} />
+						) : !auth.record_name ? (
+							// No reports domain: there is no authorization record to look for, so nothing is missing.
+							<CheckResult
+								status="neutral"
+								title="Authorization record"
+								summary="No reports domain is configured, so there is no authorization record to check. Set one up in Routing and this check will run."
+							/>
 						) : (
 							<CheckResult
 								status="missing"

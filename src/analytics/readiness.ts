@@ -9,7 +9,7 @@
 // finds (a recognised service that seems to fail) can only warn.
 
 import {
-  describeStep, PASS_RATE_THRESHOLD, planNextStep, ROLLOUT_SEQUENCE, stepIndexForRecord, stepIndexFromStored, type NextStepPlan, type RolloutStep,
+  describeStep, parseDmarcTags, PASS_RATE_THRESHOLD, planNextStep, ROLLOUT_SEQUENCE, stepIndexForRecord, stepIndexFromStored, type NextStepPlan, type RolloutStep,
 } from '../dmarc/rollout';
 import type { Fix } from './fixes';
 import { pct } from './senders';
@@ -135,9 +135,16 @@ export function assessReadiness(i: ReadinessInput): Readiness {
   if (i.newSenders > 0) warn(`${i.newSenders} sender${i.newSenders === 1 ? ' is' : 's are'} new this week. Give them time to show up in the reports before tightening.`);
   if (!known.length && !unknown.length) reasons.push({ level: 'ok', text: 'No recognised service seems to fail DMARC.' });
 
-  if (!enforcing) reasons.push({ level: 'ok', text: `${describeStep(next)} is testing mode: receivers treat failures one step weaker, so it is a low-risk half-step.` });
+  if (!enforcing) reasons.push({ level: 'ok', text: `The first step to ${next.policy} is testing mode: receivers treat failures one step weaker, so it is a low-risk half-step.` });
 
-  if (blocked) return done('blocked', `Not safe to move to ${describeStep(next)} yet`, reasons, next);
-  if (caution) return done('caution', `You can move to ${describeStep(next)}, with care`, reasons, next);
-  return done('ready', `Safe to move to ${describeStep(next)}`, reasons, next);
+  // The headline names what actually changes. When the next step keeps the policy the domain is already at, "move to
+  // quarantine" would be untrue: the change is leaving testing mode, or taking a partial pct to 100%.
+  let action = `move to ${next.policy}`;
+  if (next.policy === step.policy) {
+    const livePct = parseInt(parseDmarcTags(record).get('pct') ?? '', 10);
+    action = plan.dropsPartialPct ? `raise pct from ${livePct}% to 100% for ${next.policy}` : `turn off testing mode (t=y) for ${next.policy}`;
+  }
+  if (blocked) return done('blocked', `Not safe to ${action} yet`, reasons, next);
+  if (caution) return done('caution', `You can ${action}, with care`, reasons, next);
+  return done('ready', `Safe to ${action}`, reasons, next);
 }

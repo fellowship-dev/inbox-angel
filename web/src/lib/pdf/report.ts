@@ -28,11 +28,11 @@ function statusLabel(pass: number, total: number): { label: string; color: [numb
 	return { label: 'Fail', color: FAIL_COLOR };
 }
 
-function dmarcPolicyLabel(policy: string | null): { label: string; color: [number, number, number] } {
+export function dmarcPolicyLabel(policy: string | null): { label: string; color: [number, number, number] } {
 	if (policy === 'reject')     return { label: 'reject', color: PASS_COLOR };
 	if (policy === 'quarantine') return { label: 'quarantine', color: WARN_COLOR };
 	if (policy === 'none')       return { label: 'none (monitor only)', color: FAIL_COLOR };
-	return { label: 'Not configured', color: FAIL_COLOR };
+	return { label: 'Not checked yet', color: MUTED_COLOR };
 }
 
 function addPageIfNeeded(doc: jsPDF, y: number, needed = 20): number {

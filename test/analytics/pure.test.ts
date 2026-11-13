@@ -181,7 +181,7 @@ describe('assessReadiness', () => {
     const r = assessReadiness(base);
     expect(r.status).toBe('ready');
     expect(r.next).toMatchObject({ policy: 'quarantine', testing: true, label: 'p=quarantine; t=y' });
-    expect(r.headline).toBe('Safe to move to p=quarantine; t=y');
+    expect(r.headline).toBe('Safe to move to quarantine');
     expect(r.reasons.every((x) => x.level === 'ok')).toBe(true);
   });
   it('needs enough data before judging', () => {
