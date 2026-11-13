@@ -124,3 +124,16 @@ describe('getStartedSteps', () => {
 		expect(steps.map((s) => `${s.key}:${s.state}`)).toEqual(['add:done', 'read:done', 'publish:done', 'reports:waiting']);
 	});
 });
+
+describe('slots for hosted help (PR 142)', () => {
+	it('offers a help prompt only where a person may be stuck', () => {
+		expect(domainVerdict(domain, summary({ dns_check_status: 'nxdomain', spf_record: null, dmarc_policy: null }), reports(null)).help).toEqual({ lead: 'Sure this is the right name?', about: 'about example.com' });
+		expect(domainVerdict(domain, summary({ dns_check_status: 'failed' }), reports(null)).help).toEqual({ lead: 'DNS checks keep failing?', about: 'about example.com' });
+		expect(domainVerdict(domain, summary(), reports(99)).help).toBeNull();
+	});
+
+	it('reports-not-connected follows an empty report address', () => {
+		expect(domainVerdict({ ...domain, rua_address: '' }, summary(), reports(null)).reportsNotConnected).toBe(true);
+		expect(domainVerdict(domain, summary(), reports(null)).reportsNotConnected).toBe(false);
+	});
+});

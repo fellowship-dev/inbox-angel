@@ -333,6 +333,8 @@ export function reportQueries(db: Db, workspaceId: string) {
 		},
 
 		async checkSummary(domainId: number, since: number): Promise<DomainCheckSummary | null> {
+			// Report totals and record counts are summed in separate subqueries: joining report_records straight onto
+			// aggregate_reports repeats each report once per record, which multiplied total/pass/fail messages.
 			const rows = await db.all<DomainCheckSummary>(sql`
 				SELECT
 					d.id            AS domain_id,
@@ -345,21 +347,34 @@ export function reportQueries(db: Db, workspaceId: string) {
 					d.dmarc_issue,
 					d.dmarc_inherited_from,
 					d.dns_last_good_status,
-					COALESCE(SUM(ar.total_count), 0) AS total_messages,
-					COALESCE(SUM(ar.pass_count),  0) AS pass_messages,
-					COALESCE(SUM(ar.fail_count),  0) AS fail_messages,
-					COALESCE(SUM(rr.count), 0)       AS dkim_total,
-					COALESCE(SUM(CASE WHEN rr.dkim_result = 'pass' THEN rr.count ELSE 0 END), 0) AS dkim_pass,
-					COALESCE(SUM(rr.count), 0)       AS spf_total,
-					COALESCE(SUM(CASE WHEN rr.spf_result  = 'pass' THEN rr.count ELSE 0 END), 0) AS spf_pass,
-					COALESCE(m.enabled, 0)           AS mta_sts_enabled,
-					m.mode                           AS mta_sts_mode
+					COALESCE(ar.total, 0)     AS total_messages,
+					COALESCE(ar.pass, 0)      AS pass_messages,
+					COALESCE(ar.fail, 0)      AS fail_messages,
+					COALESCE(rr.total, 0)     AS dkim_total,
+					COALESCE(rr.dkim_pass, 0) AS dkim_pass,
+					COALESCE(rr.total, 0)     AS spf_total,
+					COALESCE(rr.spf_pass, 0)  AS spf_pass,
+					COALESCE(m.enabled, 0)    AS mta_sts_enabled,
+					m.mode                    AS mta_sts_mode
 				FROM domains d
-				LEFT JOIN aggregate_reports ar ON ar.domain_id = d.id AND ar.workspace_id = ${A} AND ar.date_begin >= ${since}
-				LEFT JOIN report_records rr    ON rr.report_id = ar.id AND rr.workspace_id = ${A}
-				LEFT JOIN mta_sts_config m     ON m.domain_id = d.id AND m.workspace_id = ${A}
+				LEFT JOIN (
+					SELECT domain_id, SUM(total_count) AS total, SUM(pass_count) AS pass, SUM(fail_count) AS fail
+					FROM aggregate_reports
+					WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
+					GROUP BY domain_id
+				) ar ON ar.domain_id = d.id
+				LEFT JOIN (
+					SELECT a.domain_id,
+						SUM(r.count) AS total,
+						SUM(CASE WHEN r.dkim_result = 'pass' THEN r.count ELSE 0 END) AS dkim_pass,
+						SUM(CASE WHEN r.spf_result  = 'pass' THEN r.count ELSE 0 END) AS spf_pass
+					FROM report_records r
+					JOIN aggregate_reports a ON a.id = r.report_id AND a.workspace_id = ${A}
+					WHERE r.workspace_id = ${A} AND a.domain_id = ${domainId} AND a.date_begin >= ${since}
+					GROUP BY a.domain_id
+				) rr ON rr.domain_id = d.id
+				LEFT JOIN mta_sts_config m ON m.domain_id = d.id AND m.workspace_id = ${A}
 				WHERE d.workspace_id = ${A} AND d.id = ${domainId}
-				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, d.dns_checked_at, d.dns_check_attempted_at, d.dns_check_status, d.dmarc_issue, d.dmarc_inherited_from, d.dns_last_good_status, m.enabled, m.mode
 			`);
 			return rows[0] ?? null;
 		},

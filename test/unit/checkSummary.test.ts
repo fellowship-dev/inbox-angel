@@ -25,14 +25,29 @@ async function seed() {
 describe('reports.checkSummary', () => {
   it('summarises DMARC pass/fail and DKIM/SPF rates for the window', async () => {
     const { q, id } = await seed();
-    // NOTE: carried over unchanged from the original query. The report totals are SUMmed over a join
-    // with report_records, so they are multiplied by the number of records in each report (2 here).
-    // Fixing that is a behaviour change, deliberately out of scope for the db lane.
+    // One report of 1,000 messages with two records: the totals are the report's, not multiplied by its records.
     expect(await q.reports.checkSummary(id, NOW - 30 * 86400)).toEqual({
       domain_id: id, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 ~all', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null,
-      total_messages: 2000, pass_messages: 1960, fail_messages: 40,
+      total_messages: 1000, pass_messages: 980, fail_messages: 20,
       dkim_total: 1000, dkim_pass: 950, spf_total: 1000, spf_pass: 950,
       mta_sts_enabled: 0, mta_sts_mode: null,
+    });
+  });
+
+  it('counts each report once however many records it has, and records once however many reports there are', async () => {
+    const { q, id } = await seed();
+    const rep = await q.reports.insertAggregate({
+      domain_id: id, org_name: 'microsoft', report_id: 'r2', date_begin: NOW - 3600, date_end: NOW,
+      total_count: 300, pass_count: 290, fail_count: 10, raw_xml: null,
+    });
+    await q.reports.insertRecords([
+      { report_id: Number(rep.meta.last_row_id), source_ip: '3.3.3.3', count: 100, disposition: 'none', dkim_result: 'pass', spf_result: 'fail', dkim_domain: null, spf_domain: null, header_from: 'example.com' },
+      { report_id: Number(rep.meta.last_row_id), source_ip: '4.4.4.4', count: 100, disposition: 'none', dkim_result: 'pass', spf_result: 'pass', dkim_domain: null, spf_domain: null, header_from: 'example.com' },
+      { report_id: Number(rep.meta.last_row_id), source_ip: '5.5.5.5', count: 100, disposition: 'none', dkim_result: 'fail', spf_result: 'pass', dkim_domain: null, spf_domain: null, header_from: 'example.com' },
+    ]);
+    expect(await q.reports.checkSummary(id, NOW - 30 * 86400)).toMatchObject({
+      total_messages: 1300, pass_messages: 1270, fail_messages: 30,
+      dkim_total: 1300, dkim_pass: 1150, spf_total: 1300, spf_pass: 1150,
     });
   });
 

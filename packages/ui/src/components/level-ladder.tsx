@@ -21,6 +21,9 @@ export interface LevelLadderProps extends Omit<React.HTMLAttributes<HTMLDivEleme
  * The signature element: Delivering → Authenticated → Protected as three rungs. Reached rungs are filled and get a
  * check; the current rung's name sits on the halo-gold accent (navy label, both themes), so the level reads from the
  * word and the check, never from colour alone. Unknown is its own state: empty rungs and "Level not known yet".
+ *
+ * A level name is never cut. The rungs sit side by side when the ladder's own box is wide enough for all three names
+ * (a container query, so it holds in a sidebar column, a card or a phone), and stack as three short lines when it is not.
  */
 export const LevelLadder = React.forwardRef<HTMLDivElement, LevelLadderProps>(({ level, label = "Protection level", className, ...props }, ref) => {
 	const current = level === null ? null : LEVELS[level];
@@ -34,28 +37,30 @@ export const LevelLadder = React.forwardRef<HTMLDivElement, LevelLadderProps>(({
 			aria-valuenow={level === null ? undefined : level + 1}
 			aria-valuetext={current ? `Level ${current.level} of 2: ${current.name}` : "Level not known yet"}
 			data-level={level ?? "unknown"}
-			className={cn("grid grid-cols-3 gap-1.5", className)}
+			className={cn("@container min-w-0", className)}
 			{...props}
 		>
-			{LEVELS.map((l) => {
-				const reached = level !== null && l.level <= level;
-				const isCurrent = level === l.level;
-				return (
-					<div key={l.level} className="min-w-0 space-y-1.5">
-						<div className={cn("h-2 rounded-full", reached ? "bg-brand-ink" : level === null ? "border border-dashed border-ink-3" : "bg-surface-3")} />
-						<p
-							className={cn(
-								"flex w-fit max-w-full items-center gap-1 rounded-full text-xs leading-5",
-								isCurrent ? "bg-accent px-1.5 font-semibold text-accent-fg" : reached ? "text-ink-1" : "text-ink-2",
-							)}
-						>
-							{reached && !isCurrent ? <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-brand-ink" /> : null}
-							<span className="truncate">{l.name}</span>
-						</p>
-					</div>
-				);
-			})}
-			{level === null ? <p className="col-span-3 text-xs text-ink-2">Level not known yet</p> : null}
+			<div className="grid gap-1.5 @min-[22rem]:grid-cols-3">
+				{LEVELS.map((l) => {
+					const reached = level !== null && l.level <= level;
+					const isCurrent = level === l.level;
+					return (
+						<div key={l.level} className="flex items-center gap-2 @min-[22rem]:block @min-[22rem]:space-y-1.5">
+							<div className={cn("h-2 w-10 shrink-0 rounded-full @min-[22rem]:w-auto", reached ? "bg-brand-ink" : level === null ? "border border-dashed border-ink-3" : "bg-surface-3")} />
+							<p
+								className={cn(
+									"flex w-fit items-center gap-1 whitespace-nowrap rounded-full text-xs leading-5",
+									isCurrent ? "bg-accent px-1.5 font-semibold text-accent-fg" : reached ? "text-ink-1" : "text-ink-2",
+								)}
+							>
+								{reached && !isCurrent ? <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-brand-ink" /> : null}
+								{l.name}
+							</p>
+						</div>
+					);
+				})}
+			</div>
+			{level === null ? <p className="mt-1.5 text-xs text-ink-2">Level not known yet</p> : null}
 		</div>
 	);
 });

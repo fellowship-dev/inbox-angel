@@ -4,7 +4,16 @@ import { useId } from 'react';
 import { Link } from 'react-router';
 import type { DomainVerdict } from '../../lib/verdict';
 
-const AREAS = 'grid gap-x-6 gap-y-3 [grid-template-areas:"head"_"ladder"_"body"] md:grid-cols-[19rem_minmax(0,1fr)] md:[grid-template-areas:"ladder_head"_"ladder_body"]';
+/**
+ * Slot for one contextual "Talk to Max" link (verdict.help): renders nothing until the help link component exists.
+ * PR 142 replaces the body with `<TalkToMax lead={help.lead} about={help.about} />`, which itself renders nothing
+ * unless a help URL is configured.
+ */
+export function ContextHelp(_props: { help: NonNullable<DomainVerdict['help']> }) {
+	return null;
+}
+
+const AREAS = 'grid gap-x-6 gap-y-3 [grid-template-areas:"head"_"ladder"_"body"] lg:grid-cols-[22rem_minmax(0,1fr)] lg:[grid-template-areas:"ladder_head"_"ladder_body"]';
 
 /**
  * One domain on the overview: the name and its state, the level ladder, what is true now with its evidence, when it
@@ -29,7 +38,7 @@ export function DomainRow({
 
 	if (!verdict) {
 		return (
-			<li aria-labelledby={nameId} aria-busy="true" className={cn('px-4 py-4 sm:px-5', parent && 'md:pl-10')}>
+			<li aria-labelledby={nameId} aria-busy="true" className={cn('px-4 py-4 sm:px-5', parent && 'sm:pl-10')}>
 				<div className={AREAS}>
 					<h3 id={nameId} className="font-mono text-base font-semibold [grid-area:head] [overflow-wrap:anywhere]">
 						{domain.domain}
@@ -51,7 +60,7 @@ export function DomainRow({
 	const nothing = next.who === 'Nobody';
 
 	return (
-		<li aria-labelledby={nameId} data-status={verdict.status} className={cn('px-4 py-4 sm:px-5', parent && 'md:pl-10')}>
+		<li aria-labelledby={nameId} data-status={verdict.status} className={cn('px-4 py-4 sm:px-5', parent && 'sm:pl-10')}>
 			<div className={AREAS}>
 				<div className="min-w-0 space-y-0.5 [grid-area:head]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -64,7 +73,7 @@ export function DomainRow({
 					</div>
 					{parent ? <p className="text-xs text-ink-2">Subdomain of {parent}</p> : null}
 				</div>
-				<LevelLadder level={verdict.level} className="self-start [grid-area:ladder] md:pt-1" aria-label={`${domain.domain}: protection level`} />
+				<LevelLadder level={verdict.level} className="self-start [grid-area:ladder] lg:pt-1" aria-label={`${domain.domain}: protection level`} />
 				<div className="min-w-0 space-y-1.5 [grid-area:body]">
 					<p className="max-w-prose text-sm text-ink-1">{verdict.sentence}</p>
 					{verdict.evidence ? <p className="max-w-prose text-sm text-ink-2">{verdict.evidence}</p> : null}
@@ -92,6 +101,7 @@ export function DomainRow({
 							</>
 						)}
 					</div>
+					{verdict.help ? <ContextHelp help={verdict.help} /> : null}
 				</div>
 			</div>
 		</li>

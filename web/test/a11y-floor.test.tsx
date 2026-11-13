@@ -68,6 +68,8 @@ const verdict: DomainVerdict = {
 	evidence: null,
 	checked: 'Checked 3 hours ago',
 	next: { label: 'Publish an SPF record', who: 'You or your DNS manager', to: '/domains/1/setup/2' },
+	reportsNotConnected: false,
+	help: null,
 };
 const row = (canWrite: boolean, v: DomainVerdict | null = verdict) =>
 	renderApp(

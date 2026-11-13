@@ -132,15 +132,15 @@ function WhereItStands({ domain, reports }: { domain: Domain; reports: ReportTot
 	const wizard = useWizardState(domain.id);
 	const { canWrite } = useSession();
 	const headingId = useId();
-	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error)) : summary.data && reports !== undefined ? domainVerdict(domain, summary.data, reports, hosted) : null;
+	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data && reports !== undefined ? domainVerdict(domain, summary.data, reports, hosted) : null;
 	const progress = canWrite && wizard.data ? wizardProgress(wizard.data) : null;
 	return (
 		<section aria-labelledby={headingId} className="space-y-3">
 			<h2 id={headingId} className="text-lg font-semibold tracking-tight">
 				Where it stands
 			</h2>
-			<div className="grid gap-x-6 gap-y-4 rounded-lg border border-line bg-surface-1 p-4 sm:p-5 md:grid-cols-[19rem_minmax(0,1fr)]">
-				{v ? <LevelLadder level={v.level} className="self-start md:pt-1" /> : <Skeleton className="h-8 w-full" />}
+			<div className="grid gap-x-6 gap-y-4 rounded-lg border border-line bg-surface-1 p-4 sm:p-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
+				{v ? <LevelLadder level={v.level} className="self-start lg:pt-1" /> : <Skeleton className="h-8 w-full" />}
 				<div className="min-w-0 space-y-1.5">
 					{v ? (
 						<>

@@ -68,7 +68,7 @@ export function OverviewPage() {
 	});
 	const verdicts: Array<DomainVerdict | null> = domains.map((d, i) => {
 		const sq = summaries[i]!;
-		if (sq.isError) return unavailableVerdict(errorMessage(sq.error));
+		if (sq.isError) return unavailableVerdict(errorMessage(sq.error), d.domain);
 		const h = hosted[i]!;
 		if (sq.isPending || stats[i]!.isPending || (hostedOn && h.isPending)) return null;
 		const info = hostedOn && h.data?.enabled ? h.data : null;

@@ -39,7 +39,7 @@ export function getStartedSteps(i: GetStartedInput): Step[] {
 		steps.push(
 			i.claims === 0 && n > 0
 				? { key: 'prove', title: 'Prove it is yours', state: 'done', detail: 'Ownership is proven for every domain you added.' }
-				: { key: 'prove', title: 'Prove it is yours', state: 'todo', detail: i.claims > 0 ? `${plural(i.claims, 'domain is', 'domains are')} waiting for the DNS record shown below.` : 'Once a domain is added, a DNS record proves you own it.' },
+				: { key: 'prove', title: 'Prove it is yours', state: 'todo', detail: i.claims > 0 ? `${plural(i.claims, 'domain is', 'domains are')} waiting for the DNS record shown below. Its live level from public DNS is visible before proof: press Check public DNS on its card.` : 'Once a domain is added, a DNS record proves you own it. Its live level from public DNS is visible before that.' },
 		);
 	}
 

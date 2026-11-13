@@ -31,6 +31,17 @@ export interface DomainVerdict {
 	/** When DNS was last read, or null for hosted domains (their level comes from pointer checks). */
 	checked: string | null;
 	next: NextAction;
+	/**
+	 * True when no DMARC report can reach this dashboard for the domain: it has no report address (`rua_address` empty;
+	 * on the hosted service that means report intake is not connected). The evidence line then says so, never "0 reports".
+	 */
+	reportsNotConnected: boolean;
+	/**
+	 * Slot for one contextual "Talk to Max" link where a person may be stuck: a name that does not resolve, DNS checks
+	 * that fail, a summary that cannot load. `lead` is the question shown before the link. Rendered by DomainRow's
+	 * ContextHelp, which shows nothing until the help link exists (PR 142's TalkToMax, shown only when configured).
+	 */
+	help: { lead: string; about: string } | null;
 }
 
 /** Report totals for the window, or null while they load or when they failed. */
@@ -59,13 +70,18 @@ const HARMFUL = 70;
 /** The DMARC wizard offers p=reject from quarantine at this rate (lib/dmarc.ts getGuidance). */
 const READY_FOR_REJECT = 90;
 
+/** Same condition as PR 142's useReportsNotConnected, minus the hosted-mode gate (an empty address means no reports in either mode). */
+export const reportsNotConnected = (domain: Pick<Domain, 'rua_address'>): boolean => !hasReportAddress(domain.rua_address);
+
 function reportsLine(domain: Pick<Domain, 'rua_address'>, r: ReportTotals | null | undefined): string {
 	if (r === undefined) return 'Report totals are loading.';
 	if (r === null) return 'Report totals could not be loaded, so this covers public DNS only.';
 	if (r.total > 0 && r.passRate !== null) return `${r.passRate}% of ${formatNumber(r.total)} reported messages passed DMARC in the last ${r.days} days.`;
-	if (!hasReportAddress(domain.rua_address)) return 'Reports are not connected for this domain, so nobody has confirmed that every sender passes.';
+	if (reportsNotConnected(domain)) return 'Reports are not connected for this domain, so nobody has confirmed that every sender passes.';
 	return `No DMARC reports in the last ${r.days} days, so nobody has confirmed that every sender passes.`;
 }
+
+type Core = Omit<DomainVerdict, 'reportsNotConnected' | 'help'>;
 
 export function domainVerdict(
 	domain: Pick<Domain, 'id' | 'domain' | 'rua_address'>,
@@ -73,6 +89,19 @@ export function domainVerdict(
 	reports: ReportTotals | null | undefined,
 	hosted: HostedLevelInput | null = null,
 ): DomainVerdict {
+	const core = coreVerdict(domain, s, reports, hosted);
+	const about = `about ${domain.domain}`;
+	const unresolved = hosted ? null : didNotResolve(s);
+	const help = unresolved ? { lead: 'Sure this is the right name?', about } : !hosted && s.dns_check_status === 'failed' ? { lead: 'DNS checks keep failing?', about } : null;
+	return { ...core, reportsNotConnected: reportsNotConnected(domain), help };
+}
+
+function coreVerdict(
+	domain: Pick<Domain, 'id' | 'domain' | 'rua_address'>,
+	s: DomainCheckSummary,
+	reports: ReportTotals | null | undefined,
+	hosted: HostedLevelInput | null,
+): Core {
 	const page = `/domains/${domain.id}`;
 	const name = domain.domain;
 	const checked = hosted ? null : dnsCheckLine(s);
@@ -194,8 +223,10 @@ export function domainVerdict(
 }
 
 /** A domain whose summary could not be loaded: unknown, never a guessed level. */
-export function unavailableVerdict(message: string): DomainVerdict {
+export function unavailableVerdict(message: string, domain?: string): DomainVerdict {
 	return {
+		reportsNotConnected: false,
+		help: { lead: 'Still failing after a retry?', about: domain ? `about ${domain}` : 'about this domain' },
 		status: 'unknown',
 		level: null,
 		sentence: `What we know about this domain could not be loaded: ${message}`,

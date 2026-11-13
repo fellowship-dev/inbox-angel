@@ -269,3 +269,17 @@ describe('OverviewPage: get to a first answer', () => {
 		expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
 	});
 });
+
+describe('OverviewPage: pending ownership claims keep the lazy DNS preview', () => {
+	const claim = { id: 5, domain: 'acme.com', status: 'pending', txt_name: '_inboxangel-challenge.acme.com', txt_value: 'ia-verify=abc123', created_at: 1700000000, last_checked_at: null, last_error: null };
+
+	it('shows "Check public DNS" on the claim, requests nothing until pressed, and the proof step says the level is visible first', async () => {
+		const { calls } = renderApp(<OverviewPage />, { routes: { 'GET /api/domains': { domains: [], pending_claims: [claim] } } });
+		const section = await screen.findByRole('region', { name: 'Waiting for verification' });
+		expect(within(section).getByRole('button', { name: 'Check public DNS' })).toBeInTheDocument();
+		expect(calls.some((c) => c.path.includes('/claims/5/preview'))).toBe(false);
+		expect(screen.getByText('Not yet: 1 domain is waiting for proof that it is yours.')).toBeInTheDocument();
+		const step = within(screen.getByRole('region', { name: 'Get to your first answer' })).getByText('Prove it is yours').closest('li')!;
+		expect(within(step).getByText(/Its live level from public DNS is visible before proof/)).toBeInTheDocument();
+	});
+});
