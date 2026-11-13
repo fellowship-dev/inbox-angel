@@ -22,7 +22,7 @@ describe('installer-proof screen and HOSTED_SERVICE_URL', () => {
 		expect(link).toHaveAttribute('href', URL_SET);
 		expect(link).toHaveAttribute('target', '_blank');
 		expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
-		expect(screen.getByText(/Self-hosting stays fully supported/)).toBeInTheDocument();
+		expect(screen.getByText(/a self-hosted installation keeps every feature/)).toBeInTheDocument();
 		expect(screen.getAllByRole('link', { name: /hosted/i })).toHaveLength(1);
 		expect(screen.getByRole('button', { name: 'Create account' })).toBeEnabled();
 	});

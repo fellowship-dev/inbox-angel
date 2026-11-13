@@ -3,7 +3,7 @@
 Cloudflare Workers backend for [InboxAngel](https://github.com/Fellowship-dev/inbox-angel).
 Self-hostable email authentication platform — DMARC monitoring, SPF management, MTA-STS provisioning, and TLS-RPT reporting, all running on your own Cloudflare account.
 
-**Coding agents:** asked to "set up DMARC monitoring for my domain" or to "self-host this"? Read [docs/coding-agents.md](docs/coding-agents.md) first: which path to take, what each costs, and the exact steps.
+**Coding agents:** asked to "set up DMARC monitoring for my domain" or to "self-host this"? Read [docs/coding-agents.md](docs/coding-agents.md) first: what running it takes, what it costs, and the exact steps.
 
 ---
 
@@ -44,17 +44,15 @@ Sending MTA → attempts TLS → policy says "enforce" → must succeed or rejec
 
 ---
 
-<a id="self-hosting"></a>
+## Self-hosting
 
-## Advanced: self-hosting
-
-Self-hosting runs the whole product on your own Cloudflare account. It is fully supported by the code in this repository; it also makes you the operator.
+Self-hosting runs the whole product on your own Cloudflare account and makes you its operator.
 
 ### What self-hosting takes
 
-- **A Cloudflare account** holding a Worker, a D1 database and a KV namespace (`OAUTH_KV`), plus a runtime API token with the permissions below. One-click DNS changes and report intake need the domain's DNS on Cloudflare; with external DNS you copy records by hand.
+- **A Cloudflare account** holding a Worker, a D1 database and a KV namespace (`OAUTH_KV`), plus a runtime API token with the permissions below. One-click DNS changes for a monitored domain need that domain's DNS on Cloudflare; on any other DNS host you copy the records by hand.
 - **Configuration before first use:** a canonical HTTPS origin (`BETTER_AUTH_URL`) and a private, single-use installer proof (`BOOTSTRAP_SECRET`). A successful deploy is not a finished setup.
-- **For DMARC report ingestion:** Cloudflare Email Routing on a reports subdomain (MX records and a rule to the Worker) and the per-domain authorization records the Worker provisions. Live DNS checks work without it.
+- **For DMARC report ingestion:** Cloudflare Email Routing on your reports domain (MX records and a rule to the Worker). The `_report._dmarc` authorization records also live in the reports domain's zone, not in each monitored domain's zone, so a monitored domain on external DNS can still have its reports ingested: it only adds the reports address to its own DMARC record. Live DNS checks work without any of this.
 - **For mail to arbitrary recipients** (free-check replies, alerts to addresses that are not verified destinations): a sending domain onboarded in Cloudflare Email Service, which needs Workers Paid. Without it, outbound mail reaches only verified Email Routing destinations.
 - **Costs:** whatever Cloudflare charges for Workers, D1, KV and email under your plan and usage. This project charges nothing.
 - **Upgrades are yours:** back up D1, run migrations, redeploy ([Upgrading](#upgrading)). `GET /api/version` shows when a newer release exists.

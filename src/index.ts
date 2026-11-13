@@ -110,7 +110,7 @@ export const coreWorker = Object.freeze({
     // OAuth relay deployment (CF_OAUTH_RELAY_SECRET set): stateless, needs no database. Inert everywhere else.
     if (relayEnabled(env) && isRelayPath(new URL(request.url).pathname)) return handleRelay(request, env);
     // Machine-readable summary for agents (llmstxt.org). Needs no database, so it also answers before setup.
-    if (new URL(request.url).pathname === '/llms.txt' && request.method === 'GET') return llmsTxt(env);
+    if (new URL(request.url).pathname === '/llms.txt' && (request.method === 'GET' || request.method === 'HEAD')) return llmsTxt(env, request.method === 'HEAD');
     if (!env.DB) return setupPage(env);
     try {
       await assertSchemaReady(env.DB);
@@ -215,7 +215,7 @@ export function setupPage(env: Pick<Env, 'MODE' | 'HOSTED_SERVICE_URL'> = {}): R
     <li>Deploy:<br><pre>npm run deploy</pre>Then visit the canonical dashboard, enter installer proof and create the owner. Domain enrollment and optional DNS/routing setup follow.</li>
   </ol>
   <div class="note">
-    Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#advanced-self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>
+    Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>
   </div>
 </body>
 </html>`;

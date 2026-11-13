@@ -34,13 +34,13 @@ describe('hostedServiceUrl', () => {
     expect(hostedServiceUrl({ MODE: 'saas', HOSTED_SERVICE_URL: URL_SET })).toBeNull();
   });
 
-  it('the sentence is one sentence, names the URL and keeps self-hosting supported', () => {
+  it('the sentence is one sentence, names the URL and says self-hosting keeps every feature', () => {
     const sentence = hostedServiceSentence(URL_SET);
     expect(sentence).toContain(URL_SET);
-    expect(sentence).toMatch(/self-hosting stays fully supported/);
+    expect(sentence).toMatch(/a self-hosted installation keeps every feature/);
     expect(sentence.match(/\.(\s|$)/g)).toHaveLength(1);
     // No invented limits, prices or guarantees.
-    expect(sentence).not.toMatch(/\$|\d+ (domains|workspaces)|guarantee|SLA|support team/i);
+    expect(sentence).not.toMatch(/\$|\d+ (domains|workspaces)|guarantee|SLA|support/i);
   });
 });
 
@@ -58,6 +58,13 @@ describe('/llms.txt', () => {
     expect(mentionsHosted(body)).toBe(false);
   });
 
+  it('HEAD answers with the same headers and no body', async () => {
+    const res = await coreWorker.fetch(new Request('https://ia.example.com/llms.txt', { method: 'HEAD' }), { BETTER_AUTH_URL: 'https://ia.example.com' } as unknown as Env, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
+    expect(await res.text()).toBe('');
+  });
+
   it('answers before a database is bound (no setup page in its place)', async () => {
     const res = await get({});
     expect(res.status).toBe(200);
@@ -69,7 +76,7 @@ describe('/llms.txt', () => {
   it('set: exactly one hosted sentence, self-hosting still documented', async () => {
     const body = await (await get({ BETTER_AUTH_URL: 'https://ia.example.com', HOSTED_SERVICE_URL: URL_SET })).text();
     expect(body.split(hostedServiceSentence(URL_SET))).toHaveLength(2);
-    expect(body.match(/hosted/gi)).toHaveLength(1);
+    expect(body.match(/hosted free tier/gi)).toHaveLength(1);
     expect(body).toContain('self-hosting');
   });
 

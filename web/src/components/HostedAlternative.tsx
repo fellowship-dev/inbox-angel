@@ -11,7 +11,7 @@ export function HostedAlternative({ url }: { url?: string | null }) {
 			<a href={url} target="_blank" rel="noopener noreferrer" className="text-brand-ink underline underline-offset-4">
 				The hosted free tier
 			</a>{' '}
-			is the fastest way to start. Self-hosting stays fully supported.
+			is the fastest way to start monitoring a domain; a self-hosted installation keeps every feature.
 		</p>
 	);
 }

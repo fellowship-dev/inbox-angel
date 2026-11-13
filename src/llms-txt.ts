@@ -35,7 +35,7 @@ export function llmsTxtBody(env: LlmsTxtEnv): string {
   lines.push(
     '## Docs',
     '',
-    `- [Guide for coding agents](${REPO}/blob/main/docs/coding-agents.md): which path to take for "set up DMARC monitoring for my domain" or "self-host this", what each costs, and the exact steps`,
+    `- [Guide for coding agents](${REPO}/blob/main/docs/coding-agents.md): for "set up DMARC monitoring for my domain" or "self-host this": what running it takes, what it costs, and the exact steps`,
     `- [README](${REPO}#readme): what the product does, self-hosting, upgrading and uninstalling`,
     `- [Agents, product credentials and source metrics](${REPO}/blob/main/docs/agent-operations.md): installer setup, connecting an MCP client, first useful report`,
     '',
@@ -43,8 +43,8 @@ export function llmsTxtBody(env: LlmsTxtEnv): string {
   return lines.join('\n');
 }
 
-export function llmsTxt(env: LlmsTxtEnv): Response {
-  return new Response(llmsTxtBody(env), {
+export function llmsTxt(env: LlmsTxtEnv, head = false): Response {
+  return new Response(head ? null : llmsTxtBody(env), {
     headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'max-age=300', 'X-Content-Type-Options': 'nosniff' },
   });
 }
