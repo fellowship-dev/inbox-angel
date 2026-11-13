@@ -8,7 +8,7 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
-import { buildRecommendedRecord, parseDmarcPolicy } from '../../../lib/dmarc-record';
+import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../../lib/dmarc-record';
 import type { OnboardingStatus } from '../../../lib/types';
 import { setupKeys } from './hooks';
 import type { StepProps } from './SpfStep';
@@ -28,9 +28,14 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	const [applied, setApplied] = useState(false);
 	const [authProvisioned, setAuthProvisioned] = useState(false);
 
-	const severity = dmarcSeverity(dmarc, dmarcFailed.length > 0);
+	// The report address is top-level in the status, and empty when the domain was added without a reports domain.
+	const rua = hasReportAddress(status.rua_address) ? status.rua_address : null;
+	const lookupSeverity = dmarcSeverity(dmarc, dmarcFailed.length > 0);
+	// Without a report address nothing reaches Inbox Angel, whatever the record says, so it is never "configured".
+	const severity = !rua && lookupSeverity === 'info' ? 'warning' : lookupSeverity;
 	// Adding our rua= must never relax an existing policy, so keep p= as it is and only default to none for a new record.
-	const recommended = buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', dmarc.rua_address);
+	// No report address, no recommended record: a record ending in `mailto:` is broken, so there is nothing to copy.
+	const recommended = rua ? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua) : null;
 
 	const patch = (fn: (s: OnboardingStatus) => OnboardingStatus) => qc.setQueryData<OnboardingStatus>(setupKeys.status(status.domain_id), (s) => (s ? fn(s) : s));
 
@@ -79,15 +84,20 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							No DMARC record found for <strong className="text-ink-1">_dmarc.{status.domain}</strong>.
 						</p>
 					)}
-					{severity === 'error' && !applied ? (
+					{!rua && !applied ? (
+						<Alert variant="warning" title="Report address not configured yet">
+							This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
+						</Alert>
+					) : null}
+					{severity === 'error' && rua && !applied ? (
 						<p className="text-sm text-ink-2">
 							Without a DMARC record receiving servers send no reports, so Inbox Angel has nothing to analyse. Create one with <code className="font-mono text-ink-1">p=none</code>{' '}
 							(monitor only) so reports start flowing.
 						</p>
 					) : null}
-					{severity === 'warning' && !applied ? (
+					{severity === 'warning' && rua && !applied ? (
 						<p className="text-sm text-ink-2">
-							Your DMARC record exists but does not send reports to Inbox Angel. Add <code className="font-mono text-ink-1">rua=mailto:{dmarc.rua_address}</code> to receive
+							Your DMARC record exists but does not send reports to Inbox Angel. Add <code className="font-mono text-ink-1">rua=mailto:{rua}</code> to receive
 							aggregate reports.
 						</p>
 					) : null}
@@ -97,7 +107,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							<code className="font-mono">p=reject</code> safely.
 						</Alert>
 					) : null}
-					{(severity === 'error' || severity === 'warning') && !applied ? (
+					{(severity === 'error' || severity === 'warning') && recommended && !applied ? (
 						<div className="space-y-3">
 							<TxtRecord title="Recommended record" name="_dmarc" value={recommended} />
 							<div className="flex flex-col gap-2 sm:flex-row">

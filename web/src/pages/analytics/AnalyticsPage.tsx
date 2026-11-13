@@ -70,7 +70,7 @@ function Body({ data, days }: { data: Data; days: number }) {
 			)}
 
 			<Section title="What to fix next" description="Ranked by how much of your mail each problem touches.">
-				<FixList fixes={data.fixes} showDomain={workspace} />
+				<FixList fixes={data.fixes} messages={data.totals.messages} showDomain={workspace} />
 			</Section>
 
 			<Section title="Pass rate trend" description={`Messages per ${days > 30 ? 'week' : 'day'}, passed and failed DMARC.`}>

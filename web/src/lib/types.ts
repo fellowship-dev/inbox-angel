@@ -199,7 +199,7 @@ export interface OnboardingStatus {
     found: boolean;
     has_our_rua: boolean;
     current_record: string | null;
-    rua_address: string;
+    // No rua_address here: the API sends it once, at the top level, and it is empty without a reports domain.
     auth_record?: {
       found: boolean;
       record_name: string | null;

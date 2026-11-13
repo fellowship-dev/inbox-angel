@@ -117,7 +117,8 @@ function SpfEditor({ status, onNext, onSkip }: StepProps) {
 		},
 	});
 
-	const severity = applied ? 'info' : spfSeverity(spf);
+	// The badge describes what is on screen: with nothing selected there is no record to judge, so never "All good".
+	const severity = applied ? 'info' : preview === null ? 'warning' : spfSeverity(spf);
 	const showCompare = spf.record !== null && hasChanges && preview !== null;
 	const removeAll = preview === null && spf.record !== null;
 

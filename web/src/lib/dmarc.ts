@@ -1,15 +1,5 @@
 import type { Domain, WizardState } from './types';
 
-export type DomainStatus = 'good' | 'warning' | 'danger';
-
-/** Overview health from policy and the 7-day pass rate (0..1, null without data). */
-export function computeStatus(policy: Domain['dmarc_policy'], passRate: number | null): DomainStatus {
-	if (policy === 'none' || policy === null) return 'danger';
-	if (passRate !== null && passRate < 0.7) return 'danger';
-	if (policy === 'quarantine' || (passRate !== null && passRate < 0.9)) return 'warning';
-	return 'good';
-}
-
 /** What people paste into the box: trim, lowercase, drop a scheme and one trailing slash. */
 export function normalizeDomain(input: string): string {
 	return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -96,13 +86,19 @@ export function sumStats(stats: DayStat[]): { total: number; passed: number; fai
 	return { total, passed, failed, passRate: total > 0 ? Math.round((passed / total) * 100) : null };
 }
 
-/** Steps done out of the wizard's five; used for "Continue setup n/5". */
-export function wizardProgress(state: WizardState): { done: number; total: number; nextStep: number } {
-	const values: string[] = Object.values(state);
-	const done = values.filter((v) => v === 'complete').length;
-	const keys = ['domain', 'spf', 'dkim', 'dmarc', 'routing'] as const;
-	const firstIncomplete = keys.findIndex((k, i) => i > 0 && state[k] !== 'complete');
-	return { done, total: values.length, nextStep: firstIncomplete > 0 ? firstIncomplete + 1 : 2 };
+const SETUP_STEPS = ['domain', 'spf', 'dkim', 'dmarc', 'routing'] as const;
+
+/**
+ * Setup progress out of the wizard's five steps, counted the same way everywhere: the wizard's "n of 5 steps
+ * complete" and the "Continue setup n/5" links. A domain that exists has done the domain step, even when it was
+ * added outside the wizard and its stored state still says not_started.
+ */
+export function wizardProgress(state: WizardState): { done: number; skipped: number; total: number; nextStep: number } {
+	const stateOf = (k: (typeof SETUP_STEPS)[number]) => (k === 'domain' ? 'complete' : state[k]);
+	const done = SETUP_STEPS.filter((k) => stateOf(k) === 'complete').length;
+	const skipped = SETUP_STEPS.filter((k) => stateOf(k) === 'skipped').length;
+	const firstIncomplete = SETUP_STEPS.findIndex((k, i) => i > 0 && state[k] !== 'complete');
+	return { done, skipped, total: SETUP_STEPS.length, nextStep: firstIncomplete > 0 ? firstIncomplete + 1 : 2 };
 }
 
 /**

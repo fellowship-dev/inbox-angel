@@ -6,13 +6,15 @@ import { useParams } from 'react-router';
 import { AuthBadge, BackLink, ProviderName, useRouteDomainId } from '../../components/reports';
 import { LoadError, PageSkeleton, Section } from '../../components/states';
 import { api } from '../../lib/api';
+import { parseDmarcPolicy } from '../../lib/dmarc-record';
+import { useDnsCheck } from '../../lib/domain-queries';
 import { useDomain } from '../../lib/queries';
-import { explain, formatDayWithRelative, isFailing, passRate } from '../../lib/reports';
+import { explain, formatDayWithRelative, isFailing, passRate, type KnownPolicy } from '../../lib/reports';
 import type { DayReport, ReportSource } from '../../lib/types';
 
 const sourceKey = (s: ReportSource) => `${s.source_ip}-${s.header_from}-${s.spf_domain}-${s.dkim_domain}`;
 
-function FailingCard({ src }: { src: ReportSource }) {
+function FailingCard({ src, policy }: { src: ReportSource; policy: KnownPolicy }) {
 	return (
 		<Card className="space-y-3 border-danger/40 p-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -25,7 +27,7 @@ function FailingCard({ src }: { src: ReportSource }) {
 					<span className="ml-1 text-xs text-ink-2">{src.count === 1 ? 'message' : 'messages'}</span>
 				</p>
 			</div>
-			<p className="text-sm leading-relaxed text-ink-1">{explain(src)}</p>
+			<p className="text-sm leading-relaxed text-ink-1">{explain(src, policy)}</p>
 			<div className="flex flex-wrap items-center gap-2">
 				<AuthBadge protocol="SPF" pass={!!src.spf_pass} />
 				<AuthBadge protocol="DKIM" pass={!!src.dkim_pass} />
@@ -89,6 +91,9 @@ export function ReportDetailPage() {
 	const id = useRouteDomainId();
 	const { date = '' } = useParams();
 	const { domain } = useDomain(id);
+	// What happens to failing mail depends on the policy published now, so read it live; unknown until the lookup works.
+	const dns = useDnsCheck(id);
+	const policy: KnownPolicy = !dns.data || dns.data.error ? null : !dns.data.found ? 'no-record' : parseDmarcPolicy(dns.data.current_record);
 
 	const q = useQuery({
 		queryKey: ['day-report', id, date],
@@ -157,7 +162,7 @@ export function ReportDetailPage() {
 						<Section title="Needs attention" description="These sources failed SPF or DKIM for this day.">
 							<div className="space-y-3">
 								{failing.map((s) => (
-									<FailingCard key={sourceKey(s)} src={s} />
+									<FailingCard key={sourceKey(s)} src={s} policy={policy} />
 								))}
 							</div>
 						</Section>

@@ -15,7 +15,7 @@ const rollout = {
 };
 const onboarding = {
 	domain_id: 1, domain: 'example.com', rua_address: 'r@reports.test', cf_available: true,
-	dmarc: { found: true, has_our_rua: false, current_record: current, rua_address: 'r@reports.test' },
+	dmarc: { found: true, has_our_rua: false, current_record: current },
 	spf: { record: 'v=spf1 include:_spf.google.com -all', lookup_count: 4, flattening_active: false },
 	dkim: { selectors: [{ name: 'google._domainkey.example.com', record: 'v=DKIM1; k=rsa; p=AAA' }], source: 'doh' },
 	routing: { mx_found: true, destination_verified: true, reports_domain: null, admin_email: null },
@@ -41,6 +41,26 @@ const page = (opts: Parameters<typeof renderApp>[1]) =>
 		</Routes>,
 		{ route: '/domains/1', ...opts },
 	);
+
+describe('DomainDetailPage DKIM keys', () => {
+	const withSelectors = (selectors: Array<{ name: string; record: string }>) => routes({ 'GET /api/domains/1/onboarding-status': { ...onboarding, dkim: { selectors, source: 'doh' } } });
+
+	it('an empty p= is a revoked key: never a pass, never counted as found', async () => {
+		page({ routes: withSelectors([{ name: 's1._domainkey.example.com', record: 'v=DKIM1; p=' }, { name: 's2._domainkey.example.com', record: 'v=DKIM1; k=rsa; p=' }]) });
+		const row = (await screen.findByText('DKIM selectors')).closest('li') as HTMLElement;
+		expect(row).toHaveAttribute('data-status', 'fail');
+		expect(within(row).getByText(/No usable DKIM key\. 2 selectors have an empty key \(p=\), which means revoked\./)).toBeInTheDocument();
+		expect(within(row).queryByText(/selectors? found/)).not.toBeInTheDocument();
+		expect(within(row).getAllByText('Revoked: empty key')).toHaveLength(2);
+	});
+
+	it('counts only usable keys when some are revoked', async () => {
+		page({ routes: withSelectors([{ name: 'google._domainkey.example.com', record: 'v=DKIM1; k=rsa; p=AAA' }, { name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' }]) });
+		const row = (await screen.findByText('DKIM selectors')).closest('li') as HTMLElement;
+		expect(row).toHaveAttribute('data-status', 'pass');
+		expect(within(row).getByText(/1 usable key found\. 1 selector has an empty key/)).toBeInTheDocument();
+	});
+});
 
 describe('DomainDetailPage policy badge', () => {
 	it('never contradicts the DMARC record card: no live record means "last known", not p=quarantine', async () => {

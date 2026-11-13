@@ -11,12 +11,21 @@ import { useRouteDomainId } from '../../components/wizard/useRouteDomainId';
 import { WizardHeader } from '../../components/wizard/WizardHeader';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
-import { buildRecommendedRecord } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, parseDmarcPolicy } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
 
 type Policy = 'none' | 'quarantine' | 'reject';
 
 const POLICY_STEPS: Record<Policy, number> = { none: 0, quarantine: 1, reject: 2 };
+
+/**
+ * The wizard step the live record has already reached. The stored policy can lag DNS (manual edits, a missed
+ * refresh), so the live record decides; no record, or an unreadable p=, starts at none.
+ */
+function liveStep(record: string | null): number {
+	const p = parseDmarcPolicy(record);
+	return p === 'none' || p === 'quarantine' || p === 'reject' ? POLICY_STEPS[p] : 0;
+}
 const STEP_COPY = [
 	{
 		title: 'Step 1: switch to quarantine',
@@ -85,9 +94,10 @@ export function DmarcWizardPage() {
 			</StepCard>
 		);
 	} else {
-		const policy = (domain.dmarc_policy ?? 'none') as Policy;
-		const current = step ?? POLICY_STEPS[policy];
-		const enforced = policy === 'reject' || current >= 2;
+		// Never below the live policy: the wizard must not offer a record weaker than the one already published.
+		const floor = liveStep(dns.data.found ? dns.data.current_record : null);
+		const current = Math.max(step ?? floor, floor);
+		const enforced = current >= 2;
 		const copy = STEP_COPY[Math.min(current, 1)] ?? STEP_COPY[0];
 		const cfManaged = dns.data.cf_managed;
 		const currentRecord = appliedRecord ?? dns.data.current_record;
@@ -137,7 +147,7 @@ export function DmarcWizardPage() {
 						) : null}
 						<StepFooter
 							start={
-								current > 0 ? (
+								current > floor ? (
 									<Button variant="ghost" onClick={() => setStep(current - 1)} disabled={apply.isPending}>
 										Back
 									</Button>

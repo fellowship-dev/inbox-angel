@@ -26,8 +26,6 @@ export function resolveStep(urlStep: number | null, wizard: WizardState): number
 	return (first > 0 ? first : 1) + 1;
 }
 
-export const completedCount = (w: WizardState): number => STEP_KEYS.filter((k) => w[k] === 'complete').length;
-
 export type DnsCheckName = 'spf' | 'dmarc' | 'authRecord' | 'mx' | 'nullSender' | 'dkim';
 
 const PREFIX: Record<DnsCheckName, string> = {

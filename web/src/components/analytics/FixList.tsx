@@ -1,13 +1,19 @@
 import { Badge, Card, CardContent, EmptyState, RecordBlock } from '@inbox-angel/ui';
-import { CheckCircle2, ExternalLink } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Inbox } from 'lucide-react';
 import { Link } from 'react-router';
 import { fmtPct, SEVERITY_LABEL, type Fix } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
 
 const VARIANT = { high: 'danger', medium: 'warning', low: 'outline' } as const;
 
-/** What to fix next, most impactful first: the sender, the share it touches, and the change to make. */
-export function FixList({ fixes, showDomain }: { fixes: Fix[]; showDomain?: boolean }) {
+/**
+ * What to fix next, most impactful first: the sender, the share it touches, and the change to make.
+ * `messages` is how many reported messages the list was built from: with none, there is no evidence either way.
+ */
+export function FixList({ fixes, messages, showDomain }: { fixes: Fix[]; messages: number; showDomain?: boolean }) {
+	if (fixes.length === 0 && messages === 0) {
+		return <EmptyState icon={<Inbox />} title="No reports yet" description="There are no DMARC reports for this period, so there is nothing to rank yet." />;
+	}
 	if (fixes.length === 0) {
 		return <EmptyState icon={<CheckCircle2 />} title="Nothing to fix right now" description="Every sender we can see passes DMARC, or the failures are too small to act on." />;
 	}
