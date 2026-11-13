@@ -31,7 +31,7 @@ const status = (over: Partial<OnboardingStatus> = {}): OnboardingStatus => ({
 	domain: 'example.com',
 	rua_address: 'r@reports.example.com',
 	cf_available: true,
-	dmarc: { found: true, has_our_rua: true, current_record: 'v=DMARC1; p=none; rua=mailto:r@reports.example.com', rua_address: 'r@reports.example.com' },
+	dmarc: { found: true, has_our_rua: true, current_record: 'v=DMARC1; p=none; rua=mailto:r@reports.example.com' },
 	spf: { record: 'v=spf1 include:_spf.google.com ~all', lookup_count: 2, flattening_active: false },
 	dkim: { selectors: [], source: 'doh' },
 	routing: { mx_found: true, destination_verified: true, reports_domain: 'reports.example.com', admin_email: 'owner@example.com', null_sender_spf: true, null_sender_dmarc: true },
@@ -142,7 +142,7 @@ describe('DNS lookup failures are not missing records', () => {
 	it('DMARC: a failed lookup is not "No DMARC record found"', async () => {
 		renderApp(<Wizard />, {
 			route: '/domains/7/setup/4',
-			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null, rua_address: 'r@x.com' }, dns_errors: ['dmarc: timeout'] }) }),
+			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null }, dns_errors: ['dmarc: timeout'] }) }),
 		});
 		await heading('DMARC policy');
 		expect((await screen.findAllByText('Lookup failed')).length).toBeGreaterThan(0);
@@ -154,7 +154,7 @@ describe('DNS lookup failures are not missing records', () => {
 	it('DMARC: a missing record is shown as missing with the recommended record', async () => {
 		renderApp(<Wizard />, {
 			route: '/domains/7/setup/4',
-			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null, rua_address: 'r@reports.example.com' } }) }),
+			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null } }) }),
 		});
 		expect(await screen.findByText(/No DMARC record found/)).toBeInTheDocument();
 		expect(screen.getByText('v=DMARC1; p=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
@@ -165,7 +165,7 @@ describe('DNS lookup failures are not missing records', () => {
 		const { calls } = renderApp(<Wizard />, {
 			route: '/domains/7/setup/4',
 			routes: routes({
-				status: status({ dmarc: { found: true, has_our_rua: false, current_record: current, rua_address: 'r@reports.example.com' } }),
+				status: status({ dmarc: { found: true, has_our_rua: false, current_record: current } }),
 				extra: { 'POST /api/domains/7/apply-dmarc': { ok: true, record: 'x', created: false } },
 			}),
 		});
@@ -178,6 +178,56 @@ describe('DNS lookup failures are not missing records', () => {
 		expect(record).toContain('sp=none');
 		expect(record).not.toMatch(/(^|;\s*)p=none/);
 		expect(record).toContain('mailto:other@x.com,mailto:r@reports.example.com');
+	});
+
+	it('DMARC: reads the report address the API actually sends (top level), not a field that does not exist', async () => {
+		renderApp(<Wizard />, {
+			route: '/domains/7/setup/4',
+			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null } }) }),
+		});
+		expect(await screen.findByText('v=DMARC1; p=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
+		expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+	});
+
+	it.each([
+		['missing record', { found: false, has_our_rua: false, current_record: null }],
+		['record without our rua', { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' }],
+		// The API matches an empty address against every record, so has_our_rua is true here; it is still not configured.
+		['record the API thinks is ours', { found: true, has_our_rua: true, current_record: 'v=DMARC1; p=none' }],
+	])('DMARC: with no report address (%s) nothing broken is offered for copying', async (_label, dmarc) => {
+		renderApp(<Wizard />, { route: '/domains/7/setup/4', routes: routes({ status: status({ rua_address: '', dmarc }) }) });
+		await heading('DMARC policy');
+		expect(await screen.findByText('Report address not configured yet')).toBeInTheDocument();
+		expect(screen.queryByText(/mailto:(undefined|;|$)/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+		expect(screen.queryByText('Recommended record')).not.toBeInTheDocument();
+		// Only the current record (if any) can be copied; there is no recommended record to copy.
+		expect(screen.queryByRole('button', { name: 'Copy record' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /Apply via Cloudflare/ })).not.toBeInTheDocument();
+		expect(screen.queryByText('Reports are configured')).not.toBeInTheDocument();
+	});
+
+	it('SPF: the badge never says "All good" when nothing is selected', async () => {
+		renderApp(<Wizard />, { route: '/domains/7/setup/2', routes: routes({ status: status({ spf: { record: 'v=spf1 -all', lookup_count: 0, flattening_active: false } }) }) });
+		await heading('SPF record');
+		expect(await screen.findByText('No providers selected yet.')).toBeInTheDocument();
+		expect(screen.queryByText('All good')).not.toBeInTheDocument();
+		expect(screen.getByText('Needs attention')).toBeInTheDocument();
+		// An existing -all is kept as it is: the wizard never proposes a weaker qualifier on its own.
+		expect(screen.getByRole('radio', { name: /Hardfail/ })).toBeChecked();
+	});
+
+	it('SPF: with no record, softfail is the default until senders are known', async () => {
+		renderApp(<Wizard />, { route: '/domains/7/setup/2', routes: routes({ status: status({ spf: { record: null, lookup_count: null, flattening_active: false } }) }) });
+		await heading('SPF record');
+		expect(await screen.findByRole('radio', { name: /Softfail/ })).toBeChecked();
+		expect(screen.queryByText('All good')).not.toBeInTheDocument();
+	});
+
+	it('the subtitle counts complete and skipped steps the same way as the overview', async () => {
+		renderApp(<Wizard />, { route: '/domains/7/setup/4', routes: routes({ wizard: wizard({ domain: 'not_started', spf: 'complete', dkim: 'skipped' }) }) });
+		await heading('DMARC policy');
+		expect(await screen.findByText('2 of 5 steps complete, 1 skipped')).toBeInTheDocument();
 	});
 
 	it('Routing: failed MX lookup is an error row without the "set up" nudge', async () => {

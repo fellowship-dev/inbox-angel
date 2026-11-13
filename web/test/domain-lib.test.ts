@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRecommendedRecord, computeStatus, getGuidance, inheritanceVerdict, normalizeDomain, spTag, sumStats, wizardProgress } from '../src/lib/dmarc';
+import { buildRecommendedRecord, getGuidance, inheritanceVerdict, normalizeDomain, spTag, sumStats, wizardProgress } from '../src/lib/dmarc';
 import { weeklyBuckets } from '../src/lib/pdf/report';
 import { getRecommendations } from '../src/lib/pdf/recommendations';
 import { buildTree } from '../src/pages/domains/OverviewPage';
@@ -38,14 +38,6 @@ describe('getGuidance', () => {
 });
 
 describe('small helpers', () => {
-	it('computeStatus', () => {
-		expect(computeStatus(null, 1)).toBe('danger');
-		expect(computeStatus('none', 1)).toBe('danger');
-		expect(computeStatus('reject', 0.69)).toBe('danger');
-		expect(computeStatus('quarantine', 0.99)).toBe('warning');
-		expect(computeStatus('reject', 0.89)).toBe('warning');
-		expect(computeStatus('reject', null)).toBe('good');
-	});
 	it('normalizeDomain', () => expect(normalizeDomain('  HTTPS://Example.com/ ')).toBe('example.com'));
 	it('spTag', () => {
 		expect(spTag('v=DMARC1; p=none; sp=reject')).toBe('reject');
@@ -54,7 +46,7 @@ describe('small helpers', () => {
 	});
 	it('sumStats', () => expect(sumStats([{ total: 10, passed: 9, failed: 1 }, { total: 10, passed: 10, failed: 0 }])).toEqual({ total: 20, passed: 19, failed: 1, passRate: 95 }));
 	it('wizardProgress points at the first unfinished step after the domain step', () => {
-		expect(wizardProgress({ domain: 'complete', spf: 'complete', dkim: 'skipped', dmarc: 'not_started', routing: 'not_started' })).toEqual({ done: 2, total: 5, nextStep: 3 });
+		expect(wizardProgress({ domain: 'complete', spf: 'complete', dkim: 'skipped', dmarc: 'not_started', routing: 'not_started' })).toEqual({ done: 2, skipped: 1, total: 5, nextStep: 3 });
 		expect(wizardProgress({ domain: 'not_started', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' }).nextStep).toBe(2);
 	});
 	it('inheritanceVerdict', () => {
@@ -62,6 +54,31 @@ describe('small helpers', () => {
 		expect(inheritanceVerdict({ has_dmarc: true, dmarc_policy: 'reject', dmarc_sp: null })).toEqual({ kind: 'enforced', via: 'p=reject (sp= not set, inherits p=)' });
 		expect(inheritanceVerdict({ has_dmarc: true, dmarc_policy: 'reject', dmarc_sp: 'none' })).toEqual({ kind: 'open', via: 'sp=none' });
 		expect(inheritanceVerdict({ has_dmarc: true, dmarc_policy: 'quarantine', dmarc_sp: null }).via).toBe('no sp= tag (inherits p=quarantine)');
+	});
+});
+
+describe('setup progress counts one way everywhere', () => {
+	it('counts the domain step as done for a domain that exists, whatever its stored state says', () => {
+		const added = { domain: 'not_started', spf: 'not_started', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' } as const;
+		expect(wizardProgress(added)).toEqual({ done: 1, skipped: 0, total: 5, nextStep: 2 });
+	});
+	it('reports skipped steps separately from complete ones', () => {
+		expect(wizardProgress({ domain: 'complete', spf: 'skipped', dkim: 'skipped', dmarc: 'complete', routing: 'not_started' })).toMatchObject({ done: 2, skipped: 2 });
+	});
+});
+
+describe('buildRecommendedRecord never builds a broken record', () => {
+	it.each([undefined, '', '   ', null])('with report address %j: no mailto, no "undefined"', (rua) => {
+		const fresh = buildRecommendedRecord(null, 'none', rua as string);
+		expect(fresh).toBe('v=DMARC1; p=none');
+		const kept = buildRecommendedRecord('v=DMARC1; p=quarantine; rua=mailto:a@x.test', 'reject', rua as string);
+		expect(kept).toBe('v=DMARC1; p=reject; rua=mailto:a@x.test');
+		for (const r of [fresh, kept]) {
+			expect(r).not.toMatch(/undefined|null|mailto:(;|$|,)/);
+		}
+	});
+	it('still adds a real report address', () => {
+		expect(buildRecommendedRecord(null, 'none', 'r@reports.test')).toBe('v=DMARC1; p=none; rua=mailto:r@reports.test');
 	});
 });
 

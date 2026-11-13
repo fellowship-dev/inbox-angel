@@ -29,6 +29,24 @@ const src = (over: Partial<AuthSource> = {}): AuthSource => ({
 	...over,
 });
 
+describe('explain says what the policy does with spoofed mail', () => {
+	it('under p=none the mail is still delivered, never "your DMARC policy will handle it"', () => {
+		const t = explain(src(), 'none');
+		expect(t).not.toMatch(/will handle it/);
+		expect(t).toContain('p=none, so receivers still deliver it');
+	});
+	it('without a DMARC record it is still delivered', () => expect(explain(src(), 'no-record')).toContain('no DMARC record, so receivers still deliver it'));
+	it('quarantine and reject say what they ask receivers to do', () => {
+		expect(explain(src(), 'quarantine')).toContain('asks receivers to send it to spam');
+		expect(explain(src(), 'reject')).toContain('asks receivers to reject it');
+	});
+	it('an unknown policy promises nothing', () => {
+		const t = explain(src());
+		expect(t).not.toMatch(/will handle it|still deliver/);
+		expect(t).toContain('could not be read');
+	});
+});
+
 describe('explain', () => {
 	it('says unauthorized when both fail', () => {
 		expect(explain(src())).toContain('has no authorization to send as "example.com"');

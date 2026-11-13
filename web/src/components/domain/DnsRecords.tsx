@@ -2,7 +2,8 @@ import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckS
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
-import { buildRecommendedRecord } from '../../lib/dmarc';
+import { isRevokedDkimKey } from '../../lib/dkim';
+import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
 import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '../../lib/domain-queries';
 import type { Domain } from '../../lib/types';
 import { Section, WriteButton } from '../states';
@@ -35,6 +36,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 
 	const current = dns.data?.current_record ?? null;
 	const policy = current?.match(/\bp=([a-z]+)/)?.[1] ?? 'none';
+	const ruaReady = hasReportAddress(domain.rua_address);
 	const recommended = buildRecommendedRecord(current, policy, domain.rua_address);
 	const dmarcName = `_dmarc.${domain.domain}`;
 	const cfAvailable = !!(dns.data?.cf_managed || onboarding.data?.cf_available);
@@ -53,19 +55,23 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 		if (dns.isError || dns.data.error) {
 			return <CheckResult status="error" title="DMARC record" summary={dns.isError ? errorMessage(dns.error) : 'The DNS lookup did not complete.'} onRetry={() => void dns.refetch()} />;
 		}
-		const { found, has_rua } = dns.data;
+		const { found } = dns.data;
+		// Without a report address of our own, no record can send reports here, whatever the lookup matched.
+		const has_rua = dns.data.has_rua && ruaReady;
 		const status: CheckStatus = found && has_rua ? 'pass' : found ? 'warn' : 'missing';
-		const upToDate = found && has_rua && current === recommended;
+		const upToDate = !ruaReady || (found && has_rua && current === recommended);
 		return (
 			<CheckResult
 				status={status}
 				title="DMARC record"
 				summary={
-					!found
-						? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
-						: has_rua
-							? 'Published, and aggregate reports are sent to Inbox Angel.'
-							: `Published, but it does not send reports to ${domain.rua_address}. Update it with the record below.`
+					!ruaReady
+						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Inbox Angel report address yet, so there is no record to suggest.`
+						: !found
+							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
+							: has_rua
+								? 'Published, and aggregate reports are sent to Inbox Angel.'
+								: `Published, but it does not send reports to ${domain.rua_address}. Update it with the record below.`
 				}
 			>
 				<div className="space-y-3">
@@ -124,15 +130,28 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 				/>
 			);
 		}
+		// An empty p= is a revoked key: published, but nothing it signs can pass. Only usable keys count.
+		const revoked = selectors.filter((s) => isRevokedDkimKey(s.record)).length;
+		const usable = selectors.length - revoked;
+		const partial = dkimFailed ? ' Some selectors could not be checked.' : '';
+		const revokedNote = `${revoked} ${revoked === 1 ? 'selector has' : 'selectors have'} an empty key (p=), which means revoked.`;
 		return (
 			<CheckResult
-				status="pass"
+				status={usable > 0 ? 'pass' : 'fail'}
 				title="DKIM selectors"
-				summary={`${selectors.length} selector${selectors.length === 1 ? '' : 's'} found.${dkimFailed ? ' Some selectors could not be checked.' : ''}`}
+				summary={
+					usable > 0
+						? `${usable} usable key${usable === 1 ? '' : 's'} found.${revoked > 0 ? ` ${revokedNote}` : ''}${partial}`
+						: `No usable DKIM key. ${revokedNote}${partial}`
+				}
 			>
 				<div className="space-y-2">
 					{selectors.map((s) => (
-						<RecordBlock key={s.name} record={{ type: /v=DKIM1|p=/i.test(s.record) ? 'TXT' : 'CNAME', name: s.name, value: s.record }} />
+						<RecordBlock
+							key={s.name}
+							title={isRevokedDkimKey(s.record) ? 'Revoked: empty key' : undefined}
+							record={{ type: /v=DKIM1|p=/i.test(s.record) ? 'TXT' : 'CNAME', name: s.name, value: s.record }}
+						/>
 					))}
 				</div>
 			</CheckResult>

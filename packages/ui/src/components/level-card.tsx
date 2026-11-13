@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleSlash, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, CircleSlash, XCircle } from "lucide-react";
 import * as React from "react";
 import { cn } from "../lib/cn.js";
 import { Card, CardContent, CardHeader } from "./card.js";
@@ -11,7 +11,8 @@ export const LEVELS = [
 	{ level: 2, name: "Protected" },
 ] as const;
 
-export type FindingStatus = "pass" | "warn" | "fail" | "missing";
+/** `unknown`: nothing has been checked yet. Neutral, never shown as missing. */
+export type FindingStatus = "pass" | "warn" | "fail" | "missing" | "unknown";
 
 export interface Finding {
 	status: FindingStatus;
@@ -24,6 +25,7 @@ const findingMeta = {
 	warn: { Icon: AlertTriangle, tone: "text-warning", word: "Warning" },
 	fail: { Icon: XCircle, tone: "text-danger", word: "Fail" },
 	missing: { Icon: CircleSlash, tone: "text-danger", word: "Not found" },
+	unknown: { Icon: CircleHelp, tone: "text-ink-2", word: "Not checked yet" },
 } as const;
 
 export interface LevelCardProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {

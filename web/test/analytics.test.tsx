@@ -116,7 +116,7 @@ describe('SenderInventory', () => {
 
 describe('FixList', () => {
 	it('ranks, names the impact in words and offers copyable records plus the guide', async () => {
-		await renderReady(<FixList fixes={[fix(), fix({ id: 'x', kind: 'review-new-sender', severity: 'low', title: 'New sender: SendGrid', records: [], guide_url: null, affected_messages: 0 })]} showDomain />);
+		await renderReady(<FixList fixes={[fix(), fix({ id: 'x', kind: 'review-new-sender', severity: 'low', title: 'New sender: SendGrid', records: [], guide_url: null, affected_messages: 0 })]} messages={2000} showDomain />);
 		const items = screen.getAllByRole('listitem').filter((li) => li.querySelector('h3'));
 		expect(items).toHaveLength(2);
 		expect(within(items[0]!).getByRole('heading')).toHaveTextContent(/Mailchimp sends 12% of your mail and fails DMARC/);
@@ -127,9 +127,14 @@ describe('FixList', () => {
 		expect(within(items[0]!).getByRole('link', { name: /Mailchimp setup guide/ })).toHaveAttribute('href', 'https://mailchimp.com/help/');
 		expect(within(items[1]!).getByText('Low impact')).toBeInTheDocument();
 	});
-	it('says when there is nothing to fix', async () => {
-		await renderReady(<FixList fixes={[]} />);
+	it('says when there is nothing to fix, given reports to judge by', async () => {
+		await renderReady(<FixList fixes={[]} messages={1200} />);
 		expect(screen.getByText('Nothing to fix right now')).toBeInTheDocument();
+	});
+	it('with no reports at all, says so instead of "Nothing to fix"', async () => {
+		await renderReady(<FixList fixes={[]} messages={0} />);
+		expect(screen.getByText('No reports yet')).toBeInTheDocument();
+		expect(screen.queryByText('Nothing to fix right now')).not.toBeInTheDocument();
 	});
 });
 
