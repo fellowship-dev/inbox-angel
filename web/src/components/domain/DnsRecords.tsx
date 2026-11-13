@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { isRevokedDkimKey } from '../../lib/dkim';
+import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../lib/dkim-wildcard';
 import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
 import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '../../lib/domain-queries';
 import type { Domain } from '../../lib/types';
@@ -141,7 +142,8 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	const dkimRow = (() => {
 		if (onboarding.isPending) return <RowSkeleton label="DKIM" />;
 		if (onboarding.isError) return <CheckResult status="error" title="DKIM selectors" summary={errorMessage(onboarding.error)} onRetry={retryOnboarding} />;
-		const { selectors } = onboarding.data.dkim;
+		const { selectors, wildcard } = onboarding.data.dkim;
+		if (wildcard) return <CheckResult status="neutral" title="DKIM selectors" statusLabel={DKIM_WILDCARD_LABEL} summary={dkimWildcardSummary(domain.domain)} />;
 		const dkimFailed = errors.some((e) => e.startsWith('dkim'));
 		if (selectors.length === 0 && dkimFailed) return <CheckResult status="error" title="DKIM selectors" summary="The DNS lookups did not complete." onRetry={retryOnboarding} />;
 		if (selectors.length === 0) {

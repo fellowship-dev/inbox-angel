@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { checkDomain } from '../src/report';
 import { createResolver, DEFAULT_DOH_ENDPOINT, DOH_ENDPOINTS, type FetchLike } from '../src/doh';
+import { COMMON_DKIM_SELECTORS } from '../src/dkim';
 import { dohFetch, resp, type Zone } from './helpers';
 
 const POLICY = 'version: STSv1\nmode: enforce\nmx: aspmx.l.google.com\nmax_age: 604800\n';
@@ -158,5 +159,23 @@ describe('checkDomain – named resolver endpoints', () => {
     expect(urls).toContain(`${DOH_ENDPOINTS.google}?name=x.com&type=NS`);
     expect(r.dnsHost.id).toBe('cloudflare');
     expect(r.mx.status).toBe('found');
+  });
+});
+
+describe('checkDomain – a wildcard TXT under _domainkey (gov.uk answers every name with its DMARC record)', () => {
+  const dmarc = 'v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@x.com';
+  const wildcard = (record: string): Zone => ({
+    ...base,
+    'TXT _dmarc.x.com': [dmarc],
+    ...Object.fromEntries(COMMON_DKIM_SELECTORS.map(s => [`TXT ${s}._domainkey.x.com`, [record]])),
+  });
+
+  it('reports no keys, flags the wildcard, and does not call that a missing key', async () => {
+    const r = await run(wildcard(dmarc));
+    expect(r.dkim.found).toEqual([]);
+    expect(r.dkim.wildcard).toBe(true);
+    expect(r.grade.level).toBe(2);
+    expect(r.grade.reasons.join(' ')).not.toContain('No DKIM key found');
+    expect(r.grade.reasons).toContain("DKIM can't be checked: every name under the domain answers with the same TXT record");
   });
 });

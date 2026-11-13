@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { api, ApiError, onUnauthorized } from './api';
 import type { AuthStatus, Me, Role } from './types';
+import { clearSignupDomain, reconcileSignupDomain } from './signup-intent';
 import { workspaceStore } from './workspace';
 
 /** The workspace the dashboard is looking at (URL first, else the last one used). */
@@ -81,8 +82,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 	const signOut = useCallback(async () => {
 		await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
 		clearSession();
+		clearSignupDomain();
 		await qc.invalidateQueries({ queryKey: ['auth-status'] });
 	}, [clearSession, qc]);
+
+	const signedInEmail = meQ.data?.user?.email ?? null;
+	useEffect(() => {
+		if (signedInEmail) reconcileSignupDomain(signedInEmail);
+	}, [signedInEmail]);
 
 	useEffect(() => {
 		onUnauthorized(clearSession);

@@ -71,7 +71,7 @@ export interface ZFacts {
   mx: Facts['mx'];
   spf: { status: Facts['spf']['status']; raw: string | null; raws: string[]; verdict: Facts['spf']['verdict']; lookup_count: number; includes: string[]; issues: Facts['spf']['issues'] };
   dmarc: { status: Facts['dmarc']['status']; raw: string | null; raws: string[]; policy: string | null; pct: unknown; sp: string | null; rua: string[]; inherited: boolean; found_at: string | null; valid: boolean | null; issues: string[] };
-  dkim: { found_selectors: string[]; scanned: number };
+  dkim: { found_selectors: string[]; scanned: number; wildcard: boolean };
   mta_sts: Facts['mtaSts'];
   bimi: { status: Facts['bimi']['status']; raw: string | null; found_at: string | null; logo: Facts['bimi']['logo']; certificate: Facts['bimi']['certificate'] };
   unchecked: string[];
@@ -112,7 +112,7 @@ export function zFacts(f: Facts): ZFacts {
       status: f.dmarc.status, raw: f.dmarc.raw, raws: f.dmarc.raws, policy: f.dmarc.policy, pct: f.dmarc.pct, sp: f.dmarc.sp, rua: f.dmarc.rua,
       inherited: f.dmarc.inherited, found_at: f.dmarc.foundAt, valid: f.dmarc.valid, issues: f.dmarc.issues,
     },
-    dkim: { found_selectors: f.dkim.foundSelectors, scanned: f.dkim.scanned },
+    dkim: { found_selectors: f.dkim.foundSelectors, scanned: f.dkim.scanned, wildcard: f.dkim.wildcard },
     mta_sts: f.mtaSts,
     bimi: { status: f.bimi.status, raw: f.bimi.raw, found_at: f.bimi.foundAt, logo: f.bimi.logo, certificate: f.bimi.certificate },
     unchecked: f.unchecked,
