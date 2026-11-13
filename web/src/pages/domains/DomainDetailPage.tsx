@@ -207,7 +207,11 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 											? 'We could not check your DNS record just now. See DNS records below.'
 											: dns.data.found && dns.data.has_rua
 												? 'DNS record detected. Reports will start arriving soon.'
-												: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
+												: dns.data.found
+													? hasReportAddress(domain.rua_address)
+														? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records below.'
+														: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
+													: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
 									</p>
 								) : null}
 							</Alert>

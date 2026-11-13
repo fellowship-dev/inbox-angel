@@ -121,3 +121,38 @@ describe('item 10: read-only members do not get the Upgrade button', () => {
 		await waitFor(() => expect(screen.queryByRole('link', { name: /Upgrade to/ })).toBeNull());
 	});
 });
+
+describe('browser-check follow-ups', () => {
+	const detail = (dns: unknown, d = noRua) =>
+		renderApp(
+			<Routes>
+				<Route path="/domains/:id" element={<DomainDetailPage />} />
+			</Routes>,
+			{
+				route: '/domains/1',
+				routes: {
+					'GET /api/domains': { domains: [d] },
+					'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },
+					'GET /api/domains/1/sources': { sources: [] },
+					'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
+					'GET /api/domains/1/dns-check': dns,
+				},
+			},
+		);
+
+	it('a published record is never "not found yet" when there is no reports address', async () => {
+		detail({ found: true, has_rua: false, current_record: 'v=DMARC1; p=reject', cf_managed: false });
+		expect(await screen.findByText(/A DMARC record is published\. No reports address is configured for this domain/)).toBeInTheDocument();
+		expect(screen.queryByText(/DNS record not found yet/)).toBeNull();
+	});
+
+	it('a published record without our rua says so when an address exists', async () => {
+		detail({ found: true, has_rua: false, current_record: 'v=DMARC1; p=reject', cf_managed: false }, domain);
+		expect(await screen.findByText(/published, but it does not send reports to your reports address yet/)).toBeInTheDocument();
+	});
+
+	it('a genuinely absent record is still "not found yet"', async () => {
+		detail({ found: false, has_rua: false, current_record: null, cf_managed: false });
+		expect(await screen.findByText(/DNS record not found yet/)).toBeInTheDocument();
+	});
+});

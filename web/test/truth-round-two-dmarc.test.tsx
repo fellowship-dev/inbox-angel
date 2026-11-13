@@ -94,3 +94,22 @@ describe('item 5: pages', () => {
 		expect(await screen.findByText(/news\.example\.com is a subdomain, so sp=quarantine applies to it instead of p=reject/)).toBeInTheDocument();
 	});
 });
+
+describe('browser-check follow-up: p=reject with a weaker sp=', () => {
+	it('the wizard says subdomains follow sp=none, and stays silent when there is no sp=', async () => {
+		const wiz = (record: string) =>
+			renderApp(
+				<Routes>
+					<Route path="/domains/:id/dmarc-wizard" element={<DmarcWizardPage />} />
+				</Routes>,
+				{ route: '/domains/3/dmarc-wizard', routes: { 'GET /api/domains': { domains: [{ id: 3, domain: 'example.com', dmarc_policy: 'reject', rua_address: 'r@x.test', parent_id: null, created_at: 1, alerts_enabled: 1, is_default: 1 }] }, 'GET /api/domains/3/dns-check': { found: true, has_rua: true, current_record: record, cf_managed: false } } },
+			);
+		const a = wiz('v=DMARC1; p=reject; sp=none');
+		expect(await screen.findByText(/Subdomains follow/)).toBeInTheDocument();
+		expect(screen.getByText('sp=none')).toBeInTheDocument();
+		a.unmount();
+		wiz('v=DMARC1; p=reject');
+		expect(await screen.findByRole('heading', { name: 'Fully enforced' })).toBeInTheDocument();
+		expect(screen.queryByText(/Subdomains follow/)).toBeNull();
+	});
+});

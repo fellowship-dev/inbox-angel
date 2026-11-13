@@ -11,7 +11,7 @@ import { useRouteDomainId } from '../../components/wizard/useRouteDomainId';
 import { WizardHeader } from '../../components/wizard/WizardHeader';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
-import { buildRecommendedRecord, enforcementLevel, parseDmarcPolicy } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, enforcementLevel, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
 
 type Policy = 'none' | 'quarantine' | 'reject';
@@ -105,6 +105,8 @@ export function DmarcWizardPage() {
 		// p=reject with pct below 100 applies to that share of mail only: that is not full enforcement.
 		const partial = enforced ? enforcementLevel(currentRecord) : null;
 		const partialPct = partial?.level === 'partial' ? partial.pct : null;
+		const sp = enforced ? parseDmarcSp(currentRecord) : null;
+		const spWeaker = sp === 'none' || sp === 'quarantine' ? sp : null;
 
 		body = (
 			<>
@@ -134,6 +136,11 @@ export function DmarcWizardPage() {
 									DMARC is set to <strong className="text-ink-1">reject</strong>. Spoofed mail claiming to be from <strong className="text-ink-1">{domain.domain}</strong> is rejected
 									outright by receiving servers.
 								</p>
+								{spWeaker ? (
+									<Alert variant="warning">
+										Subdomains follow <strong>sp={spWeaker}</strong>, not p=reject, so mail from a subdomain without its own record is not rejected. Set sp=reject to enforce it there too.
+									</Alert>
+								) : null}
 								<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
 							</>
 						)}

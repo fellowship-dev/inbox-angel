@@ -45,14 +45,12 @@ function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string | null 
 		row = <CheckResult status="pass" title={title} statusLabel="Detected" summary="DNS record detected! Reports will start arriving within 24 hours." />;
 	} else if (q.data.found) {
 		row = (
-			<CheckResult status="warn" title={title} statusLabel="Missing rua" summary={hasReportAddress(rua) ? 'TXT record found, but the rua= address is missing. Double-check you copied the full value above.' : 'TXT record found. No reports address is configured for this domain, so there is no rua= to look for.'}>
+			<CheckResult status="warn" title={title} statusLabel={hasReportAddress(rua) ? 'Missing rua' : 'No reports address'} summary={hasReportAddress(rua) ? 'TXT record found, but the rua= address is missing. Double-check you copied the full value above.' : 'TXT record found. No reports address is configured for this domain, so there is no rua= to look for.'}>
 				{hasReportAddress(rua) ? (
 					<>
 						Expected: <code className="font-mono">rua=mailto:{rua.trim()}</code>
 					</>
-				) : (
-					'No reports address is configured for this domain, so there is no rua= value to expect.'
-				)}
+				) : null}
 			</CheckResult>
 		);
 	} else {
