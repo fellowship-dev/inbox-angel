@@ -37,9 +37,9 @@ body {
 }
 
 /* Motion. Keyframes + utilities (usable with variants: data-[state=closed]:ia-fade-out). */
-@keyframes ia-shimmer {
-  from { background-position: -200% 0; }
-  to   { background-position:  200% 0; }
+@keyframes ia-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
 }
 @keyframes ia-fade-in {
   from { opacity: 0; }
@@ -66,10 +66,10 @@ body {
   to   { opacity: 1; transform: scale(1); }
 }
 
-@utility ia-shimmer {
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
-  background-size: 200% 100%;
-  animation: ia-shimmer 1.5s infinite;
+/* Skeletons are one solid token that pulses in opacity; no moving sheen. */
+@utility ia-pulse {
+  background-color: var(--surface-3);
+  animation: ia-pulse 1.5s ease-in-out infinite;
 }
 @utility ia-fade-in    { animation: ia-fade-in 150ms ease both; }
 @utility ia-fade-out   { animation: ia-fade-out 120ms ease both; }
@@ -86,5 +86,5 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  .ia-shimmer { animation: none !important; background: var(--surface-2); }
+  .ia-pulse { animation: none !important; opacity: 1; }
 }

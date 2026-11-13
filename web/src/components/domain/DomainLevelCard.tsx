@@ -6,6 +6,7 @@ import { formatNumber } from '../../lib/format';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
 import { assessDomain, assessHostedDomain } from '../../lib/levels';
+import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
 function DomainLink({ domain }: { domain: Domain }) {
@@ -22,6 +23,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 	const stats = useStats(domain.id, 7);
 	const wizard = useWizardState(domain.id);
 	const hosted = useHostedInfo(domain.id); // null unless hosted is on for the deployment and this domain
+	const { canWrite } = useSession(); // read-only members cannot run the setup wizard, so they are not invited to
 
 	if (summary.isPending) {
 		return (
@@ -77,7 +79,7 @@ export function DomainLevelCard({ domain }: { domain: Domain }) {
 				<div className="flex flex-wrap items-center gap-2">
 					{summary.data.dmarc_policy ? <Badge variant="outline">p={summary.data.dmarc_policy}</Badge> : null}
 					{/* Protected domains are done: nudging them to finish a wizard would contradict the level above. */}
-					{progress && progress.done < progress.total && a.level < 2 ? (
+					{canWrite && progress && progress.done < progress.total && a.level < 2 ? (
 						<Link to={`/domains/${domain.id}/setup/${progress.nextStep}`} className="text-brand-ink underline underline-offset-4">
 							Continue setup ({progress.done}/{progress.total})
 						</Link>

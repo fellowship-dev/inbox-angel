@@ -194,9 +194,9 @@ A restrained palette: cool neutrals, one brand fill that swaps between navy and 
 **The No-Colour-Alone Rule.** Every status pairs colour with an icon and a word.
 **The No-Gradients Rule.** No gradients, anywhere, on the dashboard or the website (Max, 2026-11-13): no gradient fills, text, dividers, borders, loading shimmers or scroll shadows. Every colour is a solid token. This is a hard rule, not a preference; existing gradients in code are known debt to remove, not precedent.
 
+The dashboard has none: skeletons are a solid `surface-3` opacity pulse (`ia-pulse`), and an overflowing table marks the edge that hides columns with a `control-border` hairline plus a "Scroll sideways" label. `packages/ui/test/tokens.test.ts` fails if a gradient appears in `packages/ui/src` or `web/src`.
+
 Known gradient debt (to remove):
-- `packages/ui/src/styles/base.css` `ia-shimmer` (lines 69-72): skeleton loading gradient, used by `packages/ui/src/components/skeleton.tsx`.
-- `web/src/components/analytics/SenderInventory.tsx` `SCROLL_SHADOWS` (line 9): table edge scroll shadows built from four `linear-gradient` layers.
 - Website (same rule): `frontend/app/globals.css` `.shimmer` and `.section-rule` in fellowship-dev/inbox-angel-website; the reference snapshot `docs/design/site-globals.css` (lines 354 and 412) copies both and is not shipped.
 
 ## Typography
@@ -267,7 +267,7 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - Raised-surface block with 14px radius; each field (Type, Name, Value, optional TTL) is a label/value row in Geist Mono with a copy icon button on Name and Value. Copy feedback is a check icon plus a polite live-region announcement ("Copied to clipboard") and resets after 2 seconds.
 
 ### Motion
-- `ia-fade-in` 150ms, `ia-pop` 120ms, `ia-scale-in` 200ms and `ia-slide-up` 200ms (`cubic-bezier(0.16, 1, 0.3, 1)`), `ia-slide-left` 220ms. `ia-shimmer` 1.5s for skeletons is a gradient and therefore known debt to remove (see The No-Gradients Rule). `prefers-reduced-motion` reduces all animation and transitions to 0.01ms.
+- `ia-fade-in` 150ms, `ia-pop` 120ms, `ia-scale-in` 200ms and `ia-slide-up` 200ms (`cubic-bezier(0.16, 1, 0.3, 1)`), `ia-slide-left` 220ms. `ia-pulse` 1.5s for skeletons: a solid `surface-3` fill pulsing between full and half opacity, held still under reduced motion. `prefers-reduced-motion` reduces all animation and transitions to 0.01ms.
 
 ## Do's and Don'ts
 

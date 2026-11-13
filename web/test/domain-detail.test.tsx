@@ -99,6 +99,18 @@ describe('DomainDetailPage', () => {
 		expect(screen.getAllByText(current).length).toBeGreaterThan(0);
 	});
 
+	it('invites only writers to continue an unfinished setup', async () => {
+		const unfinished = { 'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'not_started', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' } };
+		const owner = page({ routes: routes(unfinished) });
+		expect(await screen.findByRole('link', { name: 'Continue setup' })).toBeInTheDocument();
+		owner.unmount();
+		page({ role: 'member', routes: routes(unfinished) });
+		expect(await screen.findByRole('heading', { level: 1, name: 'example.com' })).toBeInTheDocument();
+		await screen.findByTestId('read-only-notice');
+		expect(screen.queryByText(/Setup incomplete/)).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: 'Continue setup' })).not.toBeInTheDocument();
+	});
+
 	it('shows "Lookup failed", never "Not found", when DNS lookups fail', async () => {
 		page({
 			routes: routes({

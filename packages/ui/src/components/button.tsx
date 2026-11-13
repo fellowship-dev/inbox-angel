@@ -21,7 +21,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 		const classes = cn(buttonVariants({ variant, size }), className);
 		if (asChild) {
 			return (
-				<Slot ref={ref} className={classes} {...props}>
+				<Slot ref={ref} data-slot="button" className={classes} {...props}>
 					{children}
 				</Slot>
 			);
@@ -30,6 +30,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 			<button
 				ref={ref}
 				type="button"
+				data-slot="button"
 				className={classes}
 				disabled={disabled}
 				aria-disabled={loading || undefined}

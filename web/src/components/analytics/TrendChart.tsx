@@ -2,11 +2,17 @@ import { EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableR
 import { useId, useState } from 'react';
 import { bucketTrend, fmtPct, type TrendDay } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
+import { useElementWidth } from '../../lib/layout';
 import { Segmented } from '../reports';
 
-const W = 720;
+/** Fallback width before the chart is measured; afterwards the SVG is drawn at its rendered width, 1 unit = 1 CSS px. */
+const W_FALLBACK = 720;
 const H = 200;
-const PAD = { top: 8, right: 8, bottom: 22, left: 44 };
+const PAD = { top: 8, right: 8, bottom: 24, left: 48 };
+/** Tick labels are 12px at every width: the SVG is never scaled, so this is the rendered size. */
+const TICK_PX = 12;
+/** Horizontal room per day label ("MM/DD" at 12px plus a gap). */
+const LABEL_SLOT_PX = 52;
 
 const niceMax = (n: number): number => {
 	if (n <= 0) return 10;
@@ -21,6 +27,8 @@ const niceMax = (n: number): number => {
 export function TrendChart({ trend, days }: { trend: TrendDay[]; days: number }) {
 	const [view, setView] = useState<'chart' | 'table'>('chart');
 	const hatch = useId();
+	const [frameRef, measured] = useElementWidth<HTMLElement>();
+	const W = measured > 0 ? measured : W_FALLBACK;
 	const points = bucketTrend(trend, days > 30 ? 'week' : 'day');
 	const has = points.some((p) => p.total > 0);
 	const unit = days > 30 ? 'week' : 'day';
@@ -36,7 +44,7 @@ export function TrendChart({ trend, days }: { trend: TrendDay[]; days: number })
 	const bar = Math.max(2, Math.min(24, slot - 2));
 	const y = (v: number) => PAD.top + innerH - (v / max) * innerH;
 	const ticks = [0, max / 2, max];
-	const every = Math.ceil(points.length / 8);
+	const every = Math.ceil(points.length / Math.max(2, Math.min(8, Math.floor(innerW / LABEL_SLOT_PX))));
 	const summary = `Stacked columns of messages per ${unit}, passed and failed, last ${days} days. Switch to the table for exact numbers.`;
 
 	return (
@@ -58,8 +66,8 @@ export function TrendChart({ trend, days }: { trend: TrendDay[]; days: number })
 			</div>
 
 			{view === 'chart' ? (
-				<figure className="m-0">
-					<svg role="img" aria-label={summary} viewBox={`0 0 ${W} ${H}`} className="h-auto w-full max-w-full text-ink-2">
+				<figure ref={frameRef} className="m-0">
+					<svg role="img" aria-label={summary} width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block max-w-full text-ink-2">
 						<defs>
 							<pattern id={hatch} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
 								<rect width="6" height="6" className="fill-danger" />
@@ -69,7 +77,7 @@ export function TrendChart({ trend, days }: { trend: TrendDay[]; days: number })
 						{ticks.map((t) => (
 							<g key={t}>
 								<line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} className="stroke-line" strokeWidth="1" />
-								<text x={PAD.left - 6} y={y(t) + 4} textAnchor="end" className="fill-current text-[10px]">{formatNumber(Math.round(t))}</text>
+								<text x={PAD.left - 6} y={y(t) + 4} textAnchor="end" fontSize={TICK_PX} className="fill-current">{formatNumber(Math.round(t))}</text>
 							</g>
 						))}
 						{points.map((p, i) => {
@@ -81,7 +89,7 @@ export function TrendChart({ trend, days }: { trend: TrendDay[]; days: number })
 									<title>{`${p.day}: ${formatNumber(p.total)} messages, ${formatNumber(p.passed)} passed, ${formatNumber(p.failed)} failed`}</title>
 									{p.passed > 0 ? <rect x={x} y={y(0) - hp} width={bar} height={hp} className="fill-success" /> : null}
 									{p.failed > 0 ? <rect x={x} y={y(0) - hp - hf} width={bar} height={hf} fill={`url(#${hatch})`} /> : null}
-									{i % every === 0 ? <text x={x + bar / 2} y={H - 6} textAnchor="middle" className="fill-current text-[10px]">{p.day.slice(5).replace('-', '/')}</text> : null}
+									{i % every === 0 ? <text x={x + bar / 2} y={H - 6} textAnchor="middle" fontSize={TICK_PX} className="fill-current">{p.day.slice(5).replace('-', '/')}</text> : null}
 								</g>
 							);
 						})}
