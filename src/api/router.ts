@@ -738,7 +738,10 @@ async function _handleApi(
       if (!claim) return err('claim not found', 404);
       // Already added (a second tab, a double click, two requests at once): say so, whatever the cap and whatever DNS says now.
       const added = await resumeExistingDomain(tenant, claim.domain);
-      if (added) return json(added, 200);
+      if (added) {
+        await tenant.scope.claims.delete(claim.id); // a claim for a domain the workspace has is a leftover
+        return json(added, 200);
+      }
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);

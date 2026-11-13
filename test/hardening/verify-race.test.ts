@@ -72,6 +72,7 @@ describe('two simultaneous verifies of the same claim at cap minus one', () => {
     expect(res.status).toBe(200);
     expect((await json(res)).resumed).toBe(true);
     expect(w.liveRows()).toHaveLength(1);
+    expect(w.rows("SELECT id FROM domain_claims WHERE domain = 'acme.org'")).toEqual([]); // the leftover claim is gone
   });
 
   it('once the first verify has settled the claim, a late second verify is 404 claim not found: the id maps to no domain any more', async () => {
