@@ -117,7 +117,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
@@ -985,18 +985,29 @@ async function _handleApi(
                 cf.listDnsRecords(zone.id, { type: 'TXT', per_page: 100 }),
                 cf.listDnsRecords(zone.id, { type: 'CNAME', per_page: 100 }),
               ]);
-              const found = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
-              return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const };
+              // A TXT record under _domainkey counts only if it is DKIM-shaped; a CNAME is a named selector as it stands. A zone wildcard
+              // (`*._domainkey`) answers every selector alike, so it names none.
+              const here = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
+              const wild = here.find(r => r.name.startsWith('*.') && r.type === 'TXT' && isDkimRecord(decodeTxtData(r.content)));
+              if (wild) return { selectors: [] as { name: string; record: string }[], source: 'cf' as const, wildcard: true, wildcard_record: decodeTxtData(wild.content) };
+              const found = here.filter(r => !r.name.startsWith('*.') && (r.type !== 'TXT' || isDkimRecord(decodeTxtData(r.content))));
+              return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const, wildcard: false };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
           // DoH fallback
-          const hits = await Promise.all(DKIM_SELECTORS.map(async sel => {
+          const answers = await Promise.all(DKIM_SELECTORS.map(async sel => {
             const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
             if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
-            if (t.records.length > 0) return { name: `${sel}._domainkey.${domain.domain}`, record: t.records[0] };
-            return null;
+            return { name: `${sel}._domainkey.${domain.domain}`, records: t.records };
           }));
-          return { selectors: hits.filter(Boolean) as { name: string; record: string }[], source: 'doh' as const };
+          // Every name answering with one identical record is a wildcard: it says nothing about which selectors exist.
+          const wildcardRecord = sharedWildcardRecord(answers.filter(a => a !== null).map(a => a!.records));
+          if (wildcardRecord !== null) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: wildcardRecord };
+          const hits = answers.flatMap(a => {
+            const record = a?.records.find(isDkimRecord);
+            return a && record ? [{ name: a.name, record }] : [];
+          });
+          return { selectors: hits, source: 'doh' as const, wildcard: false };
         })(),
 
         // Null-sender protection: check SPF + DMARC on reports subdomain

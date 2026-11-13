@@ -2,6 +2,7 @@ import { Alert, Button, CheckResult, CheckResultList, LevelCard, Skeleton } from
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api, ApiError } from '../../lib/api';
+import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../lib/dkim-wildcard';
 import { previewAssessment, type ClaimPreviewData } from '../../lib/claim-preview';
 
 const RATE_LIMITED = 'Checked too often. Try again in a minute.';
@@ -17,7 +18,8 @@ function ago(iso: string, now = Date.now()): string {
 	return `${Math.floor(s / 86400)} d ago`;
 }
 
-function DkimRow({ dkim, retry }: { dkim: ClaimPreviewData['dkim']; retry: () => void }) {
+function DkimRow({ dkim, domain, retry }: { dkim: ClaimPreviewData['dkim']; domain: string; retry: () => void }) {
+	if (dkim.status === 'wildcard') return <CheckResult status="neutral" title="DKIM" statusLabel={DKIM_WILDCARD_LABEL} summary={dkimWildcardSummary(domain)} />;
 	if (dkim.status === 'found') {
 		return (
 			<CheckResult status="pass" title="DKIM" statusLabel="Key found" summary={<>Found at {dkim.selectors.map((s, i) => <span key={s}>{i > 0 ? ', ' : ''}<Mono>{s}</Mono></span>)}.</>} />
@@ -72,7 +74,7 @@ function Result({ data, retry }: { data: ClaimPreviewData; retry: () => void }) 
 				{spf.over_limit ? (
 					<CheckResult status="warn" title="SPF" statusLabel="Over 10 lookups" summary={`Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs ${spf.lookup_count}.`} />
 				) : null}
-				<DkimRow dkim={data.dkim} retry={retry} />
+				<DkimRow dkim={data.dkim} domain={domain} retry={retry} />
 			</CheckResultList>
 		</div>
 	);
