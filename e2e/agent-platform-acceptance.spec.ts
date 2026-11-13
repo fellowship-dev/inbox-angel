@@ -62,7 +62,7 @@ test('operator enrollment, finite product access, revocation and responsive repo
   await expect.poll(async () => (await machine.get('/api/resources')).status()).toBe(401);
   await machine.dispose();
   await page.goto(`/#/domains/${id}`);
-  await expect(page.getByRole('heading', { name: 'Email health report', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /^Email health report/ }).click();
   await expect(page.getByText('Inbox placement', { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/inbox-agent-report-mobile.png', fullPage: true });

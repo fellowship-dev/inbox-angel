@@ -1,6 +1,6 @@
 import { Button, EmptyState, IconButton, PageHeader, cn, toast } from '@inbox-angel/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, Copy, Mail, MailQuestion } from 'lucide-react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackLink, OverallBadge, ProtocolChip, ProtocolResults } from '../../components/reports';
 import { ListSkeleton, LoadError, Section } from '../../components/states';
@@ -118,7 +118,7 @@ function History({ expandedId, setExpandedId }: { expandedId: number | null; set
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load recent checks" />
 			) : q.data.length === 0 ? (
-				<EmptyState icon={<Mail />} title="No checks yet" description="Run your first check above. Each result is kept here so you can compare after fixing something." />
+				<EmptyState title="No checks yet" description="Run your first check above. Each result is kept here so you can compare after fixing something." />
 			) : (
 				<>
 					<div className="hidden grid-cols-[minmax(0,12rem)_auto_minmax(0,1fr)_auto_auto] gap-x-4 px-4 text-xs font-semibold uppercase tracking-wide text-ink-2 md:grid" aria-hidden>
@@ -207,7 +207,6 @@ export function EmailCheckPage() {
 				{phase.kind === 'timeout' ? (
 					<div className="max-w-xl space-y-4">
 						<EmptyState
-							icon={<MailQuestion />}
 							title="No email received yet"
 							description={
 								<>

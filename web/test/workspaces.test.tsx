@@ -178,9 +178,9 @@ describe('workspace switcher', () => {
 		await user.click(screen.getByRole('button', { name: 'Create workspace' }));
 		await waitFor(() => expect(window.location.hash).toBe('#/w/ws_new/'));
 		expect(api.calls.find((c) => c.method === 'POST' && c.path === '/api/workspaces')?.body).toEqual({ name: 'Acme' });
-		expect(await screen.findByText('No domains yet')).toBeInTheDocument();
-		expect(screen.getByRole('link', { name: 'Add your first domain' })).toHaveAttribute('href', '#/w/ws_new/setup');
-		expect(screen.getByRole('link', { name: 'Connect Cloudflare' })).toBeInTheDocument();
+		expect(await screen.findByText('Nothing to check yet: this workspace has no domains.')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'Add a domain' })).toHaveAttribute('href', '#/w/ws_new/setup');
+		expect(screen.queryByRole('link', { name: 'Connect Cloudflare' })).not.toBeInTheDocument();
 		expect(window.location.hash).toBe('#/w/ws_new/'); // not bounced to the wizard
 	});
 

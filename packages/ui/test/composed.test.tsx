@@ -49,10 +49,15 @@ describe("Table / EmptyState / Skeleton", () => {
 		expect(container.querySelector("td")).toHaveAttribute("colspan", "2");
 		await expectNoViolations(container);
 	});
-	it("EmptyState has title, description and action", () => {
-		render(<EmptyState icon={<Inbox />} title="Nothing here" description="Try later" action={<Button>Do it</Button>} />);
-		expect(screen.getByText("Nothing here")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Do it" })).toBeInTheDocument();
+	it("EmptyState says why and what next, with one action and no icon-in-a-circle or dashed frame", async () => {
+		const { container } = render(<EmptyState title="No reports for example.test yet" description="Publish a DMARC record that names the reports address." action={<Button>Open the DMARC step</Button>} />);
+		expect(screen.getByText("No reports for example.test yet")).toBeInTheDocument();
+		expect(screen.getByText(/Publish a DMARC record/)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Open the DMARC step" })).toBeInTheDocument();
+		const root = container.firstChild as HTMLElement;
+		expect(root.querySelector("svg")).toBeNull();
+		expect(root.className).not.toMatch(/border-dashed|rounded-full/);
+		await expectNoViolations(container);
 	});
 	it("Skeleton is hidden from assistive tech", () => {
 		const { container } = render(<Skeleton data-testid="s" className="h-4 w-20" />);

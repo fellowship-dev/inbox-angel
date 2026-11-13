@@ -107,12 +107,19 @@ describe('item 10: read-only members do not get the Upgrade button', () => {
 					'GET /api/domains/1/sources': { sources: [] },
 					'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
 					'GET /api/domains/1/dns-check': { found: true, has_rua: true, current_record: 'v=DMARC1; p=none', cf_managed: false },
+					'GET /api/domains/1/onboarding-status': {
+						domain_id: 1, domain: 'example.com', rua_address: '', cf_available: false, dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' },
+						spf: { record: 'v=spf1 -all', lookup_count: 1, flattening_active: false }, dkim: { selectors: [{ name: 'k._domainkey.example.com', record: 'v=DKIM1; p=AAA' }], source: 'doh' },
+						routing: { mx_found: true, destination_verified: true, reports_domain: null, admin_email: null },
+					},
 				},
 			},
 		);
 
-	it('owner sees it', async () => {
+	it('owner sees it, and the same step leads the page as an approval', async () => {
 		detail('owner');
+		expect(await screen.findByRole('link', { name: 'Review the change' })).toHaveAttribute('href', '/domains/1/dmarc-wizard');
+		await userEvent.click(screen.getByRole('button', { name: /^Reports/ }));
 		expect(await screen.findByRole('link', { name: 'Upgrade to quarantine' })).toBeInTheDocument();
 	});
 

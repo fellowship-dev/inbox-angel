@@ -129,12 +129,15 @@ describe('FixList', () => {
 	});
 	it('says when there is nothing to fix, given reports to judge by', async () => {
 		await renderReady(<FixList fixes={[]} messages={1200} />);
-		expect(screen.getByText('Nothing to fix right now')).toBeInTheDocument();
+		expect(screen.getByText('No sender fails often enough to rank')).toBeInTheDocument();
+		// The claim names its evidence: the messages it was judged from.
+		expect(screen.getByText(/Every sender in the 1,200 reported messages for this period passes DMARC/)).toBeInTheDocument();
 	});
 	it('with no reports at all, says so instead of "Nothing to fix"', async () => {
 		await renderReady(<FixList fixes={[]} messages={0} />);
-		expect(screen.getByText('No reports yet')).toBeInTheDocument();
-		expect(screen.queryByText('Nothing to fix right now')).not.toBeInTheDocument();
+		expect(screen.getByText('No reports for this period')).toBeInTheDocument();
+		expect(screen.getByText(/Check that your DMARC record sends reports here/)).toBeInTheDocument();
+		expect(screen.queryByText(/passes DMARC/)).not.toBeInTheDocument();
 	});
 });
 

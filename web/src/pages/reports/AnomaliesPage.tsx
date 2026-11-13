@@ -1,6 +1,6 @@
-import { EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Button, EmptyState, PageHeader } from '@inbox-angel/ui';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router';
 import { useState } from 'react';
 import { BackLink, SourceTable, WindowPills, useRouteDomainId } from '../../components/reports';
 import { ListSkeleton, LoadError, Section } from '../../components/states';
@@ -36,7 +36,15 @@ export function AnomaliesPage() {
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load anomalies" />
 			) : active.length + older.length === 0 ? (
-				<EmptyState icon={<CheckCircle2 />} title={`No anomalies in the last ${days} days`} description="All sending sources are passing DMARC. Nothing to fix." />
+				<EmptyState
+					title={`No failing sources in the last ${days} days`}
+					description="No source in the reports received for this window failed SPF or DKIM. If no reports arrived, there is nothing to judge yet, so check what was received."
+					action={
+						<Button asChild variant="secondary">
+							<Link to={`/domains/${id}/reports`}>See received reports</Link>
+						</Button>
+					}
+				/>
 			) : (
 				<>
 					{active.length > 0 ? (

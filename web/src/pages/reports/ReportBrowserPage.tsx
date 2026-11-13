@@ -1,6 +1,5 @@
 import { EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@inbox-angel/ui';
 import { useQuery } from '@tanstack/react-query';
-import { FileText } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { BackLink, ReporterAuthBadge, Segmented, useRouteDomainId } from '../../components/reports';
@@ -61,7 +60,6 @@ export function ReportBrowserPage() {
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load reports" />
 			) : visible.length === 0 ? (
 				<EmptyState
-					icon={<FileText />}
 					title={filterName ? `No reports for ${filterName} yet` : 'No reports yet'}
 					description="DMARC reports arrive daily from mail providers. Make sure your DMARC record's rua= address points to Inbox Angel, then check back tomorrow."
 				/>

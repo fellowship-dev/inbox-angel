@@ -1,6 +1,5 @@
 import { Alert, Badge, EmptyState, PageHeader } from '@inbox-angel/ui';
 import { useQuery } from '@tanstack/react-query';
-import { MailPlus } from 'lucide-react';
 import { ListSkeleton, LoadError } from '../../components/states';
 import { api, ApiError } from '../../lib/api';
 import { formatTimestamp } from '../../lib/reports';
@@ -66,7 +65,7 @@ function LeadsTable({ data }: { data: LeadsResponse }) {
 			) : null}
 
 			{data.leads.length === 0 ? (
-				<EmptyState icon={<MailPlus />} title="No leads yet" description="Someone who sends a free check, and is not suppressed, appears here with their place in the sequence." />
+				<EmptyState title="No leads yet" description="Someone who sends a free check, and is not suppressed, appears here with their place in the sequence." />
 			) : (
 				<div className="overflow-x-auto rounded-lg border border-line bg-surface-1">
 					<table className="w-full text-left text-sm">

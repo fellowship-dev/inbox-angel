@@ -1,17 +1,24 @@
-import { Button, EmptyState, PageHeader, Stat, StatGroup, toast } from '@inbox-angel/ui';
+import { Button, EmptyState, PageHeader, statusRank, toast } from '@inbox-angel/ui';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { Download, Globe, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { Download, Plus } from 'lucide-react';
+import { useId, useState } from 'react';
 import { Link } from 'react-router';
 import { ClaimCard } from '../../components/domain/ClaimCard';
-import { DomainLevelCard } from '../../components/domain/DomainLevelCard';
+import { DomainRow } from '../../components/domain/DomainRow';
+import { GetStarted } from '../../components/GetStarted';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
-import { errorMessage } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
 import { sumStats } from '../../lib/dmarc';
 import { domainKeys, fetchStats, fetchSummary } from '../../lib/domain-queries';
+import { getStartedSteps } from '../../lib/get-started';
+import { hostedKey, useHostedConfig, type HostedResponse } from '../../lib/hosted';
 import { useDomainClaims, useDomains } from '../../lib/queries';
 import { useSession } from '../../lib/session';
 import type { DailyStat, Domain } from '../../lib/types';
+import { domainVerdict, unavailableVerdict, workspaceAnswer, type DomainVerdict, type ReportTotals } from '../../lib/verdict';
+
+/** Days of reports each row's evidence covers. */
+const WINDOW = 30;
 
 /** Parents first, each followed by its children. A child whose parent is not monitored stands alone. */
 export function buildTree(domains: Domain[]): Array<{ root: Domain; children: Domain[] }> {
@@ -38,27 +45,61 @@ function AddDomainButton() {
 	);
 }
 
-const CONNECT_CLOUDFLARE_DOCS = 'https://github.com/fellowship-dev/inbox-angel/blob/main/docs/cloudflare-oauth.md';
-
 export function OverviewPage() {
 	const qc = useQueryClient();
-	const { canWrite } = useSession();
+	const { canWrite, status } = useSession();
 	const list = useDomains();
 	const domains = list.data ?? [];
 	const claims = useDomainClaims().data ?? [];
 	const [exporting, setExporting] = useState(false);
+	const listId = useId();
 
-	// Same keys as the cards use, so each request is made once.
-	const stats = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.stats(d.id, 7), queryFn: () => fetchStats(d.id, 7) })) });
-	// Where each domain stands is the level on its card. A second count here ("Protected", "Needs action") used another
-	// model and contradicted the cards, so the summary only states facts both agree on.
-	const all = sumStats(stats.flatMap((q) => (q.data ? q.data.stats : [])));
+	// One stored-DNS summary and one report total per domain; the domain page reuses both from the cache.
+	const summaries = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.summary(d.id), queryFn: () => fetchSummary(d.id) })) });
+	const stats = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.stats(d.id, WINDOW), queryFn: () => fetchStats(d.id, WINDOW) })) });
+	const hostedOn = useHostedConfig();
+	const hosted = useQueries({ queries: domains.map((d) => ({ queryKey: hostedKey(d.id), queryFn: () => api<HostedResponse>(`/api/domains/${d.id}/hosted`), enabled: hostedOn })) });
+
+	const totals: Array<ReportTotals | null | undefined> = stats.map((q) => {
+		if (q.isPending) return undefined;
+		if (q.isError) return null;
+		const s = sumStats(q.data.stats);
+		return { total: s.total, passed: s.passed, failed: s.failed, passRate: s.passRate, days: WINDOW };
+	});
+	const verdicts: Array<DomainVerdict | null> = domains.map((d, i) => {
+		const sq = summaries[i]!;
+		if (sq.isError) return unavailableVerdict(errorMessage(sq.error));
+		const h = hosted[i]!;
+		if (sq.isPending || stats[i]!.isPending || (hostedOn && h.isPending)) return null;
+		const info = hostedOn && h.data?.enabled ? h.data : null;
+		return domainVerdict(d, sq.data, totals[i], info);
+	});
+	const byId = new Map(domains.map((d, i) => [d.id, { domain: d, verdict: verdicts[i] ?? null, retry: summaries[i]!.isError ? () => void summaries[i]!.refetch() : undefined }]));
+
+	// Most urgent first, a subdomain right under its parent. Until every row is known the order stays as listed,
+	// so rows do not jump while they load.
+	const settled = verdicts.every(Boolean);
+	const rank = (d: Domain) => statusRank(byId.get(d.id)?.verdict?.status ?? 'unknown');
+	const cmp = (a: Domain, b: Domain) => rank(a) - rank(b) || a.domain.localeCompare(b.domain);
+	const groups = buildTree(domains).map((g) => ({ ...g, children: settled ? [...g.children].sort(cmp) : g.children }));
+	if (settled) groups.sort((a, b) => Math.min(rank(a.root), ...a.children.map(rank)) - Math.min(rank(b.root), ...b.children.map(rank)) || a.root.domain.localeCompare(b.root.domain));
+	const ordered = groups.flatMap((g) => [{ d: g.root, parent: undefined as string | undefined }, ...g.children.map((c) => ({ d: c, parent: g.root.domain }))]);
+
+	const answer = workspaceAnswer(domains.map((d, i) => ({ name: d.domain, verdict: verdicts[i] ?? null })), claims.length);
+	const steps = getStartedSteps({
+		hosted: status?.mode === 'saas',
+		domains,
+		claims: claims.length,
+		summaries: summaries.map((q) => (q.isPending ? undefined : q.isError ? null : q.data)),
+		verdicts,
+		reports: totals,
+	});
 
 	async function exportPdf() {
 		setExporting(true);
 		try {
 			// Every summary must load, or the report would silently leave a domain out. Trends are optional.
-			const [summaries, trendResults] = await Promise.all([
+			const [summaryData, trendResults] = await Promise.all([
 				Promise.all(domains.map((d) => qc.fetchQuery({ queryKey: domainKeys.summary(d.id), queryFn: () => fetchSummary(d.id), staleTime: 0 }))),
 				Promise.all(domains.map((d) => fetchStats(d.id, 90).catch(() => null))),
 			]);
@@ -68,7 +109,7 @@ export function OverviewPage() {
 				if (t) trends[d.id] = t.stats;
 			});
 			const { downloadPdfReport } = await import('../../lib/pdf/report');
-			downloadPdfReport({ summaries, trends });
+			downloadPdfReport({ summaries: summaryData, trends });
 			toast({ title: 'Report downloaded', description: 'email-auth-report.pdf', variant: 'success' });
 		} catch (e) {
 			toast({ title: 'Could not export the PDF', description: errorMessage(e), variant: 'danger' });
@@ -77,11 +118,12 @@ export function OverviewPage() {
 		}
 	}
 
+	const empty = domains.length === 0 && claims.length === 0;
+
 	return (
 		<div className="space-y-6">
 			<PageHeader
 				title="Domains"
-				description="Where each domain stands: can receivers verify your mail, and is spoofing blocked."
 				actions={
 					<>
 						{domains.length > 0 ? (
@@ -90,7 +132,7 @@ export function OverviewPage() {
 								{exporting ? 'Generating…' : 'Export PDF'}
 							</Button>
 						) : null}
-						<AddDomainButton />
+						{!empty || !canWrite ? <AddDomainButton /> : null}
 					</>
 				}
 			/>
@@ -100,68 +142,53 @@ export function OverviewPage() {
 				<ListSkeleton rows={3} label="Loading domains" />
 			) : list.isError ? (
 				<LoadError error={list.error} onRetry={() => void list.refetch()} title="Could not load your domains" />
-			) : domains.length === 0 && claims.length === 0 ? (
-				<EmptyState
-					icon={<Globe />}
-					title="No domains yet"
-					description={
-						canWrite
-							? 'Add your first domain to start receiving DMARC reports and see where it stands. Domains are managed through Cloudflare, so connect it too.'
-							: 'Nothing has been added to this workspace yet. An owner or admin can add the first domain.'
-					}
-					action={
-						canWrite ? (
-							<div className="flex flex-wrap justify-center gap-2">
-								<Button asChild>
-									<Link to="/setup">Add your first domain</Link>
-								</Button>
-								<Button asChild variant="secondary">
-									<a href={CONNECT_CLOUDFLARE_DOCS} target="_blank" rel="noreferrer">
-										Connect Cloudflare
-									</a>
-								</Button>
-							</div>
-						) : undefined
-					}
-				/>
-			) : null}
-
-			{!list.isPending && !list.isError && claims.length > 0 ? (
-				<section aria-labelledby="waiting-heading" className="space-y-4">
-					<div className="space-y-1">
-						<h2 id="waiting-heading" className="text-lg font-semibold tracking-tight">
-							Waiting for verification
-						</h2>
-						<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
-					</div>
-					{claims.map((c) => (
-						<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
-					))}
-				</section>
-			) : null}
-
-			{!list.isPending && !list.isError && domains.length > 0 ? (
+			) : (
 				<>
-					<StatGroup className="sm:grid-cols-2" aria-label="Summary">
-						<Stat label={domains.length === 1 ? 'Domain' : 'Domains'} value={domains.length} />
-						<Stat label="Pass rate, 7 days" value={all.passRate !== null ? `${all.passRate}%` : 'n/a'} />
-					</StatGroup>
-					<div className="space-y-6">
-						{buildTree(domains).map(({ root, children }) => (
-							<div key={root.id} className="space-y-4">
-								<DomainLevelCard domain={root} />
-								{children.length > 0 ? (
-									<div className="ml-3 space-y-4 border-l-2 border-line pl-3 sm:ml-6 sm:pl-6">
-										{children.map((c) => (
-											<DomainLevelCard key={c.id} domain={c} />
-										))}
-									</div>
-								) : null}
-							</div>
-						))}
+					<div className="space-y-1">
+						<p className="text-lg font-semibold tracking-tight text-ink-1 [overflow-wrap:anywhere] sm:text-xl" aria-live="polite" data-testid="am-i-done">
+							{answer}
+						</p>
+						{!empty ? <p className="max-w-prose text-sm text-ink-2">Each domain below says what public DNS and its last {WINDOW} days of reports show, and who acts next. Most urgent first.</p> : null}
 					</div>
+
+					{canWrite ? <GetStarted steps={steps} /> : null}
+
+					{empty && !canWrite ? (
+						<EmptyState
+							title="This workspace has no domains yet"
+							description="An owner or admin adds them. Each domain then appears here with its level, what is true now and what to do next."
+						/>
+					) : null}
+
+					{claims.length > 0 ? (
+						<section aria-labelledby="waiting-heading" className="space-y-4">
+							<div className="space-y-1">
+								<h2 id="waiting-heading" className="text-lg font-semibold tracking-tight">
+									Waiting for verification
+								</h2>
+								<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
+							</div>
+							{claims.map((c) => (
+								<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
+							))}
+						</section>
+					) : null}
+
+					{domains.length > 0 ? (
+						<section aria-labelledby={listId} className="space-y-3">
+							<h2 id={listId} className="sr-only">
+								Your domains
+							</h2>
+							<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1">
+								{ordered.map(({ d, parent }) => {
+									const row = byId.get(d.id)!;
+									return <DomainRow key={d.id} domain={d} parent={parent} verdict={row.verdict} canWrite={canWrite} onRetry={row.retry} />;
+								})}
+							</ul>
+						</section>
+					) : null}
 				</>
-			) : null}
+			)}
 		</div>
 	);
 }

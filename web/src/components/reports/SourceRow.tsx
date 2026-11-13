@@ -18,7 +18,7 @@ export function SourceStatus({ src, older }: { src: AnomalySource; older: boolea
 	}
 	return (
 		<span className="inline-flex flex-col items-start gap-1">
-			<Badge variant="danger">
+			<Badge variant="danger" className="whitespace-nowrap">
 				<XCircle aria-hidden />
 				{failLabel(src)} fail
 			</Badge>

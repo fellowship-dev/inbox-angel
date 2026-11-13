@@ -1,6 +1,5 @@
 import { Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Inbox } from 'lucide-react';
 import { useState } from 'react';
 import { BackLink, Segmented, SourceTable, WindowPills, useRouteDomainId } from '../../components/reports';
 import { ListSkeleton, LoadError } from '../../components/states';
@@ -63,11 +62,10 @@ export function ExplorePage() {
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load sources" />
 			) : visible.length === 0 ? (
-				filter === 'anomalies' ? (
+				filter === 'anomalies' && sources.length > 0 ? (
 					<EmptyState
-						icon={<CheckCircle2 />}
-						title={`No anomalies in the last ${days} days`}
-						description="All sending sources are passing DMARC."
+						title={`No failing sources in the last ${days} days`}
+						description={`None of the ${sources.length} sources in the reports for this window failed SPF or DKIM. The full list is under All.`}
 						action={
 							<Button variant="secondary" onClick={() => setFilter('all')}>
 								Show all sources
@@ -76,9 +74,8 @@ export function ExplorePage() {
 					/>
 				) : (
 					<EmptyState
-						icon={<Inbox />}
 						title={`No sources in the last ${days} days`}
-						description="No DMARC reports received yet. Reports arrive daily from mail providers once your DMARC record points to Inbox Angel."
+						description="No DMARC reports arrived in this window. Receivers send them about once a day once your DMARC record points to Inbox Angel; a longer window may show older ones."
 						action={days < 90 ? <Button variant="secondary" onClick={() => setDays(90)}>Look back 90 days</Button> : undefined}
 					/>
 				)

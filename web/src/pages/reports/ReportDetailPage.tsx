@@ -1,6 +1,6 @@
 import { Card, EmptyState, PageHeader, Stat, StatGroup, cn } from '@inbox-angel/ui';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, ChevronDown, FileText, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { AuthBadge, BackLink, ProviderName, useRouteDomainId } from '../../components/reports';
@@ -143,7 +143,6 @@ export function ReportDetailPage() {
 
 			{summary.total === 0 ? (
 				<EmptyState
-					icon={<FileText />}
 					title="No reports received for this date"
 					description="DMARC reports arrive daily from mail providers, usually a day late. Pick another day from the reports list."
 				/>
