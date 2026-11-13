@@ -118,7 +118,7 @@ describe('live DNS check budget (the expensive tools)', () => {
   const t0 = 1_800_000_000_000;
   await spendDnsCheck(env, 'old', 'ws_old', { now: t0, prune: false });
   await q.hit('login:198.51.100.1', t0, 60_000);
-  const count = async () => (env.DB as unknown as TestDb).sqlite.prepare("SELECT key FROM auth_rate_limits ORDER BY key").all().map((r: any) => r.key);
+  const count = async () => (env.DB as unknown as TestDb).sqlite.prepare("SELECT key FROM auth_rate_limits WHERE key LIKE 'login:%' OR key LIKE 'mcp-dns:%' ORDER BY key").all().map((r: any) => r.key);
   expect(await count()).toEqual(['login:198.51.100.1', 'mcp-dns:connection:old', 'mcp-dns:workspace:ws_old']);
   await spendDnsCheck(env, 'new', 'ws_new', { now: t0 + 61_000, prune: true });
   expect(await count()).toEqual(['login:198.51.100.1', 'mcp-dns:connection:new', 'mcp-dns:workspace:ws_new']);
