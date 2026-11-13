@@ -42,12 +42,26 @@ describe('0008 dns_checked_at', () => {
 		const d = createTestD1();
 		applyMigrations(d.sqlite, { through: '0007_metrics.sql' });
 		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, spf_record, dmarc_policy) VALUES ('acme.com', 'r@x', 'v=spf1 -all', 'none')").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0008_dns_checked_at.sql']);
+		expect(applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' })).toEqual(['0008_dns_checked_at.sql']);
 		expect(d.sqlite.prepare('SELECT spf_record, dmarc_policy, ' + NEW.join(', ') + ' FROM domains').all()).toEqual([
 			{ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null },
 		]);
 		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name IN (" + NEW.map((n) => `'${n}'`).join(',') + ')').all() as any[];
 		expect(cols.map((c) => c.name).sort()).toEqual([...NEW].sort());
+		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
+	});
+});
+
+describe('0009 claim_settled', () => {
+	it('adds two nullable columns: existing claims stay open', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
+		d.sqlite.prepare("INSERT INTO workspaces (id, name) VALUES ('ws_x', 'X')").run();
+		d.sqlite.prepare("INSERT INTO domain_claims (workspace_id, domain, token) VALUES ('ws_x', 'acme.com', 't')").run();
+		expect(applyMigrations(d.sqlite)).toEqual(['0009_claim_settled.sql']);
+		expect(d.sqlite.prepare('SELECT domain, status, settled_at, settled_domain_id FROM domain_claims').all()).toEqual([{ domain: 'acme.com', status: 'pending', settled_at: null, settled_domain_id: null }]);
+		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domain_claims') WHERE name IN ('settled_at', 'settled_domain_id')").all() as any[];
+		expect(cols.map((c) => c.name).sort()).toEqual(['settled_at', 'settled_domain_id']);
 		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
 	});
 });

@@ -161,7 +161,7 @@ is marked verified at setup.
 it has no reports, stats, check results, hosted records or DNS writes, and it never blocks another workspace. It is
 verified by any of: (a) its zone is on the allow-list of one of the workspace's active Cloudflare connections, (b) the
 workspace already verified a parent domain, (c) the TXT record `_inboxangel.<domain>` holds `inboxangel-verify=<token>`
-(the "Verify" button re-checks). The first workspace to verify owns the name; other pending claims on it become `lost`.
+(the "Verify" button re-checks). The first workspace to verify owns the name; other pending claims on it become `lost`. A claim that became a domain is kept, hidden, for one day (`settled_at`), so a repeat of its verify answers `200` with the domain; the daily retention job deletes it after that.
 A workspace may hold 25 pending claims. Domains that existed before this feature are `verified_via=legacy`: they keep working for their holder, but never block a verified claim — a successful TXT, Cloudflare or parent proof evicts the legacy holder (audit-logged as `domain.evicted`), and a legacy domain proves nothing about its subdomains. The Cloudflare proof re-checks the zone with Cloudflare at verify time (must still be active and have the same name).
 
 **Roles.** Owners and admins manage; members are read-only. Only owners can invite admins. Owners and admins list

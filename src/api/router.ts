@@ -740,12 +740,13 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
-      // Already added (a second tab, a double click, two requests at once): say so, whatever the cap and whatever DNS says now.
+      // Already added (a second tab, a double click, two requests at once, a retry after a settled claim): say so, whatever the cap and whatever DNS says now.
       const added = await resumeExistingDomain(tenant, claim.domain);
       if (added) {
-        await tenant.scope.claims.delete(claim.id); // a claim for a domain the workspace has is a leftover
+        await tenant.scope.claims.settle(claim.domain, added.domain.id); // a claim for a domain the workspace has is settled, never left open
         return json(added, 200);
       }
+      if (claim.settled_at !== null) return err('claim not found', 404); // it became a domain that has since been removed
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
@@ -757,14 +758,14 @@ async function _handleApi(
     const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);
     if (claimPreviewMatch && method === 'GET') {
       const claim = await tenant.scope.claims.getById(parseInt(claimPreviewMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       return await claimPreviewResponse(tenant, claim, { userId: workspace.userId });
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
     if (claimDeleteMatch && method === 'DELETE') {
       const claim = await tenant.scope.claims.getById(parseInt(claimDeleteMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       await tenant.scope.claims.delete(claim.id);
       return json({ ok: true });
     }
