@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
+import { TalkToMax } from '../../components/TalkToMax';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
@@ -33,7 +34,9 @@ export function AuthPage() {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
-	const mode: Mode = !status.configured ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
+	const hosted = status.mode === 'saas';
+	// The installer-proof screen is self-host only: the hosted service never asks a registrant for one.
+	const mode: Mode = !status.configured && !hosted ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
 	const registering = mode !== 'signin';
 	const providers = status.oauth_providers.filter((p) => p in PROVIDER_LABELS);
 
@@ -84,7 +87,11 @@ export function AuthPage() {
 
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
-		mode === 'setup' ? "Create this installation's owner using the single-use proof held by its installer. No shared default password is used." : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
+		mode === 'setup' ? "Create this installation's owner using the single-use proof held by its installer. No shared default password is used." : mode === 'signup'
+				? hosted
+					? 'See where your domains stand and what to fix, checked from live DNS. DMARC reports are not connected yet.'
+					: 'Start monitoring your domains.'
+				: undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
@@ -95,7 +102,7 @@ export function AuthPage() {
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />
 					</Field>
 				) : null}
-				<Field id="email" label="Email" hint={registering ? 'Used to sign in and to receive monitoring alerts.' : undefined}>
+				<Field id="email" label="Email" hint={registering ? (hosted ? 'Used to sign in.' : 'Used to sign in and to receive monitoring alerts.') : undefined}>
 					<Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@yourcompany.com" aria-describedby={registering ? 'email-hint' : undefined} />
 				</Field>
 				<Field id="password" label="Password" hint={registering ? 'At least 8 characters.' : undefined}>
@@ -154,6 +161,7 @@ export function AuthPage() {
 					Sign-up is closed on this instance. Ask an owner for an invite link.
 				</Alert>
 			) : null}
+			<TalkToMax className="text-center" lead="Questions first, or rather have someone set it up for you?" about="about your domains" />
 		</AuthLayout>
 	);
 }

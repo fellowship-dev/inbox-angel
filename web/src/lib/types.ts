@@ -302,6 +302,8 @@ export interface AuthStatus {
   custom_domain: string | null;
   base_domain: string | null;
   has_domain: boolean;
+  /** Hosted only: the https booking link behind "Talk to Max". Null (or absent) = show no link anywhere. */
+  help_url?: string | null;
 }
 
 /** GET /api/keys: prefixes only, never the secret. */

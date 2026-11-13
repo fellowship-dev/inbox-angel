@@ -19,7 +19,8 @@ describe('pending domain claims', () => {
 		expect(within(section).getByText('_inboxangel-challenge.acme.com')).toBeInTheDocument();
 		expect(within(section).getByText('ia-verify=abc123')).toBeInTheDocument();
 		expect(within(section).getByText('TXT')).toBeInTheDocument();
-		expect(within(section).getByText('Another workspace verified this domain first. If it is yours, contact support.')).toBeInTheDocument();
+		expect(within(section).getByText('Another workspace verified this domain first, so it cannot be added to this one.')).toBeInTheDocument();
+		expect(within(section).queryByText(/contact support/)).not.toBeInTheDocument();
 		expect(within(section).getAllByRole('button', { name: 'Verify' })).toHaveLength(1);
 		expect(screen.queryByText('No domains yet')).not.toBeInTheDocument();
 		expect(calls.some((c) => /\/domains\/\d+\//.test(c.path))).toBe(false);

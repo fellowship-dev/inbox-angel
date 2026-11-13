@@ -1,6 +1,7 @@
 import { Alert, Button } from '@inbox-angel/ui';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
+import { TalkToMax } from '../../components/TalkToMax';
 import { AuthLayout } from './AuthLayout';
 
 /** Shown when the server wants the email address verified before it opens a session (SaaS mode). */
@@ -31,6 +32,7 @@ export function CheckEmail({ email, onBack, note }: { email: string; onBack?: ()
 			<Button variant="secondary" className="w-full" loading={state === 'sending'} onClick={() => void resend()}>
 				Resend verification email
 			</Button>
+			<TalkToMax className="text-center" lead={state === 'sent' ? 'Still nothing after resending?' : 'No email, or a problem with the link?'} about="about signing in" />
 			{onBack ? (
 				<button type="button" className="block w-full text-center text-sm text-brand-ink underline underline-offset-4" onClick={onBack}>
 					Back to sign in

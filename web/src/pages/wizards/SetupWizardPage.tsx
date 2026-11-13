@@ -7,15 +7,17 @@ import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api } from '../../lib/api';
 import { wizardProgress } from '../../lib/dmarc';
 import { keys, useDomains } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
+import { TalkToMax } from '../../components/TalkToMax';
 import type { WizardState, WizardStepState } from '../../lib/types';
 import { DkimStep } from './setup/DkimStep';
 import { DmarcStep } from './setup/DmarcStep';
 import { DomainStep } from './setup/DomainStep';
 import { setupKeys, useOnboardingStatus, useWizardState } from './setup/hooks';
+import { ReportsStep } from './setup/ReportsStep';
 import { RoutingStep } from './setup/RoutingStep';
 import { SpfStep } from './setup/SpfStep';
-import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, STEP_LABELS, parseStep, resolveStep } from './setup/steps';
+import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, parseStep, resolveStep, stepLabels } from './setup/steps';
 
 /**
  * `#/setup` (no domain yet) and `#/domains/:id/setup[/:step]`. The step lives in the URL, 1-indexed, so
@@ -28,6 +30,7 @@ export function SetupWizardPage() {
 }
 
 function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: ReactNode; subtitle: string; skipTo: string; wizard: WizardState; current: number; children: ReactNode }) {
+	const hosted = useHosted();
 	return (
 		<div className="space-y-6">
 			<header className="space-y-3">
@@ -43,7 +46,7 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 				<WizardProgress
 					label="Setup progress"
 					current={current}
-					steps={STEP_LABELS.map((label, i) => ({
+					steps={stepLabels(hosted).map((label, i) => ({
 						label,
 						state: wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
 					}))}
@@ -83,6 +86,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const { canWrite } = useSession();
+	const hosted = useHosted();
 	const statusQ = useOnboardingStatus(domainId);
 	const wizardQ = useWizardState(domainId);
 	const domainMarked = useRef(false);
@@ -154,7 +158,8 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 			{index === 1 ? <SpfStep {...props} /> : null}
 			{index === 2 ? <DkimStep {...props} /> : null}
 			{index === 3 ? <DmarcStep {...props} /> : null}
-			{index === 4 ? <RoutingStep {...props} /> : null}
+			{index === 4 ? (hosted ? <ReportsStep {...props} /> : <RoutingStep {...props} />) : null}
+			{(status.dns_errors?.length ?? 0) > 0 ? <TalkToMax lead="DNS lookups still failing after a retry?" about={`about ${status.domain}`} /> : null}
 		</Frame>
 	);
 }

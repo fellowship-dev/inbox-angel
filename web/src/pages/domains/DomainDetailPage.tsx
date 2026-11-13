@@ -10,6 +10,7 @@ import { DnsRecords } from '../../components/domain/DnsRecords';
 import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
@@ -137,6 +138,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
 	const { canWrite } = useSession();
+	// Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros.
+	const reportsOff = useReportsNotConnected(domain);
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
@@ -173,6 +176,11 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			<SetupBanner domainId={domain.id} />
 			<HealthReportSection domainId={domain.id} />
 
+			{reportsOff ? (
+				<Section title="Results">
+					<ReportsNotConnected domain={domain.domain} />
+				</Section>
+			) : (
 			<Section
 				title="Results"
 				actions={
@@ -225,11 +233,13 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					</>
 				)}
 			</Section>
+			)}
 
 			<HostedPanel key={domain.id} domainId={domain.id} />
 			<DnsRecords domain={domain} />
 			<Rollout domain={domain} />
 
+			{reportsOff ? null : (
 			<Section
 				title={`Last ${days} days`}
 				actions={
@@ -240,7 +250,9 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			>
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
+			)}
 
+			{reportsOff ? null : (
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
 				{hasReportAddress(domain.rua_address) ? (
 					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
@@ -248,9 +260,10 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
 				)}
 			</Section>
+			)}
 
 			<Context domain={domain} all={all} />
-			<FailingSources domainId={domain.id} q={sources} />
+			{reportsOff ? null : <FailingSources domainId={domain.id} q={sources} />}
 			<DnsTools domainId={domain.id} />
 		</div>
 	);

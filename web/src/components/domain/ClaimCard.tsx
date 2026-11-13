@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import type { Domain, DomainClaim } from '../../lib/types';
+import { TalkToMax } from '../TalkToMax';
 import { CopyField } from './CopyField';
 
-export const LOST_EXPLANATION = 'Another workspace verified this domain first. If it is yours, contact support.';
+export const LOST_EXPLANATION = 'Another workspace verified this domain first, so it cannot be added to this one.';
 
 /** What the server said when the TXT record was not (yet) found: its reason, else the claim's last error. */
 function verifyFailure(e: unknown): string {
@@ -25,6 +26,8 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const [error, setError] = useState('');
+	/** Failed Verify presses on this card: after two, a person is offered. */
+	const [failures, setFailures] = useState(0);
 	const refresh = () => qc.invalidateQueries({ queryKey: ['domains'] });
 
 	const verify = useMutation({
@@ -36,6 +39,7 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 		},
 		onError: (e) => {
 			setError(verifyFailure(e));
+			setFailures((n) => n + 1);
 			if (e instanceof ApiError && e.status === 409) void refresh();
 		},
 	});
@@ -56,7 +60,10 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 				<Badge variant={lost ? 'danger' : 'warning'}>{lost ? 'Claimed elsewhere' : 'Waiting for verification'}</Badge>
 			</div>
 			{lost ? (
-				<Alert variant="warning">{LOST_EXPLANATION}</Alert>
+				<>
+					<Alert variant="warning">{LOST_EXPLANATION}</Alert>
+					<TalkToMax lead="Is it yours?" about="about getting access to it" />
+				</>
 			) : (
 				<>
 					<p className="text-sm text-ink-2">
@@ -75,6 +82,7 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true }: { c
 					{error}
 				</Alert>
 			) : null}
+			{!lost && failures >= 2 ? <TalkToMax lead="Added the record and it still does not verify?" about={`about ${claim.domain}`} /> : null}
 			<div className="flex flex-wrap gap-2">
 				{!lost ? (
 					<Button loading={verify.isPending} disabled={!canWrite} onClick={() => { setError(''); verify.mutate(); }}>

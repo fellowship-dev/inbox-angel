@@ -5,12 +5,13 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { ClaimCard } from '../../components/domain/ClaimCard';
 import { DomainLevelCard } from '../../components/domain/DomainLevelCard';
+import { ReportsNotConnected, useWorkspaceReportsNotConnected } from '../../components/ReportsNotConnected';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
 import { errorMessage } from '../../lib/api';
 import { sumStats } from '../../lib/dmarc';
 import { domainKeys, fetchStats, fetchSummary } from '../../lib/domain-queries';
 import { useDomainClaims, useDomains } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import type { DailyStat, Domain } from '../../lib/types';
 
 /** Parents first, each followed by its children. A child whose parent is not monitored stands alone. */
@@ -47,6 +48,9 @@ export function OverviewPage() {
 	const domains = list.data ?? [];
 	const claims = useDomainClaims().data ?? [];
 	const [exporting, setExporting] = useState(false);
+	const hosted = useHosted();
+	// Hosted, before report intake: a 7-day pass rate would always read "n/a", so say why once instead.
+	const reportsOff = useWorkspaceReportsNotConnected();
 
 	// Same keys as the cards use, so each request is made once.
 	const stats = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.stats(d.id, 7), queryFn: () => fetchStats(d.id, 7) })) });
@@ -105,7 +109,9 @@ export function OverviewPage() {
 					icon={<Globe />}
 					title="No domains yet"
 					description={
-						canWrite
+						canWrite && hosted
+							? 'Add a domain you send email from to see where it stands and what to fix, checked from live DNS.'
+							: canWrite
 							? 'Add your first domain to start receiving DMARC reports and see where it stands. Domains are managed through Cloudflare, so connect it too.'
 							: 'Nothing has been added to this workspace yet. An owner or admin can add the first domain.'
 					}
@@ -115,11 +121,13 @@ export function OverviewPage() {
 								<Button asChild>
 									<Link to="/setup">Add your first domain</Link>
 								</Button>
-								<Button asChild variant="secondary">
-									<a href={CONNECT_CLOUDFLARE_DOCS} target="_blank" rel="noreferrer">
-										Connect Cloudflare
-									</a>
-								</Button>
+								{hosted ? null : (
+									<Button asChild variant="secondary">
+										<a href={CONNECT_CLOUDFLARE_DOCS} target="_blank" rel="noreferrer">
+											Connect Cloudflare
+										</a>
+									</Button>
+								)}
 							</div>
 						) : undefined
 					}
@@ -132,7 +140,11 @@ export function OverviewPage() {
 						<h2 id="waiting-heading" className="text-lg font-semibold tracking-tight">
 							Waiting for verification
 						</h2>
-						<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
+						<p className="text-sm text-ink-2">
+							{hosted
+								? 'Prove you own each one with a DNS record. Then it joins this workspace, and its SPF, DKIM and DMARC are checked from live DNS.'
+								: 'These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.'}
+						</p>
 					</div>
 					{claims.map((c) => (
 						<ClaimCard key={c.id} claim={c} canWrite={canWrite} />
@@ -144,8 +156,9 @@ export function OverviewPage() {
 				<>
 					<StatGroup className="sm:grid-cols-2" aria-label="Summary">
 						<Stat label={domains.length === 1 ? 'Domain' : 'Domains'} value={domains.length} />
-						<Stat label="Pass rate, 7 days" value={all.passRate !== null ? `${all.passRate}%` : 'n/a'} />
+						{reportsOff ? null : <Stat label="Pass rate, 7 days" value={all.passRate !== null ? `${all.passRate}%` : 'n/a'} />}
 					</StatGroup>
+					{reportsOff ? <ReportsNotConnected /> : null}
 					<div className="space-y-6">
 						{buildTree(domains).map(({ root, children }) => (
 							<div key={root.id} className="space-y-4">

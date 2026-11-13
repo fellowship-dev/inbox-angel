@@ -6,7 +6,10 @@ import { Link } from 'react-router';
 import { ClaimCard } from '../../components/domain/ClaimCard';
 import { InheritanceBanner } from '../../components/domain/InheritanceBanner';
 import { ReadOnlyNotice, WriteButton } from '../../components/states';
+import { DomainRefusalHelp } from '../../components/TalkToMax';
+import { ReportsNotConnected } from '../../components/ReportsNotConnected';
 import { api, errorMessage } from '../../lib/api';
+import { useHosted } from '../../lib/session';
 import { normalizeDomain } from '../../lib/dmarc';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
 import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
@@ -70,6 +73,43 @@ function LiveDnsCheck({ q, rua }: { q: ReturnType<typeof useLiveDnsCheck>; rua: 
 }
 
 function SetupStep({ result }: { result: AddDomainResult }) {
+	const { domain } = result;
+	const hosted = useHosted();
+	if (hosted && !hasReportAddress(domain.rua_address)) return <HostedVerified domain={domain} />;
+	return <SelfHostSetupStep result={result} />;
+}
+
+/**
+ * Hosted, before report intake: the domain is in, but there is no report address, so there is no rua= record to add.
+ * Point to what works now (the live DNS checks in the setup wizard) and say plainly that reports are not connected.
+ */
+function HostedVerified({ domain }: { domain: AddDomainResult['domain'] }) {
+	return (
+		<div className="max-w-2xl space-y-6">
+			<PageHeader
+				title={`${domain.domain} is in your workspace`}
+				description="Its SPF, DKIM and DMARC records are checked from live DNS. Setup walks through each one and shows the exact record to publish where something is missing."
+				eyebrow={
+					<Badge variant="success">
+						<CheckCircle2 aria-hidden />
+						Ownership verified
+					</Badge>
+				}
+			/>
+			<ReportsNotConnected domain={domain.domain} />
+			<div className="flex flex-col gap-2 sm:flex-row">
+				<Button asChild>
+					<Link to={`/domains/${domain.id}/setup`}>Check its records</Link>
+				</Button>
+				<Button asChild variant="secondary">
+					<Link to={`/domains/${domain.id}`}>Go to {domain.domain}</Link>
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	const { domain } = result;
 	const rua = hasReportAddress(domain.rua_address) ? domain.rua_address.trim() : null;
 	const q = useLiveDnsCheck(domain.id, domain.rua_address);
@@ -217,6 +257,7 @@ export function AddDomainPage() {
 						<Input id="domain-input" placeholder="yourcompany.com" value={input} onChange={(e) => setInput(e.target.value)} autoFocus autoComplete="off" autoCapitalize="none" spellCheck={false} aria-invalid={add.isError || undefined} aria-describedby={add.isError ? 'domain-error' : undefined} />
 					)}
 					{add.isError ? <FieldError id="domain-error">{errorMessage(add.error)}</FieldError> : null}
+					{add.isError ? <DomainRefusalHelp error={add.error} /> : null}
 				</div>
 				<WriteButton type="submit" loading={add.isPending} disabled={!normalizeDomain(input)}>
 					{add.isPending ? 'Setting up…' : 'Continue'}

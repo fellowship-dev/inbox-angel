@@ -20,6 +20,7 @@ import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { useTheme } from '../lib/theme';
 import { useSession } from '../lib/session';
 import { Banners } from './Banners';
+import { TalkToMaxLink } from './TalkToMax';
 
 const renderLink: RenderNavLink = ({ href, ...rest }) => <Link to={href} {...rest} />;
 
@@ -72,6 +73,7 @@ export function Shell() {
 			renderLink={renderLink}
 			topbarEnd={
 				<>
+					<TalkToMaxLink />
 					<IconButton label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggle}>
 						{theme === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
 					</IconButton>

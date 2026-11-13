@@ -1,4 +1,4 @@
-import { Alert, CheckResult, CheckResultList, RecordBlock, toast } from '@inbox-angel/ui';
+import { Alert, CheckResult, CheckResultList, RecordBlock, StatusDot, toast } from '@inbox-angel/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { WriteButton } from '../../../components/states';
@@ -8,6 +8,7 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
+import { useHosted } from '../../../lib/session';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../../lib/dmarc-record';
 import type { OnboardingStatus } from '../../../lib/types';
 import { setupKeys } from './hooks';
@@ -31,11 +32,27 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	// The report address is top-level in the status, and empty when the domain was added without a reports domain.
 	const rua = hasReportAddress(status.rua_address) ? status.rua_address : null;
 	const lookupSeverity = dmarcSeverity(dmarc, dmarcFailed.length > 0);
+	// Hosted, before report intake is connected: no domain has a report address, so the step judges only what DNS shows
+	// (a record or none) and never asks for an rua= that does not exist.
+	const hostedNoReports = useHosted() && !rua;
 	// Without a report address nothing reaches Inbox Angel, whatever the record says, so it is never "configured".
-	const severity = !rua && lookupSeverity === 'info' ? 'warning' : lookupSeverity;
+	const severity = hostedNoReports
+		? dmarcFailed.length > 0
+			? 'unknown'
+			: dmarc.found
+				? 'info'
+				: 'error'
+		: !rua && lookupSeverity === 'info'
+			? 'warning'
+			: lookupSeverity;
 	// Adding our rua= must never relax an existing policy, so keep p= as it is and only default to none for a new record.
 	// No report address, no recommended record: a record ending in `mailto:` is broken, so there is nothing to copy.
-	const recommended = rua ? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua) : null;
+	// Hosted with no record at all: a plain p=none record (no rua=) is still worth publishing, so offer that.
+	const recommended = rua
+		? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua)
+		: hostedNoReports && !dmarc.found
+			? buildRecommendedRecord(null, 'none', null)
+			: null;
 
 	const patch = (fn: (s: OnboardingStatus) => OnboardingStatus) => qc.setQueryData<OnboardingStatus>(setupKeys.status(status.domain_id), (s) => (s ? fn(s) : s));
 
@@ -43,7 +60,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 		mutationFn: () => api<ApplyDmarcResponse>(`/api/domains/${status.domain_id}/apply-dmarc`, { body: { record: recommended } }),
 		onSuccess: () => {
 			setApplied(true);
-			toast({ variant: 'success', title: 'DMARC record applied', description: 'Reports start arriving within 24 hours.' });
+			toast({ variant: 'success', title: 'DMARC record applied', description: hostedNoReports ? 'DNS can take a few minutes to show it.' : 'Reports start arriving within 24 hours.' });
 			patch((s) => ({ ...s, dmarc: { ...s.dmarc, found: true, has_our_rua: true, current_record: recommended } }));
 		},
 	});
@@ -84,7 +101,28 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							No DMARC record found for <strong className="text-ink-1">_dmarc.{status.domain}</strong>.
 						</p>
 					)}
-					{!rua && !applied ? (
+					{hostedNoReports ? (
+						<>
+							{!dmarc.found ? (
+								<p className="text-sm text-ink-2">
+									Without a DMARC record, receiving servers have no instruction for mail that fails SPF and DKIM. Publish this record with{' '}
+									<code className="font-mono text-ink-1">p=none</code>: it only monitors, so no mail is blocked or redirected.
+								</p>
+							) : (
+								<p className="text-sm text-ink-2">
+									{applied ? 'The record was written to Cloudflare. Public DNS can take a few minutes to show it.' : 'Your DMARC record is published, read from public DNS.'}
+								</p>
+							)}
+							<div className="space-y-1">
+								<StatusDot status="unknown" label="Reports not connected yet" className="font-medium" />
+								<p className="text-sm text-ink-2">
+									This record sends no reports to Inbox Angel, so nobody can confirm yet that every sender passes. Keep that in mind before you tighten{' '}
+									<code className="font-mono text-ink-1">p=</code> to quarantine or reject.
+								</p>
+							</div>
+						</>
+					) : null}
+					{!rua && !applied && !hostedNoReports ? (
 						<Alert variant="warning" title="Report address not configured yet">
 							This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
 						</Alert>
@@ -101,7 +139,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							aggregate reports.
 						</p>
 					) : null}
-					{severity === 'info' || applied ? (
+					{(severity === 'info' && !hostedNoReports) || (applied && !hostedNoReports) ? (
 						<Alert variant={applied ? 'success' : 'info'} title={applied ? 'DMARC record applied' : 'Reports are configured'}>
 							Reports will start arriving within 24 hours. Once there is data, the dashboard guides you from <code className="font-mono">p=none</code> to{' '}
 							<code className="font-mono">p=reject</code> safely.
@@ -128,7 +166,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 				</>
 			)}
 
-			{auth ? (
+			{auth && !hostedNoReports ? (
 				<section aria-label="Report authorization record" className="space-y-2">
 					<h3 className="text-sm font-semibold text-ink-1">Report authorization record</h3>
 					<CheckResultList>

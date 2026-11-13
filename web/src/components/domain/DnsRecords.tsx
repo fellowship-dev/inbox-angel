@@ -5,6 +5,7 @@ import { api, errorMessage } from '../../lib/api';
 import { isRevokedDkimKey } from '../../lib/dkim';
 import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
 import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '../../lib/domain-queries';
+import { useHosted } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 import { Section, WriteButton } from '../states';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -37,6 +38,8 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	const current = dns.data?.current_record ?? null;
 	const policy = current?.match(/\bp=([a-z]+)/)?.[1] ?? 'none';
 	const ruaReady = hasReportAddress(domain.rua_address);
+	// Hosted, before report intake: no report address exists, but a missing record still gets a plain p=none to publish.
+	const hostedNoReports = useHosted() && !ruaReady;
 	const recommended = buildRecommendedRecord(current, policy, domain.rua_address);
 	const dmarcName = `_dmarc.${domain.domain}`;
 	const cfAvailable = !!(dns.data?.cf_managed || onboarding.data?.cf_available);
@@ -58,14 +61,19 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 		const { found } = dns.data;
 		// Without a report address of our own, no record can send reports here, whatever the lookup matched.
 		const has_rua = dns.data.has_rua && ruaReady;
-		const status: CheckStatus = found && has_rua ? 'pass' : found ? 'warn' : 'missing';
-		const upToDate = !ruaReady || (found && has_rua && current === recommended);
+		const status: CheckStatus = hostedNoReports ? (found ? 'pass' : 'missing') : found && has_rua ? 'pass' : found ? 'warn' : 'missing';
+		const upToDate = hostedNoReports ? found : !ruaReady || (found && has_rua && current === recommended);
 		return (
 			<CheckResult
 				status={status}
+				statusLabel={hostedNoReports && found ? 'Published' : undefined}
 				title="DMARC record"
 				summary={
-					!ruaReady
+					hostedNoReports
+						? found
+							? 'Published, read from public DNS. Reports are not connected yet, so it sends no reports to Inbox Angel.'
+							: `No TXT record at ${dmarcName}. Publish the record below: p=none only monitors, so no mail is blocked or redirected.`
+						: !ruaReady
 						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Inbox Angel report address yet, so there is no record to suggest.`
 						: !found
 							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
