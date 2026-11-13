@@ -284,6 +284,7 @@ Rules: a whole result takes its most urgent state (`worstStatus`, order as in th
 - Delivering → Authenticated → Protected as three named rungs (`packages/ui/src/components/level-ladder.tsx`), the visual anchor of every overview row and the domain page. Reached rungs fill with `brand-ink` and carry a check; the **current rung's name sits on halo gold** (`bg-accent text-accent-fg`, navy on gold in both themes, about 11:1). This is the deliberate light-mode use of gold; the other is the current step marker in "Get to your first answer" and "Do this next".
 - `level={null}` is its own state: dashed empty rungs and "Level not known yet" in words. A domain never read from DNS, a failed check or a domain that does not resolve never shows a level.
 - `role="progressbar"` with `aria-valuetext` ("Level 1 of 2: Authenticated").
+- A level name is never cut. The rungs sit side by side when the ladder's own box is at least 22rem (a container query, so it holds in a row, a card or a claim preview) and stack as three short lines below that. Rows and "Where it stands" put the ladder in its own 22rem column from `lg`, and above the text below `lg`.
 
 ### Empty states
 - `EmptyState` is a quiet, left-aligned note in the page flow: the title says what is empty and why ("No reports for this period"), the description the one thing to do next and what appears once it is done, plus at most one action. No icon in a circle, no dashed frame, no slogan, and no reassurance a region cannot back with evidence ("Nothing to fix" only with the number of messages it was judged from).
