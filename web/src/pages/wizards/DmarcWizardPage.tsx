@@ -11,7 +11,7 @@ import { useRouteDomainId } from '../../components/wizard/useRouteDomainId';
 import { WizardHeader } from '../../components/wizard/WizardHeader';
 import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
-import { buildRecommendedRecord, enforcementLevel, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, enforcementLevel, invalidDmarcSp, parseDmarcPolicy, weakerSubdomainPolicy } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
 
 type Policy = 'none' | 'quarantine' | 'reject';
@@ -105,8 +105,23 @@ export function DmarcWizardPage() {
 		// p=reject with pct below 100 applies to that share of mail only: that is not full enforcement.
 		const partial = enforced ? enforcementLevel(currentRecord) : null;
 		const partialPct = partial?.level === 'partial' ? partial.pct : null;
-		const sp = enforced ? parseDmarcSp(currentRecord) : null;
-		const spWeaker = sp === 'none' || sp === 'quarantine' ? sp : null;
+		// sp= weaker than p= leaves subdomains without their own record less enforced than the domain itself.
+		const spWeaker = enforced ? weakerSubdomainPolicy(currentRecord) : null;
+		const spInvalid = enforced ? invalidDmarcSp(currentRecord) : null;
+		const spNotes = (
+			<>
+				{spWeaker ? (
+					<Alert variant="warning">
+						Subdomains follow <strong>sp={spWeaker}</strong>, not p=reject, so mail from a subdomain without its own record is not rejected. Set sp=reject to enforce it there too.
+					</Alert>
+				) : null}
+				{spInvalid ? (
+					<Alert variant="warning">
+						The record has sp={spInvalid}, which is not a valid policy, so it is ignored and subdomains inherit p=reject.
+					</Alert>
+				) : null}
+			</>
+		);
 
 		body = (
 			<>
@@ -116,11 +131,11 @@ export function DmarcWizardPage() {
 					steps={[
 						{ label: 'None', state: current > 0 ? 'complete' : 'pending' },
 						{ label: 'Quarantine', state: current > 1 ? 'complete' : 'pending' },
-						{ label: 'Reject', state: enforced ? 'complete' : 'pending' },
+						{ label: 'Reject', state: enforced && partialPct === null ? 'complete' : 'pending' },
 					]}
 				/>
 				{enforced ? (
-					<StepCard title={partialPct !== null ? `Partially enforced: ${partialPct}%` : 'Fully enforced'}>
+					<StepCard title={partialPct !== null ? `Partially enforced: ${partialPct}%` : spWeaker ? 'Enforced on this domain; subdomains are not' : 'Fully enforced'}>
 						{partialPct !== null ? (
 							<>
 								<p className="text-sm text-ink-2">
@@ -129,6 +144,7 @@ export function DmarcWizardPage() {
 								</p>
 								{currentRecord ? <TxtRecord title="Current record" name="_dmarc" value={currentRecord} /> : null}
 								<Alert variant="warning">To enforce all of it, raise pct= to 100 (or remove it) at your DNS provider once your failing sources are fixed.</Alert>
+								{spNotes}
 							</>
 						) : (
 							<>
@@ -136,12 +152,12 @@ export function DmarcWizardPage() {
 									DMARC is set to <strong className="text-ink-1">reject</strong>. Spoofed mail claiming to be from <strong className="text-ink-1">{domain.domain}</strong> is rejected
 									outright by receiving servers.
 								</p>
+								{spNotes}
 								{spWeaker ? (
-									<Alert variant="warning">
-										Subdomains follow <strong>sp={spWeaker}</strong>, not p=reject, so mail from a subdomain without its own record is not rejected. Set sp=reject to enforce it there too.
-									</Alert>
-								) : null}
-								<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
+									<Alert variant="info">One thing left: set sp=reject at your DNS provider so subdomains are rejected too. Keep an eye on your pass rate in the domain overview.</Alert>
+								) : (
+									<Alert variant="success">Nothing more to do here. Keep an eye on your pass rate in the domain overview.</Alert>
+								)}
 							</>
 						)}
 						<StepFooter

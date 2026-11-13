@@ -339,3 +339,14 @@ describe("WorkspaceSwitcher", () => {
 		await expectNoViolations(container);
 	});
 });
+
+describe("CheckResult neutral status", () => {
+	it("does not share its icon with 'Not found'", () => {
+		const { container: neutral } = render(<CheckResult status="neutral" title="Authorization record" summary="No reports domain is configured." />);
+		const { container: missing } = render(<CheckResult status="missing" title="Authorization record" summary="Not there." />);
+		const iconClass = (c: HTMLElement) => c.querySelector("svg")?.getAttribute("class") ?? "";
+		expect(iconClass(neutral)).toContain("lucide-circle-dashed");
+		expect(iconClass(missing)).toContain("lucide-circle-slash");
+		expect(iconClass(neutral)).not.toContain("lucide-circle-slash");
+	});
+});

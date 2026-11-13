@@ -6,7 +6,7 @@ import { useParams } from 'react-router';
 import { AuthBadge, BackLink, ProviderName, useRouteDomainId } from '../../components/reports';
 import { LoadError, PageSkeleton, Section } from '../../components/states';
 import { api } from '../../lib/api';
-import { parseDmarcPct, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
+import { invalidDmarcSp, parseDmarcPct, parseDmarcPolicy, parseDmarcSp } from '../../lib/dmarc-record';
 import { useDnsCheck } from '../../lib/domain-queries';
 import { useDomain } from '../../lib/queries';
 import { explain, formatDayWithRelative, isFailing, passRate, type KnownPolicy, type LiveDmarc } from '../../lib/reports';
@@ -103,7 +103,7 @@ export function ReportDetailPage() {
 
 	const name = q.data?.domain ?? domain?.domain;
 	const record = dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null;
-	const live: LiveDmarc | undefined = name && record ? { domain: name, sp: parseDmarcSp(record), pct: parseDmarcPct(record) } : undefined;
+	const live: LiveDmarc | undefined = name && record ? { domain: name, sp: parseDmarcSp(record), invalidSp: invalidDmarcSp(record), pct: parseDmarcPct(record), monitoredSubdomain: !!domain?.parent_id } : undefined;
 	const header = (title: string, description?: string) => (
 		<PageHeader eyebrow={<BackLink to={`/domains/${id}`}>{name ?? 'Back'}</BackLink>} title={title} description={description} />
 	);

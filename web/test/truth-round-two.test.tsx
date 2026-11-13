@@ -52,7 +52,7 @@ describe('item 1: no reports address is never rendered as an empty mailto', () =
 		expect(document.body.textContent).not.toMatch(/rua=mailto:(\s|$)/);
 	});
 
-	it('add-domain page: the record to publish has no rua= when there is no address', async () => {
+	it('add-domain page: with no reports address no record is offered, and it says why', async () => {
 		renderApp(<AddDomainPage />, {
 			routes: {
 				'GET /api/zones': fail(400),
@@ -62,8 +62,9 @@ describe('item 1: no reports address is never rendered as an empty mailto', () =
 		});
 		await userEvent.type(await screen.findByLabelText('Your domain'), 'new.example.org');
 		await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
-		expect(await screen.findByText('v=DMARC1; p=none')).toBeInTheDocument();
 		expect(await screen.findByText(/No reports address is configured for this domain, so there is no rua= to look for/)).toBeInTheDocument();
+		expect(screen.getByText('Report address not configured yet')).toBeInTheDocument();
+		expect(screen.queryByText('DMARC record')).toBeNull();
 		expect(document.body.textContent).not.toMatch(/rua=mailto:(\s|$)/);
 	});
 });

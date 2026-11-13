@@ -2,7 +2,6 @@
 // presence: finding nothing among common selectors does NOT mean the domain has no DKIM.
 
 import { normalizeName, type Resolver } from './doh';
-import { unquoteTxt } from './txt';
 
 export interface DkimRecord {
   raw: string;
@@ -13,8 +12,9 @@ export interface DkimRecord {
   revoked: boolean;
 }
 
+/** Reads a record's text as the resolver returns it (already decoded: see `decodeTxtData`). Decoding happens once, at the boundary. */
 export function parseDkimRecord(rawContent: string): DkimRecord {
-  const raw = unquoteTxt(rawContent);
+  const raw = rawContent.trim();
   const tags: Record<string, string> = {};
   for (const part of raw.split(';')) {
     const i = part.indexOf('=');

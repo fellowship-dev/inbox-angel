@@ -1,7 +1,7 @@
 "use client";
 
 import { cva } from "class-variance-authority";
-import { AlertTriangle, CheckCircle2, CircleHelp, CircleSlash, RefreshCw, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, CircleHelp, CircleSlash, RefreshCw, XCircle, type LucideIcon } from "lucide-react";
 import * as React from "react";
 import { cn } from "../lib/cn.js";
 import { Button } from "./button.js";
@@ -19,7 +19,7 @@ export const checkStatusMeta: Record<CheckStatus, { label: string; icon: LucideI
 	warn: { label: "Warning", icon: AlertTriangle },
 	fail: { label: "Fail", icon: XCircle },
 	missing: { label: "Not found", icon: CircleSlash },
-	neutral: { label: "Not configured", icon: CircleSlash },
+	neutral: { label: "Not configured", icon: CircleDashed },
 	error: { label: "Lookup failed", icon: CircleHelp },
 };
 

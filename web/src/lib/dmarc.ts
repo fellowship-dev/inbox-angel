@@ -1,4 +1,4 @@
-import { parseDmarcSp } from './dmarc-record';
+import { enforcementLevel, parseDmarcSp, weakerSubdomainPolicy } from './dmarc-record';
 import type { Domain, WizardState } from './types';
 
 /** What people paste into the box: trim, lowercase, drop a scheme and one trailing slash. */
@@ -23,8 +23,11 @@ export interface Guidance {
 	upgradeTo?: 'quarantine' | 'reject';
 }
 
-/** Pure guidance from policy, the window's pass rate (percent) and whether any report arrived. */
-export function getGuidance(domain: Pick<Domain, 'dmarc_policy' | 'domain' | 'rua_address'>, passRate: number | null, hasData: boolean): Guidance {
+/**
+ * Pure guidance from policy, the window's pass rate (percent) and whether any report arrived. `liveRecord` is the
+ * record read from DNS, when it was: it adds what `pct=` and `sp=` change, so "enforced" is only said where it is true.
+ */
+export function getGuidance(domain: Pick<Domain, 'dmarc_policy' | 'domain' | 'rua_address'>, passRate: number | null, hasData: boolean, liveRecord: string | null = null): Guidance {
 	const policy = domain.dmarc_policy ?? 'none';
 
 	if (!hasData) {
@@ -63,6 +66,22 @@ export function getGuidance(domain: Pick<Domain, 'dmarc_policy' | 'domain' | 'ru
 				tone: 'danger',
 				title: 'Legitimate mail may be blocked',
 				body: `Pass rate is ${passRate}% under a reject policy, so some of your own mail is likely being rejected by recipients. Check the failing sources below urgently.`,
+			};
+		}
+		const live = enforcementLevel(liveRecord);
+		if (live.policy === 'reject' && live.level === 'partial') {
+			return {
+				tone: 'warning',
+				title: `Partially enforced: ${live.pct}%`,
+				body: `DMARC is at reject with pct=${live.pct}, so it applies to only ${live.pct}% of mail that fails. Receivers handle the rest one policy level weaker. Pass rate is ${passRate ?? 'n/a'}%. Raise pct to 100 (or remove it) once your failing sources are fixed.`,
+			};
+		}
+		const spWeaker = live.policy === 'reject' ? weakerSubdomainPolicy(liveRecord) : null;
+		if (spWeaker) {
+			return {
+				tone: 'warning',
+				title: 'Enforced on this domain; subdomains are not',
+				body: `DMARC is enforced at reject for ${domain.domain} itself, and the pass rate is ${passRate ?? 'n/a'}%. Subdomains without their own DMARC record follow sp=${spWeaker}, so mail from them is not rejected. Set sp=reject to enforce them too.`,
 			};
 		}
 		return {

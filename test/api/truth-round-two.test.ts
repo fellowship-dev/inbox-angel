@@ -69,3 +69,13 @@ describe('item 2 (server): Cloudflare-sourced DKIM content is unquoted', () => {
     expect(byName['c._domainkey.acme.com']).toBe('c.dkim.provider.test');
   });
 });
+
+describe('review item 8: report addresses compare case-insensitively', () => {
+  it('dns-check and onboarding-status see our address in another letter case', async () => {
+    cf.doh['_dmarc.acme.com'] = ['v=DMARC1; p=none; rua=mailto:RUA@Reports.Test.com'];
+    const dns = await (await handleApi(get('/api/domains/1/dns-check'), makeEnv('rua@reports.test.com'), ctx)).json() as any;
+    expect(dns.has_rua).toBe(true);
+    const onboarding = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv('rua@reports.test.com'), ctx)).json() as any;
+    expect(onboarding.dmarc.has_our_rua).toBe(true);
+  });
+});

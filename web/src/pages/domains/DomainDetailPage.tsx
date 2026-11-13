@@ -12,6 +12,7 @@ import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
+import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
 import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
@@ -65,6 +66,7 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 	if (!parent && children.length === 0) return null;
 	const record = dns.data?.current_record ?? null;
 	const sp = spTag(record);
+	const badSp = invalidDmarcSp(record);
 	const ownRecord = !!dns.data && !dns.data.error && dns.data.found;
 	const lookupFailed = dns.isError || !!dns.data?.error;
 	return (
@@ -100,6 +102,10 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 						<Alert variant="success" title="sp=reject">
 							All subdomains without their own record are protected.
 						</Alert>
+					) : badSp ? (
+						<Alert variant="warning" title="sp= is not a valid policy">
+							The record has sp={badSp}, which is not none, quarantine or reject, so it is ignored: subdomains without their own record inherit p={policyLabel(domain.dmarc_policy)}.
+						</Alert>
 					) : sp ? (
 						<Alert variant="warning" title={`sp=${sp}: not enforced`}>
 							Subdomains without their own DMARC record are NOT enforced. Consider adding sp=reject.
@@ -133,7 +139,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const { canWrite } = useSession();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
-	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0) : null;
+	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
 
 	return (
 		<div className="space-y-8">

@@ -9,7 +9,7 @@
 // finds (a recognised service that seems to fail) can only warn.
 
 import {
-  describeStep, PASS_RATE_THRESHOLD, planNextStep, ROLLOUT_SEQUENCE, stepIndexForRecord, stepIndexFromStored, type NextStepPlan, type RolloutStep,
+  describeStep, parseDmarcTags, PASS_RATE_THRESHOLD, planNextStep, ROLLOUT_SEQUENCE, stepIndexForRecord, stepIndexFromStored, type NextStepPlan, type RolloutStep,
 } from '../dmarc/rollout';
 import type { Fix } from './fixes';
 import { pct } from './senders';
@@ -137,7 +137,14 @@ export function assessReadiness(i: ReadinessInput): Readiness {
 
   if (!enforcing) reasons.push({ level: 'ok', text: `The first step to ${next.policy} is testing mode: receivers treat failures one step weaker, so it is a low-risk half-step.` });
 
-  if (blocked) return done('blocked', `Not safe to move to ${next.policy} yet`, reasons, next);
-  if (caution) return done('caution', `You can move to ${next.policy}, with care`, reasons, next);
-  return done('ready', `Safe to move to ${next.policy}`, reasons, next);
+  // The headline names what actually changes. When the next step keeps the policy the domain is already at, "move to
+  // quarantine" would be untrue: the change is leaving testing mode, or taking a partial pct to 100%.
+  let action = `move to ${next.policy}`;
+  if (next.policy === step.policy) {
+    const livePct = parseInt(parseDmarcTags(record).get('pct') ?? '', 10);
+    action = plan.dropsPartialPct ? `raise pct from ${livePct}% to 100% for ${next.policy}` : `turn off testing mode (t=y) for ${next.policy}`;
+  }
+  if (blocked) return done('blocked', `Not safe to ${action} yet`, reasons, next);
+  if (caution) return done('caution', `You can ${action}, with care`, reasons, next);
+  return done('ready', `Safe to ${action}`, reasons, next);
 }

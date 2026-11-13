@@ -8,7 +8,7 @@ import { InheritanceBanner } from '../../components/domain/InheritanceBanner';
 import { ReadOnlyNotice, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
 import { normalizeDomain } from '../../lib/dmarc';
-import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
 import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
 import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
@@ -20,16 +20,24 @@ interface Zone {
 	status: string;
 }
 
-/** Checks right away, then every 15 s until the record (with our rua) is seen. A failed lookup keeps polling and is never "not found". */
-function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string | null | undefined }) {
-	const q = useQuery({
+/**
+ * Checks right away, then every 15 s until the record (with our rua) is seen. Without a reports address there is no rua
+ * to wait for, so it checks once. A failed lookup keeps polling (when polling) and is never "not found".
+ */
+function useLiveDnsCheck(domainId: number, rua: string | null | undefined) {
+	const watching = hasReportAddress(rua);
+	return useQuery({
 		queryKey: domainKeys.dnsCheck(domainId),
 		queryFn: () => api<DnsCheck>(`/api/domains/${domainId}/dns-check`),
 		staleTime: 0,
 		retry: false,
-		refetchInterval: (query) => (query.state.data?.found && query.state.data.has_rua && !query.state.data.error ? false : POLL_MS),
+		refetchInterval: (query) => (!watching || (query.state.data?.found && query.state.data.has_rua && !query.state.data.error) ? false : POLL_MS),
 	});
+}
+
+function LiveDnsCheck({ q, rua }: { q: ReturnType<typeof useLiveDnsCheck>; rua: string | null | undefined }) {
 	const title = 'Your DMARC record';
+	const watching = hasReportAddress(rua);
 
 	let row;
 	if (q.isPending) {
@@ -40,19 +48,21 @@ function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string | null 
 			</li>
 		);
 	} else if (q.isError || q.data.error) {
-		row = <CheckResult status="error" title={title} summary="Could not check DNS just now. Add the record above and you are done; we keep trying every 15 seconds." onRetry={() => void q.refetch()} />;
+		row = <CheckResult status="error" title={title} summary={watching ? 'Could not check DNS just now. We keep trying every 15 seconds.' : 'Could not check DNS just now.'} onRetry={() => void q.refetch()} />;
 	} else if (q.data.found && q.data.has_rua) {
 		row = <CheckResult status="pass" title={title} statusLabel="Detected" summary="DNS record detected! Reports will start arriving within 24 hours." />;
 	} else if (q.data.found) {
 		row = (
-			<CheckResult status="warn" title={title} statusLabel={hasReportAddress(rua) ? 'Missing rua' : 'No reports address'} summary={hasReportAddress(rua) ? 'TXT record found, but the rua= address is missing. Double-check you copied the full value above.' : 'TXT record found. No reports address is configured for this domain, so there is no rua= to look for.'}>
-				{hasReportAddress(rua) ? (
+			<CheckResult status="warn" title={title} statusLabel={watching ? 'Missing rua' : 'No reports address'} summary={watching ? 'TXT record found, but the rua= address is missing. Double-check you copied the full value above.' : 'TXT record found. No reports address is configured for this domain, so there is no rua= to look for.'}>
+				{watching ? (
 					<>
 						Expected: <code className="font-mono">rua=mailto:{rua.trim()}</code>
 					</>
 				) : null}
 			</CheckResult>
 		);
+	} else if (!watching) {
+		row = <CheckResult status="missing" title={title} summary="No DMARC record found. With no reports address configured there is nothing to add yet, so we are not checking again." />;
 	} else {
 		row = <CheckResult status="missing" title={title} summary="DNS record not detected yet. We check every 15 seconds; DNS changes can take a few minutes to propagate." />;
 	}
@@ -61,16 +71,29 @@ function LiveDnsCheck({ domainId, rua }: { domainId: number; rua: string | null 
 
 function SetupStep({ result }: { result: AddDomainResult }) {
 	const { domain } = result;
-	const record = buildRecommendedRecord(null, 'none', domain.rua_address);
+	const rua = hasReportAddress(domain.rua_address) ? domain.rua_address.trim() : null;
+	const q = useLiveDnsCheck(domain.id, domain.rua_address);
+	const lookup = q.isPending ? 'reading' : q.isError || q.data.error ? 'failed' : 'done';
+	// The live record decides what is offered: it is built from, and never to a weaker policy than, the one published.
+	const live = lookup === 'done' && q.data?.found ? q.data.current_record : null;
+	const livePolicy = parseDmarcPolicy(live);
+	const record = rua && lookup === 'done' ? buildRecommendedRecord(live, livePolicy ?? 'none', rua) : null;
+	const inPlace = lookup === 'done' && !!q.data?.found && !!q.data.has_rua;
+	const offered = record !== null && !inPlace;
+
+	let heading: { title: string; description: string };
+	if (!rua) heading = { title: 'Reports address needed', description: `${domain.domain} is added, but it has no reports address yet, so there is no DNS record to add.` };
+	else if (lookup === 'reading') heading = { title: 'Reading your DMARC record', description: `Reading the current DMARC record for ${domain.domain}…` };
+	else if (lookup === 'failed') heading = { title: 'Could not read your DMARC record', description: `We could not read the current DMARC record for ${domain.domain}, so no record is offered until the lookup works.` };
+	else if (inPlace) heading = { title: 'Your DNS record is in place', description: `The DMARC record for ${domain.domain} already sends reports here.` };
+	else if (live) heading = { title: 'Update your DMARC record', description: `${domain.domain} already has a DMARC record. Replace it with this one: it keeps your settings and adds our reports address.` };
+	else heading = { title: 'Add this DNS record', description: `Log in to wherever you manage ${domain.domain} (GoDaddy, Namecheap, Cloudflare, Route 53 …) and add this TXT record.` };
+
 	return (
 		<div className="max-w-2xl space-y-6">
 			<PageHeader
-				title="Add this DNS record"
-				description={
-					<>
-						Log in to wherever you manage <strong>{domain.domain}</strong> (GoDaddy, Namecheap, Cloudflare, Route 53 …) and add this TXT record.
-					</>
-				}
+				title={heading.title}
+				description={heading.description}
 				eyebrow={
 					<Badge variant="success">
 						<CheckCircle2 aria-hidden />
@@ -79,16 +102,31 @@ function SetupStep({ result }: { result: AddDomainResult }) {
 				}
 			/>
 			{result.parent_context ? <InheritanceBanner pc={result.parent_context} subdomain={domain.domain} /> : null}
-			<RecordBlock title="DMARC record" record={{ type: 'TXT', name: `_dmarc.${domain.domain}`, value: record, ttl: '3600 (or your provider default)' }} />
-			<p className="text-sm text-ink-2">
-				<strong className="text-ink-1">p=none</strong> means you are just watching. No email gets blocked or redirected. Once DMARC reports start coming in (usually within 24 hours), the dashboard shows whether your mail is fully aligned and when it is safe to enforce.
-			</p>
+			{!rua ? (
+				<Alert variant="warning" title="Report address not configured yet">
+					This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
+				</Alert>
+			) : null}
+			{lookup === 'reading' && rua ? <Skeleton className="h-24 w-full" /> : null}
+			{offered ? (
+				<RecordBlock title="DMARC record" record={{ type: 'TXT', name: `_dmarc.${domain.domain}`, value: record, ttl: '3600 (or your provider default)' }} />
+			) : null}
+			{offered && !live ? (
+				<p className="text-sm text-ink-2">
+					<strong className="text-ink-1">p=none</strong> means you are just watching. No email gets blocked or redirected. Once DMARC reports start coming in (usually within 24 hours), the dashboard shows whether your mail is fully aligned and when it is safe to enforce.
+				</p>
+			) : null}
+			{offered && live ? (
+				<p className="text-sm text-ink-2">
+					Your policy stays <strong className="text-ink-1">p={livePolicy ?? 'as published'}</strong>: only the reports address is added, so nothing about how your mail is handled changes.
+				</p>
+			) : null}
 			{result.manual_dns && result.dns_instructions ? (
 				<Alert variant="warning" title="Also add">
 					{result.dns_instructions}
 				</Alert>
 			) : null}
-			<LiveDnsCheck domainId={domain.id} rua={domain.rua_address} />
+			<LiveDnsCheck q={q} rua={domain.rua_address} />
 			<Button asChild>
 				<Link to={`/domains/${domain.id}`}>Go to {domain.domain}</Link>
 			</Button>

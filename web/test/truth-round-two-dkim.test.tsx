@@ -88,3 +88,9 @@ describe('item 3: the setup wizard agrees with the domain page about revoked key
 		expect(screen.queryByRole('region', { name: 'Revoked keys' })).toBeNull();
 	});
 });
+
+describe('review item 5: a quote inside a record is not TXT quoting', () => {
+	it('v=DKIM1; n="note"; p=MIGfAB== keeps its key: not revoked', () => expect(isRevokedDkimKey('v=DKIM1; n="note"; p=MIGfAB==')).toBe(false));
+	it('an escaped semicolon is decoded: "v=DKIM1\\059 p=" is revoked', () => expect(isRevokedDkimKey('"v=DKIM1\\059 p="')).toBe(true));
+	it('Cloudflare-quoted "v=DKIM1; k=rsa; p=" is still revoked', () => expect(isRevokedDkimKey('"v=DKIM1; k=rsa; p="')).toBe(true));
+});

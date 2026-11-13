@@ -38,8 +38,13 @@ export type KnownPolicy = string | null;
 /** The live record's tags that change what failing mail meets: the domain it belongs to, `sp=` and `pct=`. */
 export interface LiveDmarc {
 	domain: string;
+	/** A valid sp= (none / quarantine / reject); null when absent or not valid. */
 	sp: string | null;
+	/** An sp= value that is not a policy, as written; it is ignored, so subdomains inherit p=. */
+	invalidSp?: string | null;
 	pct: number;
+	/** The domain is itself a monitored subdomain: sp= on its own record does not reach its children. */
+	monitoredSubdomain?: boolean;
 }
 
 const isSubdomainOf = (from: string | null, domain: string) => !!from && from.toLowerCase().endsWith(`.${domain.toLowerCase()}`);
@@ -58,9 +63,16 @@ function asks(policy: string, pct: number): string | null {
 export function failingMailFate(policy: KnownPolicy, live?: LiveDmarc, headerFrom?: string | null): string {
 	const isPolicy = policy === 'none' || policy === 'quarantine' || policy === 'reject';
 	if (live && isPolicy && isSubdomainOf(headerFrom ?? null, live.domain)) {
+		// sp= only counts on the organizational domain's record. On a monitored subdomain's own record it reaches nobody:
+		// receivers look for a record published for the sender's domain, then for the organizational domain's.
+		if (live.monitoredSubdomain) {
+			return `${headerFrom} is a subdomain of ${live.domain}, which has its own DMARC record. Receivers use a record published for ${headerFrom}, or else the one on the organizational domain, so p= and sp= on ${live.domain} do not decide this mail. We have not read those records here.`;
+		}
 		const lead = live.sp
 			? `${headerFrom} is a subdomain, so sp=${live.sp} applies to it instead of p=${policy}`
-			: `${headerFrom} is a subdomain and your record has no sp= tag, so it inherits p=${policy}`;
+			: live.invalidSp
+				? `${headerFrom} is a subdomain. The record's sp=${live.invalidSp} is not a valid policy and is ignored, so it inherits p=${policy}`
+				: `${headerFrom} is a subdomain and your record has no sp= tag, so it inherits p=${policy}`;
 		const effective = live.sp ?? policy;
 		const ask = asks(effective, live.pct);
 		return `${lead}. ${ask ? `That asks receivers to ${ask}.` : 'Receivers still deliver it unless their own filters stop it.'} A DMARC record published on the subdomain itself would override this.`;
