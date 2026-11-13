@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { colors, contrastPairs, darkColors, forbiddenPairs, lightColors, radii, shadows, type ColorToken } from "../src/tokens/tokens";
 
@@ -99,4 +100,37 @@ describe("known failing pairs stay documented", () => {
 			expect(contrast(colors[p.mode][p.fg], colors[p.mode][p.bg])).toBeLessThan(4.5);
 		});
 	}
+});
+
+/** The No-Gradients Rule (DESIGN.md): every colour is a solid token. Scans the shipped sources of both packages. */
+describe("no gradients anywhere", () => {
+	const roots = ["../src/", "../../../web/src/"];
+	const exts = /\.(css|ts|tsx|js|jsx|html|svg)$/;
+	// CSS gradient functions, Tailwind gradient utilities (v3 and v4 names) and SVG gradient elements.
+	const banned = /\b(?:repeating-)?(?:linear|radial|conic)-gradient\s*\(|\bbg-gradient-|\bbg-(?:linear|radial|conic)(?:-|\b)|<\s*(?:linear|radial)Gradient\b/i;
+	const files: string[] = [];
+	const walk = (dir: URL) => {
+		for (const e of readdirSync(dir, { withFileTypes: true })) {
+			if (e.isDirectory()) walk(new URL(`${e.name}/`, dir));
+			else if (exts.test(e.name)) files.push(fileURLToPath(new URL(e.name, dir)));
+		}
+	};
+	for (const r of roots) walk(new URL(r, import.meta.url));
+
+	it("finds the sources it scans", () => {
+		expect(files.some((f) => f.endsWith("base.css"))).toBe(true);
+		expect(files.some((f) => f.endsWith("SenderInventory.tsx"))).toBe(true);
+	});
+	it("no source file uses a gradient", () => {
+		const hits = files.flatMap((f) =>
+			readFileSync(f, "utf8")
+				.split("\n")
+				.flatMap((line, i) => (banned.test(line) ? [`${f}:${i + 1}: ${line.trim()}`] : [])),
+		);
+		expect(hits).toEqual([]);
+	});
+	it("the pattern catches the forms it bans", () => {
+		for (const s of ["background: linear-gradient(90deg, red, blue)", "radial-gradient(circle, red, blue)", "bg-gradient-to-r", "bg-linear-to-r", "<linearGradient id='x'>"]) expect(banned.test(s), s).toBe(true);
+		for (const s of ["No gradients anywhere", "ia-pulse", "bg-surface-2"]) expect(banned.test(s), s).toBe(false);
+	});
 });

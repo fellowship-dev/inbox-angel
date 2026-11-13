@@ -16,6 +16,7 @@ import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from 
 import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
+import { useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
 const WINDOWS = [7, 30, 60] as const;
@@ -44,6 +45,8 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
+	const { canWrite } = useSession();
+	if (!canWrite) return null; // read-only members cannot run the setup wizard
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
 	const { done, total, nextStep } = wizardProgress(q.data);
 	if (done >= total) return null;

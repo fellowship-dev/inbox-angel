@@ -1,12 +1,9 @@
-import { Badge, EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
-import { CheckCircle2, Sparkles, XCircle, AlertTriangle } from 'lucide-react';
+import { Badge, EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@inbox-angel/ui';
+import { ArrowLeftRight, CheckCircle2, Sparkles, XCircle, AlertTriangle } from 'lucide-react';
 import { fmtPct, senderName, type Alignment, type Sender } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
+import { useScrollEdges } from '../../lib/layout';
 import { formatDay, isoDay } from '../../lib/reports';
-
-/** Scroll shadows at the table's edges (they show only while there is more to scroll to), so a cut-off column is never silent. */
-const SCROLL_SHADOWS =
-	'[background-image:linear-gradient(to_right,var(--surface-1),var(--surface-1)),linear-gradient(to_left,var(--surface-1),var(--surface-1)),linear-gradient(to_right,rgb(0_0_0/0.22),transparent),linear-gradient(to_left,rgb(0_0_0/0.22),transparent)] [background-position:left_center,right_center,left_center,right_center] [background-repeat:no-repeat] [background-size:2rem_100%,2rem_100%,0.9rem_100%,0.9rem_100%] [background-attachment:local,local,scroll,scroll]';
 
 /** A rate with an icon and the number, so pass/partial/fail never rests on colour. */
 function Rate({ pct, label }: { pct: number; label: string }) {
@@ -26,13 +23,18 @@ function Rate({ pct, label }: { pct: number; label: string }) {
 
 /** Every source that sent as this domain: who it is, how much, whether SPF and DKIM line up, and when it appeared. */
 export function SenderInventory({ senders, showDomains, alignment }: { senders: Sender[]; showDomains?: boolean; alignment?: Alignment }) {
+	const [tableRef, edges] = useScrollEdges<HTMLTableElement>();
 	if (senders.length === 0) {
 		return <EmptyState title="No senders in this window" description="Senders appear once receivers report mail sent as your domain." />;
 	}
 	return (
 		<div className="space-y-2">
-			<p className="text-xs text-ink-2 sm:hidden">Scroll sideways to see every column.</p>
-			<Table label="Sender inventory" containerClassName={SCROLL_SHADOWS}>
+			{/* A cut-off column is never silent: the label shows on phones and whenever the table overflows, and the edge that hides columns gets a control-strength hairline. */}
+			<p className={cn('items-center gap-1.5 text-xs text-ink-2', edges.left || edges.right ? 'flex' : 'flex sm:hidden')}>
+				<ArrowLeftRight aria-hidden className="size-4 shrink-0" />
+				Scroll sideways to see every column.
+			</p>
+			<Table ref={tableRef} label="Sender inventory" containerClassName={cn(edges.left && 'border-l-control', edges.right && 'border-r-control')}>
 				<caption className="sr-only">Sender inventory</caption>
 				<TableHeader>
 					<TableRow>

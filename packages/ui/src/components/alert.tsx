@@ -35,7 +35,8 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
 				<Icon aria-hidden className="mt-0.5 size-5 shrink-0" />
 				<div className="min-w-0 flex-1 space-y-1">
 					{title ? <p className="font-semibold leading-snug">{title}</p> : null}
-					{children ? <div className="text-ink-2 [&_a]:text-brand-ink [&_a]:underline">{children}</div> : null}
+					{/* Inline links take brand-ink; a link rendered as a Button (data-slot="button") keeps its own fill and label colours. */}
+					{children ? <div className="text-ink-2 [&_a:not([data-slot=button])]:text-brand-ink [&_a:not([data-slot=button])]:underline">{children}</div> : null}
 				</div>
 			</div>
 		);

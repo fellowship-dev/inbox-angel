@@ -139,6 +139,23 @@ describe("Card, Badge, Alert", () => {
 		expect(screen.getByRole("alert")).toHaveTextContent("Bad");
 		expect(screen.getByRole("status")).toHaveTextContent("FYI");
 	});
+	it("Alert link colour skips links rendered as Buttons, so a primary button keeps its label colour", () => {
+		render(
+			<Alert variant="info" title="Upgrade">
+				<a href="#docs">Read more</a>
+				<Button asChild size="sm"><a href="#wizard">Upgrade to reject</a></Button>
+			</Alert>,
+		);
+		const body = screen.getByText("Read more").parentElement!;
+		const rule = /\[&_a:not\(\[data-slot=button\]\)\]:text-brand-ink/;
+		expect(body.className).toMatch(rule);
+		expect(body.className).not.toMatch(/\[&_a\]:/);
+		const button = screen.getByRole("link", { name: "Upgrade to reject" });
+		expect(button).toHaveAttribute("data-slot", "button");
+		expect(button.matches("a:not([data-slot=button])")).toBe(false);
+		expect(button).toHaveClass("bg-brand", "text-brand-fg");
+		expect(screen.getByRole("link", { name: "Read more" }).matches("a:not([data-slot=button])")).toBe(true);
+	});
 });
 
 describe("Tooltip", () => {

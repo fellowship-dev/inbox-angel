@@ -200,9 +200,9 @@
         "purpose": "Mobile drawer."
       },
       {
-        "name": "ia-shimmer",
-        "value": "1.5s infinite",
-        "purpose": "Skeleton loading. Known debt: a gradient, which the No-Gradients Rule bans; to remove."
+        "name": "ia-pulse",
+        "value": "1.5s ease-in-out infinite",
+        "purpose": "Skeleton loading: solid surface-3 opacity pulse (no gradient); still under reduced motion."
       }
     ],
     "breakpoints": []
