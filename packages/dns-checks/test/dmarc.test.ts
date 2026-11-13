@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gradeDmarcPolicy, isDmarcRecord, lookupDmarc, parseDmarcRecord } from '../src/dmarc';
+import { gradeDmarcPolicy, isDmarcRecord, lookupDmarc, parseDmarcRecord, parseDmarcTags } from '../src/dmarc';
 import { fakeResolver } from './helpers';
 
 describe('parseDmarcRecord', () => {
@@ -100,5 +100,20 @@ describe('gradeDmarcPolicy', () => {
     expect(g('v=DMARC1; p=quarantine')).toBe('enforced');
     expect(g('v=DMARC1; p=reject; pct=99')).toBe('partial');
     expect(g('v=DMARC1; p=reject')).toBe('strict');
+  });
+});
+
+describe('parseDmarcTags (the one tag parser, shared with the dashboard)', () => {
+  it('ignores whitespace around names, = and ;, lower-cases names, first occurrence wins', () => {
+    expect(parseDmarcTags(' V = DMARC1 ;P = Reject; sp=none ; p=none;;junk')).toEqual({ v: 'DMARC1', p: 'Reject', sp: 'none' });
+  });
+  it('an empty or missing record has no tags', () => {
+    expect(parseDmarcTags('')).toEqual({});
+    expect(parseDmarcTags(null)).toEqual({});
+  });
+  it('isDmarcRecord tolerates whitespace around v= and its letter case', () => {
+    expect(isDmarcRecord('v = DMARC1 ; p=none')).toBe(true);
+    expect(isDmarcRecord('V=dmarc1')).toBe(true);
+    expect(isDmarcRecord('v=DMARC10')).toBe(false);
   });
 });

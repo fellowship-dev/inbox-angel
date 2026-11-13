@@ -1,5 +1,5 @@
 import type { Finding, Level } from '@inbox-angel/ui';
-import { formatPercent } from './format';
+import { formatPercent, timeAgo } from './format';
 import type { DomainCheckSummary } from './types';
 
 /**
@@ -9,9 +9,11 @@ import type { DomainCheckSummary } from './types';
  *  - Level 1 Authenticated: SPF and a DMARC record exist; DMARC only monitors (p=none).
  *  - Level 2 Protected:     DMARC enforces (p=quarantine or p=reject) on top of SPF.
  *
- * The stored SPF record and DMARC policy are null until something writes them, so for a self-managed domain null
- * means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only what is
- * confirmed. A lookup that failed never reaches this function: callers show an error state instead of a level.
+ * The stored SPF record and DMARC policy are null until DNS has been read (`dns_checked_at`), so for a self-managed domain
+ * null before that means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only
+ * what is confirmed. Once both were read, null is DNS's answer that there is no record. A lookup that failed never reaches this function: callers show an error state instead of a level.
+ * The stored DMARC policy is the effective one: a subdomain with no record of its own carries its parent's (`sp=`, else `p=`),
+ * and `dmarc_inherited_from` names the parent. `dmarc_issue` says a record exists but gives no policy (several, or invalid).
  * Hosted domains pass `nullMeans: 'missing'`, because there null means the record is not live in our zone.
  */
 export interface LevelAssessment {
@@ -26,15 +28,19 @@ const DKIM_HEALTHY = 0.95;
 
 const NOT_CHECKED_DETAIL = 'The overview has no stored result for this yet. The domain page reads it live from DNS.';
 
+type DnsFacts = Partial<Pick<DomainCheckSummary, 'dns_checked_at' | 'dmarc_issue' | 'dmarc_inherited_from'>>;
+
 export function assessDomain(
-	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'>,
-	{ nullMeans = 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
+	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'> & DnsFacts,
+	{ nullMeans = s.dns_checked_at ? 'missing' : 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
 ): LevelAssessment {
 	const hasSpf = !!s.spf_record;
 	const policy = s.dmarc_policy;
 	const enforcing = policy === 'quarantine' || policy === 'reject';
 	const spfUnknown = !hasSpf && nullMeans === 'unknown';
-	const dmarcUnknown = !policy && nullMeans === 'unknown';
+	const issue = policy ? null : (s.dmarc_issue ?? null); // a stored policy always wins over a stale issue
+	const dmarcUnknown = !policy && !issue && nullMeans === 'unknown';
+	const from = s.dmarc_inherited_from ? `, inherited from ${s.dmarc_inherited_from}` : '';
 
 	let level: Level = 0;
 	if (hasSpf && policy) level = 1;
@@ -46,9 +52,11 @@ export function assessDomain(
 	else findings.push({ status: 'missing', label: 'SPF record', detail: 'No SPF record found. Receivers cannot tell which servers may send for you.' });
 
 	if (dmarcUnknown) findings.push({ status: 'unknown', label: 'DMARC not checked yet', detail: NOT_CHECKED_DETAIL });
+	else if (issue === 'multiple') findings.push({ status: 'warn', label: 'Multiple DMARC records: receivers ignore them', detail: `Keep one DMARC record at _dmarc.${s.dmarc_inherited_from ?? 'your domain'} and delete the others.` });
+	else if (issue === 'invalid') findings.push({ status: 'warn', label: 'DMARC record is invalid', detail: `It has no valid p= policy, so receivers ignore it. Fix the record at _dmarc.${s.dmarc_inherited_from ?? 'your domain'}.` });
 	else if (!policy) findings.push({ status: 'missing', label: 'DMARC record', detail: 'No DMARC record found.' });
-	else if (enforcing) findings.push({ status: 'pass', label: `DMARC enforced (p=${policy})` });
-	else findings.push({ status: 'warn', label: 'DMARC is monitoring only (p=none)', detail: 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.' });
+	else if (enforcing) findings.push({ status: 'pass', label: `DMARC enforced (p=${policy})${from}` });
+	else findings.push({ status: 'warn', label: `DMARC is monitoring only (p=none)${from}`, detail: 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.' });
 
 	if (s.dkim_total > 0) {
 		const ok = s.dkim_pass / s.dkim_total >= DKIM_HEALTHY;
@@ -68,10 +76,24 @@ export function assessDomain(
 	let next: string | null = null;
 	if (unchecked) next = 'Open the domain to check its SPF and DMARC records in DNS.';
 	else if (!hasSpf) next = 'Publish an SPF record.';
+	else if (issue === 'multiple') next = 'Remove the extra DMARC records so only one remains.';
+	else if (issue === 'invalid') next = 'Fix the DMARC record so it has a valid p= policy.';
 	else if (!policy) next = 'Publish a DMARC record with p=none to start receiving reports.';
 	else if (!enforcing) next = 'Review your reports, then move DMARC to quarantine.';
 
 	return { level, description, findings, next };
+}
+
+/** When DNS was last read for this domain, and whether the latest attempt failed. */
+export function dnsCheckLine(s: Pick<DomainCheckSummary, 'dns_checked_at' | 'dns_check_attempted_at' | 'dns_check_status'> & Partial<Pick<DomainCheckSummary, 'dns_last_good_status'>>): string {
+	const goodWhen = s.dns_checked_at ? timeAgo(s.dns_checked_at) : null;
+	const good = goodWhen ? `Last good check ${goodWhen}.` : 'No successful check yet.';
+	if (s.dns_check_status === 'failed') {
+		const failed = `Last check failed${s.dns_check_attempted_at ? ` ${timeAgo(s.dns_check_attempted_at)}` : ''}.`;
+		if (goodWhen && s.dns_last_good_status === 'nxdomain') return `${failed} At the last good check (${goodWhen}) this domain did not resolve.`;
+		return `${failed} ${good}`;
+	}
+	return s.dns_checked_at ? `Checked ${timeAgo(s.dns_checked_at)}` : 'Not checked yet';
 }
 
 /** The slice of the hosted status that levels need. */
@@ -103,6 +125,8 @@ export function applyHostedInputs<S extends LevelSummary>(s: S, h: HostedLevelIn
 			...s,
 			spf_record: spf ? (s.spf_record ?? 'hosted') : null,
 			dmarc_policy: dmarc ? (s.dmarc_policy ?? 'none') : null,
+			dmarc_issue: null, // stored DNS facts do not describe records in our zone
+			dmarc_inherited_from: null,
 			mta_sts_enabled: mta ? 1 : 0,
 			mta_sts_mode: mta ? s.mta_sts_mode : null,
 		},
@@ -123,3 +147,7 @@ export function assessHostedDomain(s: LevelSummary, h: HostedLevelInput): LevelA
 	}));
 	return { ...a, findings: [...a.findings, ...extra] };
 }
+
+/** The last good check found the domain does not exist: now (the latest check agrees) or earlier (the latest attempt failed). */
+export const didNotResolve = (s: Pick<DomainCheckSummary, 'dns_check_status' | 'dns_last_good_status'>): 'now' | 'at-last-good-check' | null =>
+	s.dns_check_status === 'nxdomain' ? 'now' : s.dns_check_status === 'failed' && s.dns_last_good_status === 'nxdomain' ? 'at-last-good-check' : null;
