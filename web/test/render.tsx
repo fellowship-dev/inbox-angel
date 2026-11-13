@@ -11,6 +11,7 @@ export const STATUS: AuthStatus = {
 	configured: true,
 	mode: 'self-host',
 	signup_open: false,
+	signin_available: true,
 	oauth_providers: [],
 	prefill: { name: '', email: '' },
 	telemetry_default: false,
