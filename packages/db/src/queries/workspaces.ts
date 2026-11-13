@@ -4,7 +4,8 @@
  * itself (the caller passes the role it looked up); nothing here is reachable without one.
  */
 import { and, eq, sql } from 'drizzle-orm';
-import { getDb, type DbLike } from '../client';
+import { batchStatements, getDb, type DbLike } from '../client';
+import { changesOf } from './plan-limit';
 import {
 	apiKeys, auditLog, aggregateReports, cloudflareConnectionBlockedZones, cloudflareConnectionZones, cloudflareConnections,
 	domains, hostedDomains, intakeTokens, invites, memberships, monitorSubscriptions, mtaStsConfig, reportRecords, settings,
@@ -58,6 +59,22 @@ export function workspaceLifecycle(dbLike: DbLike) {
 				db.insert(workspaces).values({ id, name }),
 				db.insert(memberships).values({ workspace_id: id, user_id: ownerId, role: 'owner' }),
 			]),
+
+		/**
+		 * Hosted: create a workspace and its owner membership unless the user already owns `max` workspaces (invited
+		 * memberships do not count). The count and both inserts are one batch, so one D1 transaction, and D1 serialises
+		 * writes: concurrent creates cannot exceed the cap (margin 0). The membership insert is conditional on the
+		 * workspace row existing, so a refused create writes nothing. Returns whether it was created.
+		 */
+		async createCapped(id: string, name: string, ownerId: string, max: number): Promise<boolean> {
+			const [made] = await batchStatements(db, [
+				sql`INSERT INTO workspaces (id, name) SELECT ${id}, ${name}
+					WHERE (SELECT COUNT(*) FROM memberships WHERE user_id = ${ownerId} AND role = 'owner' AND workspace_id IN (SELECT id FROM workspaces)) < ${max}`,
+				sql`INSERT INTO memberships (workspace_id, user_id, role) SELECT ${id}, ${ownerId}, 'owner'
+					WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ${id})`,
+			]);
+			return changesOf(made) > 0;
+		},
 
 		/**
 		 * Leave a workspace unless that would orphan it: one statement, so two owners leaving at once

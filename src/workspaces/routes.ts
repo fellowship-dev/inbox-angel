@@ -7,6 +7,8 @@
 import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle, type MembershipRole } from '@inbox-angel/db';
 import type { AuthContext } from '../api/auth';
 import { logAudit } from '../audit/log';
+import type { Env } from '../index';
+import { planLimitResponse, planLimits } from '../hosted/plan-limits';
 import type { TenantContext } from '../tenancy/context';
 import { revokeWorkspaceConnections, type RevokeSummary } from '../lifecycle/revoke';
 import { streamWorkspaceExport } from '../lifecycle/export';
@@ -26,6 +28,8 @@ export interface WorkspaceCaller {
 export interface WorkspaceDeps {
   db: D1Database;
   mode: 'selfhost' | 'saas';
+  /** Hosted plan caps (MAX_WORKSPACES_PER_USER, BOOKING_URL): read from here so the route stays pure. */
+  env?: Partial<Env>;
   /** A tenant for any workspace, to clean up its domains (DNS, hosted records) before it is deleted. */
   tenantFor: (workspaceId: string) => Promise<TenantContext>;
   /** Before anything is deleted: can Cloudflare (and the hosted-records zone) be reached for every domain? A message when not. */
@@ -125,7 +129,13 @@ export async function handleWorkspaceRoutes(
     const name = await readName(request);
     if (name instanceof Response) return name;
     const id = `ws_${crypto.randomUUID().replace(/-/g, '')}`;
-    await lifecycle.create(id, name, user.id);
+    const caps = deps.mode === 'saas' ? planLimits({ ...deps.env, MODE: 'saas' }) : null;
+    if (caps) {
+      // Owned workspaces only (the sign-up workspace is one); atomic, so parallel creates cannot pass the cap together.
+      if (!(await lifecycle.createCapped(id, name, user.id, caps.workspacesPerUser))) return planLimitResponse(deps.env ?? {}, 'workspaces_per_user', caps.workspacesPerUser);
+    } else {
+      await lifecycle.create(id, name, user.id);
+    }
     audit(id, { action: 'workspace.created', resource_type: 'workspace', resource_id: id, resource_name: name });
     return json({ id, name, role: 'owner', member_count: 1 }, 201);
   }
