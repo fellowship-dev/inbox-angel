@@ -202,7 +202,7 @@
       {
         "name": "ia-shimmer",
         "value": "1.5s infinite",
-        "purpose": "Skeleton loading."
+        "purpose": "Skeleton loading. Known debt: a gradient, which the No-Gradients Rule bans; to remove."
       }
     ],
     "breakpoints": []
