@@ -248,6 +248,15 @@ describe('DNS lookup failures are not missing records', () => {
 		expect(screen.queryByText(/No MX records found/)).not.toBeInTheDocument();
 	});
 
+	it('DKIM: a wildcard answer says public DNS cannot tell, not "No DKIM selectors found"', async () => {
+		renderApp(<Wizard />, { route: '/domains/7/setup/3', routes: routes({ status: status({ dkim: { selectors: [], source: 'doh', wildcard: true, wildcard_record: 'v=DMARC1; p=reject' } }) }) });
+		await heading('DKIM signing');
+		const row = (await screen.findByText("Can't tell from public DNS")).closest('li') as HTMLElement;
+		expect(row).toHaveAttribute('data-status', 'neutral');
+		expect(within(row).getByText("Every name under example.com answers with the same TXT record, so public DNS can't show which DKIM keys exist.")).toBeInTheDocument();
+		expect(screen.queryByText(/No DKIM selectors found/)).not.toBeInTheDocument();
+	});
+
 	it('DKIM: failed selector lookups never read as "No DKIM selectors found"', async () => {
 		renderApp(<Wizard />, { route: '/domains/7/setup/3', routes: routes({ status: status({ dns_errors: ['dkim google: SERVFAIL'], spf: { record: null, lookup_count: null, flattening_active: false } }) }) });
 		await heading('DKIM signing');

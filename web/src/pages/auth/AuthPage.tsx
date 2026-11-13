@@ -2,10 +2,12 @@ import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
+import { bindSignupDomainToEmail, readSignupDomain } from '../../lib/signup-intent';
 import { useSession } from '../../lib/session';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
+import { HostedAlternative } from '../../components/HostedAlternative';
 
 const PROVIDER_LABELS: Record<string, string> = { github: 'GitHub', google: 'Google' };
 
@@ -17,10 +19,10 @@ type Mode = 'setup' | 'signup' | 'signin';
  *  - hosted mode: sign in, or create an account when sign-up is open;
  *  - otherwise: sign in (a self-hosted instance is closed after setup: new people come in by invite).
  */
-export function AuthPage() {
+export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const { status, signedIn } = useSession();
 	const navigate = useNavigate();
-	const [creating, setCreating] = useState(false);
+	const [creating, setCreating] = useState(initialMode === 'signup');
 	const [name, setName] = useState('');
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
@@ -51,6 +53,7 @@ export function AuthPage() {
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
+			if (mode === 'signup') bindSignupDomainToEmail(email);
 			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Inbox-Angel-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
 			if (res.verification_required) {
@@ -83,12 +86,18 @@ export function AuthPage() {
 
 	if (verifyFor) return <CheckEmail email={verifyFor} onBack={() => setVerifyFor(null)} />;
 
+	const requestedDomain = mode === 'signup' ? readSignupDomain() : null;
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
 		mode === 'setup' ? 'This creates the account that owns this instance. It needs the installer proof, a secret only the person who deployed it holds. There is no default password.' : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
+			{mode === 'signup' && requestedDomain ? (
+				<p className="text-sm text-ink-2">
+					You're adding <span className="font-mono [overflow-wrap:anywhere]">{requestedDomain}</span>. You'll confirm it after you verify your email.
+				</p>
+			) : null}
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
 				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="The BOOTSTRAP_SECRET value set on the Worker before its first start. The setup guide keeps it in a private file, such as ~/.config/inbox-angel/bootstrap-proof. It works once. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
 				{registering ? (
@@ -122,6 +131,8 @@ export function AuthPage() {
 					{mode === 'signin' ? 'Sign in' : 'Create account'}
 				</Button>
 			</form>
+
+			{mode === 'setup' ? <HostedAlternative url={status.hosted_service_url} /> : null}
 
 			{mode === 'signin' ? (
 				<p className="text-center text-sm">

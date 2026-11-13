@@ -64,7 +64,7 @@ export interface Facts {
     valid: boolean | null;
     issues: string[];
   };
-  dkim: { foundSelectors: string[]; scanned: number };
+  dkim: { foundSelectors: string[]; scanned: number; wildcard: boolean };
   mtaSts: DomainReport['mtaSts']['status'];
   bimi: {
     status: DomainReport['bimi']['status'];
@@ -143,7 +143,9 @@ export function factsOf(r: DomainReport, checkedAt: string): Facts {
   for (const [label, a] of [['logo', r.bimi.logo], ['certificate', r.bimi.vmc]] as const) {
     if (a?.status === 'unreachable') unchecked.push(`BIMI ${label}: could not be fetched (${a.detail || 'network error'})`); // a fetch failure says nothing about the asset
   }
-  unchecked.push(`DKIM: only ${r.dkim.scanned} common selectors can be probed; a key under any other selector is invisible from outside`);
+  unchecked.push(r.dkim.wildcard
+    ? `DKIM: every name under ${r.domain} answers with the same TXT record, so public DNS cannot show which DKIM keys exist`
+    : `DKIM: only ${r.dkim.scanned} common selectors can be probed; a key under any other selector is invisible from outside`);
   unchecked.push('Subdomains used by mail services (for example a send. or bounce. subdomain) were not queried');
   unchecked.push('Inbox placement and sender reputation cannot be measured from public DNS');
   const spf = r.spf, dmarc = r.dmarc, rec = dmarc.record;
@@ -161,7 +163,7 @@ export function factsOf(r: DomainReport, checkedAt: string): Facts {
       sp: rec?.subdomainPolicy ?? null, rua: rec?.rua ?? [], inherited: dmarc.inherited, foundAt: dmarc.foundAt, valid: rec ? rec.valid : null,
       issues: rec?.issues ?? [],
     },
-    dkim: { foundSelectors: liveDkim, scanned: r.dkim.scanned },
+    dkim: { foundSelectors: liveDkim, scanned: r.dkim.scanned, wildcard: r.dkim.wildcard },
     mtaSts: r.mtaSts.status,
     bimi: { status: r.bimi.status, raw: r.bimi.raw === null ? null : redact(r.bimi.raw), foundAt: r.bimi.foundAt, logo: asset(r.bimi.logo), certificate: asset(r.bimi.vmc) },
     unchecked,
@@ -274,7 +276,7 @@ export function findingsOf(r: DomainReport, checkedAt: string): Finding[] {
 
   // DKIM (weak by construction)
   const senders = facts.senderProviders;
-  if (senders.length && facts.dkim.foundSelectors.length === 0 && (spf.status === 'ok' || spf.status === 'permerror')) {
+  if (senders.length && !facts.dkim.wildcard && facts.dkim.foundSelectors.length === 0 && (spf.status === 'ok' || spf.status === 'permerror')) {
     const p = senders.reduce((best, x) => (findable(x.id) > findable(best.id) ? x : best));
     out.push(f('dkim-not-found-for-sender', `No DKIM key found for ${p.name}`, 0.6, findable(p.id), 'S',
       [`SPF authorises ${p.name} (${p.evidence.slice(0, 2).join(', ')}) ${seen}`,

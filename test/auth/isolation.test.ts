@@ -98,6 +98,7 @@ const ROUTES: Route[] = [
   // pending domain claims (SaaS): another workspace's claim is as unreachable as its domain
   { method: 'POST', path: '/api/domains/claims/1/verify', body: {}, kind: 'denied', note: 'B\'s pending claim' },
   { method: 'DELETE', path: '/api/domains/claims/1', kind: 'denied', note: 'B\'s pending claim' },
+  { method: 'GET', path: '/api/domains/claims/1/preview', kind: 'denied', note: "B's pending claim" },
   { method: 'GET', path: '/api/domains/2/stats', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/health-report', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/reports?date=2023-11-14', kind: 'denied' },
@@ -412,7 +413,7 @@ describe('self-host: the shared Cloudflare token stays with the instance owner',
   it('adding the base domain in such a workspace asks Cloudflare nothing', async () => {
     const { env, owner, cf } = await shared();
     const b = (await (await call(env, 'POST', '/api/workspaces', { key: owner, body: { name: 'Client B' } })).json() as any).id as string;
-    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example' } });
+    const res = await call(env, 'POST', '/api/settings/base-domain', { key: owner, headers: { 'x-workspace-id': b }, body: { domain: 'client-b.example.net' } });
     expect(res.status).toBe(201);
     expect((await res.json() as any).zone_id).toBeNull();
     expect(cf.calls).toEqual([]);

@@ -258,6 +258,11 @@ describe('lookupDkim', () => {
     expect(r).toBeNull();
   });
 
+  it('does not take a DMARC record that a wildcard answers with for a DKIM key (the free check\'s one selector)', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['v=DMARC1; p=reject; rua=mailto:a@example.com']));
+    expect(await lookupDkim('example.com', 'sel')).toBeNull();
+  });
+
   it('finds record with only k= tag (no v=DKIM1)', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(makeDohResponse(['k=rsa; p=MIIB']));
     const r = await lookupDkim('example.com', 'sel');

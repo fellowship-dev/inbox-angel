@@ -49,6 +49,19 @@ describe('mail findings (test_mail_check.py)', () => {
     expect(ids(rec)['dkim-not-found-for-sender']).toBeUndefined();
   });
 
+  it('a wildcard under _domainkey is "cannot tell", not "no key found": no finding, and it is listed as unchecked', () => {
+    const rec = makeRec('acme.dev', {
+      spf: 'ok', spfRaw: 'v=spf1 include:resend.com ~all', providers: [RESEND], dmarc: 'found',
+      dmarcRaw: 'v=DMARC1; p=reject; rua=mailto:a@acme.dev', rua: ['mailto:a@acme.dev'], mx: ['none', []],
+      dkimWildcard: 'v=DMARC1; p=reject; rua=mailto:a@acme.dev',
+    });
+    expect(ids(rec)['dkim-not-found-for-sender']).toBeUndefined();
+    const facts = factsOf(rec, CHECKED);
+    expect(facts.dkim).toEqual({ foundSelectors: [], scanned: 36, wildcard: true });
+    expect(facts.unchecked).toContain('DKIM: every name under acme.dev answers with the same TXT record, so public DNS cannot show which DKIM keys exist');
+    expect(facts.unchecked.join(' ')).not.toContain('only 36 common selectors');
+  });
+
   it('a provider-specific DKIM selector identifies the sender', () => {
     const facts = factsOf(makeRec('example.com', { dkim: ['resend', 'google'] }), CHECKED);
     expect(facts.senderProviders.map(p => p.id)).toEqual(['resend']);

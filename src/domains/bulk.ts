@@ -5,9 +5,12 @@
 import type { TenantContext } from '../tenancy/context';
 import { provisionDomain } from '../dns/provision';
 import { logAudit } from '../audit/log';
+import { PlanLimitError } from '@inbox-angel/db';
+import { planLimitBody } from '../hosted/plan-limits';
+import { normalizeDomainName } from '@inbox-angel/dns-checks';
+import { domainCap, domainRefusal } from './service';
 import { admitDomain, claimView, settleClaims, type ClaimView } from './ownership';
 
-const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 const BATCH_LIMIT = 50;
 
 export const REPORTS_DOMAIN_MISSING = 'Reports domain not configured — complete the setup wizard first';
@@ -18,14 +21,23 @@ export interface BulkImportResult {
   domain: string;
   status: BulkImportStatus;
   error?: string;
+  /** 'plan_limit': the workspace is at its hosted domain cap; this row and every row after it were not attempted. */
+  code?: 'plan_limit';
+  /** With code 'plan_limit': where to ask for more (https only), or null. */
+  help_url?: string | null;
   dns_record_id?: string | null;
   manual_dns?: boolean;
   /** status 'pending' (SaaS): the TXT record that proves ownership. Nothing else is done for the domain until it is verified. */
   claim?: ClaimView;
 }
 
+function atCapRow(tenant: TenantContext, domain: string, max: number): BulkImportResult {
+  const { error, help_url } = planLimitBody(tenant.env, 'domains_per_workspace', max);
+  return { domain, status: 'error', error, code: 'plan_limit', help_url };
+}
+
 export function validateDomain(domain: string): boolean {
-  return DOMAIN_RE.test(domain);
+  return normalizeDomainName(domain).ok;
 }
 
 /** Parse a newline- or comma-separated domain list into unique, lowercase entries. */
@@ -63,12 +75,19 @@ export async function bulkInsertDomains(
   const ruaAddress = `rua@${rdomain}`;
   const batch = domains.slice(0, BATCH_LIMIT);
   const results: BulkImportResult[] = [];
+  const cap = domainCap(tenant);
+  let atCap = false;
+  // One count up front, then a local tally. It is advisory: the capped INSERT below is what enforces the cap, so a stale tally
+  // can only send a row to that insert, never past the cap.
+  let held = cap === undefined ? 0 : (await tenant.scope.domains.list()).length;
 
-  for (const domain of batch) {
-    if (!validateDomain(domain)) {
-      results.push({ domain, status: 'invalid', error: 'invalid domain format' });
+  for (const typed of batch) {
+    const named = normalizeDomainName(typed);
+    if (!named.ok) {
+      results.push({ domain: typed, status: 'invalid', error: domainRefusal(named).error });
       continue;
     }
+    const domain = named.domain;
 
     // Dedup check
     const existing = await tenant.scope.domains.getByName(domain);
@@ -77,6 +96,9 @@ export async function bulkInsertDomains(
       continue;
     }
 
+    // Advisory (see service.ts): a domain that can never be added gets no claim. The INSERT below is what enforces the cap.
+    if (cap !== undefined && (atCap || held >= cap)) { atCap = true; results.push(atCapRow(tenant, domain, cap)); continue; }
+
     const admission = await admitDomain(tenant, domain);
     if (admission.kind === 'taken') { results.push({ domain, status: 'duplicate', error: 'already registered in another workspace' }); continue; }
     if (admission.kind === 'limit') { results.push({ domain, status: 'error', error: 'too many unverified domains — verify or remove some first' }); continue; }
@@ -84,9 +106,11 @@ export async function bulkInsertDomains(
 
     let domainId: number;
     try {
-      const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: admission.via });
+      const result = await tenant.scope.domains.insert({ domain, rua_address: ruaAddress, verified_via: admission.via }, undefined, { maxDomains: cap });
       domainId = result.meta.last_row_id as number;
+      held++;
     } catch (e: unknown) {
+      if (e instanceof PlanLimitError) { atCap = true; results.push(atCapRow(tenant, domain, e.max)); continue; }
       const msg = e instanceof Error ? e.message : String(e);
       // Race condition: another request inserted the domain between our check and insert
       if (msg.includes('UNIQUE')) {

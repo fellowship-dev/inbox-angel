@@ -1,6 +1,7 @@
 import { pageHeaders, renderConsentPage, renderConsentProblem, renderSignedOutPage, type ConsentModel } from './consent';
 import type { OAuthProviderOptions, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 import { accessLookups, authLookups, forWorkspace, workspaceLifecycle } from '@inbox-angel/db';
+import { normalizeDomainName } from '@inbox-angel/dns-checks';
 import type { BoundEnv } from '../index';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { ACCESS_ACTIONS, validActions } from '../access/grant';
@@ -110,7 +111,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
    if (selections.length > 100 || !Number.isInteger(days) || days < 1 || days > 30) return problem('Choose up to 100 domains and an end date between 1 and 30 days from now.', 400);
    // Validate every tuple/action using exactly the same live policy as REST/MCP.
    for (const s of selections) {
-    if (!s.domain || !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/.test(s.domain)) return problem('Enter the new domain as a plain name, like example.com, and choose its workspace.', 400);
+    if (!s.domain || (n => !n.ok || n.domain !== s.domain)(normalizeDomainName(s.domain))) return problem('Enter the new domain as a plain name, like example.com, and choose its workspace.', 400);
     if (s.productId) {
      const scope = forWorkspace(env.DB, s.workspaceId);
      if (!await scope.access.products.get(s.productId)) return Response.json({ error: 'Product unavailable' }, { status: 403 });

@@ -47,6 +47,9 @@ export interface BulkImportItem {
 	/** Present when status is 'pending': the DNS proof that makes the domain ours. */
 	claim?: DomainClaim;
 	error?: string;
+	/** 'plan_limit': the workspace is at its domain limit; `help_url` is where to ask for more (https only). */
+	code?: string;
+	help_url?: string | null;
 	dns_record_id?: string | null;
 	manual_dns?: boolean;
 }

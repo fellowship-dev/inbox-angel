@@ -7,6 +7,8 @@
 import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle, type MembershipRole } from '@inbox-angel/db';
 import type { AuthContext } from '../api/auth';
 import { logAudit } from '../audit/log';
+import type { Env } from '../index';
+import { planLimitResponse, planLimits } from '../hosted/plan-limits';
 import type { TenantContext } from '../tenancy/context';
 import { revokeWorkspaceConnections, type RevokeSummary } from '../lifecycle/revoke';
 import { streamWorkspaceExport } from '../lifecycle/export';
@@ -26,6 +28,8 @@ export interface WorkspaceCaller {
 export interface WorkspaceDeps {
   db: D1Database;
   mode: 'selfhost' | 'saas';
+  /** Hosted plan caps (MAX_WORKSPACES_PER_USER, BOOKING_URL): read from here so the route stays pure. */
+  env?: Partial<Env>;
   /** A tenant for any workspace, to clean up its domains (DNS, hosted records) before it is deleted. */
   tenantFor: (workspaceId: string) => Promise<TenantContext>;
   /** Before anything is deleted: can Cloudflare (and the hosted-records zone) be reached for every domain? A message when not. */
@@ -125,7 +129,13 @@ export async function handleWorkspaceRoutes(
     const name = await readName(request);
     if (name instanceof Response) return name;
     const id = `ws_${crypto.randomUUID().replace(/-/g, '')}`;
-    await lifecycle.create(id, name, user.id);
+    const caps = deps.mode === 'saas' ? planLimits({ ...deps.env, MODE: 'saas' }) : null;
+    if (caps) {
+      // Owned workspaces only (the sign-up workspace is one); atomic, so parallel creates cannot pass the cap together.
+      if (!(await lifecycle.createCapped(id, name, user.id, caps.workspacesPerUser))) return planLimitResponse(deps.env ?? {}, 'workspaces_per_user', caps.workspacesPerUser);
+    } else {
+      await lifecycle.create(id, name, user.id);
+    }
     audit(id, { action: 'workspace.created', resource_type: 'workspace', resource_id: id, resource_name: name });
     return json({ id, name, role: 'owner', member_count: 1 }, 201);
   }
@@ -192,7 +202,12 @@ export async function handleWorkspaceRoutes(
     if (!to || to === user.id) return err('user_id must be another member of this workspace', 400);
     const target = await (await deps.tenantFor(id)).scope.team.getMember(to);
     if (!target) return err('that person is not a member of this workspace', 404);
-    if (!(await lifecycle.transferOwnership(id, user.id, to))) return err('could not transfer ownership; reload and try again', 409);
+    const caps = deps.mode === 'saas' ? planLimits({ ...deps.env, MODE: 'saas' }) : null;
+    if (!(await lifecycle.transferOwnership(id, user.id, to, caps?.workspacesPerUser))) {
+      // Nothing changed: the target is at the cap (and not already an owner here), or the request was stale.
+      if (caps && target.role !== 'owner' && (await lifecycle.ownedCount(to)) >= caps.workspacesPerUser) return planLimitResponse(deps.env ?? {}, 'workspaces_per_user', caps.workspacesPerUser);
+      return err('could not transfer ownership; reload and try again', 409);
+    }
     await globalQueries(deps.db).users.setLegacyRole(to, 'admin');
     audit(id, { action: 'workspace.ownership_transferred', resource_type: 'user', resource_id: to, resource_name: target.email, before_value: { owner: user.email }, after_value: { owner: target.email } });
     return json({ ok: true });

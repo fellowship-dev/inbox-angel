@@ -13,6 +13,8 @@ import { runHostedCron } from './hosted/cron';
 import { runCronForWorkspaces } from './cron';
 import { buildPolicyFile } from './email/mta-sts';
 import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
+import { hostedServiceUrl, hostedServiceSentence } from './hosted-service';
+import { llmsTxt } from './llms-txt';
 
 export interface Env {
   DB: D1Database | undefined;
@@ -74,6 +76,8 @@ export interface Env {
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string; // distinct claimed sender domains with their own bucket per token per day; the rest share one (default 50)
   INTAKE_MAX_NEW_IPS_PER_REPORT?: string; // uncached source IPs enriched per report (default 50)
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string; // hosted-records domains per workspace (default 10)
+  MAX_WORKSPACES_PER_USER?: string;     // hosted plan cap: workspaces one person may own (default 5; self-host: none)
+  MAX_DOMAINS_PER_WORKSPACE?: string;   // hosted plan cap: domains one workspace may hold (default 10; self-host: none)
   HOSTED_RECORDS_TOKEN?: string; // secret: least-privilege DNS:Edit token for that one zone
   // Email funnel and compliance (docs/email-funnel.md)
   RESEND_API_KEY?: string;       // secret: Resend API key; the onboarding sequence is sent with Resend (Cloudflare Email Service is transactional-only)
@@ -86,6 +90,7 @@ export interface Env {
   AUTHSERV_HEADER?: string;      // "ar" (Authentication-Results) or "arc" (ARC-Authentication-Results): the one header kind the receiver adds; REQUIRED for enrolment
   POSTAL_ADDRESS?: string;       // postal address shown in the footer of non-transactional mail
   BOOKING_URL?: string;          // booking link in the day-14 note; that step is held until it is set
+  HOSTED_SERVICE_URL?: string;   // https URL of the maker-run hosted free tier; unset = no surface mentions a hosted service (src/hosted-service.ts)
   SERVICE_PRICES?: string;       // JSON {"fix":"$…","keepFixed":"$…/mo","bimi":"$…/mo"}: the prices in the day-10 email
   ONBOARDING_SEQUENCE_ENABLED?: string; // "1" turns the onboarding sequence on for self-host; hosted: on unless "0"
   SITE_ORIGINS?: string;         // comma-separated origins allowed to call the free-check endpoints from a browser (CORS)
@@ -93,6 +98,7 @@ export interface Env {
   SEND_EMAIL?: SendEmail;        // CF Email Workers outbound binding
   AUTH_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // auth rate limiting (10/min)
   API_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };  // global rate limiting (200/min)
+  DNS_PREVIEW_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // claim DNS preview, per user (10/min)
 }
 
 /** Env after the DB-bound guard: entry points serve the setup page / bail out when DB is unbound. */
@@ -103,7 +109,9 @@ export const coreWorker = Object.freeze({
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // OAuth relay deployment (CF_OAUTH_RELAY_SECRET set): stateless, needs no database. Inert everywhere else.
     if (relayEnabled(env) && isRelayPath(new URL(request.url).pathname)) return handleRelay(request, env);
-    if (!env.DB) return setupPage();
+    // Machine-readable summary for agents (llmstxt.org). Needs no database, so it also answers before setup.
+    if (new URL(request.url).pathname === '/llms.txt' && (request.method === 'GET' || request.method === 'HEAD')) return llmsTxt(env, request.method === 'HEAD');
+    if (!env.DB) return setupPage(env);
     try {
       await assertSchemaReady(env.DB);
     } catch (e) {
@@ -171,7 +179,11 @@ export const coreWorker = Object.freeze({
 
 export default withMcpAuthorization(coreWorker, createInboxMcpHandler());
 
-function setupPage(): Response {
+export function setupPage(env: Pick<Env, 'MODE' | 'HOSTED_SERVICE_URL'> = {}): Response {
+  const hosted = hostedServiceUrl(env);
+  const hostedNote = hosted
+    ? `\n  <p style="font-size: 0.9rem; color: #4b5563;">${escapeHtml(hostedServiceSentence(hosted)).replace(escapeHtml(hosted), () => `<a href="${escapeHtml(hosted)}" target="_blank" rel="noopener noreferrer">${escapeHtml(hosted)}</a>`)}</p>`
+    : '';
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -192,7 +204,7 @@ function setupPage(): Response {
 <body>
   <h1>🪄 InboxAngel</h1>
   <div class="badge">Setup required</div>
-  <p>Your Worker is running, but no D1 database is attached yet. Complete these steps to finish setup:</p>
+  <p>Your Worker is running, but no D1 database is attached yet. Complete these steps to finish setup:</p>${hostedNote}
   <ol>
     <li>Create a D1 database:<br><pre>wrangler d1 create inbox-angel</pre></li>
     <li>Copy the <code>database_id</code> from the output and paste it into <code>wrangler.jsonc</code> under <code>d1_databases[0].database_id</code>.</li>
@@ -208,4 +220,8 @@ function setupPage(): Response {
 </body>
 </html>`;
   return new Response(html, { status: 503, headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }

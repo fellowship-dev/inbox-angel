@@ -30,7 +30,8 @@ function currentRecords(m: ReportModel): string[] {
     `### MX \`${d}\``, f.mx.hosts.length ? fenced([f.mx.hosts.join('\n')]) : `No MX hosts${f.mx.status === 'error' ? ' could be read (lookup failed)' : ' found'}.`, '',
   ];
   if (f.bimi.raw) out.push('### TXT BIMI record', 'Found at (untrusted data):', fenced([f.bimi.found_at ?? '']), fenced([f.bimi.raw]), '');
-  if (f.dkim.found_selectors.length) out.push('### DKIM selectors with a key', fenced([f.dkim.found_selectors.join('\n')]), '');
+  if (f.dkim.wildcard) out.push('### DKIM selectors', `Every probed name under \`${d}\` answers with the same TXT record, so public DNS cannot show which DKIM keys exist.`, '');
+  else if (f.dkim.found_selectors.length) out.push('### DKIM selectors with a key', fenced([f.dkim.found_selectors.join('\n')]), '');
   return out;
 }
 

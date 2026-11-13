@@ -15,7 +15,7 @@ import { NoWorkspacePage } from './pages/auth/NoWorkspacePage';
 import { ResetPage } from './pages/auth/ResetPage';
 
 /** Waits for the session, then shows the app, the sign-in screen (deep link preserved) or a "server unreachable" state. */
-function Gate({ children }: { children: ReactNode }) {
+function Gate({ children, initialMode }: { children: ReactNode; initialMode?: 'signup' }) {
 	const { state, retry, me } = useSession();
 	if (state === 'loading') return <div className="mx-auto max-w-2xl p-8"><PageSkeleton label="Starting up" /></div>;
 	if (state === 'unreachable') {
@@ -29,7 +29,7 @@ function Gate({ children }: { children: ReactNode }) {
 			</div>
 		);
 	}
-	if (state === 'anon') return <AuthPage />;
+	if (state === 'anon') return <AuthPage initialMode={initialMode} />;
 	if (me && me.workspace_id == null) return <NoWorkspacePage />;
 	return <>{children}</>;
 }
@@ -102,6 +102,8 @@ function AppRoutes() {
 			<Route path="/invite/:token" element={<InvitePage />} />
 			<Route path="/reset/:token" element={<ResetPage />} />
 			<Route path="/forgot" element={<ForgotPage />} />
+			{/* From the website: the create-account screen when anonymous, the app (and its setup redirect) when signed in. */}
+			<Route path="/signup" element={<Gate initialMode="signup"><Navigate to="/" replace /></Gate>} />
 			<Route
 				element={
 					<Gate>

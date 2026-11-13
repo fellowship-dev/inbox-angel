@@ -23,7 +23,7 @@
 		"directory": "./web/dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health"]
+		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health", "/llms.txt"]
 	},
 	"compatibility_date": "2025-03-01",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -71,7 +71,8 @@
 	"unsafe": {
 		"bindings": [
 			{ "name": "AUTH_LIMITER", "type": "ratelimit", "namespace_id": "1001", "simple": { "limit": 10,  "period": 60 } },
-			{ "name": "API_LIMITER",  "type": "ratelimit", "namespace_id": "1002", "simple": { "limit": 200, "period": 60 } }
+			{ "name": "API_LIMITER",  "type": "ratelimit", "namespace_id": "1002", "simple": { "limit": 200, "period": 60 } },
+			{ "name": "DNS_PREVIEW_LIMITER", "type": "ratelimit", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
 		]
 	},
 
@@ -90,6 +91,10 @@
 
 	// Hosted service only (MODE=saas + SAAS_ENABLED=1, see docs/hosted.md): INTAKE_DOMAIN, CANARY_DOMAIN,
 	// HOSTED_RECORDS_ZONE, HOSTED_RECORDS_LABEL, and the secret HOSTED_RECORDS_TOKEN. Self-hosters ignore these.
+	// Hosted plan caps (positive integers, anything else keeps the default; never applied when self-hosting):
+	//   MAX_WORKSPACES_PER_USER    workspaces one person may own (default 5; workspaces they were only invited to do not count)
+	//   MAX_DOMAINS_PER_WORKSPACE  domains one workspace may hold (default 10)
+	// A refused request answers 403 with code "plan_limit"; BOOKING_URL (https only) is offered as the way to ask for more.
 
 	// Environment variables
 	"vars": {
@@ -97,5 +102,7 @@
 		// Domain config is entered in the setup wizard and stored in D1.
 		// Installer proof secret: BOOTSTRAP_SECRET; agent issuer: BETTER_AUTH_URL + OAUTH_KV.
 		// DNS/routing secret: CLOUDFLARE_API_TOKEN (see README for token permissions).
+		// Optional HOSTED_SERVICE_URL (https): the hosted free tier. When set, /llms.txt, the MCP instructions, the
+		// setup pages and /api/version mention it once; unset, nothing mentions a hosted service (src/hosted-service.ts).
 	}
 }
