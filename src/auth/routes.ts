@@ -205,7 +205,9 @@ export async function handleAuthRoute(
     if (!isSetup && !isSaas(env)) return err('sign-up is closed — ask an owner for an invite', 403);
     if (isSetup && (await platform(env).team.hasOwner())) return err('already configured — use /api/auth/login', 409);
 
-    const bootstrapProof = request.headers.get('x-ready-set-mail-bootstrap') ?? '';
+    const bootstrapProof = request.headers.get('x-ready-set-mail-bootstrap')
+      || request.headers.get('x-inbox-angel-bootstrap') // @legacy-name: header before the rename to Ready Set Mail (2026-11-13); remove after every installation's owner setup is done
+      ?? '';
     if (isSetup && !(await verifyBootstrapProof(env, bootstrapProof))) return err('installer proof required', 403);
     const body = await readJson<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);

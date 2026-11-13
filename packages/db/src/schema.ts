@@ -622,7 +622,7 @@ export type CfAuthType = (typeof CF_AUTH_TYPES)[number];
 export type CfConnectionStatus = (typeof CF_CONNECTION_STATUSES)[number];
 
 /**
- * A Cloudflare account an Ready Set Mail workspace has connected (OAuth, or a pasted API token). One workspace
+ * A Cloudflare account a Ready Set Mail workspace has connected (OAuth, or a pasted API token). One workspace
  * can hold several. `token_envelope` is the AES-GCM envelope of {access, refresh, expires_at}
  * (src/connections/crypto.ts): the plaintext token is never stored, and list queries never select the column.
  */

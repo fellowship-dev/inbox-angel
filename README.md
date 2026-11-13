@@ -241,7 +241,7 @@ Remove the `rua@reports.yourdomain.com` address from each domain's `_dmarc` TXT 
 **4. Delete the Worker and database**
 
 ```bash
-wrangler delete                   # removes the Worker and its routes
+wrangler delete                      # removes the Worker and its routes
 wrangler d1 delete ready-set-mail    # permanently deletes the D1 database
 ```
 

@@ -172,6 +172,8 @@ export class TokenCrypto {
   async hmacKey(purpose: string): Promise<CryptoKey> {
     const base = await crypto.subtle.importKey('raw', this.#keys[0].raw as BufferSource, 'HKDF', false, ['deriveKey']);
     return crypto.subtle.deriveKey(
+      // The salt is a fixed cryptographic constant from before the product was renamed; it is not a display name.
+      // Keep it: changing it invalidates every OAuth state in flight (scripts/rename-to-ready-set-mail.mjs, PROTECTED).
       { name: 'HKDF', hash: 'SHA-256', salt: enc.encode('inbox-angel'), info: enc.encode(purpose) },
       base,
       { name: 'HMAC', hash: 'SHA-256', length: 256 },
