@@ -98,6 +98,7 @@ const ROUTES: Route[] = [
   // pending domain claims (SaaS): another workspace's claim is as unreachable as its domain
   { method: 'POST', path: '/api/domains/claims/1/verify', body: {}, kind: 'denied', note: 'B\'s pending claim' },
   { method: 'DELETE', path: '/api/domains/claims/1', kind: 'denied', note: 'B\'s pending claim' },
+  { method: 'GET', path: '/api/domains/claims/1/preview', kind: 'denied', note: "B's pending claim" },
   { method: 'GET', path: '/api/domains/2/stats', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/health-report', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/reports?date=2023-11-14', kind: 'denied' },

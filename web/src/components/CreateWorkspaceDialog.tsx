@@ -4,6 +4,7 @@ import { errorMessage } from '../lib/api';
 import { setupSeenKey } from '../lib/workspace';
 import { switchToWorkspace, useCreateWorkspace } from '../lib/workspaces';
 import { Field } from '../pages/auth/AuthLayout';
+import { PlanLimitNotice, planLimitOf } from './PlanLimitNotice';
 
 /** Name it, create it (you become its owner), and open it. */
 export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -34,7 +35,8 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
 					<Field id="workspace-name" label="Workspace name">
 						<Input id="workspace-name" required autoFocus maxLength={80} placeholder="Lexgo" value={name} onChange={(e) => setName(e.target.value)} />
 					</Field>
-					{create.isError ? <FieldError>{errorMessage(create.error)}</FieldError> : null}
+					{create.isError && !planLimitOf(create.error) ? <FieldError>{errorMessage(create.error)}</FieldError> : null}
+					{create.isError && planLimitOf(create.error) ? <PlanLimitNotice limit={planLimitOf(create.error)!} /> : null}
 					<DialogFooter>
 						<Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
 							Cancel
