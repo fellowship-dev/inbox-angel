@@ -7,16 +7,16 @@ import type { AccessAction } from '../access/grant';
 export const escape = (value: unknown) => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 /** Plain words for each permission an agent can be given. The raw scope is shown as secondary text. */
-export const ACTION_COPY: Record<Exclude<AccessAction, 'access:manage'>, { label: string; detail: string }> = {
+export const ACTION_COPY: Readonly<Record<Exclude<AccessAction, 'access:manage'>, { label: string; detail: string }>> = Object.freeze({
  'resources:read': { label: 'See the domains you select', detail: 'Lists the selected domains and the products they belong to.' },
  'reports:read': { label: 'Read email health reports', detail: 'DNS findings, report history, and which evidence is still missing.' },
  'metrics:read': { label: 'Read email statistics', detail: 'Pass rates and volumes from the reports this dashboard has received.' },
  'diagnostics:run': { label: 'Run live DNS checks', detail: 'Looks up the public DNS records of the selected domains. Changes nothing.' },
  'remediation:plan': { label: 'Suggest fixes', detail: 'Writes the DNS changes it recommends, for you to review. It cannot apply them.' },
  'domains:manage': { label: 'Add domains and check ownership', detail: 'Starts monitoring a domain and checks its ownership record. It does not edit DNS or send email.' },
-};
+});
 /** Pre-selected: the two permissions a first useful answer needs (list the domains, read their report). */
-const DEFAULT_ACTIONS: readonly string[] = ['resources:read', 'reports:read'];
+const DEFAULT_ACTIONS: readonly string[] = Object.freeze(['resources:read', 'reports:read']);
 export const EXPIRY_CHOICES = [1, 7, 14, 30] as const;
 const DEFAULT_EXPIRY = 7;
 
