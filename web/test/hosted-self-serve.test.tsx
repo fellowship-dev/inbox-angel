@@ -309,7 +309,7 @@ describe('overview level cards: Talk to Max at stuck states', () => {
 	});
 
 	it('a summary that cannot load offers a person', async () => {
-		overview(fail(500, 'summary unavailable'));
+		overview(fail(404, 'summary unavailable')); // 4xx: the query client does not retry, so the error card shows at once
 		const card = await screen.findByRole('group', { name: 'acme.com' });
 		expectSafeTalkLink(await within(card).findByRole('link', { name: /Talk to Max/ }));
 	});

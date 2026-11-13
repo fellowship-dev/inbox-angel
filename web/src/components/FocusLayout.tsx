@@ -13,7 +13,8 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 			<header className="flex h-16 items-center justify-between border-b border-line bg-surface-1 px-4 sm:px-6">
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
 					<LogoMark className="size-7 rounded-md" aria-hidden />
-					Inbox Angel
+					{/* On phones the mark carries the name, so the top bar keeps room for Talk to Max, the theme toggle and Exit. */}
+					<span className="sr-only sm:not-sr-only">Inbox Angel</span>
 				</Link>
 				<div className="flex items-center gap-1 sm:gap-2">
 					<TalkToMaxLink />
