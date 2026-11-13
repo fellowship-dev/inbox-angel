@@ -10,6 +10,10 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## DNS check time
+
+Migration `0008_dns_checked_at.sql` is additive: one nullable `domains.dns_checked_at` column. Apply it before serving the new Worker (the schema guard requires it). Existing domains stay NULL ("Not checked yet" on the overview) until the next daily cron or a visit to the domain's setup page reads their DNS.
+
 ## Access and metrics upgrade
 
 Migrations `0006_access_grants.sql` and `0007_metrics.sql` are additive. Apply them before serving the new Worker. `0006` revokes legacy broad `api_keys` while preserving their rows, existing users/memberships, domains and report history; it adds products, mappings, principals, grants and hashed credentials. `0007` adds Google connection/observation storage. This upgrade does not require a data reset.
