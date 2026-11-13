@@ -6,10 +6,24 @@ import { logAudit } from '../audit/log';
 import { track } from '../telemetry';
 import { lookupSpf, lookupDmarc } from '../email/dns-check';
 import { planLimitBody, planLimits } from '../hosted/plan-limits';
+import { INVALID_DOMAIN_MESSAGE, normalizeDomainName, specialUseMessage, type DomainNameResult } from '@inbox-angel/dns-checks';
 
 export class DomainServiceError extends Error {
   /** `body`, when set, is the whole JSON answer (e.g. a plan_limit with its `code`, `limit` and `help_url`). */
   constructor(message: string, readonly status: number, readonly body?: Record<string, unknown>) { super(message); }
+}
+
+/** The 400 body for a refused domain name: `invalid domain format`, or the special-use sentence with its code. */
+export function domainRefusal(refused: Exclude<DomainNameResult, { ok: true }>): { error: string; code?: 'special_use_domain' } {
+  return refused.reason === 'special_use' ? { error: specialUseMessage(refused.name), code: 'special_use_domain' } : { error: INVALID_DOMAIN_MESSAGE };
+}
+
+/** The domain, normalised, or a DomainServiceError (400) saying why it cannot be monitored. */
+export function requireDomainName(raw: string): string {
+  const n = normalizeDomainName(raw);
+  if (n.ok) return n.domain;
+  const body = domainRefusal(n);
+  throw new DomainServiceError(body.error, 400, body.code ? body : undefined);
 }
 
 // Hosted plan cap on domains per workspace (src/hosted/plan-limits.ts). Margin: the INSERT itself is conditional on the count
@@ -69,8 +83,7 @@ export function enrollmentView(domain: DomainRow, reportsDomain?: string) {
 
 /** Proof and monitoring are independent of the optional report intake hub. No DNS writes. */
 export async function enrollDomain(tenant: TenantContext, input: string, userEmail?: string, ctx?: ExecutionContext, actorId?: string, options: EnrollmentOptions = {}) {
-  const domain = input.toLowerCase().trim();
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new DomainServiceError('invalid domain format', 400);
+  const domain = requireDomainName(input);
   await authorizeProductEnrollment(tenant, domain, options);
   await assertAgentEnrollmentSafe(tenant, domain);
   const existing = await tenant.scope.domains.getByName(domain);

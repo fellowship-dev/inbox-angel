@@ -101,7 +101,7 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { DomainServiceError, assertDomainRoom, domainCap, enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
 import { claimPreviewResponse } from '../domains/claim-preview';
@@ -117,7 +117,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
@@ -635,8 +635,9 @@ async function _handleApi(
       const body = await parseBody<{ domain?: string }>(request);
       if (!body.domain || typeof body.domain !== 'string') return err('domain is required', 400);
 
-      const domain = body.domain.toLowerCase().trim();
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return err('invalid domain format', 400);
+      const named = normalizeDomainName(body.domain);
+      if (!named.ok) return json(domainRefusal(named), 400);
+      const domain = named.domain;
 
       // Hosted plan cap, advisory: no claim for a domain that can never be added (the insert below enforces it exactly).
       if (!(await tenant.scope.domains.getByName(domain))) await assertDomainRoom(tenant);
@@ -1921,9 +1922,11 @@ async function _handleApi(
     // GET /api/domains/ct-discover?domain= — admin-only: enumerate subdomains via crt.sh
     if (path === '/api/domains/ct-discover' && method === 'GET') {
       if (!isAdmin) return err('admin required', 403);
-      const rootDomain = url.searchParams.get('domain')?.toLowerCase().trim();
-      if (!rootDomain) return err('domain query param is required', 400);
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(rootDomain)) return err('invalid domain format', 400);
+      const typedRoot = url.searchParams.get('domain')?.trim();
+      if (!typedRoot) return err('domain query param is required', 400);
+      const namedRoot = normalizeDomainName(typedRoot);
+      if (!namedRoot.ok) return json(domainRefusal(namedRoot), 400);
+      const rootDomain = namedRoot.domain;
       try {
         const subdomains = await fetchSubdomains(rootDomain);
         return json({ domain: rootDomain, subdomains });

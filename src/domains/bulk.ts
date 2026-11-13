@@ -7,10 +7,10 @@ import { provisionDomain } from '../dns/provision';
 import { logAudit } from '../audit/log';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitBody } from '../hosted/plan-limits';
-import { domainCap } from './service';
+import { normalizeDomainName } from '@inbox-angel/dns-checks';
+import { domainCap, domainRefusal } from './service';
 import { admitDomain, claimView, settleClaims, type ClaimView } from './ownership';
 
-const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 const BATCH_LIMIT = 50;
 
 export const REPORTS_DOMAIN_MISSING = 'Reports domain not configured — complete the setup wizard first';
@@ -37,7 +37,7 @@ function atCapRow(tenant: TenantContext, domain: string, max: number): BulkImpor
 }
 
 export function validateDomain(domain: string): boolean {
-  return DOMAIN_RE.test(domain);
+  return normalizeDomainName(domain).ok;
 }
 
 /** Parse a newline- or comma-separated domain list into unique, lowercase entries. */
@@ -78,11 +78,13 @@ export async function bulkInsertDomains(
   const cap = domainCap(tenant);
   let atCap = false;
 
-  for (const domain of batch) {
-    if (!validateDomain(domain)) {
-      results.push({ domain, status: 'invalid', error: 'invalid domain format' });
+  for (const typed of batch) {
+    const named = normalizeDomainName(typed);
+    if (!named.ok) {
+      results.push({ domain: typed, status: 'invalid', error: domainRefusal(named).error });
       continue;
     }
+    const domain = named.domain;
 
     // Dedup check
     const existing = await tenant.scope.domains.getByName(domain);

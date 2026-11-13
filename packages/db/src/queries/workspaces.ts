@@ -109,7 +109,7 @@ export function workspaceLifecycle(dbLike: DbLike) {
 			db
 				.select({ n: sql<number>`COUNT(*)` })
 				.from(memberships)
-				.where(and(eq(memberships.user_id, userId), eq(memberships.role, 'owner'), sql`${memberships.workspace_id} IN (SELECT id FROM workspaces)`))
+				.where(/* workspace-scope-exempt: the cap counts the workspaces a person owns, across all of them */ and(eq(memberships.user_id, userId), eq(memberships.role, 'owner'), sql`${memberships.workspace_id} IN (SELECT id FROM workspaces)`))
 				.get()
 				.then((r) => r?.n ?? 0),
 

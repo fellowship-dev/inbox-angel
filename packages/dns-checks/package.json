@@ -13,6 +13,7 @@
     "./dmarc": "./src/dmarc.ts",
     "./dmarc-tags": "./src/dmarc-tags.ts",
     "./dkim": "./src/dkim.ts",
+    "./domain-name": "./src/domain-name.ts",
     "./txt": "./src/txt.ts",
     "./mx": "./src/mx.ts",
     "./mta-sts": "./src/mta-sts.ts",
