@@ -197,7 +197,7 @@ describe('one contextual Talk to Max per screen', () => {
 			},
 		});
 		const user = (await import('@testing-library/user-event')).default.setup();
-		await user.type(await screen.findByLabelText('Your domain'), 'acme.test');
+		await user.type(await screen.findByLabelText('Your domain'), 'acme-agency.com');
 		await user.click(screen.getByRole('button', { name: 'Continue' }));
 		expect(await screen.findByText('This workspace has reached its limit of 10 domains.')).toBeInTheDocument();
 		expect(talkLinks()).toHaveLength(1);

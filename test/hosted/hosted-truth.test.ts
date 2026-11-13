@@ -24,27 +24,27 @@ describe('hosted: no reports domain and no report address, ever', () => {
   it('after the wizard domain step, a re-submit and /add, no domain has an rua_address and no reports settings exist', async () => {
     const w = await hosted();
     // Wizard domain step: a claim, proven by TXT.
-    const first = await json(await call(w.env, 'POST', '/api/settings/base-domain', { key: w.token, body: { domain: 'acme.test' } }));
+    const first = await json(await call(w.env, 'POST', '/api/settings/base-domain', { key: w.token, body: { domain: 'acme-agency.com' } }));
     expect(first.pending).toBe(true);
-    w.cf.doh['_inboxangel.acme.test'] = [first.claim.txt_value];
+    w.cf.doh['_inboxangel.acme-agency.com'] = [first.claim.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${first.claim.id}/verify`, { key: w.token, body: {} })).status).toBe(201);
 
     // Submitting the same (now verified) domain again in the wizard must not set up report addresses either.
-    const again = await call(w.env, 'POST', '/api/settings/base-domain', { key: w.token, body: { domain: 'acme.test' } });
+    const again = await call(w.env, 'POST', '/api/settings/base-domain', { key: w.token, body: { domain: 'acme-agency.com' } });
     expect(again.status).toBe(201);
     expect((await json(again)).reports_domain).toBeNull();
 
     // A later domain through /add.
-    const second = await json(await call(w.env, 'POST', '/api/domains', { key: w.token, body: { domain: 'client.test' } }));
-    w.cf.doh['_inboxangel.client.test'] = [second.claim.txt_value];
+    const second = await json(await call(w.env, 'POST', '/api/domains', { key: w.token, body: { domain: 'client-shop.com' } }));
+    w.cf.doh['_inboxangel.client-shop.com'] = [second.claim.txt_value];
     const verified = await json(await call(w.env, 'POST', `/api/domains/claims/${second.claim.id}/verify`, { key: w.token, body: {} }));
     expect(verified.domain.rua_address).toBe('');
 
     const domains = w.rows('SELECT domain, rua_address FROM domains WHERE workspace_id = ? ORDER BY domain', w.ws);
-    expect(domains).toEqual([{ domain: 'acme.test', rua_address: '' }, { domain: 'client.test', rua_address: '' }]);
+    expect(domains).toEqual([{ domain: 'acme-agency.com', rua_address: '' }, { domain: 'client-shop.com', rua_address: '' }]);
     expect(w.rows("SELECT key FROM settings WHERE workspace_id = ? AND key IN ('reports_domain', 'base_domain', 'from_email')", w.ws)).toEqual([]);
 
-    const id = domains.length && w.rows("SELECT id FROM domains WHERE domain = 'client.test'")[0].id;
+    const id = domains.length && w.rows("SELECT id FROM domains WHERE domain = 'client-shop.com'")[0].id;
     const status = await json(await call(w.env, 'GET', `/api/domains/${id}/onboarding-status`, { key: w.token }));
     expect(status.rua_address).toBe('');
     expect(status.routing.reports_domain).toBeNull();
