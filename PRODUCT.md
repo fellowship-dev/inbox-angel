@@ -7,9 +7,11 @@
 web
 
 ## Users
-People who run the dashboard on their own Cloudflare account and use it to see and fix email authentication for the domains they send from. Roles are per workspace (README, Authentication): **owners** and **admins** perform domain operations; **members** read and see every screen with write controls disabled (`web/PARITY.md`). Product credentials and agent connections are managed by a browser owner in Settings. Interactive agents (MCP) act for a signed-in person under finite, consented grants.
+Dashboard users are the website's audience (Max, 2026-11-13): the dashboard is the next step after registering from the Inbox Angel website, so the person signing in is the same person who arrived from the site, there to see and fix email authentication for the domains they send from. Copy, defaults and brand continue the website's; the dashboard does not address a separate operator audience. Which installation a website registrant lands in is open (see Open questions).
 
-The repository does not describe these people's company size, technical depth or situation beyond "self-hosting a Cloudflare Worker". See Open questions.
+Self-hosting on one's own Cloudflare account remains a secondary route to the same dashboard (README).
+
+Roles are per workspace (README, Authentication): **owners** and **admins** perform domain operations; **members** read and see every screen with write controls disabled (`web/PARITY.md`). Product credentials and agent connections are managed by a browser owner in Settings. Interactive agents (MCP) act for a signed-in person under finite, consented grants.
 
 ## Product Purpose
 InboxAngel is a self-hostable email authentication platform. It collects DMARC aggregate reports from receiving mail servers, parses them in a Cloudflare Worker, stores them in D1 and shows trends, failing sources, pass rates and policy guidance in the dashboard. It also manages SPF (lookup depth, flattening), MTA-STS provisioning and TLS-RPT reporting, and a five-step domain setup wizard (Domain, SPF, DKIM, DMARC, Routing).
@@ -43,6 +45,7 @@ Shared with the Inbox Angel website (inboxangel.io): the name; the personality *
 - Never promises inbox placement; separates authentication (fixable, verifiable) from reputation (takes weeks).
 - No invented proof: no user counts, customer logos, badges or testimonials.
 - Not an enterprise-security look (shields, padlocks, SOC 2 badge walls, fear marketing), not a hype landing page, not cutesy to the point of undermining competence.
+- No gradients, anywhere, on the dashboard or the website (Max, 2026-11-13). A hard rule; see The No-Gradients Rule in DESIGN.md.
 - Reference products named in the repo: resend.com (clarity), plausible.io (honest open-source SaaS), linear.app (polish).
 
 ## Evidence on Hand
@@ -65,8 +68,7 @@ WCAG AA: text/background pairs at 4.5:1 (3:1 for large text and UI borders), a v
 ## Open questions
 Not resolved here; each needs a product owner's answer.
 
-1. **Audience mismatch.** The brand context that previously lived in `docs/design/` described website visitors: small software teams (SaaS founders, indie hackers, vibe-coded apps) arriving stressed over a bouncing `550 5.7.26` email, secondary Shopify owners and freelancers. The website's newer context (2026-10-26) instead targets "companies with a recognizable brand and customer email" and leads with "Let your customers know it's you." The README describes the dashboard's users only as self-hosters and workspace members. Which audience should the dashboard's copy and defaults serve?
-2. **Dashboard user situation.** Are dashboard users the same people as website visitors, or operators/IT staff managing domains for others? Neither the README nor the design docs says.
-3. **Success measures.** No success metric is recorded beyond reaching `p=reject` safely.
-4. **Positioning claim.** What can a neighbouring DMARC product (hosted or self-hosted) not truthfully copy? Only "runs on your own Cloudflare account, MIT" is evidenced.
-5. **Voice details.** Voice rules come from the shared brand context; no dashboard-specific copy guide exists.
+1. **Success measures.** No success metric is recorded beyond reaching `p=reject` safely.
+2. **Positioning claim.** What can a neighbouring DMARC product (hosted or self-hosted) not truthfully copy? Only "runs on your own Cloudflare account, MIT" is evidenced.
+3. **Voice details.** Voice rules come from the shared brand context; no dashboard-specific copy guide exists.
+4. **Where does a website registrant land? (for Max)** "The next step after registering from the website" implies a hosted dashboard, but hosted SaaS mode is not launched (Capabilities and Constraints), Positioning describes the product as running on the operator's own Cloudflare account, and the website's PRODUCT.md rejects hosted self-serve plans and any hosted rung without a human. Which installation does a registrant use?

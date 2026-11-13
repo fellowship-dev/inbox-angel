@@ -155,9 +155,9 @@ components:
 
 ## Overview
 
-The dashboard (`web/`) is built on the shared design system `@inbox-angel/ui` (`packages/ui`), which is also used by the Inbox Angel website. The brand is shared with the website: the name, the personality **Calm · Competent · Honest** (friendly, technical when needed), the palette roles below, Geist Sans and Geist Mono, the halo-envelope mark, WCAG AA, and no invented proof (no user counts, logos, badges or testimonials). Values here are read from `packages/ui/src/styles/{tokens,theme,base}.css` and the components, not from the website.
+The dashboard (`web/`) is built on the shared design system `@inbox-angel/ui` (`packages/ui`), which is also used by the Inbox Angel website. The brand is shared with the website: the name, the personality **Calm · Competent · Honest** (friendly, technical when needed), the palette roles below, Geist Sans and Geist Mono, the halo-envelope mark, WCAG AA, and no invented proof (no user counts, logos, badges or testimonials). Values here are read from `packages/ui/src/styles/{tokens,theme,base}.css` and the components, not from the website. The dashboard is the next step after registering from the website: the same person arrives from the site, so it continues the same brand rather than introducing a separate product look (Max, 2026-11-13).
 
-Source-stated qualities: sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion, light mode by default with a full dark mode. Technical content (DNS records, error codes, addresses) is first-class and set in monospace. Rejected by the source: sky blue as a primary, gradients, mascot faces, enterprise-security imagery (shields, padlocks, badge walls), hype-landing devices, and cutesiness that undermines competence.
+Source-stated qualities: sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion, light mode by default with a full dark mode. Technical content (DNS records, error codes, addresses) is first-class and set in monospace. Rejected by the source: sky blue as a primary, mascot faces, enterprise-security imagery (shields, padlocks, badge walls), hype-landing devices, and cutesiness that undermines competence. Gradients are banned outright (see The No-Gradients Rule).
 
 Creative North Star, overview mood language and any named metaphor: **open decision** (the repository records none, and none was supplied).
 
@@ -192,6 +192,12 @@ A restrained palette: cool neutrals, one brand fill that swaps between navy and 
 **The Fill-Versus-Ink Rule.** `brand` is a fill and takes `brand-fg` labels (white on navy, navy on gold); brand-coloured text and links use `brand-ink`.
 **The Blush Rule.** Blush is decorative only.
 **The No-Colour-Alone Rule.** Every status pairs colour with an icon and a word.
+**The No-Gradients Rule.** No gradients, anywhere, on the dashboard or the website (Max, 2026-11-13): no gradient fills, text, dividers, borders, loading shimmers or scroll shadows. Every colour is a solid token. This is a hard rule, not a preference; existing gradients in code are known debt to remove, not precedent.
+
+Known gradient debt (to remove):
+- `packages/ui/src/styles/base.css` `ia-shimmer` (lines 69-72): skeleton loading gradient, used by `packages/ui/src/components/skeleton.tsx`.
+- `web/src/components/analytics/SenderInventory.tsx` `SCROLL_SHADOWS` (line 9): table edge scroll shadows built from four `linear-gradient` layers.
+- Website (same rule): `frontend/app/globals.css` `.shimmer` and `.section-rule` in fellowship-dev/inbox-angel-website; the reference snapshot `docs/design/site-globals.css` (lines 354 and 412) copies both and is not shipped.
 
 ## Typography
 
@@ -261,7 +267,7 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - Raised-surface block with 14px radius; each field (Type, Name, Value, optional TTL) is a label/value row in Geist Mono with a copy icon button on Name and Value. Copy feedback is a check icon plus a polite live-region announcement ("Copied to clipboard") and resets after 2 seconds.
 
 ### Motion
-- `ia-fade-in` 150ms, `ia-pop` 120ms, `ia-scale-in` 200ms and `ia-slide-up` 200ms (`cubic-bezier(0.16, 1, 0.3, 1)`), `ia-slide-left` 220ms, `ia-shimmer` 1.5s for skeletons. `prefers-reduced-motion` reduces all animation and transitions to 0.01ms.
+- `ia-fade-in` 150ms, `ia-pop` 120ms, `ia-scale-in` 200ms and `ia-slide-up` 200ms (`cubic-bezier(0.16, 1, 0.3, 1)`), `ia-slide-left` 220ms. `ia-shimmer` 1.5s for skeletons is a gradient and therefore known debt to remove (see The No-Gradients Rule). `prefers-reduced-motion` reduces all animation and transitions to 0.01ms.
 
 ## Do's and Don'ts
 
@@ -274,7 +280,8 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - **Do** honour `prefers-reduced-motion`.
 
 ### Don't:
-- **Don't** use sky blue as a primary, gradients, or a mascot face.
+- **Don't** use sky blue as a primary or a mascot face.
+- **Don't** use gradients anywhere: fills, text, dividers, borders, loading shimmers and scroll shadows are solid colours.
 - **Don't** use blush for text or as the only signal.
 - **Don't** use enterprise-security imagery (shields, padlocks, badge walls) or hype-landing devices (counters, "trusted by").
 - **Don't** use `accent-fg` on `accent-subtle` in dark mode (fails AA; listed in `forbiddenPairs`) or `--line-strong` for form-control edges.
