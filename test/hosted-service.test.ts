@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Env } from '../src/index';
 
+vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../src/telemetry', () => ({ track: vi.fn() }));
 
 import { createMigratedD1 } from '@inbox-angel/db/testing';
