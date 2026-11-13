@@ -3,8 +3,8 @@
 // It looks up public DNS only (SPF, DMARC, a scan of common DKIM selectors, MX), through one resolver, and returns a small view.
 // Nothing is stored and nothing of the workspace or the claim goes in: public DNS may be shown before ownership is proven, and the
 // answers are cached per domain (shared across workspaces) for a minute. A lookup that failed is `error`, never "missing".
-import { COMMON_DKIM_SELECTORS, SPF_LOOKUP_LIMIT, createResolver, lookupDmarc, lookupMx, normalizeName, scanDkimSelectors, type Resolver, type TxtResult } from '@inbox-angel/dns-checks';
-import { claimLookups, type DomainClaimRow } from '@inbox-angel/db';
+import { COMMON_DKIM_SELECTORS, SPF_LOOKUP_LIMIT, createResolver, lookupDmarc, lookupMx, normalizeName, scanDkimSelectors, type Resolver, type TxtResult } from '@ready-set-mail/dns-checks';
+import { claimLookups, type DomainClaimRow } from '@ready-set-mail/db';
 import { dmarcFactsFromLookup, observingResolver, snapshotDns } from '../email/dns-snapshot';
 import type { TenantContext } from '../tenancy/context';
 import { getMode } from '../tenancy/mode';

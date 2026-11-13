@@ -1,5 +1,5 @@
-import { checkDomain, createResolver, DOH_ENDPOINTS, type Resolver } from '@inbox-angel/dns-checks';
-import { buildReport } from '@inbox-angel/report';
+import { checkDomain, createResolver, DOH_ENDPOINTS, type Resolver } from '@ready-set-mail/dns-checks';
+import { buildReport } from '@ready-set-mail/report';
 import type { TenantContext } from '../tenancy/context';
 import { enrollmentView } from '../domains/service';
 import { getAnalytics } from './analytics';
@@ -49,7 +49,7 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     status: data === null ? 'unavailable' : 'available', ...(reason ? { reason } : {}), source, population, window, data,
   });
   return {
-    schema: 'inbox-angel-health/v1' as const,
+    schema: 'ready-set-mail-health/v1' as const,
     domain: { id: domain.id, domain: domain.domain }, generatedAt: dns.generatedAt,
     coverage: { scope: 'shared-domain' as const, product_attribution: false, detail: 'Aggregate observations cover this domain; they cannot be attributed to one product.' },
     intake: enrollmentView(domain, tenant.settings.reportsDomain).intake,

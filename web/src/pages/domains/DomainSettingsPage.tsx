@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Card, CardContent, EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from '@inbox-angel/ui';
+import { Alert, Badge, Button, Card, CardContent, EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Download, PauseCircle, PlayCircle, Star } from 'lucide-react';
 import { useState } from 'react';

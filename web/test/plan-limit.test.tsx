@@ -103,7 +103,7 @@ describe('where a plan limit can appear', () => {
 	});
 
 	it('ClaimCard: verifying at the limit', async () => {
-		const claim = { id: 4, domain: 'acme.io', status: 'pending' as const, txt_name: '_inboxangel.acme.io', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
+		const claim = { id: 4, domain: 'acme.io', status: 'pending' as const, txt_name: '_readysetmail.acme.io', txt_value: 'readysetmail-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
 		renderApp(<ClaimCard claim={claim} />, { routes: { 'POST /api/domains/claims/4/verify': limit('domains_per_workspace', BOOKING) } });
 		await userEvent.click(await screen.findByRole('button', { name: 'Verify' }));
 		expect(await screen.findByText(DOMAINS)).toBeInTheDocument();

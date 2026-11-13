@@ -1,10 +1,10 @@
-import { accessLookups, forWorkspace } from '@inbox-angel/db';
+import { accessLookups, forWorkspace } from '@ready-set-mail/db';
 import type { AccessSubject } from './principal';
 import { authorizeResource } from './resolve';
 import { validActions, type AccessAction } from './grant';
 import { AccessDenied } from './policy';
 import { issueAccessCredential } from '../auth/api-keys';
-import { normalizeDomain, organizationalDomain } from '@inbox-angel/dns-checks';
+import { normalizeDomain, organizationalDomain } from '@ready-set-mail/dns-checks';
 
 /** Owner operations never accept a delegated actor, even one holding the same action string. */
 export class AccessService {

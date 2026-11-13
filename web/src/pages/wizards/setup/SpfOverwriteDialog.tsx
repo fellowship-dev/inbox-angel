@@ -1,4 +1,4 @@
-import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@inbox-angel/ui';
+import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@ready-set-mail/ui';
 import { RecordPair, TxtRecord } from '../../../components/wizard/RecordPair';
 
 export interface SpfOverwrite {

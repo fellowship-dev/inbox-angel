@@ -1,4 +1,4 @@
-import { createResolver, type Resolver } from '@inbox-angel/dns-checks';
+import { createResolver, type Resolver } from '@ready-set-mail/dns-checks';
 
 export interface DnsName { TXT?: string[]; CNAME?: string; error?: boolean }
 

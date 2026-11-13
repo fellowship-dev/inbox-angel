@@ -45,7 +45,7 @@ Prefer additive changes (new tables, nullable or defaulted columns) so the old W
 
 ## Rollback
 
-Take a backup first: `wrangler d1 export inbox-angel --remote --output backup.sql`. The old Worker may not run against a newer
+Take a backup first: `wrangler d1 export ready-set-mail --remote --output backup.sql`. The old Worker may not run against a newer
 schema, so roll back by restoring the backup together with the previous Worker version.
 
 ## Requirements

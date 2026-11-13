@@ -151,7 +151,7 @@ export async function handleTlsRptReport(
       const policyDomain = policy.policy?.['policy-domain'];
       if (!policyDomain || !coversDomain(opts.hosted.token.domain, policyDomain)) {
         console.warn(`[tls-rpt] policy-domain ${policyDomain ?? '(none)'} is outside the token's domain`);
-        message.setReject(`Unknown domain ${policyDomain ?? '(none)'} — not a registered InboxAngel inbox`);
+        message.setReject(`Unknown domain ${policyDomain ?? '(none)'} — not a registered Ready Set Mail inbox`);
         return { failure_count: 0 };
       }
     }

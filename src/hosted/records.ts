@@ -1,6 +1,6 @@
 // The hosted-records writer: the only code that writes to the operator's records zone.
 //
-// Everything lives under one label of that zone (`h`), so `*.h.inboxangel.io` is ours and the rest of
+// Everything lives under one label of that zone (`h`), so `*.h.readysetmail.com` is ours and the rest of
 // the zone belongs to the operator. Three layers keep it that way:
 //   1. the token (HOSTED_RECORDS_TOKEN) should be scoped to DNS:Edit on this one zone;
 //   2. `assertHostedName` refuses any record name outside `*.<label>.<zone>`, for create, update and delete;

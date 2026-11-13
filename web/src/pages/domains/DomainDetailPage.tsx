@@ -1,5 +1,5 @@
 import { HealthReportSection } from './HealthReportSection';
-import { Alert, Badge, Button, EmptyState, PageHeader, Stat, StatGroup, Tabs, TabsList, TabsTrigger } from '@inbox-angel/ui';
+import { Alert, Badge, Button, EmptyState, PageHeader, Stat, StatGroup, Tabs, TabsList, TabsTrigger } from '@ready-set-mail/ui';
 import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';

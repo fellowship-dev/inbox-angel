@@ -1,4 +1,4 @@
-import { Button } from '@inbox-angel/ui';
+import { Button } from '@ready-set-mail/ui';
 import type { ReactNode } from 'react';
 
 /** Back/skip on the start side, the primary action on the end side; stacks (primary first) on phones. */

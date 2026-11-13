@@ -2,7 +2,7 @@
 // subscription only starts alerting once its link is clicked (GET /api/monitor/confirm). Unconfirmed rows are
 // deleted after 7 days (src/funnel/cron.ts).
 
-import { forWorkspace, funnelQueries, globalQueries } from '@inbox-angel/db';
+import { forWorkspace, funnelQueries, globalQueries } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import type { TenantContext } from '../tenancy/context';
 import { isSuppressed } from '../mail/compliance';
@@ -37,7 +37,7 @@ export async function requestMonitorSubscription(
 
   // Transactional: the binding from the workspace's own sender, else Resend from MAIL_FROM (the only sender verified there).
   const mailer = transactionalMailer(env);
-  const from = mailer?.provider === 'resend' ? funnelSender(env) : tenant.settings.fromEmail ? { name: 'InboxAngel', email: tenant.settings.fromEmail } : funnelSender(env);
+  const from = mailer?.provider === 'resend' ? funnelSender(env) : tenant.settings.fromEmail ? { name: 'Ready Set Mail', email: tenant.settings.fromEmail } : funnelSender(env);
   if (!mailer || !from) return { status: 503, body: { error: 'Email delivery is not configured on this server, so a confirmation cannot be sent' } };
 
   // A suppressed address (unsubscribed, bounced) gets nothing; the answer is the same as for any other address.
@@ -73,7 +73,7 @@ export async function requestMonitorSubscription(
     to: email,
     subject: `Confirm email alerts for ${input.domain}`,
     text: [
-      `Someone, probably you, asked InboxAngel to email ${email} when the email security settings of ${input.domain} change.`,
+      `Someone, probably you, asked Ready Set Mail to email ${email} when the email security settings of ${input.domain} change.`,
       '',
       'To start these alerts, confirm with this link (valid for 7 days):',
       link,

@@ -1,4 +1,4 @@
-import { Badge, RecordBlock } from '@inbox-angel/ui';
+import { Badge, RecordBlock } from '@ready-set-mail/ui';
 import { AlertTriangle, CheckCircle2, CircleHelp, SearchX, XCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { PURPOSE_LABEL, PURPOSE_ORDER, pointerStateLabel, type HostedPointer, type HostedStatus, type PointerState } from '../../lib/hosted';

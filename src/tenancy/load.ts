@@ -8,7 +8,7 @@ import { DEFAULT_BRAND_COLOR, TenantContext, type TenantSettings } from './conte
 import { CfConnectionError, CfError, CfNotConfiguredError } from './cf-client';
 import { getMode, type Mode } from './mode';
 import type { ResolvedWorkspace } from './resolver';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 const KEYS: readonly string[] = [
   'base_domain', 'zone_id', 'zone_name', 'cf_account_id', 'reports_domain', 'from_email', 'workers_subdomain',

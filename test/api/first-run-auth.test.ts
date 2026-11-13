@@ -5,7 +5,7 @@ import type { Env } from '../../src/index';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const LEGACY_KEY = 'legacy-auto-key-0000';
@@ -27,7 +27,7 @@ function makeEnv(db: D1Database): Env {
 }
 
 function req(method: string, path: string, opts: { key?: string; body?: unknown } = {}) {
-  const headers: Record<string, string> = path === '/api/auth/setup' ? { 'x-inbox-angel-bootstrap': 'test-only-installer-proof-32-characters-minimum' } : {};
+  const headers: Record<string, string> = path === '/api/auth/setup' ? { 'x-ready-set-mail-bootstrap': 'test-only-installer-proof-32-characters-minimum' } : {};
   if (opts.key) headers['x-api-key'] = opts.key;
   if (opts.body) headers['content-type'] = 'application/json';
   return new Request(`${BASE}${path}`, { method, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });

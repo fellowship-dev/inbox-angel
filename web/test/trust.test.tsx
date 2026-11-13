@@ -9,14 +9,14 @@ import { OverviewPage } from '../src/pages/domains/OverviewPage';
 import { ReportBrowserPage } from '../src/pages/reports/ReportBrowserPage';
 import { fail, renderApp } from './render';
 
-const claim = (over = {}) => ({ id: 5, domain: 'acme.com', status: 'pending', txt_name: '_inboxangel-challenge.acme.com', txt_value: 'ia-verify=abc123', created_at: 1700000000, last_checked_at: null, last_error: null, ...over });
+const claim = (over = {}) => ({ id: 5, domain: 'acme.com', status: 'pending', txt_name: '_readysetmail-challenge.acme.com', txt_value: 'ia-verify=abc123', created_at: 1700000000, last_checked_at: null, last_error: null, ...over });
 const domain = { id: 9, domain: 'acme.com', dmarc_policy: 'none', rua_address: 'r@x.io', parent_id: null, created_at: 1700000000, alerts_enabled: 1, is_default: 0 };
 
 describe('pending domain claims', () => {
 	it('lists them in their own section with TXT instructions and no stats calls', async () => {
 		const { calls } = renderApp(<OverviewPage />, { routes: { 'GET /api/domains': { domains: [], pending_claims: [claim(), claim({ id: 6, domain: 'lost.com', status: 'lost' })] } } });
 		const section = await screen.findByRole('region', { name: 'Waiting for verification' });
-		expect(within(section).getByText('_inboxangel-challenge.acme.com')).toBeInTheDocument();
+		expect(within(section).getByText('_readysetmail-challenge.acme.com')).toBeInTheDocument();
 		expect(within(section).getByText('ia-verify=abc123')).toBeInTheDocument();
 		expect(within(section).getByText('TXT')).toBeInTheDocument();
 		expect(within(section).getByText('Another workspace verified this domain first. If it is yours, contact support.')).toBeInTheDocument();

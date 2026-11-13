@@ -8,7 +8,7 @@ steps:
   - name: open-dashboard
     action: navigate
     url: "{{TARGET_URL}}"
-    expect: InboxAngel dashboard loads — shows login or overview page
+    expect: Ready Set Mail dashboard loads — shows login or overview page
 
   - name: screenshot-landing
     action: screenshot

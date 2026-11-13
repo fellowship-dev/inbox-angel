@@ -97,7 +97,7 @@ describe('first-run setup', () => {
 		await waitFor(() => expect(meFetches(calls)).toBeGreaterThan(1));
 		expect(localStorage.getItem('ia_api_key')).toBeNull();
 		expect(calls.find((c) => c.path === '/api/auth/setup')?.body).toEqual({ name: '', email: 'owner@example.com', password: 'long-enough-1', telemetry: true });
-		expect(calls.find((c) => c.path === '/api/auth/setup')?.headers['x-inbox-angel-bootstrap']).toBe('installer-proof-012345678901234567890123');
+		expect(calls.find((c) => c.path === '/api/auth/setup')?.headers['x-ready-set-mail-bootstrap']).toBe('installer-proof-012345678901234567890123');
 		expect(screen.getByLabelText('Installer proof')).toHaveValue('');
 	});
 });

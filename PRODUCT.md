@@ -7,14 +7,14 @@
 web
 
 ## Users
-Dashboard users are the website's audience (Max, 2026-11-13): the dashboard is the next step after registering from the Inbox Angel website, so the person signing in is the same person who arrived from the site, there to see and fix email authentication for the domains they send from. Copy, defaults and brand continue the website's; the dashboard does not address a separate operator audience. Which installation a website registrant lands in is open (see Open questions).
+Dashboard users are the website's audience (Max, 2026-11-13): the dashboard is the next step after registering from the Ready Set Mail website, so the person signing in is the same person who arrived from the site, there to see and fix email authentication for the domains they send from. Copy, defaults and brand continue the website's; the dashboard does not address a separate operator audience. Which installation a website registrant lands in is open (see Open questions).
 
 Self-hosting on one's own Cloudflare account remains a secondary route to the same dashboard (README).
 
 Roles are per workspace (README, Authentication): **owners** and **admins** perform domain operations; **members** read and see every screen with write controls disabled (`web/PARITY.md`). Product credentials and agent connections are managed by a browser owner in Settings. Interactive agents (MCP) act for a signed-in person under finite, consented grants.
 
 ## Product Purpose
-InboxAngel is a self-hostable email authentication platform. It collects DMARC aggregate reports from receiving mail servers, parses them in a Cloudflare Worker, stores them in D1 and shows trends, failing sources, pass rates and policy guidance in the dashboard. It also manages SPF (lookup depth, flattening), MTA-STS provisioning and TLS-RPT reporting, and a five-step domain setup wizard (Domain, SPF, DKIM, DMARC, Routing).
+Ready Set Mail is a self-hostable email authentication platform. It collects DMARC aggregate reports from receiving mail servers, parses them in a Cloudflare Worker, stores them in D1 and shows trends, failing sources, pass rates and policy guidance in the dashboard. It also manages SPF (lookup depth, flattening), MTA-STS provisioning and TLS-RPT reporting, and a five-step domain setup wizard (Domain, SPF, DKIM, DMARC, Routing).
 
 The stated core value is getting an owner "from 'I don't know' to `p=reject` without breaking your email". Success is a domain whose legitimate senders are all authenticated before enforcement is tightened.
 
@@ -39,7 +39,7 @@ Runs entirely on the operator's own Cloudflare account (Workers, Email Workers, 
 - Hosted SaaS mode exists in code but is **not launched**.
 
 ## Brand Commitments
-Shared with the Inbox Angel website (inboxangel.io): the name; the personality **Calm · Competent · Honest** (friendly, technical when needed); the palette roles (navy `#0B1F3A`, halo gold `#FAD172`, blush `#FCA0A4`; see DESIGN.md); Geist Sans and Geist Mono; the halo-envelope `LogoMark`; WCAG AA.
+Shared with the Ready Set Mail website (readysetmail.com): the name; the personality **Calm · Competent · Honest** (friendly, technical when needed); the palette roles (navy `#0B1F3A`, halo gold `#FAD172`, blush `#FCA0A4`; see DESIGN.md); Geist Sans and Geist Mono; the halo-envelope `LogoMark`; WCAG AA.
 
 - The voice names the email, not the protocol ("signup emails", "password reset"), then SPF/DKIM/DMARC.
 - Never promises inbox placement; separates authentication (fixable, verifiable) from reputation (takes weeks).

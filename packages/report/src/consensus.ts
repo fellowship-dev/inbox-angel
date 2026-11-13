@@ -4,7 +4,7 @@
 // contradicts it; a run whose lookup errored counts as neither side. No run producing it, with at least two completed
 // lookups, is a confirmed absence. Everything else is unconfirmed: shown as such, never stated as fact.
 
-import type { DomainReport } from '@inbox-angel/dns-checks';
+import type { DomainReport } from '@ready-set-mail/dns-checks';
 import { build, type Finding } from './findings';
 
 type Check = DomainReport['errors'][number]['check'];

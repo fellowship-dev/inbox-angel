@@ -14,7 +14,7 @@ vi.mock('../../src/dns/provision', () => ({
   deprovisionDomain: vi.fn(),
   DnsProvisionError: class DnsProvisionError extends Error {},
 }));
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 import { seedSettings } from '../helpers/tenant';
 
@@ -28,7 +28,7 @@ function makeEnv(): Env {
   return { DB: db as unknown as D1Database, API_KEY: 'k' } as unknown as Env;
 }
 
-const get = (path: string) => new Request(`https://api.inboxangel.com${path}`, { method: 'GET' });
+const get = (path: string) => new Request(`https://api.readysetmail.com${path}`, { method: 'GET' });
 const doh = (body: unknown, ok = true) => new Response(JSON.stringify(body), { status: ok ? 200 : 503 });
 
 type Rule = (name: string, type: string) => Response | Error | undefined;

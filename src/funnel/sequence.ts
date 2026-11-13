@@ -5,7 +5,7 @@
 // provider accepted the mail, can never send a step twice. The price: a crash or an ambiguous failure can lose that one
 // email, which is the right way round for marketing mail. A lead that is far behind gets one email per run, about a day apart.
 
-import { funnelQueries, globalQueries, type LeadRow } from '@inbox-angel/db';
+import { funnelQueries, globalQueries, type LeadRow } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import { buildLetterHtml, buildLetterText } from '../email/html-templates';
 import type { CheckSummary } from '../email/report-formatter';

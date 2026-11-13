@@ -5,8 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Full signup + worker round trips: the 5 s default flakes when the whole suite runs in parallel.
 vi.setConfig({ testTimeout: 30_000 });
 import { gzipSync, strToU8 } from 'fflate';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -45,7 +45,7 @@ describe('self-host is unchanged', () => {
     const s = selfHost();
     const m = fakeMessage('rua@reports.acme.com', gzipReportMime(dmarcXml('other.com')));
     await worker.email(m, s.env, ctx);
-    expect(m.setReject).toHaveBeenCalledWith('Unknown domain other.com — not a registered InboxAngel inbox');
+    expect(m.setReject).toHaveBeenCalledWith('Unknown domain other.com — not a registered Ready Set Mail inbox');
   });
 
   it('TLS-RPT: JSON body only, unknown policy domains skipped without a reject, attachments not read', async () => {

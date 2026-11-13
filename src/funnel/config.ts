@@ -49,7 +49,7 @@ export function servicePrices(env: FunnelEnv): ServicePrices {
 
 export function funnelSender(env: FunnelEnv): { name: string; email: string } | null {
   const email = env.MAIL_FROM?.trim() || (env.CANARY_DOMAIN ? `noreply@${env.CANARY_DOMAIN.trim().toLowerCase()}` : '');
-  return email ? { name: env.MAIL_FROM_NAME?.trim() || 'Inbox Angel', email } : null;
+  return email ? { name: env.MAIL_FROM_NAME?.trim() || 'Ready Set Mail', email } : null;
 }
 
 export function siteOrigins(env: FunnelEnv): string[] {

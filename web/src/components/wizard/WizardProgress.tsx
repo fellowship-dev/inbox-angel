@@ -1,4 +1,4 @@
-import { cn } from '@inbox-angel/ui';
+import { cn } from '@ready-set-mail/ui';
 import { Check, SkipForward } from 'lucide-react';
 
 export interface ProgressStep {

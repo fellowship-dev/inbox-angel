@@ -1,4 +1,4 @@
-import { Badge, Card, CardContent, EmptyState, RecordBlock } from '@inbox-angel/ui';
+import { Badge, Card, CardContent, EmptyState, RecordBlock } from '@ready-set-mail/ui';
 import { CheckCircle2, ExternalLink, Inbox } from 'lucide-react';
 import { Link } from 'react-router';
 import { fmtPct, SEVERITY_LABEL, type Fix } from '../../lib/analytics';

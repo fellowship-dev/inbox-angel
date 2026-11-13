@@ -15,7 +15,7 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
 });
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, ctx, makeEnv, setupOwner, inviteAndAccept, req } from './helpers';
 import { handleApi } from '../../src/api/router';
 

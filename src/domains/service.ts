@@ -1,4 +1,4 @@
-import { PlanLimitError, claimLookups, type DomainRow } from '@inbox-angel/db';
+import { PlanLimitError, claimLookups, type DomainRow } from '@ready-set-mail/db';
 import { authorizeResource } from '../access/resolve';
 import type { TenantContext } from '../tenancy/context';
 import { admitDomain, claimView, settleClaims, type VerifiedVia } from './ownership';
@@ -6,7 +6,7 @@ import { logAudit } from '../audit/log';
 import { track } from '../telemetry';
 import { lookupSpf, lookupDmarc } from '../email/dns-check';
 import { planLimitBody, planLimits } from '../hosted/plan-limits';
-import { INVALID_DOMAIN_MESSAGE, normalizeDomainName, specialUseMessage, type DomainNameResult } from '@inbox-angel/dns-checks';
+import { INVALID_DOMAIN_MESSAGE, normalizeDomainName, specialUseMessage, type DomainNameResult } from '@ready-set-mail/dns-checks';
 
 export class DomainServiceError extends Error {
   /** `body`, when set, is the whole JSON answer (e.g. a plan_limit with its `code`, `limit` and `help_url`). */

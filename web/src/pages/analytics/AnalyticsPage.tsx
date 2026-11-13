@@ -1,4 +1,4 @@
-import { Button, PageHeader, Stat, StatGroup, TableBody, TableCell, TableHead, TableHeader, TableRow, Badge } from '@inbox-angel/ui';
+import { Button, PageHeader, Stat, StatGroup, TableBody, TableCell, TableHead, TableHeader, TableRow, Badge } from '@ready-set-mail/ui';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { FixList } from '../../components/analytics/FixList';

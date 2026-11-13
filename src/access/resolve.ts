@@ -1,4 +1,4 @@
-import { accessLookups, authLookups, forWorkspace } from '@inbox-angel/db';
+import { accessLookups, authLookups, forWorkspace } from '@ready-set-mail/db';
 import type { AccessSubject } from './principal';
 import { assertAccess, canAccess } from './policy';
 import { validActions, type AccessAction, type AccessResource, type AccessGrant } from './grant';

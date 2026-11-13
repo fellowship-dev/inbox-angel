@@ -1,7 +1,7 @@
 // Signing secret for sessions. BETTER_AUTH_SECRET wins; otherwise a random one is
 // generated on first use and kept in D1 so self-hosting needs no extra setup.
 // (Read per request: the Worker keeps no module-level state.)
-import { forImplicitWorkspace } from '@inbox-angel/db';
+import { forImplicitWorkspace } from '@ready-set-mail/db';
 import type { AuthEnv } from './config';
 
 const SETTING = 'auth_secret';

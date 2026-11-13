@@ -17,7 +17,7 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 import { seedSettings } from '../helpers/tenant';
 

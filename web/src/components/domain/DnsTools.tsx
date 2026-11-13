@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, toast, type BadgeProps } from '@inbox-angel/ui';
+import { Badge, Button, Card, CardContent, toast, type BadgeProps } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, CircleDashed, ShieldCheck } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -117,7 +117,7 @@ function spfCard(id: number, s: SpfFlatStatus) {
 			disablePath={`/api/domains/${id}/spf-flatten`}
 			disableKey={domainKeys.spf(id)}
 			disableTitle="Disable SPF flattening?"
-			disableDescription="Inbox Angel restores your original SPF record and stops re-resolving it daily. Your lookup count may go back over the limit."
+			disableDescription="Ready Set Mail restores your original SPF record and stops re-resolving it daily. Your lookup count may go back over the limit."
 		/>
 	);
 }

@@ -1,4 +1,4 @@
-import { Button, toast } from '@inbox-angel/ui';
+import { Button, toast } from '@ready-set-mail/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
@@ -67,7 +67,7 @@ function EntryFlow() {
 	if (first) return <Navigate to={`/domains/${first.id}/setup/1`} replace />;
 
 	return (
-		<Frame title="Let's set up Inbox Angel" subtitle="0 of 5 steps complete" skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
+		<Frame title="Let's set up Ready Set Mail" subtitle="0 of 5 steps complete" skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
 			<DomainStep
 				onDomainSet={(newId) => {
 					void qc.invalidateQueries({ queryKey: keys.domains });

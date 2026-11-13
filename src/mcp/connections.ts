@@ -1,7 +1,7 @@
 import { consentPage, consentIdentity } from './consent';
 import type { OAuthProviderOptions, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
-import { accessLookups, authLookups, forWorkspace } from '@inbox-angel/db';
-import { normalizeDomainName } from '@inbox-angel/dns-checks';
+import { accessLookups, authLookups, forWorkspace } from '@ready-set-mail/db';
+import { normalizeDomainName } from '@ready-set-mail/dns-checks';
 import type { BoundEnv } from '../index';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { ACCESS_ACTIONS, validActions } from '../access/grant';
@@ -45,7 +45,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  const api = getOAuthApi(options, env);
  const user = await currentUser(request, env, ctx);
  if (!user || (isSaas(env) && !user.emailVerified)) {
-  if (request.method === 'GET' && path === '/oauth/authorize') return new Response(`<!doctype html><title>Sign in to Inbox Angel</title><p>Sign in to your Inbox Angel dashboard, then return to this authorization link.</p><a href="/">Open dashboard</a>`, { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  if (request.method === 'GET' && path === '/oauth/authorize') return new Response(`<!doctype html><title>Sign in to Ready Set Mail</title><p>Sign in to your Ready Set Mail dashboard, then return to this authorization link.</p><a href="/">Open dashboard</a>`, { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
   return Response.json({ error: 'Sign in required' }, { status: 401 });
  }
  const memberships = await authLookups(env.DB).membershipsOf(user.id);
@@ -67,7 +67,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  try {
   if (request.method === 'GET') {
    const authRequest = await api.parseAuthRequest(request);
-   if (authRequest.scope.some(s => s !== 'inbox-angel' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
+   if (authRequest.scope.some(s => s !== 'ready-set-mail' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
    const description = await api.describeConsent(authRequest), consent = await api.beginConsent(authRequest);
    const choices: string[] = [];
    for (const m of memberships) {
@@ -79,7 +79,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     }
    }
    const headers = new Headers(consent.headers); headers.set('Content-Type', 'text/html; charset=utf-8'); headers.set('Cache-Control', 'no-store');
-   return new Response(consentPage(`<h1>Authorize Inbox Angel agent</h1>${consentIdentity(description, url.origin)}<form method="post"><input type="hidden" name="handle" value="${escape(consent.handle)}"><fieldset><legend>Select exact resources</legend>${choices.join('')}</fieldset><fieldset><legend>Or preauthorize one exact new domain for onboarding</legend><label>Workspace<select name="workspaceId"><option value="">None</option>${memberships.map(m => `<option>${escape(m.workspace_id)}</option>`).join('')}</select></label><label>Domain<input name="domain" placeholder="mail.example.com"></label></fieldset><fieldset><legend>Allowed actions</legend>${ACCESS_ACTIONS.filter(a => a !== 'access:manage').map(a => `<label><input type="checkbox" name="actions" value="${a}">${a}</label><br>`).join('')}</fieldset><label>Expires in days<input type="number" name="days" min="1" max="30" value="7"></label><button>Authorize selected access</button></form>`), { headers });
+   return new Response(consentPage(`<h1>Authorize Ready Set Mail agent</h1>${consentIdentity(description, url.origin)}<form method="post"><input type="hidden" name="handle" value="${escape(consent.handle)}"><fieldset><legend>Select exact resources</legend>${choices.join('')}</fieldset><fieldset><legend>Or preauthorize one exact new domain for onboarding</legend><label>Workspace<select name="workspaceId"><option value="">None</option>${memberships.map(m => `<option>${escape(m.workspace_id)}</option>`).join('')}</select></label><label>Domain<input name="domain" placeholder="mail.example.com"></label></fieldset><fieldset><legend>Allowed actions</legend>${ACCESS_ACTIONS.filter(a => a !== 'access:manage').map(a => `<label><input type="checkbox" name="actions" value="${a}">${a}</label><br>`).join('')}</fieldset><label>Expires in days<input type="number" name="days" min="1" max="30" value="7"></label><button>Authorize selected access</button></form>`), { headers });
   }
   if (request.method === 'POST') {
    if (!(request.headers.get('content-type') ?? '').startsWith('application/x-www-form-urlencoded')) return Response.json({ error: 'form required' }, { status: 415 });
@@ -100,7 +100,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     }
     for (const action of actions) await authorizeResource(env.DB, actor, action, s);
    }
-   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['inbox-angel'] });
+   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['ready-set-mail'] });
    const principalId = crypto.randomUUID(), workspaceId = selections[0]!.workspaceId, now = Math.floor(Date.now() / 1000), expiresAt = now + days * 86400;
    await forWorkspace(env.DB, workspaceId).access.principals.create({ id: principalId, name: `Agent ${approved.request.clientId}`.slice(0, 80), kind: 'human', user_id: user.id });
    try {
@@ -108,7 +108,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     const local = mcpInstallation(env);
     const record: AgentConnection = { principalId, userId: user.id, workspaceId, clientId: approved.request.clientId, name: `Agent ${approved.request.clientId}`.slice(0, 80), createdAt: now, expiresAt };
     await forWorkspace(env.DB, workspaceId).settings.set(`${prefix}${principalId}`, JSON.stringify(record));
-    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['inbox-angel'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
+    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['ready-set-mail'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
     const headers = new Headers(approved.headers); headers.set('Location', completed.redirectTo); headers.set('Cache-Control', 'no-store');
     return new Response(null, { status: 302, headers });
    } catch (error) {

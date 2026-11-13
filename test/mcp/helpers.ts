@@ -1,5 +1,5 @@
 import { makeEnv, setupOwner, type TestDb } from '../auth/helpers';
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 import type { BoundEnv } from '../../src/index';
 export async function connection() {
  const env = makeEnv(undefined, { BETTER_AUTH_URL: 'https://ia.example.com' }) as BoundEnv;

@@ -1,6 +1,6 @@
 {
 	// ── Self-hosting checklist ──────────────────────────────────────────────────
-	// 1. Run: wrangler d1 create inbox-angel → paste database_id below
+	// 1. Run: wrangler d1 create ready-set-mail → paste database_id below
 	// 2. Create/bind an installation-owned OAUTH_KV namespace and set BETTER_AUTH_URL to its HTTPS origin.
 	// 3. Upload private BOOTSTRAP_SECRET proof before first-owner setup (docs/agent-operations.md).
 	// 4. For DNS/routing operations: wrangler secret put CLOUDFLARE_API_TOKEN
@@ -14,7 +14,7 @@
 	//    DMARC records, email routing setup.
 	// ───────────────────────────────────────────────────────────────────────────
 
-	"name": "inbox-angel-worker",
+	"name": "ready-set-mail-worker",
 	"main": "src/index.ts",
 	"build": {
 		"command": "npm run build:dashboard"
@@ -41,7 +41,7 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "inbox-angel",
+			"database_name": "ready-set-mail",
 			"database_id": "cf18a05c-9f6c-4f38-a43c-d85037d17534",
 			"migrations_dir": "migrations"
 		}
@@ -98,7 +98,7 @@
 
 	// Environment variables
 	"vars": {
-		"WORKER_NAME": "inbox-angel-worker"
+		"WORKER_NAME": "ready-set-mail-worker"
 		// Domain config is entered in the setup wizard and stored in D1.
 		// Installer proof secret: BOOTSTRAP_SECRET; agent issuer: BETTER_AUTH_URL + OAUTH_KV.
 		// DNS/routing secret: CLOUDFLARE_API_TOKEN (see README for token permissions).

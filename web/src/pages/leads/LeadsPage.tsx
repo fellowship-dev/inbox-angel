@@ -1,4 +1,4 @@
-import { Alert, Badge, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Alert, Badge, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { MailPlus } from 'lucide-react';
 import { ListSkeleton, LoadError } from '../../components/states';

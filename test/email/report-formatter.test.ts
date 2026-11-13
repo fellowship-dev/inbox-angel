@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CATALOG } from '@inbox-angel/report';
+import { CATALOG } from '@ready-set-mail/report';
 import { buildSummary, fixSteps, formatCheckReport, OverallStatus } from '../../src/email/report-formatter';
 import type { AuthResultsHeader } from '../../src/email/parse-headers';
 import type { DnsCheckResult } from '../../src/email/dns-check';
@@ -289,11 +289,11 @@ describe('closing: help line, truthful retention, configured site link', () => {
     }
   });
 
-  it('never claims nothing is stored and never links inboxangel.com', () => {
+  it('never claims nothing is stored and never links readysetmail.com', () => {
     for (const { auth, dns } of cases()) {
       const text = formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns);
       expect(text).not.toContain('No data about your domain is stored');
-      expect(text).not.toContain('inboxangel.com');
+      expect(text).not.toContain('readysetmail.com');
     }
   });
 
@@ -326,7 +326,7 @@ describe('closing: help line, truthful retention, configured site link', () => {
 
   it('links the configured site URL, and no site at all when it is unset', () => {
     const summary = buildSummary('example.com', null, exposedDns);
-    expect(formatCheckReport('a@example.com', summary, null, exposedDns, { siteUrl: 'https://inboxangel.io' })).toContain('https://inboxangel.io');
+    expect(formatCheckReport('a@example.com', summary, null, exposedDns, { siteUrl: 'https://readysetmail.com' })).toContain('https://readysetmail.com');
     expect(formatCheckReport('a@example.com', summary, null, exposedDns)).not.toMatch(/https?:\/\//);
   });
 });
@@ -373,8 +373,8 @@ describe('actionable findings: the exact record or setting to change, then "or w
   });
 
   it('"or we do it for you": BOOKING_URL, else SITE_URL/pricing, else plain text', () => {
-    expect(report(null, NO_RECORDS, { bookingUrl: 'https://cal.example/max', siteUrl: 'https://inboxangel.io' })).toContain('Or we do it for you: https://cal.example/max');
-    expect(report(null, NO_RECORDS, { siteUrl: 'https://inboxangel.io' })).toContain('Or we do it for you: https://inboxangel.io/pricing');
+    expect(report(null, NO_RECORDS, { bookingUrl: 'https://cal.example/max', siteUrl: 'https://readysetmail.com' })).toContain('Or we do it for you: https://cal.example/max');
+    expect(report(null, NO_RECORDS, { siteUrl: 'https://readysetmail.com' })).toContain('Or we do it for you: https://readysetmail.com/pricing');
     const plain = report(null, NO_RECORDS);
     const line = plain.split('\n').find(l => l.startsWith('Or we do it for you'))!;
     expect(line).toBeDefined();
@@ -382,7 +382,7 @@ describe('actionable findings: the exact record or setting to change, then "or w
   });
 });
 
-// ── U5: record fixes come from the @inbox-angel/report catalog ──
+// ── U5: record fixes come from the @ready-set-mail/report catalog ──
 
 describe('record fixes come from the catalog; message-derived steps stay', () => {
   const NO_RECORDS: DnsCheckResult = { domain: 'example.com', spf: null, dkim: null, dmarc: null };
@@ -467,7 +467,7 @@ describe('share links when fully protected', () => {
 
 describe('catalog record fixes only for the protocol the received message failed', () => {
   const report = (auth: AuthResultsHeader | null, dns: DnsCheckResult) =>
-    formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns, { siteUrl: 'https://inboxangel.io' });
+    formatCheckReport('a@example.com', buildSummary('example.com', auth, dns), auth, dns, { siteUrl: 'https://readysetmail.com' });
   const steps = (auth: AuthResultsHeader | null, dns: DnsCheckResult) => fixSteps(buildSummary('example.com', auth, dns), auth, dns);
 
   it('protected with no SPF record: no fix steps and no "do it for you", share links stay', () => {

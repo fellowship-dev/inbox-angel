@@ -1,4 +1,4 @@
-import type { ReportModel } from '@inbox-angel/report';
+import type { ReportModel } from '@ready-set-mail/report';
 import type { getAnalytics } from './analytics';
 
 export interface EvidenceWindow { since: number; until: number }

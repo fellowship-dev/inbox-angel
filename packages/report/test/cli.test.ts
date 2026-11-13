@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DOH_ENDPOINTS, type FetchLike, type FetchResponseLike } from '@inbox-angel/dns-checks';
+import { DOH_ENDPOINTS, type FetchLike, type FetchResponseLike } from '@ready-set-mail/dns-checks';
 import { run } from '../cli';
 import { REPORT_SCHEMA } from '../src/index';
 
@@ -64,7 +64,7 @@ describe('report CLI (U4)', () => {
       expect(line.schema).toBe(REPORT_SCHEMA);
       expect(line.model.schema).toBe(REPORT_SCHEMA);
       expect(line.model.domain).toBe(d);
-      expect(line.model.reportUrl).toBe(`https://inboxangel.io/r/${tokens[d]}`);
+      expect(line.model.reportUrl).toBe(`https://readysetmail.com/r/${tokens[d]}`);
       expect(line.model.resolvers).toBe(3);
       expect(line.html).toContain('<html');
       expect(line.md).toContain(`\`${d}\``);
@@ -112,7 +112,7 @@ describe('report CLI (U4)', () => {
       fakeFetch(ZONE),
     );
     expect(out.map(o => o.domain).sort()).toEqual(['acme.dev', 'beta.io']);
-    expect(out.find(o => o.domain === 'acme.dev').model.reportUrl).toBe('https://inboxangel.io/r/t1');
+    expect(out.find(o => o.domain === 'acme.dev').model.reportUrl).toBe('https://readysetmail.com/r/t1');
   });
 
   it('reads domains from --in and caller blocks from --blocks, inserting them into that domain\'s HTML only', async () => {

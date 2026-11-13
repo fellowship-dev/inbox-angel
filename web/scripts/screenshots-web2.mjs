@@ -27,7 +27,7 @@ const list = async () => (await (await fetch(`${base}/api/domains`, { headers: {
 const sql = async (text) => {
 	const file = join(await mkdtemp(join(tmpdir(), 'ia-shot-')), 'q.sql');
 	await writeFile(file, text);
-	execFileSync('npx', ['wrangler', 'd1', 'execute', 'inbox-angel', '--local', '--persist-to', persist, '--file', file], { stdio: 'pipe' });
+	execFileSync('npx', ['wrangler', 'd1', 'execute', 'ready-set-mail', '--local', '--persist-to', persist, '--file', file], { stdio: 'pipe' });
 };
 let domain = (await list()).find((d) => d.domain === DOMAIN);
 if (!domain) {
@@ -39,11 +39,11 @@ if (!domain) {
 const ID = 'k3j2h4g5f6d7s8a9';
 const hosted = (over = {}) => ({
 	enabled: true, hosted_id: ID, mta_sts: false,
-	records: { dmarc: `${ID}._dmarc.h.inboxangel.io`, spf: `${ID}._spf.h.inboxangel.io`, tls_rpt: `${ID}._tlsrpt.h.inboxangel.io`, mta_sts: null },
+	records: { dmarc: `${ID}._dmarc.h.readysetmail.com`, spf: `${ID}._spf.h.readysetmail.com`, tls_rpt: `${ID}._tlsrpt.h.readysetmail.com`, mta_sts: null },
 	pointers: [
-		{ purpose: 'dmarc', type: 'CNAME', name: `_dmarc.${DOMAIN}`, value: `${ID}._dmarc.h.inboxangel.io` },
-		{ purpose: 'spf', type: 'TXT', name: DOMAIN, value: `include:${ID}._spf.h.inboxangel.io` },
-		{ purpose: 'tls_rpt', type: 'CNAME', name: `_smtp._tls.${DOMAIN}`, value: `${ID}._tlsrpt.h.inboxangel.io` },
+		{ purpose: 'dmarc', type: 'CNAME', name: `_dmarc.${DOMAIN}`, value: `${ID}._dmarc.h.readysetmail.com` },
+		{ purpose: 'spf', type: 'TXT', name: DOMAIN, value: `include:${ID}._spf.h.readysetmail.com` },
+		{ purpose: 'tls_rpt', type: 'CNAME', name: `_smtp._tls.${DOMAIN}`, value: `${ID}._tlsrpt.h.readysetmail.com` },
 	],
 	pointer_status: { dmarc: 'ok', spf: 'missing', mta_sts: null, tls_rpt: 'error', checked_at: Math.floor(Date.now() / 1000) },
 	level_inputs: { dmarc_published: true, spf_published: false, mta_sts_published: false },
@@ -55,7 +55,7 @@ const stubHosted = async (page) => {
 	await page.route(`**/api/domains/${domain.id}/hosted`, (r) => {
 		if (r.request().method() === 'POST') {
 			on = true;
-			return r.fulfill({ status: 201, json: { hosted: hosted(), addresses: { rua: `rua+${'q7x2'.repeat(8)}@rua.inboxangel.io`, tls_rpt: `tls-rpt+${'q7x2'.repeat(8)}@rua.inboxangel.io` } } });
+			return r.fulfill({ status: 201, json: { hosted: hosted(), addresses: { rua: `rua+${'q7x2'.repeat(8)}@rua.readysetmail.com`, tls_rpt: `tls-rpt+${'q7x2'.repeat(8)}@rua.readysetmail.com` } } });
 		}
 		return r.fulfill({ json: on ? hosted() : { enabled: false } });
 	});

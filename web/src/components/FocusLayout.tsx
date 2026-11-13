@@ -1,4 +1,4 @@
-import { IconButton, LogoMark } from '@inbox-angel/ui';
+import { IconButton, LogoMark } from '@ready-set-mail/ui';
 import { Moon, Sun, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -12,7 +12,7 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 			<header className="flex h-16 items-center justify-between border-b border-line bg-surface-1 px-4 sm:px-6">
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
 					<LogoMark className="size-7 rounded-md" aria-hidden />
-					Inbox Angel
+					Ready Set Mail
 				</Link>
 				<div className="flex items-center gap-2">
 					<IconButton label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggle}>

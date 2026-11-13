@@ -3,8 +3,8 @@
 // A field is `undefined` when DNS could not answer (failure), `null` when DNS answered "no record", and the value
 // otherwise. Unknown is never folded into absent.
 
-import { createResolver, isSpfRecord, lookupDmarc, type DmarcLookup, type Resolver, type TxtResult } from '@inbox-angel/dns-checks';
-import type { DmarcFacts } from '@inbox-angel/db';
+import { createResolver, isSpfRecord, lookupDmarc, type DmarcLookup, type Resolver, type TxtResult } from '@ready-set-mail/dns-checks';
+import type { DmarcFacts } from '@ready-set-mail/db';
 import { RECORDS_SEPARATOR, lookupSpf } from './dns-check';
 
 /** SPF from the TXT answer at the domain (several v=spf1 records are joined, like lookupSpf does). */

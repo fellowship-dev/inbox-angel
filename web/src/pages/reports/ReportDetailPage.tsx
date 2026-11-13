@@ -1,4 +1,4 @@
-import { Card, EmptyState, PageHeader, Stat, StatGroup, cn } from '@inbox-angel/ui';
+import { Card, EmptyState, PageHeader, Stat, StatGroup, cn } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, ChevronDown, FileText, XCircle } from 'lucide-react';
 import { useState } from 'react';

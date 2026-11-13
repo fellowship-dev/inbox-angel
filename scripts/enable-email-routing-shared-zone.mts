@@ -15,7 +15,7 @@
 //   CLOUDFLARE_ZONE_ID=<zone-id> \
 //   ROOT_DOMAIN=fellowship.dev \
 //   REPORTS_DOMAIN=reports.fellowship.dev \
-//   WORKER_NAME=inbox-angel-worker \
+//   WORKER_NAME=ready-set-mail-worker \
 //   npx tsx scripts/enable-email-routing-shared-zone.mts
 //
 // Token permissions (same as the worker's CLOUDFLARE_API_TOKEN):
@@ -26,7 +26,7 @@ const TOKEN  = process.env.CLOUDFLARE_API_TOKEN;
 const ZONE   = process.env.CLOUDFLARE_ZONE_ID;
 const ROOT   = process.env.ROOT_DOMAIN;
 const DOMAIN = process.env.REPORTS_DOMAIN;
-const WORKER = process.env.WORKER_NAME ?? 'inbox-angel-worker';
+const WORKER = process.env.WORKER_NAME ?? 'ready-set-mail-worker';
 // Override if CF already overwrote root MX. Format: "10:mail.protonmail.ch,20:mailsec.protonmail.ch"
 const ORIGINAL_MX = process.env.ORIGINAL_MX;
 

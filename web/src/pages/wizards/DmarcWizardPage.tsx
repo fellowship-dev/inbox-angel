@@ -1,4 +1,4 @@
-import { Alert, Button, CheckResult, CheckResultList, FieldHint } from '@inbox-angel/ui';
+import { Alert, Button, CheckResult, CheckResultList, FieldHint } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -180,7 +180,7 @@ export function DmarcWizardPage() {
 						) : null}
 						{!cfManaged ? (
 							<Alert variant="info" title="This does not change your DNS">
-								Inbox Angel cannot edit this domain's DNS. Copy the new record into your DNS provider, then confirm. Confirming makes no change on our side: Inbox Angel will detect
+								Ready Set Mail cannot edit this domain's DNS. Copy the new record into your DNS provider, then confirm. Confirming makes no change on our side: Ready Set Mail will detect
 								the new policy from your DNS on its own.
 							</Alert>
 						) : null}

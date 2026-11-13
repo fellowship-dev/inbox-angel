@@ -1,6 +1,6 @@
 // Port of unzip-inboxangel outreach-tools/tests/test_fixes.py and the catalog/fix half of test_bimi.py.
 import { describe, expect, it } from 'vitest';
-import { DNS_HOSTS, PROVIDERS, type DomainReport } from '@inbox-angel/dns-checks';
+import { DNS_HOSTS, PROVIDERS, type DomainReport } from '@ready-set-mail/dns-checks';
 import { CATALOG, DNS_HOST_STEPS, build, enforcedDmarc, fill, type Fix } from '../src/index';
 import { CHECKED, GOOGLE, M365, RESEND, SENDGRID, SES, bimiRec, makeRec, type RecOptions } from './helpers';
 
@@ -104,7 +104,7 @@ describe('fixes (test_fixes.py)', () => {
     const f = fx(makeRec('acme.dev', { providers: [GOOGLE] }), 'dmarc-missing');
     expect(f.why.toLowerCase()).not.toContain('report');
     expect(f.optionalNext).toContain('rua=mailto:<a mailbox you read>');
-    expect(f.optionalNext).toContain('Inbox Angel receive and read them');
+    expect(f.optionalNext).toContain('Ready Set Mail receive and read them');
   });
 
   it('dmarc-p-none-no-rua wording', () => {

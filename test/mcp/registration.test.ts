@@ -30,7 +30,7 @@ beforeAll(async () => {
   for(const statement of sql.split(';').filter(s=>s.trim())) await db.prepare(statement).run();
   await db.prepare('INSERT INTO d1_migrations(name) VALUES (?)').bind(name).run();
  }
- const setups = await Promise.all(['owner@example.com','racer@example.com'].map(email=>fetch('/api/auth/setup', { ...body({email,password:'runtime-test-password'}), headers: { 'content-type':'application/json','x-inbox-angel-bootstrap':proof } })));
+ const setups = await Promise.all(['owner@example.com','racer@example.com'].map(email=>fetch('/api/auth/setup', { ...body({email,password:'runtime-test-password'}), headers: { 'content-type':'application/json','x-ready-set-mail-bootstrap':proof } })));
  expect(setups.filter(r=>r.status===201)).toHaveLength(1);
  const setup=setups.find(r=>r.status===201)!; cookie = cookieOf(setup as unknown as Response);
  expect((await db.prepare("SELECT COUNT(*) n FROM memberships WHERE role='owner'").first() as any).n).toBe(1);
@@ -46,7 +46,7 @@ describe('real Workers OAuth contract',()=>{
   expect((await fetch('/mcp')).status).toBe(401);
  });
  it('requires PKCE and rejects wrong audiences',async()=>{
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',state:'opaque-state'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state:'opaque-state'});
   const noPkce=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   expect(noPkce.status).toBe(400);
   query.set('code_challenge','A'.repeat(43));query.set('code_challenge_method','S256');query.set('resource','https://other.example/mcp');
@@ -54,7 +54,7 @@ describe('real Workers OAuth contract',()=>{
  });
  it('rejects private and special-use client metadata destinations in the real fetch boundary',async()=>{
   for (const destination of ['https://127.0.0.1/client.json','https://[::1]/client.json','https://169.254.169.254/latest/meta-data/']) {
-   const query=new URLSearchParams({response_type:'code',client_id:destination,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+   const query=new URLSearchParams({response_type:'code',client_id:destination,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
    const response=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
    expect(response.status).toBeGreaterThanOrEqual(400);
   }
@@ -65,7 +65,7 @@ describe('real Workers OAuth contract',()=>{
   expect(response.status).toBe(403);
  });
  it('expired consent storage cannot mint a connection',async()=>{
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   const handle=(await page.text()).match(/name="handle" value="([^"]+)"/)![1];
   const hash=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(handle))).toString('hex');
@@ -77,7 +77,7 @@ describe('real Workers OAuth contract',()=>{
   const verifier='runtime-pkce-verifier-at-least-forty-three-characters';
   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));
   const challenge=Buffer.from(digest).toString('base64url');
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',state:'opaque-state',code_challenge:challenge,code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state:'opaque-state',code_challenge:challenge,code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   const html=await page.text();expect(page.status,html).toBe(200);expect(html).not.toContain(proof);expect(html).not.toContain('runtime-test-password');
   const handle=html.match(/name="handle" value="([^"]+)"/)?.[1];expect(handle).toBeTruthy();
@@ -108,7 +108,7 @@ describe('real Workers OAuth contract',()=>{
   const verifier='runtime-pkce-verifier-at-least-forty-three-characters';
   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));
   const challenge=Buffer.from(digest).toString('base64url');
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',state:'opaque-state',code_challenge:challenge,code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state:'opaque-state',code_challenge:challenge,code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   const html=await page.text();expect(page.status,html).toBe(200);expect(html).not.toContain(proof);expect(html).not.toContain('runtime-test-password');
   const handle=html.match(/name="handle" value="([^"]+)"/)?.[1];expect(handle).toBeTruthy();

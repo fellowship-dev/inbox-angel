@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { SenderRow } from '@inbox-angel/db';
-import { identifySender } from '@inbox-angel/dns-checks/sender-providers';
+import type { SenderRow } from '@ready-set-mail/db';
+import { identifySender } from '@ready-set-mail/dns-checks/sender-providers';
 import { buildSenders, recordAlignment } from '../../src/analytics/senders';
 import { buildFixes, spfWithInclude } from '../../src/analytics/fixes';
 import { assessReadiness } from '../../src/analytics/readiness';

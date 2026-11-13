@@ -1,6 +1,6 @@
 /** Pure DMARC record helpers shared by the setup wizard, the graduation wizard and the domain page. */
 
-import { parseDmarcTags, readDmarcTag } from '@inbox-angel/dns-checks/dmarc-tags';
+import { parseDmarcTags, readDmarcTag } from '@ready-set-mail/dns-checks/dmarc-tags';
 
 /**
  * True when `rua` is a usable report address. A domain added before a reports domain was configured has an

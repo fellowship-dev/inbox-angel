@@ -1,4 +1,4 @@
-import { Badge } from '@inbox-angel/ui';
+import { Badge } from '@ready-set-mail/ui';
 import { AlertTriangle, CheckCircle2, CircleHelp, Info, XCircle } from 'lucide-react';
 
 /** `unknown` = the DNS lookup behind this step failed, so we cannot judge it. */

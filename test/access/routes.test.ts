@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { makeEnv, setupOwner, req, ctx, call } from '../auth/helpers';
 import { handleAccessRoutes } from '../../src/access/routes';
 

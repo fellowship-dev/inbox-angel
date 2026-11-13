@@ -1,4 +1,4 @@
-import { Button, EmptyState, PageHeader, Stat, StatGroup, toast } from '@inbox-angel/ui';
+import { Button, EmptyState, PageHeader, Stat, StatGroup, toast } from '@ready-set-mail/ui';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Download, Globe, Plus } from 'lucide-react';
 import { useState } from 'react';
@@ -38,7 +38,7 @@ function AddDomainButton() {
 	);
 }
 
-const CONNECT_CLOUDFLARE_DOCS = 'https://github.com/fellowship-dev/inbox-angel/blob/main/docs/cloudflare-oauth.md';
+const CONNECT_CLOUDFLARE_DOCS = 'https://github.com/fellowship-dev/ready-set-mail/blob/main/docs/cloudflare-oauth.md';
 
 export function OverviewPage() {
 	const qc = useQueryClient();

@@ -1,4 +1,4 @@
-import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@inbox-angel/ui';
+import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ready-set-mail/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import { ClaimCard } from '../../../components/domain/ClaimCard';
@@ -79,7 +79,7 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 		<StepCard title="What's your main domain?" focusHeading={false}>
 			<form onSubmit={submit} className="space-y-4" noValidate>
 				<p className="text-sm text-ink-2">
-					Pick the domain you want as your Inbox Angel home base. We create a <code className="font-mono text-ink-1">reports</code> subdomain here to receive email
+					Pick the domain you want as your Ready Set Mail home base. We create a <code className="font-mono text-ink-1">reports</code> subdomain here to receive email
 					authentication reports, and every domain you add later sends its reports there too.
 				</p>
 				<div className="space-y-1.5">

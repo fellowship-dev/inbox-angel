@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import type { Env } from '../../src/index';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 
 export const BASE = 'https://ia.example.com';
@@ -22,7 +22,7 @@ export const freshIp = () => `10.0.${Math.floor(++ipCounter / 250)}.${ipCounter 
 
 export function req(method: string, path: string, opts: { key?: string; body?: unknown; headers?: Record<string, string>; ip?: string } = {}) {
   const headers: Record<string, string> = { 'cf-connecting-ip': opts.ip ?? freshIp(), ...opts.headers };
-  if (path === '/api/auth/setup' && !Object.hasOwn(headers, 'x-inbox-angel-bootstrap')) headers['x-inbox-angel-bootstrap'] = 'test-only-installer-proof-32-characters-minimum';
+  if (path === '/api/auth/setup' && !Object.hasOwn(headers, 'x-ready-set-mail-bootstrap')) headers['x-ready-set-mail-bootstrap'] = 'test-only-installer-proof-32-characters-minimum';
   if (opts.key) headers['x-api-key'] = opts.key;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
   let body = opts.body;

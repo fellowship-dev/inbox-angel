@@ -1,7 +1,7 @@
 // Item 1: handing a workspace over cannot push the new owner past the hosted workspace cap.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { call, makeEnv, setupOwner } from '../auth/helpers';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { hosted, json, nxdomain } from './helpers';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));

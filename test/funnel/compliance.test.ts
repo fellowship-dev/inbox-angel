@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { hashEmail } from '@inbox-angel/db';
+import { hashEmail } from '@ready-set-mail/db';
 import { signToken, verifyToken } from '../../src/mail/tokens';
 import { sendNonTransactional, unsubscribeUrl } from '../../src/mail/compliance';
 import { funnelMailer, ownerMailer, transactionalMailer } from '../../src/mail/mailer';
@@ -14,7 +14,7 @@ import { T0, fakeMailer, funnelWorld, quietLogs } from './world';
 beforeEach(quietLogs);
 afterEach(() => vi.restoreAllMocks());
 
-const get = (env: any, path: string, method = 'GET') => handleApi(new Request(`https://app.inboxangel.io${path}`, { method, headers: { 'cf-connecting-ip': '9.9.9.9' } }), env, ctx);
+const get = (env: any, path: string, method = 'GET') => handleApi(new Request(`https://app.readysetmail.com${path}`, { method, headers: { 'cf-connecting-ip': '9.9.9.9' } }), env, ctx);
 const tokenOf = (url: string) => decodeURIComponent(new URL(url).searchParams.get('t')!);
 
 describe('signed tokens', () => {
@@ -55,7 +55,7 @@ describe('GET|POST /api/unsubscribe', () => {
     await w.enroll('a@acme.com');
     w.db.sqlite.prepare("INSERT INTO monitor_subscriptions (email, domain, workspace_id) VALUES ('a@acme.com', 'acme.com', 'ws_default')").run();
     const link = (await unsubscribeUrl(w.env, 'A@acme.com'))!;
-    return { w, link, path: link.replace('https://app.inboxangel.io', '') };
+    return { w, link, path: link.replace('https://app.readysetmail.com', '') };
   }
 
   it('the link in the email body unsubscribes: suppression hash kept, lead and subscriptions deleted at once, no login needed', async () => {
@@ -134,9 +134,9 @@ describe('change alerts (non-transactional)', () => {
     await sendChangeNotification('a@acme.com', 'acme.com', [change], tenant);
     expect(send).toHaveBeenCalledOnce();
     const arg = send.mock.calls[0][0];
-    expect(arg.headers['List-Unsubscribe']).toMatch(/^<https:\/\/app\.inboxangel\.io\/api\/unsubscribe\?t=.+>$/);
+    expect(arg.headers['List-Unsubscribe']).toMatch(/^<https:\/\/app\.readysetmail\.com\/api\/unsubscribe\?t=.+>$/);
     expect(arg.headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
-    expect(arg.text).toContain('Unsubscribe: https://app.inboxangel.io/api/unsubscribe');
+    expect(arg.text).toContain('Unsubscribe: https://app.readysetmail.com/api/unsubscribe');
     expect(arg.text).toContain('Wilmington');
     expect(arg.html).toContain('Unsubscribe</a>');
 
@@ -176,7 +176,7 @@ describe('mailers by purpose', () => {
     expect(await resend(503, 'down')).toMatchObject({ kind: 'transient' });
     // Resend names no recipient-specific error (https://resend.com/docs/api-reference/errors): nothing from it bounces a lead.
     expect(await resend(422, 'Invalid `to` field')).toMatchObject({ kind: 'config' });
-    expect(await resend(403, 'The inboxangel.io domain is not verified.')).toMatchObject({ kind: 'config' });
+    expect(await resend(403, 'The readysetmail.com domain is not verified.')).toMatchObject({ kind: 'config' });
     expect(await resend(401, 'API key is invalid')).toMatchObject({ kind: 'config' });
     expect(await resend(429, 'Too many requests')).toMatchObject({ kind: 'config' });
     expect(await resend(400, 'something we have never seen')).toMatchObject({ kind: 'config' });
@@ -198,8 +198,8 @@ describe('privacy of rate-limit keys and link base', () => {
 
   it('links are HTTPS only (plain-HTTP List-Unsubscribe is rejected by providers); http is accepted for localhost', () => {
     const base = (v?: string) => publicBaseUrl({ PUBLIC_BASE_URL: v } as any);
-    expect(base('https://app.inboxangel.io/')).toBe('https://app.inboxangel.io');
-    expect(base('http://app.inboxangel.io')).toBeNull();
+    expect(base('https://app.readysetmail.com/')).toBe('https://app.readysetmail.com');
+    expect(base('http://app.readysetmail.com')).toBeNull();
     expect(base('http://localhost:8787')).toBe('http://localhost:8787');
     expect(base('http://localhost.evil.com')).toBeNull();
     expect(base(undefined)).toBeNull();

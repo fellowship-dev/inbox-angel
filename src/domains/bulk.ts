@@ -5,9 +5,9 @@
 import type { TenantContext } from '../tenancy/context';
 import { provisionDomain } from '../dns/provision';
 import { logAudit } from '../audit/log';
-import { PlanLimitError } from '@inbox-angel/db';
+import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitBody } from '../hosted/plan-limits';
-import { normalizeDomainName } from '@inbox-angel/dns-checks';
+import { normalizeDomainName } from '@ready-set-mail/dns-checks';
 import { domainCap, domainRefusal } from './service';
 import { admitDomain, claimView, settleClaims, type ClaimView } from './ownership';
 

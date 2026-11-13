@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, FieldError, Input, Skeleton } from '@inbox-angel/ui';
+import { Alert, Badge, Button, FieldError, Input, Skeleton } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -88,7 +88,7 @@ export function InvitePage() {
 	const workspaceLabel = info.workspace_name ?? 'a workspace';
 	const description = (
 		<>
-			<strong>{info.invited_by}</strong> invited you to join <strong>{workspaceLabel}</strong> on Inbox Angel as <Badge variant="brand">{info.role}</Badge>
+			<strong>{info.invited_by}</strong> invited you to join <strong>{workspaceLabel}</strong> on Ready Set Mail as <Badge variant="brand">{info.role}</Badge>
 		</>
 	);
 
@@ -163,7 +163,7 @@ function ExistingUser({ info, token, description, signOut }: { info: InviteInfo;
 				</>
 			) : (
 				<>
-					<p className="text-sm text-ink-2">{info.email} already has an Inbox Angel login. Sign in with it to accept; this adds the workspace to your account.</p>
+					<p className="text-sm text-ink-2">{info.email} already has an Ready Set Mail login. Sign in with it to accept; this adds the workspace to your account.</p>
 					<InlineSignIn email={info.email} token={token} />
 				</>
 			)}

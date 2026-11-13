@@ -7,7 +7,7 @@ vi.mock('../../src/api/auth', () => ({
   },
 }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { getMode } from '../../src/tenancy/mode';
 import { defaultResolver, resolveDomainOwner, resolveInboundWorkspace, selfHostResolver, type WorkspaceResolver } from '../../src/tenancy/resolver';
 import { DEFAULT_WORKER_NAME, workerName } from '../../src/tenancy/context';
@@ -74,10 +74,10 @@ describe('the WorkspaceResolver seam', () => {
 });
 
 describe('WORKER_NAME', () => {
-  it('keeps inbox-angel-worker as the default script name', () => {
-    expect(DEFAULT_WORKER_NAME).toBe('inbox-angel-worker');
-    expect(workerName({})).toBe('inbox-angel-worker');
-    expect(workerName({ WORKER_NAME: '' })).toBe('inbox-angel-worker');
+  it('keeps ready-set-mail-worker as the default script name', () => {
+    expect(DEFAULT_WORKER_NAME).toBe('ready-set-mail-worker');
+    expect(workerName({})).toBe('ready-set-mail-worker');
+    expect(workerName({ WORKER_NAME: '' })).toBe('ready-set-mail-worker');
     expect(workerName({ WORKER_NAME: 'custom' })).toBe('custom');
     expect(makeTenant({ env: { WORKER_NAME: 'mine' } }).workerName).toBe('mine');
   });

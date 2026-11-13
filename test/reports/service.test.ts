@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { createResolver } from '@inbox-angel/dns-checks';
-import { buildReport } from '@inbox-angel/report';
-import { checkDomain } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
+import { buildReport } from '@ready-set-mail/report';
+import { checkDomain } from '@ready-set-mail/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 import { makeTenant } from '../helpers/tenant';
 import { getDomainReport } from '../../src/reports/service';
@@ -66,7 +66,7 @@ describe('shared domain evidence report', () => {
     await tenant.scope.reports.insertAggregate({ domain_id: id, org_name: 'DMARC reporter', report_id: 'original-source-42', date_begin: begin, date_end: end, total_count: 0, pass_count: 0, fail_count: 0, raw_xml: '<private>never expose</private>' });
     await tenant.scope.reports.insertTls({ domain_id: id, org_name: 'TLS reporter', date_begin: begin, date_end: end, total_success: 0, total_failure: 0, failure_details: 'private', raw_json: 'private' });
     const received = now - 60;
-    const db = tenant.env.DB as unknown as ReturnType<typeof import('@inbox-angel/db/testing').createMigratedD1>;
+    const db = tenant.env.DB as unknown as ReturnType<typeof import('@ready-set-mail/db/testing').createMigratedD1>;
     db.sqlite.prepare('UPDATE aggregate_reports SET created_at = ?').run(received);
     db.sqlite.prepare('UPDATE tls_reports SET created_at = ?').run(received);
     const report = await getDomainReport(tenant, id, { resolver: createResolver({ fetch: dohFetch({}) }), now, days: 2 });

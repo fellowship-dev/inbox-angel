@@ -11,7 +11,7 @@ import {
 	LogoMark,
 	WorkspaceSwitcher,
 	type RenderNavLink,
-} from '@inbox-angel/ui';
+} from '@ready-set-mail/ui';
 import { BarChart3, Globe, History, LogOut, Mail, MailPlus, Moon, Settings, Sun, UserCircle, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
@@ -54,7 +54,7 @@ export function Shell() {
 			brand={
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
 					<LogoMark className="size-8 shrink-0 rounded-md" aria-hidden />
-					<span>Inbox Angel</span>
+					<span>Ready Set Mail</span>
 				</Link>
 			}
 			sidebarTop={(collapsed) =>

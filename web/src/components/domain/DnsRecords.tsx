@@ -1,4 +1,4 @@
-import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@inbox-angel/ui';
+import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
@@ -67,11 +67,11 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 				title="DMARC record"
 				summary={
 					!ruaReady
-						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Inbox Angel report address yet, so there is no record to suggest.`
+						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Ready Set Mail report address yet, so there is no record to suggest.`
 						: !found
 							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
 							: has_rua
-								? 'Published, and aggregate reports are sent to Inbox Angel.'
+								? 'Published, and aggregate reports are sent to Ready Set Mail.'
 								: `Published, but it does not send reports to ${domain.rua_address}. Update it with the record below.`
 				}
 			>
@@ -85,7 +85,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 									Apply to Cloudflare
 								</WriteButton>
 							) : (
-								<p className="text-ink-2">Add this record at your DNS provider. Inbox Angel cannot change DNS for this domain.</p>
+								<p className="text-ink-2">Add this record at your DNS provider. Ready Set Mail cannot change DNS for this domain.</p>
 							)}
 						</>
 					) : null}

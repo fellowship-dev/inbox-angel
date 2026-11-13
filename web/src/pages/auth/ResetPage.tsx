@@ -1,4 +1,4 @@
-import { Alert, Button, FieldError, Input } from '@inbox-angel/ui';
+import { Alert, Button, FieldError, Input } from '@ready-set-mail/ui';
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';

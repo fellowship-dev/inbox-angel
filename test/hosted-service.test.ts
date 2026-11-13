@@ -6,7 +6,7 @@ import type { Env } from '../src/index';
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { hostedServiceSentence, hostedServiceUrl } from '../src/hosted-service';
 import { llmsTxtBody } from '../src/llms-txt';
 import { mcpInstructions } from '../src/mcp/server';
@@ -52,7 +52,7 @@ describe('/llms.txt', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
     const body = await res.text();
-    expect(body.startsWith('# Inbox Angel\n')).toBe(true);
+    expect(body.startsWith('# Ready Set Mail\n')).toBe(true);
     expect(body).toContain('https://ia.example.com/mcp');
     expect(body).toContain('docs/coding-agents.md');
     expect(mentionsHosted(body)).toBe(false);
@@ -69,7 +69,7 @@ describe('/llms.txt', () => {
     const res = await get({});
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('# Inbox Angel');
+    expect(body).toContain('# Ready Set Mail');
     expect(body).not.toContain('/mcp.'); // no endpoint claimed without a canonical origin
   });
 
@@ -131,7 +131,7 @@ describe('setup-required page (no D1 bound)', () => {
     const html = await setupPage({ HOSTED_SERVICE_URL: URL_SET }).text();
     expect(html).toContain(`<a href="${URL_SET}"`);
     expect(html.match(/hosted free tier/g)).toHaveLength(1);
-    expect(html).toContain('wrangler d1 create inbox-angel');
+    expect(html).toContain('wrangler d1 create ready-set-mail');
     expect(html.length - plain.length).toBeLessThan(600);
   });
 

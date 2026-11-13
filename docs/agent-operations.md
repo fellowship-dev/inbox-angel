@@ -7,7 +7,7 @@ The same installation serves its dashboard, HTTP API and MCP endpoint. Self-host
 Each installation needs its own migrated D1 database, `OAUTH_KV` namespace and canonical HTTPS origin. Do not reuse another installation's OAuth namespace, database or credentials. In `wrangler.jsonc`, replace the D1 database id and `REPLACE_WITH_INSTALLATION_OAUTH_KV_ID` with the resources you created:
 
 ```sh
-npx wrangler d1 create inbox-angel
+npx wrangler d1 create ready-set-mail
 npx wrangler kv namespace create OAUTH_KV
 ```
 
@@ -16,9 +16,9 @@ Set `BETTER_AUTH_URL` in Worker vars to the exact public origin, for example `ht
 Before deployment and first-owner setup, generate an installer-held random proof in a **new private file outside the checkout**. For example:
 
 ```sh
-mkdir -p "$HOME/.config/inbox-angel"
-chmod 700 "$HOME/.config/inbox-angel"
-bootstrap_file="$HOME/.config/inbox-angel/bootstrap-proof"
+mkdir -p "$HOME/.config/ready-set-mail"
+chmod 700 "$HOME/.config/ready-set-mail"
+bootstrap_file="$HOME/.config/ready-set-mail/bootstrap-proof"
 (umask 077; set -C; openssl rand -hex 32 > "$bootstrap_file")
 ```
 
@@ -28,7 +28,7 @@ Stop if the file already exists; use a new private path instead of overwriting a
 npx wrangler secret put BOOTSTRAP_SECRET < "$bootstrap_file"
 ```
 
-Store the proof privately (for example, in the installer's password manager). Open the file through a trusted local editor when entering it into the browser's masked **Installer proof** field. Never print it, paste it into agent chat, put it in a URL or commit it. The dashboard sends it only in `X-Inbox-Angel-Bootstrap`, alongside the owner account form; the proof is not a JSON-body field. The configured value must be at least 32 characters; accepted submissions are capped at 512 characters. A proof is consumed after successful owner setup and cannot reopen signup. Email/password setup does not require SMTP, Google or GitHub sign-in. Social sign-in cannot claim first ownership.
+Store the proof privately (for example, in the installer's password manager). Open the file through a trusted local editor when entering it into the browser's masked **Installer proof** field. Never print it, paste it into agent chat, put it in a URL or commit it. The dashboard sends it only in `X-Ready-Set-Mail-Bootstrap`, alongside the owner account form; the proof is not a JSON-body field. The configured value must be at least 32 characters; accepted submissions are capped at 512 characters. A proof is consumed after successful owner setup and cannot reopen signup. Email/password setup does not require SMTP, Google or GitHub sign-in. Social sign-in cannot claim first ownership.
 
 Apply migrations and build before serving the new code (`npm run deploy` performs build → migration → deploy). The one-click deployment is a starting point: it does not remove the namespace, canonical-origin or installer-proof steps. Creating a deployment is separate from verifying its browser and MCP behavior.
 
@@ -39,10 +39,10 @@ Apply migrations and build before serving the new code (`npm run deploy` perform
 3. From the repository, create a new installation-specific plugin directory:
 
    ```sh
-   node tools/configure-agent-plugin.mjs --endpoint https://mail.example.com/mcp --out /tmp/my-inbox-angel-plugin
+   node tools/configure-agent-plugin.mjs --endpoint https://mail.example.com/mcp --out /tmp/my-ready-set-mail-plugin
    ```
 
-   The generator refuses existing output directories and URLs containing credentials, a query or a fragment. It writes endpoint configuration, never a token. Install that generated directory through the client's supported local-plugin flow, then reload the client/tools. See [plugin setup](../plugins/inbox-angel/SETUP.md). The source package has no default server connection.
+   The generator refuses existing output directories and URLs containing credentials, a query or a fragment. It writes endpoint configuration, never a token. Install that generated directory through the client's supported local-plugin flow, then reload the client/tools. See [plugin setup](../plugins/ready-set-mail/SETUP.md). The source package has no default server connection.
 4. Start the client's browser sign-in. Review the requesting client's publisher/name, token-return hostname, exact workspace/product/domain tuples, actions and expiry. A self-registered client's name is not verified; a loopback redirect sends access to a local application. Consent lasts 1–30 days. Newly added domains, products and memberships do not expand an existing finite grant.
 5. Confirm callable tools exist, call `whoami`, then `list_domains` and `get_email_report` for the exact permitted domain. The report must contain live DNS findings, observed source evidence or precise unavailable states, and proposed fixes with prerequisites and verification.
 

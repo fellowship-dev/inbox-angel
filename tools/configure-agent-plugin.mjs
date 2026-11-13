@@ -11,10 +11,10 @@ try {
   const output = resolve(value('--out'));
   try { await access(output); throw new Error('exists'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   await mkdir(dirname(output), { recursive: true });
-  await cp(fileURLToPath(new URL('../plugins/inbox-angel/', import.meta.url)), output, { recursive: true, force: false, errorOnExist: true });
+  await cp(fileURLToPath(new URL('../plugins/ready-set-mail/', import.meta.url)), output, { recursive: true, force: false, errorOnExist: true });
   const server = { url: endpoint.href };
-  await writeFile(resolve(output, 'mcp.json'), JSON.stringify({ $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json', mcpServers: { 'inbox-angel': { type: 'streamable-http', ...server } } }, null, 2) + '\n');
-  await writeFile(resolve(output, '.mcp.json'), JSON.stringify({ mcpServers: { 'inbox-angel': { type: 'http', ...server } } }, null, 2) + '\n');
+  await writeFile(resolve(output, 'mcp.json'), JSON.stringify({ $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json', mcpServers: { 'ready-set-mail': { type: 'streamable-http', ...server } } }, null, 2) + '\n');
+  await writeFile(resolve(output, '.mcp.json'), JSON.stringify({ mcpServers: { 'ready-set-mail': { type: 'http', ...server } } }, null, 2) + '\n');
   process.stdout.write('Plugin copy configured. Install it, authenticate, then verify whoami and an actual report.\n');
 } catch (error) {
   // Never include supplied URLs: they may accidentally contain a credential.

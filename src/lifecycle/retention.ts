@@ -5,7 +5,7 @@
 // sweep is logged and the others still run. The whole run shares one statement budget (D1 caps queries per
 // invocation), so a big backlog is worked off over several days; truncated sweeps say so in the log line. Expired canary tokens are purged by src/hosted/cron.ts, as before.
 
-import { lifecycleQueries, sweepLimits, type SweepResult } from '@inbox-angel/db';
+import { lifecycleQueries, sweepLimits, type SweepResult } from '@ready-set-mail/db';
 import { retentionPolicy, type RetentionEnv } from './config';
 
 const DAY = 86400;

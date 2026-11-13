@@ -8,7 +8,7 @@ vi.mock('../../src/api/auth', () => ({
 }));
 vi.mock('../../src/dns/provision', () => ({ provisionDomain: vi.fn(), deprovisionDomain: vi.fn(), DnsProvisionError: class extends Error {} }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 import { seedSettings } from '../helpers/tenant';
 
@@ -24,7 +24,7 @@ function makeEnv(): Env {
 }
 
 const send = (method: string, path: string, body?: unknown) =>
-  handleApi(new Request(`https://api.inboxangel.com${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), makeEnv(), ctx);
+  handleApi(new Request(`https://api.readysetmail.com${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), makeEnv(), ctx);
 
 beforeEach(() => vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ Status: 2 }), { status: 200 }))));
 afterEach(() => vi.unstubAllGlobals());

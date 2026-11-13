@@ -9,7 +9,7 @@
 //   * carries the owner's zone allow-list and refuses every call outside it,
 //   * throws CfConnectionError (not a generic failure) when the connection is broken or revoked.
 
-import type { WorkspaceScope, CfConnectionInfo, CfConnectionZone } from '@inbox-angel/db';
+import type { WorkspaceScope, CfConnectionInfo, CfConnectionZone } from '@ready-set-mail/db';
 import {
   CfAuthError,
   CfClient,
@@ -301,7 +301,7 @@ export class ConnectionService {
 
   // ── Zones ──────────────────────────────────────────────────
 
-  /** Every active zone the connection's token can see, with whether Inbox Angel may manage it. */
+  /** Every active zone the connection's token can see, with whether Ready Set Mail may manage it. */
   async availableZones(id: string): Promise<{ id: string; name: string; allowed: boolean; cfAccountId?: string }[]> {
     const cf = await this.#setupClient(id);
     const allowed = new Set((await this.#host.scope.connections.zones(id)).map(z => z.zone_id));

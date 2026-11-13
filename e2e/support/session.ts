@@ -25,7 +25,7 @@ export async function signIn(page: Page) {
  expect(status.status()).toBe(200);
  const { configured } = await status.json() as { configured: boolean };
  const response = await page.request.post(configured ? '/api/auth/login' : '/api/auth/setup', {
-  headers: { Origin: origin, ...(!configured ? { 'X-Inbox-Angel-Bootstrap': operator.proof } : {}) },
+  headers: { Origin: origin, ...(!configured ? { 'X-Ready-Set-Mail-Bootstrap': operator.proof } : {}) },
   data: { email: operator.email, password: operator.password, ...(!configured ? { name: 'E2E Owner' } : {}) },
  });
  // Assert status only: response bodies can contain private account diagnostics.

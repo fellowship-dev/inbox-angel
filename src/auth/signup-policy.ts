@@ -10,7 +10,7 @@
 // OAuth provider reports that email as verified (an unverified address proves nothing about its holder).
 import { verifyBootstrapProof, consumeBootstrapProof } from './bootstrap';
 import { APIError } from 'better-auth/api';
-import { authLookups, forWorkspace, forImplicitWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@inbox-angel/db';
+import { authLookups, forWorkspace, forImplicitWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@ready-set-mail/db';
 import { isSaas, type AuthEnv } from './config';
 
 export type SignupIntent =

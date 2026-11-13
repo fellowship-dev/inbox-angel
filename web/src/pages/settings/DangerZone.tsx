@@ -1,4 +1,4 @@
-import { Button, Card, CardContent, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldError, Input, toast } from '@inbox-angel/ui';
+import { Button, Card, CardContent, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldError, Input, toast } from '@ready-set-mail/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { useState } from 'react';
@@ -39,7 +39,7 @@ export function DangerZone() {
 
 function ExportCard({ workspaceId }: { workspaceId: string }) {
 	const download = useMutation({
-		mutationFn: () => downloadFile(`/api/workspaces/${encodeURIComponent(workspaceId)}/export`, `inbox-angel-${workspaceId}-export.json`),
+		mutationFn: () => downloadFile(`/api/workspaces/${encodeURIComponent(workspaceId)}/export`, `ready-set-mail-${workspaceId}-export.json`),
 		onError: (e) => toast({ variant: 'danger', title: 'Could not export', description: errorMessage(e) }),
 	});
 	return (

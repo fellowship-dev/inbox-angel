@@ -3,7 +3,7 @@ import { handleRelay, relayEnabled, RELAY_STATE_TTL_SECONDS } from '../../src/co
 import worker from '../../src/index';
 import { b64url } from '../../src/connections/crypto';
 import { call, makeEnv, setupOwner } from '../auth/helpers';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { FakeCloudflare } from '../helpers/cf-fake';
 import { AUTH, MockAuthServer } from './mock-oauth';
 import { KEY } from './world';

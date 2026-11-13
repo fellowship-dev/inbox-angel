@@ -2,7 +2,7 @@
 //
 // Browser sessions use current memberships. ias_ credentials use explicit finite grants.
 // Prelaunch env API_KEY and ia_ machine credentials deliberately have no fallback.
-import { authLookups, globalQueries, type MembershipRole } from '@inbox-angel/db';
+import { authLookups, globalQueries, type MembershipRole } from '@ready-set-mail/db';
 import { resolveApiKey, looksLikeApiKey } from './api-keys';
 import { createAuth } from './index';
 import type { AuthEnv } from './config';

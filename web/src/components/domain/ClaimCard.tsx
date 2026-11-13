@@ -1,4 +1,4 @@
-import { Alert, Badge, Button } from '@inbox-angel/ui';
+import { Alert, Badge, Button } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
