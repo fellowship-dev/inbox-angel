@@ -51,14 +51,14 @@ export async function intakeAuthStatus(env: { DB: D1Database; AUTHSERV_ID?: stri
 /** A finding in the shape of `PreflightItem` (src/setup/preflight.ts). Messages name a setting and what it breaks; never a value. */
 export interface IntakeSetupFinding { id: 'intake'; severity: 'action' | 'note'; setting: string; message: string }
 
-const CAP_TEXT: Record<string, string> = {
+const CAP_TEXT = {
   cap_instance_day: 'the instance-wide daily message limit (INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY)',
   cap_instance_storage: 'the instance-wide stored-records limit (INTAKE_MAX_INSTANCE_RECORDS)',
   cap_workspace_day: 'a workspace\'s daily message limit (INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY)',
   cap_workspace_storage: 'a workspace\'s stored-records limit (INTAKE_MAX_WORKSPACE_RECORDS)',
   cap_address_day: 'a report address\'s daily message limit (INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY)',
   cap_address_records: 'a report address\'s daily stored-records limit (INTAKE_MAX_ADDRESS_RECORDS_PER_DAY)',
-};
+} as const;
 
 /**
  * What the instance owner should know about report intake, in preflight's finding shape. Silent for a self-hosted server that counts every
@@ -83,7 +83,7 @@ export async function intakeSetupFindings(
   const caps = await globalQueries(env.DB).capObservations.since(since).catch(() => []);
   const hit = caps.filter((c) => Number(c.messages) > 0).map((c) => c.scope.slice(4));
   if (hit.length) {
-    const names = hit.map((r) => CAP_TEXT[r] ?? r);
+    const names = hit.map((r) => (CAP_TEXT as Record<string, string>)[r] ?? r);
     out.push({ id: 'intake', severity: 'note', setting: hit.map((r) => ({ cap_instance_day: 'INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY', cap_instance_storage: 'INTAKE_MAX_INSTANCE_RECORDS', cap_workspace_day: 'INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY', cap_workspace_storage: 'INTAKE_MAX_WORKSPACE_RECORDS', cap_address_day: 'INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY', cap_address_records: 'INTAKE_MAX_ADDRESS_RECORDS_PER_DAY' } as Record<string, string>)[r] ?? r).join(', '), message: `In the last 3 days report mail was stopped by ${names.join('; ')}. Mail from known reporters was accepted and dropped; other senders were refused. Raise the limit if this is legitimate traffic.` });
   }
   return out;
