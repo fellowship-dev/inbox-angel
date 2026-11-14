@@ -72,11 +72,11 @@ export function storeStatements(i: StoreReportInput): SQL[] {
 	const out: SQL[] = [];
 	if (i.supersedeXmlId !== undefined) {
 		const x = i.supersedeXmlId;
-		const sib = sql`workspace_id = ${ws} AND domain_id = ${i.domainId} AND reporter_identity IS NOT NULL AND reporter_tier <> 'counted' AND substr(report_id, instr(report_id, '|') + 1) = ${x}`;
+		const sib = sql`domain_id = ${i.domainId} AND reporter_identity IS NOT NULL AND reporter_tier <> 'counted' AND substr(report_id, instr(report_id, '|') + 1) = ${x}`;
 		out.push(
-			sql`UPDATE workspace_storage SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE ${sib})), reports = MAX(0, reports - (SELECT COUNT(*) FROM aggregate_reports WHERE ${sib})) WHERE workspace_id = ${ws}`,
-			sql`UPDATE intake_quota SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE ${sib})) WHERE scope = '*' AND day = 'total'`,
-			sql`DELETE FROM aggregate_reports WHERE ${sib}`,
+			sql`UPDATE workspace_storage SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})), reports = MAX(0, reports - (SELECT COUNT(*) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE workspace_id = ${ws}`,
+			sql`UPDATE intake_quota SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE scope = '*' AND day = 'total'`,
+			sql`DELETE FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib}`,
 		);
 	}
 	out.push(

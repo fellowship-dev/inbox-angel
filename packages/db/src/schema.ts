@@ -725,7 +725,6 @@ export const GLOBAL_TABLES = {
 	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
 	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
 	intake_quota: 'instance-wide intake counters per scope and day; a counter, no tenant content',
-	reporter_candidate_days: 'instance-wide candidates for the reporter registry (authenticated, not in the registry): domain, From, workspace count, days seen; for the instance owner',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */
@@ -753,6 +752,7 @@ export const WORKSPACE_OWNED_TABLES = [
 	'intake_usage',
 	'workspace_storage',
 	'intake_failures',
+	'reporter_candidate_days',
 ] as const;
 
 // ── Trust hardening (0004) ──────────────────────────────────

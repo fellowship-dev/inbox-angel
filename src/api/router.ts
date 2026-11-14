@@ -282,9 +282,12 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
 }
 
 /** A stored report as the API shows it: whether it counts toward the numbers, and without the storing attempt's internal id. */
-function withCounted<T extends { reporter_auth: string | null; ingest_token?: string | null }>(tenant: TenantContext, r: T): Omit<T, 'ingest_token'> & { counted: boolean } {
+function withCounted<T extends { reporter_auth: string | null; reporter_tier?: string | null; reporter_identity?: string | null; report_id?: string; ingest_token?: string | null }>(tenant: TenantContext, r: T): Omit<T, 'ingest_token'> & { counted: boolean } {
   const { ingest_token: _ingest, ...rest } = r;
-  return { ...rest, counted: tenant.scope.counting === 'all' || r.reporter_auth === 'pass' };
+  const counted = tenant.scope.counting === 'all' ? true : tenant.scope.counting === 'authenticated' ? r.reporter_auth === 'pass' : r.reporter_tier === 'counted';
+  // an uncounted report is stored as '<identity>|<id from the report>': show the id the report carried
+  const report_id = r.report_id && r.reporter_identity && r.reporter_tier !== 'counted' ? r.report_id.slice(r.report_id.indexOf('|') + 1) : r.report_id;
+  return { ...rest, ...(report_id !== undefined ? { report_id } : {}), counted };
 }
 
 async function getReports(tenant: TenantContext, url: URL): Promise<Response> {

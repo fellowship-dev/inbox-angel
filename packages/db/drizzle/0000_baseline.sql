@@ -59,6 +59,7 @@ CREATE TABLE `aggregate_reports` (
 	`reporter_auth_reason` text,
 	`reporter_tier` text,
 	`reporter_known_as` text,
+	`reporter_identity` text,
 	`ingest_token` text,
 	`record_count` integer,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
@@ -351,13 +352,6 @@ CREATE TABLE `intake_tokens` (
 CREATE UNIQUE INDEX `intake_tokens_token_hash_unique` ON `intake_tokens` (`token_hash`);--> statement-breakpoint
 CREATE INDEX `idx_intake_tokens_workspace` ON `intake_tokens` (`workspace_id`);--> statement-breakpoint
 CREATE INDEX `idx_intake_tokens_prev` ON `intake_tokens` (`prev_token_hash`);--> statement-breakpoint
-CREATE TABLE `intake_unknown_reporters` (
-	`reporter` text PRIMARY KEY NOT NULL,
-	`reports` integer DEFAULT 0 NOT NULL,
-	`first_seen` integer NOT NULL,
-	`last_seen` integer NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `intake_usage` (
 	`domain_id` integer NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -529,6 +523,18 @@ CREATE TABLE `report_records` (
 CREATE INDEX `idx_records_report` ON `report_records` (`report_id`);--> statement-breakpoint
 CREATE INDEX `idx_records_ip` ON `report_records` (`source_ip`);--> statement-breakpoint
 CREATE INDEX `idx_records_workspace` ON `report_records` (`workspace_id`);--> statement-breakpoint
+CREATE TABLE `reporter_candidate_days` (
+	`dkim_org` text NOT NULL,
+	`from_address` text NOT NULL,
+	`report_email` text NOT NULL,
+	`workspace_id` text NOT NULL,
+	`day` text NOT NULL,
+	`reports` integer DEFAULT 0 NOT NULL,
+	`org_name` text,
+	PRIMARY KEY(`dkim_org`, `from_address`, `report_email`, `workspace_id`, `day`)
+);
+--> statement-breakpoint
+CREATE INDEX `idx_reporter_candidate_days_day` ON `reporter_candidate_days` (`day`);--> statement-breakpoint
 CREATE TABLE `revocation_tombstones` (
 	`id` text PRIMARY KEY NOT NULL,
 	`deleted_workspace_id` text NOT NULL,

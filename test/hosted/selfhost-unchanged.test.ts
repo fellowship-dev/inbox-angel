@@ -38,7 +38,9 @@ describe('self-host is unchanged', () => {
     const m = fakeMessage('rua@reports.acme.com', gzipReportMime(dmarcXml('acme.com', 'golden-1')));
     await worker.email(m, s.env, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
-    expect(s.rows('SELECT workspace_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_default', report_id: 'golden-1' }]);
+    // Mail with no authentication results is stored (self-host never refuses it) as an unauthenticated report, under '<identity>|<id>' so it can
+    // neither squat nor displace a counted report's id. Self-host counts every report by default, so the dashboard still shows it.
+    expect(s.rows('SELECT workspace_id, report_id, reporter_tier FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_default', report_id: '~unauth|golden-1', reporter_tier: 'unauthenticated' }]);
   });
 
   it('an unknown domain is rejected exactly as before', async () => {

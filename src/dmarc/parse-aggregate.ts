@@ -102,18 +102,18 @@ const EARLIEST_BEGIN = Date.UTC(2012, 0, 1) / 1000;
 const FUTURE_SLACK_SECONDS = 2 * 86400;
 /** A report is a few levels deep (feedback > record > auth_results > dkim > domain). Far deeper is an attack on the parser, not a report. */
 const MAX_XML_DEPTH = 20;
-/** Elements in a report: ~15 per record plus the header. A 1 MiB report cannot honestly hold more than this. */
-const MAX_XML_ELEMENTS = 100_000;
+/** Elements in a report: ~14 per record plus the header. The cap follows the records cap (20 per record), so it scales with an operator's limit. */
+const ELEMENTS_PER_RECORD = 20;
 
 /** Refuse pathological nesting or element counts before the parser builds a tree (parsedmarc advisories: depth and node bombs). Linear, no tree. */
-export function checkXmlShape(xml: string): void {
+export function checkXmlShape(xml: string, maxElements: number): void {
   const text = xml.includes('<!--') ? xml.replace(/<!--[\s\S]*?-->/g, '') : xml;
   const re = /<(\/?)([A-Za-z_][^\s>/]*)[^>]*?(\/?)>/g;
   let depth = 0;
   let elements = 0;
   for (let m = re.exec(text); m; m = re.exec(text)) {
     if (m[1]) { depth = Math.max(0, depth - 1); continue; }
-    if (++elements > MAX_XML_ELEMENTS) throw new ReportRejected('xml_invalid', `Report has more than ${MAX_XML_ELEMENTS} elements`);
+    if (++elements > maxElements) throw new ReportRejected('xml_invalid', `Report has more than ${maxElements} elements`);
     if (!m[3]) { if (++depth > MAX_XML_DEPTH) throw new ReportRejected('xml_invalid', `Report is nested deeper than ${MAX_XML_DEPTH} levels`); }
   }
 }
@@ -237,7 +237,7 @@ export async function parseAggregateReportXml(
 
     if (/<!(?:DOCTYPE|ENTITY)/i.test(xml)) throw new ReportRejected('xml_invalid', 'DOCTYPE and entity declarations are not allowed in a DMARC report');
 
-    checkXmlShape(xml);
+    checkXmlShape(xml, limits.maxRecords !== undefined ? limits.maxRecords * ELEMENTS_PER_RECORD + 1000 : 500_000);
 
     let parsed: Record<string, unknown>;
     try {

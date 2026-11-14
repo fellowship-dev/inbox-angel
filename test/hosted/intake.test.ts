@@ -7,8 +7,12 @@ import { handleHostedEmail } from '../../src/hosted/intake';
 import { coversDomain } from '../../src/hosted/scope';
 import { generateToken, hashToken, intakeAddress, isTokenShaped, parseRecipient } from '../../src/hosted/tokens';
 import { resolveInboundWorkspace } from '../../src/tenancy/resolver';
-import { dmarcXml, fakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime, zipReportMime } from '../helpers/mail';
+import { dmarcXml, fakeMessage as rawFakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime, zipReportMime } from '../helpers/mail';
 import { NOW, nxdomain, quiet, twoWorkspaces } from './world';
+
+// Report mail as Cloudflare delivers it: Google's carrier, authenticated by the receiver (the default From of the MIME helpers is Google's report address).
+const AUTH = 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1';
+const fakeMessage = (to: string, raw: string, o: Parameters<typeof rawFakeMessage>[2] = {}) => rawFakeMessage(to, raw, /^(rua|tls-rpt)\+/.test(to) ? { ...o, headers: { 'authentication-results': AUTH, ...(o.headers ?? {}) } } : o);
 
 // cloudflare:email only exists in workerd.
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d349b7ae-1edf-4dd3-a033-b8752d0f4eb6",
+  "id": "d3d50a45-c1ef-47ff-b18d-0a8170f8d235",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -434,6 +434,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "reporter_tier": {
+          "name": "reporter_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_known_as": {
+          "name": "reporter_known_as",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_identity": {
+          "name": "reporter_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "ingest_token": {
           "name": "ingest_token",
           "type": "text",
@@ -494,11 +515,11 @@
           "isUnique": false,
           "where": "\"aggregate_reports\".\"raw_xml\" IS NOT NULL"
         },
-        "idx_agg_reports_auth": {
-          "name": "idx_agg_reports_auth",
+        "idx_agg_reports_tier": {
+          "name": "idx_agg_reports_tier",
           "columns": [
             "workspace_id",
-            "reporter_auth",
+            "reporter_tier",
             "date_begin"
           ],
           "isUnique": false
@@ -3675,6 +3696,85 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "reporter_candidate_days": {
+      "name": "reporter_candidate_days",
+      "columns": {
+        "dkim_org": {
+          "name": "dkim_org",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_email": {
+          "name": "report_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reports": {
+          "name": "reports",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "org_name": {
+          "name": "org_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_reporter_candidate_days_day": {
+          "name": "idx_reporter_candidate_days_day",
+          "columns": [
+            "day"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "reporter_candidate_days_dkim_org_from_address_report_email_workspace_id_day_pk": {
+          "columns": [
+            "dkim_org",
+            "from_address",
+            "report_email",
+            "workspace_id",
+            "day"
+          ],
+          "name": "reporter_candidate_days_dkim_org_from_address_report_email_workspace_id_day_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

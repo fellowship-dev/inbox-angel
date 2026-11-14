@@ -23,7 +23,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 interface X { org?: string; email?: string; id?: string; domain?: string; begin?: number; end?: number; headerFrom?: string; ip?: string; count?: string; dateRange?: boolean; before?: string; dkimDomain?: string }
 const xml = (o: X = {}) => `<?xml version="1.0"?>${o.before ?? ''}<feedback>
-<report_metadata><org_name>${o.org ?? 'google.com'}</org_name><email>${o.email ?? 'noreply@google.com'}</email><report_id>${o.id ?? 'h1'}</report_id>
+<report_metadata><org_name>${o.org ?? 'google.com'}</org_name><email>${o.email ?? 'noreply-dmarc-support@google.com'}</email><report_id>${o.id ?? 'h1'}</report_id>
 ${o.dateRange === false ? '' : `<date_range><begin>${o.begin ?? NOW - 86400}</begin><end>${o.end ?? NOW - 1}</end></date_range>`}</report_metadata>
 <policy_published><domain>${o.domain ?? 'a-corp.com'}</domain><adkim>r</adkim><aspf>r</aspf><p>none</p><pct>100</pct></policy_published>
 <record><row><source_ip>${o.ip ?? '198.51.100.7'}</source_ip><count>${o.count ?? '3'}</count><policy_evaluated><disposition>none</disposition><dkim>pass</dkim><spf>pass</spf></policy_evaluated></row>

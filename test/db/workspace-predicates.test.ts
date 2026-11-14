@@ -184,7 +184,7 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 
 	it('the allow-list matches the schema', () => {
 		for (const t of GLOBAL) expect(OWNED.has(t)).toBe(false);
-		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'intake_quota', 'reporter_candidate_days', 'ip_info', 'leads', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'suppression', 'users', 'verifications', 'workspaces']);
+		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'intake_quota', 'ip_info', 'leads', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'suppression', 'users', 'verifications', 'workspaces']);
 	});
 });
 
