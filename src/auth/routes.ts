@@ -431,6 +431,9 @@ export async function handleAuthRoute(
     // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary login with no workspace of its
     // own (it must be verified, and sets its password at verification) and then accepts while signed in as that verified address.
     if (isSaas(env)) {
+      // Closed sign-up creates no account here either. Said explicitly: Better Auth turns a refusal from the user-creation hook
+      // into its generic "check your email" answer while email verification is required, which would look like success.
+      if (await hostedSignupClosed(env)) return err(SIGNUP_CLOSED_MESSAGE, 503);
       const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: body.name.trim(), email: invite.email, password: body.password || unusablePassword() });
       if (!created.res.ok) return authError(created.res, 'could not create account');
       return sessionResponse(request, created.res, { verification_required: true, invite_pending: true }, 201);

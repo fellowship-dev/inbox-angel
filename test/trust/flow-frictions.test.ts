@@ -205,8 +205,8 @@ describe('6. hosted sign-up closed: no account is created by any route', () => {
         userInfo: { id: 'gh-1', email: 'new@example.com', name: 'New', emailVerified: true },
         account: { providerId: 'github', accountId: 'gh-1', accessToken: 'at' },
         callbackURL: '/',
-      } as any);
-      expect(res.error).toBeTruthy();
+      } as any).catch((e: unknown) => ({ error: e }));
+      expect(res.error).toBeTruthy(); // the user-creation hook refuses (Better Auth surfaces it as an error)
       expect(w.rows('SELECT COUNT(*) n FROM users')).toEqual([{ n: 0 }]);
     }
   });
@@ -217,7 +217,7 @@ describe('6. hosted sign-up closed: no account is created by any route', () => {
     const inv = await json(await call(open.env, 'POST', '/api/team/invite', { key: owner, body: { email: 'friend@example.com' } }));
     const closed = { ...open.env, TURNSTILE_SECRET_KEY: undefined, TURNSTILE_SITE_KEY: undefined } as typeof open.env;
     const res = await call(closed, 'POST', `/api/invites/${inv.token}`, { body: { name: 'Friend' } });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBe(503);
     expect(open.rows("SELECT COUNT(*) n FROM users WHERE email = 'friend@example.com'")).toEqual([{ n: 0 }]);
   });
 

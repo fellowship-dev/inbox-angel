@@ -182,7 +182,7 @@ describe('real Workers OAuth contract',()=>{
  });
  it('consent POST: the page keeps the real Origin on its own form (Referrer-Policy same-origin); foreign, null and missing origins are refused; Allow and Don\'t allow both work',async()=>{
   const db=await runtime.getD1Database('DB');
-  await db.prepare("INSERT INTO domains(workspace_id,domain,rua_address) VALUES ('ws_default','shapes-consent.example','rua@reports.example.com')").run();
+  await db.prepare("INSERT INTO domains(workspace_id,domain,rua_address) VALUES ('ws_default','shapes-consent-walk.com','rua@reports.example.com')").run();
   const open=async(state:string)=>{
    const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state,code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
    const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
@@ -192,7 +192,7 @@ describe('real Workers OAuth contract',()=>{
    const html=await page.text();
    return {handle:html.match(/name="handle" value="([^"]+)"/)![1],cookies:cookie+'; '+cookieOf(page as unknown as Response),referer:origin+'/oauth/authorize?'+query};
   };
-  const post=(c:{handle:string;cookies:string},headers:Record<string,string>,decision='allow')=>fetch('/oauth/authorize',{method:'POST',headers:{cookie:c.cookies,'content-type':'application/x-www-form-urlencoded',...headers},body:new URLSearchParams({handle:c.handle,decision,actions:'reports:read',selection:JSON.stringify({workspaceId:'ws_default',domain:'shapes-consent.example'}),days:'7'}).toString()});
+  const post=(c:{handle:string;cookies:string},headers:Record<string,string>,decision='allow')=>fetch('/oauth/authorize',{method:'POST',headers:{cookie:c.cookies,'content-type':'application/x-www-form-urlencoded',...headers},body:new URLSearchParams({handle:c.handle,decision,actions:'reports:read',selection:JSON.stringify({workspaceId:'ws_default',domain:'shapes-consent-walk.com'}),days:'7'}).toString()});
   const c=await open('state-shapes');
   // refused shapes leave the handle unused and nothing created
   const before=(await db.prepare('SELECT COUNT(*) n FROM access_principals').first() as any).n;
