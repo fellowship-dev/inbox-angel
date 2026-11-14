@@ -98,6 +98,11 @@ export function globalQueries(dbLike: DbLike) {
 					.get();
 				return row ?? null;
 			},
+			/** The count in the key's current window, without counting a request (null when the window has expired or never started). */
+			peek: async (key: string, nowMs: number, windowMs: number): Promise<{ count: number; lastRequest: number } | null> => {
+				const row = await db.select({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest }).from(authRateLimits).where(eq(authRateLimits.key, key)).get();
+				return row && nowMs - row.lastRequest < windowMs ? row : null;
+			},
 			/** Undo one `hitUnder` in the same window (when a later limit refused the request). */
 			giveBack: (key: string, windowStart: number) =>
 				db.update(authRateLimits).set({ count: sql`${authRateLimits.count} - 1` }).where(and(eq(authRateLimits.key, key), eq(authRateLimits.lastRequest, windowStart), gt(authRateLimits.count, 0))).run(),
