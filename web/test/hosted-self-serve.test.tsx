@@ -87,7 +87,7 @@ describe('hosted sign-in, sign-up and check-your-email', () => {
 		expect(talkLinks()).toHaveLength(0);
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Create an account' }));
 		expect(await screen.findByText(/checked from live DNS\. DMARC reports are not connected yet\./)).toBeInTheDocument();
-		expect(screen.getByText('Used to sign in.')).toBeInTheDocument();
+		expect(screen.getByText("We'll email you a link. It opens a page where you choose your password and are signed in.")).toBeInTheDocument();
 		expectSafeTalkLink(screen.getByRole('link', { name: /Talk to Max/ }));
 	});
 

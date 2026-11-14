@@ -91,8 +91,6 @@ describe('the sign-up form', () => {
 		renderApp(<AuthPage initialMode="signup" />, { role: null, status: { signup_open: true }, routes: { 'POST /api/auth/signup': { verification_required: true } } });
 		await userEvent.type(await screen.findByLabelText('Your name (optional)'), 'New Person');
 		await userEvent.type(screen.getByLabelText('Email'), 'New@Example.com');
-		await userEvent.type(screen.getByLabelText('Password'), 'correct horse battery');
-		await userEvent.type(screen.getByLabelText('Confirm password'), 'correct horse battery');
 		await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 		await screen.findByText(/Check your email/i);
 		expect(stored()).toMatchObject({ domain: 'acme.io', email: 'new@example.com' });
