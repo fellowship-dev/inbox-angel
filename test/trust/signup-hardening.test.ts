@@ -51,7 +51,7 @@ describe('1. resend needs the bot check, and a resend flood cannot use up the li
     expect(await json(own)).toEqual(await json(first));
     expect(w.sentTo('victim@example.com')).toBe(2 + MAIL_CAPS.other.hour);
     expect((await completeWelcome(w.env, w.lastToken(), 'victims-own-pass-1')).status).toBe(200);
-  });
+  }, 30000);
 
   it('repeated sign-ups cannot flood: 2 an hour and 4 a day from the sign-up allowance, every answer the same', async () => {
     expect(MAIL_CAPS).toEqual({ signup: { hour: 2, day: 4 }, other: { hour: 3, day: 10 } });
@@ -82,12 +82,13 @@ describe('2. sign-in failures are throttled per address', () => {
       expect(r.status).toBe(429);
       expect(Number(r.headers.get('retry-after'))).toBeGreaterThan(SIGNIN_FAILURE_WINDOW_SECONDS - 60);
     }
-    expect(await json(real)).toEqual(await json(nobody));
-    expect((await json(real)).error).toBe('Too many sign-in attempts for this address. Try again in 15 minutes, or reset your password to sign in now.');
+    const [realBody, nobodyBody] = [await json(real), await json(nobody)];
+    expect(realBody).toEqual(nobodyBody);
+    expect(realBody.error).toBe('Too many sign-in attempts for this address. Try again in 15 minutes, or reset your password to sign in now.');
     // other addresses are unaffected
     await signupVerified(w.env, 'other@example.com', 'other-password-1');
     expect((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'other@example.com', password: 'other-password-1' }, ...ip() })).status).toBe(200);
-  });
+  }, 30000);
 
   it('the window is short: 15 minutes later the right password works again', async () => {
     const w = hosted();

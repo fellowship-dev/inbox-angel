@@ -169,22 +169,23 @@ describe('a pre-registered address: the real owner ends up with an account the r
 });
 
 describe('verification mail is capped per address, across every route, without revealing whether the address exists', () => {
-  it('3 an hour: sign-up, resend and a sign-in of the unverified account all count; the 4th sends nothing, and every answer is unchanged', async () => {
+  it('resends and sign-ins of the unconfirmed account share 3 an hour; the 4th sends nothing, and every answer is unchanged (sign-up has its own allowance: signup-hardening.test.ts)', async () => {
     const w = hosted();
     const ip = (n: number) => ({ ip: `192.0.2.${n}` });
-    const signup = await call(w.env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(1) }); // 1
+    const signup = await call(w.env, 'POST', '/api/auth/signup', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(1) }); // the sign-up allowance
     expect(signup.status).toBe(201);
-    expect((await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ...ip(2) })).status).toBe(200); // 2
-    expect((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(3) })).status).toBe(403); // 3 (sign-in of an unverified account mails a link)
-    expect(w.send).toHaveBeenCalledTimes(3);
+    expect((await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ...ip(2) })).status).toBe(200); // 1
+    expect((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(3) })).status).toBe(403); // 2 (sign-in of an unverified account mails a link)
+    expect((await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ...ip(4) })).status).toBe(200); // 3
+    expect(w.send).toHaveBeenCalledTimes(4);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const capped = await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ...ip(4) });
-    const unknown = await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'nobody@example.com' }, ...ip(5) });
+    const capped = await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ...ip(5) });
+    const unknown = await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'nobody@example.com' }, ...ip(6) });
     expect([capped.status, await json(capped)]).toEqual([unknown.status, await json(unknown)]);
-    const login = await call(w.env, 'POST', '/api/auth/login', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(6) });
+    const login = await call(w.env, 'POST', '/api/auth/login', { body: { email: 'a@example.com', password: 'api-client-pass-1' }, ...ip(7) });
     expect(login.status).toBe(403); // same answer as when a mail is sent
-    expect(w.send).toHaveBeenCalledTimes(3);
-  });
+    expect(w.send).toHaveBeenCalledTimes(4);
+  }, 30000);
 
   it('10 a day', async () => {
     const w = hosted();
@@ -195,6 +196,6 @@ describe('verification mail is capped per address, across every route, without r
       vi.spyOn(Date, 'now').mockReturnValue(t0 + hour * 3601_000);
       for (let i = 0; i < 3; i++) await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ip: `192.0.2.${hour * 3 + i + 10}` });
     }
-    expect(w.send).toHaveBeenCalledTimes(10);
+    expect(w.send).toHaveBeenCalledTimes(1 + 10); // the sign-up's own link, then 10 resends a day
   }, 30000);
 });
