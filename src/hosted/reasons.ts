@@ -10,7 +10,7 @@ export const REASONS = {
   bad_recipient: 'Unknown recipient',
   wrong_host: 'Unknown recipient',
   unknown_token: 'Unknown intake token',
-  raw_too_large: 'Report is larger than 25 MiB',
+  raw_too_large: 'Report is larger than the allowed size',
   cap_address_day: 'Daily intake limit for this address reached; try again tomorrow',
   cap_unauth_day: 'Daily intake limit for this address reached; try again tomorrow',
   cap_workspace_day: 'Daily intake limit for this account reached; try again tomorrow',
@@ -36,6 +36,9 @@ export const REASONS = {
   schema_not_ready: 'Database schema is out of date',
   internal_error: 'Temporary failure; try again later',
 } as const;
+
+/** The refusal text for a message over the raw-size cap: "Report is larger than 10 MiB". */
+export const rawTooLarge = (bytes: number) => `Report is larger than ${Math.floor(bytes / 1048576)} MiB`;
 
 export type ReasonCode = keyof typeof REASONS;
 

@@ -30,6 +30,7 @@ export interface HostedEnv {
   INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY?: string;
   INTAKE_MAX_INSTANCE_RECORDS?: string;
   INTAKE_MAX_DECOMPRESSED_BYTES?: string;
+  INTAKE_MAX_RAW_BYTES?: string;
   INTAKE_MAX_STORAGE_RETRIES_PER_DAY?: string;
   INTAKE_TRUSTED_REPORTER_ADDRESSES?: string;
   REPORT_COUNTING?: string;
@@ -38,7 +39,7 @@ export interface HostedEnv {
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string;
 }
 
-/** Largest report (raw message, and decompressed attachment) accepted by the central intake. */
+/** The ceiling for the raw message and the decompressed report (Cloudflare's own inbound limit). The defaults are lower: see below. */
 export const MAX_REPORT_BYTES = 25 * 1024 * 1024;
 
 export function hostedEnabled(env: Pick<HostedEnv, 'MODE' | 'SAAS_ENABLED'>): boolean {
@@ -75,12 +76,15 @@ export function hostedApex(cfg: HostedConfig): string | undefined {
 /** Defaults for the per-token intake caps and the per-workspace hosted-domain cap (each overridable by env). */
 /** Per authenticated reporter domain, per intake token, per UTC day. */
 export const DEFAULT_MAX_REPORTS_PER_DAY = 50;
-/** Records in one aggregate report. Measured (docs/hosted.md, "Measured limits"): parse + store of 5,000 records stays well inside the 128 MB isolate. */
+/**
+ * Records in one aggregate report. Measured (docs/hosted.md, "Measured limits"): parsing keeps ~7 KB of live heap per record, so 5,000 records
+ * hold ~36 MB (peak RSS +83 MB over an idle process) and parse in ~0.3 s; 20,000 hold ~119 MB, which does not fit a 128 MB isolate.
+ */
 export const DEFAULT_MAX_RECORDS_PER_REPORT = 5_000;
 export const DEFAULT_MAX_BYTES_PER_DAY = 50 * 1024 * 1024;
 export const DEFAULT_MAX_NEW_IPS_PER_REPORT = 50;
 /** Self-host (one tenant, a private address, no daily caps): generous but bounded. Records and the decompressed size are limits there too. */
-export const SELFHOST_MAX_RECORDS_PER_REPORT = 20_000;
+export const SELFHOST_MAX_RECORDS_PER_REPORT = 10_000;
 export const SELFHOST_MAX_NEW_IPS_PER_REPORT = 200;
 /** Distinct authenticated reporter domains accepted per token per day. */
 export const DEFAULT_MAX_REPORTERS_PER_DAY = 100;
@@ -114,8 +118,14 @@ export const DEFAULT_MAX_WORKSPACE_RECORDS = 1_000_000;
 export const DEFAULT_MAX_INSTANCE_MESSAGES_PER_DAY = 50_000;
 /** Report records the whole instance may hold: sized so the tables and their indexes stay far below D1's 10 GB database limit. */
 export const DEFAULT_MAX_INSTANCE_RECORDS = 10_000_000;
-/** Decompressed report size (the raw message may still be 25 MiB, a gzip of it far smaller). */
-export const DEFAULT_MAX_DECOMPRESSED_BYTES = 8 * 1024 * 1024;
+/** Decompressed report size. ~18 bytes of live heap per XML byte, so 3 MiB ≈ 56 MB, inside a 128 MB isolate with room for the rest. */
+export const DEFAULT_MAX_DECOMPRESSED_BYTES = 3 * 1024 * 1024;
+export const SELFHOST_MAX_DECOMPRESSED_BYTES = 6 * 1024 * 1024;
+/**
+ * The raw message. Cloudflare delivers up to 25 MiB, but reading its attachment holds several copies at once (bytes, decoded text,
+ * base64 text, decoded bytes: measured peak RSS ~16x the attachment), so the default stops well short of that.
+ */
+export const DEFAULT_MAX_RAW_BYTES = 10 * 1024 * 1024;
 /** Storage failures per domain and UTC day after which a failing message is refused for good instead of being retried. */
 export const DEFAULT_MAX_STORAGE_RETRIES_PER_DAY = 20;
 /** Per token and day, across every proven reporter that is not well known (slots coming and going do not reset it). */
@@ -149,6 +159,7 @@ export interface IntakeLimits {
   instanceMessagesPerDay: number;
   instanceRecords: number;
   maxDecompressedBytes: number;
+  maxRawBytes: number;
   storageRetriesPerDay: number;
 }
 
@@ -173,7 +184,8 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     workspaceRecords: positive(env.INTAKE_MAX_WORKSPACE_RECORDS, DEFAULT_MAX_WORKSPACE_RECORDS),
     instanceMessagesPerDay: positive(env.INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY, DEFAULT_MAX_INSTANCE_MESSAGES_PER_DAY),
     instanceRecords: positive(env.INTAKE_MAX_INSTANCE_RECORDS, DEFAULT_MAX_INSTANCE_RECORDS),
-    maxDecompressedBytes: Math.min(positive(env.INTAKE_MAX_DECOMPRESSED_BYTES, saas ? DEFAULT_MAX_DECOMPRESSED_BYTES : MAX_REPORT_BYTES), MAX_REPORT_BYTES),
+    maxDecompressedBytes: Math.min(positive(env.INTAKE_MAX_DECOMPRESSED_BYTES, saas ? DEFAULT_MAX_DECOMPRESSED_BYTES : SELFHOST_MAX_DECOMPRESSED_BYTES), MAX_REPORT_BYTES),
+    maxRawBytes: Math.min(positive(env.INTAKE_MAX_RAW_BYTES, DEFAULT_MAX_RAW_BYTES), MAX_REPORT_BYTES),
     storageRetriesPerDay: positive(env.INTAKE_MAX_STORAGE_RETRIES_PER_DAY, DEFAULT_MAX_STORAGE_RETRIES_PER_DAY),
   };
 }

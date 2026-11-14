@@ -125,8 +125,11 @@ describe('DMARC aggregate reports', () => {
 
     const m2 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')), { rawSize: 26 * 1024 * 1024 });
     await handleHostedEmail(m2, w.env);
-    expect(m2.setReject).toHaveBeenCalledWith('Report is larger than 25 MiB');
-    expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
+    expect(m2.setReject).toHaveBeenCalledWith('Report is larger than 10 MiB'); // the raw cap defaults to 10 MiB (INTAKE_MAX_RAW_BYTES, at most 25 MiB)
+    const m3 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'raw25')), { rawSize: 20 * 1024 * 1024 });
+    await handleHostedEmail(m3, { ...w.env, INTAKE_MAX_RAW_BYTES: String(25 * 1024 * 1024) } as any);
+    expect(m3.setReject).not.toHaveBeenCalled(); // an operator can raise it to Cloudflare's own 25 MiB ceiling
+    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'raw25' }]);
   }, BIG_REPORT_TIMEOUT);
 
   it('accepts a report just under the 25 MiB ceiling when the operator raises the decompressed cap to it', async () => {

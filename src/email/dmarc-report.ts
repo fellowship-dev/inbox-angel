@@ -23,7 +23,7 @@ import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
 import { reporterAuth } from '../dmarc/reporter-auth';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
-import { REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
+import { rawTooLarge, REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
 
 export interface ReportOptions {
   /** Cap on the decompressed report (default MAX_REPORT_BYTES, which also bounds zip/gzip bombs in self-host). */
@@ -76,7 +76,9 @@ export async function handleDmarcReport(
   };
 
   const limits = intakeLimits(tenant.env);
-  const hosted = !!opts.token;
+
+  // 0. The message itself: reading its attachment holds several copies at once, so a very large one is refused first
+  if (message.rawSize > limits.maxRawBytes) return refuse('raw_too_large', rawTooLarge(limits.maxRawBytes));
 
   // 1. Extract attachment bytes from raw MIME stream (the headers are read from a second branch of it)
   let bytes: Uint8Array;
@@ -90,7 +92,7 @@ export async function handleDmarcReport(
     }
     bytes = await extractAttachmentBytes(raw);
   } catch (err) {
-    console.error('dmarc-report: mime extraction failed', err);
+    console.error('dmarc-report: mime extraction failed:', err instanceof Error ? err.name : 'error'); // the structured intake line has the reason
     if (err instanceof MimeExtractError) return refuse(/No DMARC attachment|No MIME headers|boundary/i.test(err.message) ? 'no_attachment' : 'archive_invalid', `Could not extract attachment: ${err.message}`);
     return refuse('archive_invalid', 'Unexpected error reading email');
   }
@@ -141,13 +143,10 @@ export async function handleDmarcReport(
   } catch (err) {
     if (err instanceof ParseStop) {
       if (err.outcome === 'duplicate') {
-        console.log(`dmarc-report: duplicate report for ${found.domain?.domain} — skipped`);
         return result('duplicate', 'duplicate');
       }
-      console.warn('dmarc-report: refused:', err.code, err.code === 'domain_not_owned' ? policyDomain : '');
       return refuse(err.code as ReasonCode, err.message === err.code ? REASONS[err.code as ReasonCode] : err.message);
     }
-    console.error('dmarc-report: parse failed', err);
     if (err instanceof ParseEmailError) {
       const code = (err.code && err.code in REASONS ? err.code : 'xml_invalid') as ReasonCode;
       const detail = code === 'xml_invalid' || code === 'archive_invalid' || code === 'wrong_attachment_type' || code === 'too_many_records' || code === 'field_too_long' || code === 'date_range_invalid'
@@ -167,18 +166,11 @@ export async function handleDmarcReport(
   // 4. Store in D1: one batch, all or nothing
   try {
     const stored = await storeReport(tenant, domain.id, report, rawXml, true, auth);
-    if (stored.stored) {
-      console.log(
-        `dmarc-report: stored report ${report.report_metadata.report_id} ` +
-        `for ${domain.domain} (id=${stored.reportId}, records=${report.records.length})`
-      );
-      return result('accepted', 'ok', known);
-    }
+    if (stored.stored) return result('accepted', 'ok', known);
     // Lost the race to a concurrent delivery of the same report: nothing was written, which is the right outcome.
-    console.log(`dmarc-report: duplicate report ${report.report_metadata.report_id} for ${domain.domain} — skipped`);
     return result('duplicate', 'duplicate', known);
   } catch (err) {
-    console.error('dmarc-report: D1 storage failed for', domain.domain, err);
+    console.error('dmarc-report: D1 storage failed for domain', domain.id, err instanceof Error ? err.message : err);
     // Nothing of the report was stored (one transaction). Count it where the owner can see it; this is best effort and
     // must not hide the original failure.
     let failuresToday = 1;

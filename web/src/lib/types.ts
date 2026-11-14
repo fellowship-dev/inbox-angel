@@ -1,3 +1,4 @@
+import type { ReportVisibilityFields } from './uncounted';
 export interface ParentContext {
   domain: string;
   dmarc_policy: string | null;
@@ -23,7 +24,7 @@ export interface DailyStat {
   failed: number;
 }
 
-export interface DomainStats {
+export interface DomainStats extends ReportVisibilityFields {
   domain: string;
   days: number;
   stats: DailyStat[];
@@ -123,6 +124,10 @@ export interface AggregateReport {
   /** Did the report email itself pass DMARC-aligned auth? null = reported before this was recorded. */
   reporter_auth?: 'pass' | 'fail' | 'none' | null;
   reporter_auth_domain?: string | null;
+  /** Why the sender was not verified (a reason code), or null. */
+  reporter_auth_reason?: string | null;
+  /** Does this report feed the numbers (REPORT_COUNTING)? Absent on older servers. */
+  counted?: boolean;
 }
 
 export interface SpfFlatConfig {
@@ -230,7 +235,7 @@ export interface OnboardingStatus {
   dns_errors?: string[];
 }
 
-export interface DomainCheckSummary {
+export interface DomainCheckSummary extends ReportVisibilityFields {
   domain_id: number;
   domain: string;
   dmarc_policy: string | null;

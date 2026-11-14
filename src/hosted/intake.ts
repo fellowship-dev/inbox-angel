@@ -22,11 +22,11 @@ import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
 import { claimedSender, provenReporter } from '../dmarc/reporter-auth';
 import { readAuthHeaders, trustedResults } from '../email/sender-proof';
-import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES, WELL_KNOWN_REPORTERS } from './config';
+import { hostedConfig, hostedEnabled, intakeLimits, WELL_KNOWN_REPORTERS } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 import { logAuthservDiscovery, logIntake, type IntakeKind } from './intake-log';
-import { OWNER_VISIBLE, REASONS, type Outcome, type ReasonCode } from './reasons';
+import { OWNER_VISIBLE, rawTooLarge, REASONS, type Outcome, type ReasonCode } from './reasons';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -71,7 +71,8 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   const kind = rcpt.base;
   seen.kind = kind;
 
-  if (message.rawSize > MAX_REPORT_BYTES) return refuse('raw_too_large');
+  const limits = intakeLimits(env);
+  if (message.rawSize > limits.maxRawBytes) return refuse('raw_too_large', rawTooLarge(limits.maxRawBytes));
   if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return refuse('unknown_token');
 
   const hash = await hashToken(rcpt.tag);
@@ -81,7 +82,6 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   seen.dom = target.domain_id;
 
   const q = forWorkspace(env.DB, target.workspace_id).intake;
-  const limits = intakeLimits(env);
   const day = today();
   const now = () => Math.floor(Date.now() / 1000);
   /** Mail that reached the address and was not stored is counted where the owner can see it (best effort). */

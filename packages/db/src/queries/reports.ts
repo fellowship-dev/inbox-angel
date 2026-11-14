@@ -13,6 +13,8 @@ export interface DomainWeeklyStat {
 	pass_messages: number;
 	fail_messages: number;
 	report_count: number;
+	/** Reports in the window that are stored but left out of the numbers above (only when counting is `proven`). */
+	uncounted_reports: number;
 }
 
 export interface FailingSource {
@@ -240,7 +242,10 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 					COALESCE(SUM(r.total_count), 0) AS total_messages,
 					COALESCE(SUM(r.pass_count),  0) AS pass_messages,
 					COALESCE(SUM(r.fail_count),  0) AS fail_messages,
-					COUNT(r.id) AS report_count
+					COUNT(r.id) AS report_count,
+					${counting === 'proven'
+						? sql`(SELECT COUNT(*) FROM aggregate_reports u WHERE u.workspace_id = ${A} AND u.domain_id = d.id AND u.date_begin >= ${since} AND u.reporter_auth IS NOT 'pass')`
+						: sql`0`} AS uncounted_reports
 				FROM domains d
 				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND ${C('r')}
 				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL

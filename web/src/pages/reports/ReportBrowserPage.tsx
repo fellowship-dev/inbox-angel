@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { useDomain, useDomains } from '../../lib/queries';
 import { formatDayWithRelative, isoDay, passRate, plural, rateTone, type RateTone } from '../../lib/reports';
 import type { AggregateReport } from '../../lib/types';
+import { countingBasisNote, type ReportCounting } from '../../lib/uncounted';
 
 const TONE_TEXT: Record<RateTone, string> = { success: 'text-success', warning: 'text-warning', danger: 'text-danger' };
 
@@ -24,7 +25,7 @@ export function ReportBrowserPage() {
 	const domains = useDomains();
 	const [scope, setScope] = useState<Scope>('domain');
 
-	const q = useQuery({ queryKey: ['reports', 200], queryFn: () => api<{ reports: AggregateReport[] }>('/api/reports?limit=200') });
+	const q = useQuery({ queryKey: ['reports', 200], queryFn: () => api<{ reports: AggregateReport[]; report_counting?: ReportCounting }>('/api/reports?limit=200') });
 
 	const idByName = new Map((domains.data ?? []).map((d) => [d.domain, d.id]));
 	const all = q.data?.reports ?? [];
@@ -52,7 +53,7 @@ export function ReportBrowserPage() {
 						{ value: 'all', label: 'All domains' },
 					]}
 				/>
-				{!loading && !q.isError ? <p className="text-sm text-ink-2">{plural(visible.length, 'report')}</p> : null}
+				{!loading && !q.isError ? <p className="text-sm text-ink-2">{plural(visible.length, 'report')}{countingBasisNote(q.data?.report_counting) ? ` · ${countingBasisNote(q.data?.report_counting)}` : ''}</p> : null}
 			</div>
 
 			{loading ? (
@@ -91,7 +92,7 @@ export function ReportBrowserPage() {
 									{showDomainColumn ? <TableCell>{r.domain}</TableCell> : null}
 									<TableCell>
 										{r.org_name}
-										<ReporterAuthBadge auth={r.reporter_auth} />
+										<ReporterAuthBadge auth={r.reporter_auth} counted={r.counted} />
 									</TableCell>
 									<TableCell className="text-right tabular-nums">{r.pass_count.toLocaleString()}</TableCell>
 									<TableCell className={cn('text-right tabular-nums', r.fail_count > 0 && 'font-semibold text-danger')}>{r.fail_count.toLocaleString()}</TableCell>

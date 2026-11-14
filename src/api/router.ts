@@ -82,6 +82,7 @@ import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
+import { reportVisibility } from '../reports/visibility';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
@@ -276,10 +277,16 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
   return new Response(null, { status: 204 });
 }
 
+/** A stored report as the API shows it: whether it counts toward the numbers, and without the storing attempt's internal id. */
+function withCounted<T extends { reporter_auth: string | null; ingest_token?: string | null }>(tenant: TenantContext, r: T): Omit<T, 'ingest_token'> & { counted: boolean } {
+  const { ingest_token: _ingest, ...rest } = r;
+  return { ...rest, counted: tenant.scope.counting === 'all' || r.reporter_auth === 'pass' };
+}
+
 async function getReports(tenant: TenantContext, url: URL): Promise<Response> {
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '30', 10), 100);
   const results = await tenant.scope.reports.recent(limit);
-  return json({ reports: results });
+  return json({ reports: results.map((r) => withCounted(tenant, r)), report_counting: tenant.scope.counting });
 }
 
 async function getReport(tenant: TenantContext, reportId: string): Promise<Response> {
@@ -292,7 +299,7 @@ async function getReport(tenant: TenantContext, reportId: string): Promise<Respo
 
   const records = await tenant.scope.reports.records(id);
 
-  return json({ report, records });
+  return json({ report: withCounted(tenant, report), records });
 }
 
 async function getCheckResults(tenant: TenantContext): Promise<Response> {
@@ -319,8 +326,9 @@ async function getDomainStatsSummary(tenant: TenantContext, domainId: string, ur
   const days = Math.min(isNaN(rawDays) ? 30 : rawDays, 90);
   const since = Math.floor(Date.now() / 1000) - days * 86400;
 
-  const results = await tenant.scope.reports.dailyStats(id, since);
-  return json({ domain: domain.domain, days, stats: results });
+  const [results, visibility] = await Promise.all([tenant.scope.reports.dailyStats(id, since), reportVisibility(tenant, id, since)]);
+  // `stats` counts only what counts (REPORT_COUNTING); the rest says what was left out and what could not be stored.
+  return json({ domain: domain.domain, days, stats: results, ...visibility });
 }
 
 async function exportDomainData(tenant: TenantContext, domainId: string): Promise<Response> {
@@ -332,11 +340,11 @@ async function exportDomainData(tenant: TenantContext, domainId: string): Promis
 
   const results = await tenant.scope.reports.exportData(id);
 
-  const header = 'date,org_name,total_count,pass_count,fail_count,source_ip,header_from,spf_result,spf_domain,dkim_result,dkim_domain,record_count,disposition\n';
+  const header = 'date,org_name,total_count,pass_count,fail_count,source_ip,header_from,spf_result,spf_domain,dkim_result,dkim_domain,record_count,disposition,counted\n';
   const rows = results.map(r =>
     [r.date, r.org_name, r.total_count, r.pass_count, r.fail_count,
      r.source_ip ?? '', r.header_from ?? '', r.spf_result ?? '', r.spf_domain ?? '',
-     r.dkim_result ?? '', r.dkim_domain ?? '', r.record_count ?? '', r.disposition ?? '']
+     r.dkim_result ?? '', r.dkim_domain ?? '', r.record_count ?? '', r.disposition ?? '', r.counted ? 'yes' : 'no']
     .map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')
   ).join('\n');
 
@@ -357,10 +365,10 @@ async function getDomainCheckSummary(tenant: TenantContext, domainId: string): P
   if (!domain) return err('domain not found', 404);
 
   const since = Math.floor(Date.now() / 1000) - 30 * 86400;
-  const summary = await tenant.scope.reports.checkSummary(id, since);
+  const [summary, visibility] = await Promise.all([tenant.scope.reports.checkSummary(id, since), reportVisibility(tenant, id, since)]);
   if (!summary) return err('check summary not found', 404);
 
-  return json(summary);
+  return json({ ...summary, ...visibility });
 }
 
 async function getDomainReportByDate(tenant: TenantContext, domainId: string, url: URL): Promise<Response> {

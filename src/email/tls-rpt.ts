@@ -103,12 +103,11 @@ async function storeHostedTlsRpt(
       raw_json: rawJson(tenant, raw),
     });
   } catch (e) {
-    console.error(`[tls-rpt] insert failed for ${domain.domain}:`, e);
+    console.error('[tls-rpt] insert failed for domain', domain.id, e instanceof Error ? e.message : e);
     // A valid report that could not be stored is never accepted-and-dropped: count it for the owner and fail the delivery.
     try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* a courtesy */ }
     throw new StorageFailure({ failure_count: failure }, e);
   }
-  console.log(`[tls-rpt] stored report from ${orgName} for ${domain.domain}`);
   return { failure_count: failure, outcome: 'accepted', reason: 'ok', records: null, reporter: null, proven: null };
 }
 
@@ -131,7 +130,6 @@ export async function handleTlsRptReport(
   try {
     raw = await readReport(message, opts);
   } catch (e) {
-    console.error('[tls-rpt] failed to extract email body:', e);
     return e instanceof ReportTooLargeError ? refuse('decompressed_too_large', 'TLS-RPT report is too large') : refuse('no_attachment', 'Could not read TLS-RPT report email body');
   }
 
@@ -147,7 +145,6 @@ export async function handleTlsRptReport(
     if (start === -1 || end === -1) throw new Error('no JSON object found');
     report = JSON.parse(raw.slice(start, end + 1));
   } catch (e) {
-    console.error('[tls-rpt] JSON parse failed:', e);
     return refuse('json_invalid');
   }
 
@@ -164,7 +161,6 @@ export async function handleTlsRptReport(
     for (const policy of report.policies ?? []) {
       const policyDomain = policy.policy?.['policy-domain'];
       if (!policyDomain || !coversDomain(opts.hosted.token.domain, policyDomain)) {
-        console.warn(`[tls-rpt] policy-domain ${policyDomain ?? '(none)'} is outside the token's domain`);
         return refuse('domain_not_owned', `Unknown domain ${String(policyDomain ?? '(none)').slice(0, 253)} — not a registered InboxAngel inbox`);
       }
     }
@@ -179,7 +175,6 @@ export async function handleTlsRptReport(
 
     const domain = await tenant.scope.domains.getByName(opts.hosted ? policyDomain.toLowerCase() : policyDomain);
     if (!domain) {
-      console.warn(`[tls-rpt] unknown domain ${policyDomain} — skipping policy`);
       continue;
     }
 
@@ -203,12 +198,11 @@ export async function handleTlsRptReport(
       });
       stored++;
     } catch (e) {
-      console.error(`[tls-rpt] insert failed for ${policyDomain}:`, e);
+      console.error('[tls-rpt] insert failed for domain', domain.id, e instanceof Error ? e.message : e);
       try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* a courtesy */ }
       throw new StorageFailure({ failure_count: totalFailureCount }, e);
     }
   }
 
-  console.log(`[tls-rpt] stored ${stored} policy report(s) from ${orgName}`);
   return result('accepted', 'ok', totalFailureCount);
 }
