@@ -7,9 +7,11 @@
 //    speed cannot lock the other agents of its workspace out. Agents share cloud egress addresses (every Claude or
 //    ChatGPT user of an installation can arrive from the same few IPs), so authenticated requests are never limited
 //    per IP. Hosted mode refuses (503) rather than run unlimited when either binding is missing.
-// 2. Client registration, token requests and unauthenticated `/mcp` requests: AUTH_LIMITER (10 per 60 s) per IP.
+// 2. Per IP, separate budgets: `/oauth/token` 600 (OAUTH_TOKEN_LIMITER), `/oauth/register` 10 (AUTH_LIMITER, own key),
+//    `/mcp` without a token 60 (MCP_ANON_LIMITER). A presented token that fails always gets 401, never 429.
 // 3. Tools that run a full live DNS check (about 45-60 DNS-over-HTTPS lookups per resolver, two resolvers, so
-//    roughly 90-120 Worker subrequests per call): an exact D1 counter, tighter than the request limit.
+//    roughly 90-120 Worker subrequests per call): a D1 counter, tighter than the request limit. Each count is a
+//    single conditional write, so simultaneous calls cannot pass the limit.
 import { globalQueries } from '@inbox-angel/db';
 import type { BoundEnv } from '../index';
 import type { AccessSubject } from '../access/principal';
@@ -28,7 +30,7 @@ export const DNS_CHECK_TOOLS = ['inspect_domain', 'get_email_report', 'query_ema
 const PRUNE_RATE = 0.05;
 
 type Limiter = { limit(opts: { key: string }): Promise<{ success: boolean }> };
-type LimitEnv = { MODE?: string; MCP_LIMITER?: Limiter; API_LIMITER?: Limiter; AUTH_LIMITER?: Limiter };
+type LimitEnv = { MODE?: string; MCP_LIMITER?: Limiter; API_LIMITER?: Limiter; AUTH_LIMITER?: Limiter; OAUTH_TOKEN_LIMITER?: Limiter; MCP_ANON_LIMITER?: Limiter };
 
 /** Workspaces a connection holds live grants in (its own workspace first). */
 function workspacesOf(subject: AccessSubject): string[] {
@@ -66,11 +68,22 @@ export async function limitBrowserRequest(env: LimitEnv, request: Request): Prom
  return tooManyRequests(MCP_REQUEST_WINDOW_SECONDS, `Too many requests from this address. Wait ${MCP_REQUEST_WINDOW_SECONDS} seconds and try again.`);
 }
 
-/** Client registration, token requests and requests without a valid agent token: AUTH_LIMITER per IP. */
-export async function limitAnonymousAgentRequest(env: LimitEnv, request: Request): Promise<Response | null> {
- if (!env.AUTH_LIMITER) return null;
- if ((await env.AUTH_LIMITER.limit({ key: `oauth:${clientIp(request)}` })).success) return null;
- return tooManyRequests(MCP_REQUEST_WINDOW_SECONDS, `Too many sign-in requests from this address. Wait ${MCP_REQUEST_WINDOW_SECONDS} seconds and try again.`);
+/**
+ * Per-IP limits for requests that carry no agent identity yet. Three separate budgets, so ten registrations from an
+ * address never block a token refresh from it:
+ * - `/oauth/token`: OAUTH_TOKEN_LIMITER, 600 per 60 s (refreshes from assistants that share cloud addresses);
+ * - `/oauth/register`: AUTH_LIMITER, 10 per 60 s, on its own key (not the sign-in key);
+ * - `/mcp` with no Authorization header: MCP_ANON_LIMITER, 60 per 60 s.
+ * A request that presents a token is never limited here: a bad or expired token always gets its 401, so clients refresh.
+ */
+export const ANONYMOUS_AGENT_LIMITS = { token: 600, register: 10, unauthenticatedMcp: 60 } as const;
+export type AnonymousAgentRoute = 'token' | 'register' | 'mcp';
+export async function limitAnonymousAgentRequest(env: LimitEnv, request: Request, route: AnonymousAgentRoute): Promise<Response | null> {
+ const ip = clientIp(request);
+ const [binding, key] = route === 'token' ? [env.OAUTH_TOKEN_LIMITER, `oauth-token:${ip}`] : route === 'register' ? [env.AUTH_LIMITER, `oauth-register:${ip}`] : [env.MCP_ANON_LIMITER, `mcp-anon:${ip}`];
+ if (!binding || (await binding.limit({ key })).success) return null;
+ const what = route === 'token' ? 'token requests' : route === 'register' ? 'app registrations' : 'requests without a token';
+ return tooManyRequests(MCP_REQUEST_WINDOW_SECONDS, `Too many ${what} from this address. Wait ${MCP_REQUEST_WINDOW_SECONDS} seconds and try again.`);
 }
 
 export class RateLimitedError extends ToolError {
@@ -79,18 +92,25 @@ export class RateLimitedError extends ToolError {
 
 /**
  * Spend one live DNS check for this connection and workspace, or throw a tool error saying when to retry.
- * Both windows are read first, so a refusal spends neither count. Two simultaneous checks can each pass the read,
- * so a window may overshoot by the number of checks in flight; the next check is then refused.
+ * Each count is one conditional write (count only while under the limit), so simultaneous calls cannot overshoot.
+ * The workspace is counted first; if the connection then refuses, the workspace gets its count back. A refusal
+ * therefore spends nothing that stays spent.
  */
 export async function spendDnsCheck(env: Pick<BoundEnv, 'DB'>, principalId: string, workspaceId: string, opts: { now?: number; prune?: boolean } = {}): Promise<void> {
  const q = globalQueries(env.DB).rateLimit;
  const now = opts.now ?? Date.now(), windowMs = DNS_CHECK_LIMITS.windowSeconds * 1000;
  if (opts.prune ?? Math.random() < PRUNE_RATE) await q.prune('mcp-dns:', now - windowMs);
  const connectionKey = `mcp-dns:connection:${principalId}`, workspaceKey = `mcp-dns:workspace:${workspaceId}`;
- const [connection, workspace] = await Promise.all([q.peek(connectionKey, now, windowMs), q.peek(workspaceKey, now, windowMs)]);
- const retry = (row: { lastRequest: number }) => Math.max(1, Math.ceil((row.lastRequest + windowMs - now) / 1000));
- if (workspace && workspace.count >= DNS_CHECK_LIMITS.perWorkspace) throw new RateLimitedError(`Agents in this workspace ran ${DNS_CHECK_LIMITS.perWorkspace} live DNS checks within one minute, the limit. Try again in ${retry(workspace)} seconds.`, retry(workspace));
- if (connection && connection.count >= DNS_CHECK_LIMITS.perConnection) throw new RateLimitedError(`This agent connection ran ${DNS_CHECK_LIMITS.perConnection} live DNS checks within one minute, the limit. Try again in ${retry(connection)} seconds.`, retry(connection));
- await q.hit(connectionKey, now, windowMs);
- await q.hit(workspaceKey, now, windowMs);
+ const retry = (row: { lastRequest: number } | null) => row ? Math.max(1, Math.ceil((row.lastRequest + windowMs - now) / 1000)) : DNS_CHECK_LIMITS.windowSeconds;
+ const workspace = await q.hitUnder(workspaceKey, now, windowMs, DNS_CHECK_LIMITS.perWorkspace);
+ if (!workspace) {
+  const after = retry(await q.peek(workspaceKey, now, windowMs));
+  throw new RateLimitedError(`Agents in this workspace ran ${DNS_CHECK_LIMITS.perWorkspace} live DNS checks within one minute, the limit. Try again in ${after} seconds.`, after);
+ }
+ const connection = await q.hitUnder(connectionKey, now, windowMs, DNS_CHECK_LIMITS.perConnection);
+ if (!connection) {
+  await q.giveBack(workspaceKey, workspace.lastRequest);
+  const after = retry(await q.peek(connectionKey, now, windowMs));
+  throw new RateLimitedError(`This agent connection ran ${DNS_CHECK_LIMITS.perConnection} live DNS checks within one minute, the limit. Try again in ${after} seconds.`, after);
+ }
 }

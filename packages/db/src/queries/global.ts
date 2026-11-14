@@ -77,11 +77,30 @@ export function globalQueries(dbLike: DbLike) {
 					.returning({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest })
 					.get();
 			},
-			/** The count in the key's current window, without counting a request (0 when the window has expired or never started). */
-			peek: async (key: string, nowMs: number, windowMs: number): Promise<{ count: number; lastRequest: number } | null> => {
-				const row = await db.select({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest }).from(authRateLimits).where(eq(authRateLimits.key, key)).get();
-				return row && nowMs - row.lastRequest < windowMs ? row : null;
+			/**
+			 * Count one request only if the window has expired or holds fewer than `max`: one conditional statement, so
+			 * simultaneous requests cannot all pass a stale read. Returns the new count, or null when refused (nothing counted).
+			 */
+			hitUnder: async (key: string, nowMs: number, windowMs: number, max: number): Promise<{ count: number; lastRequest: number } | null> => {
+				const expired = sql`${nowMs} - ${authRateLimits.lastRequest} >= ${windowMs}`;
+				const row = await db
+					.insert(authRateLimits)
+					.values({ id: crypto.randomUUID(), key, count: 1, lastRequest: nowMs })
+					.onConflictDoUpdate({
+						target: authRateLimits.key,
+						set: {
+							count: sql`CASE WHEN ${expired} THEN 1 ELSE ${authRateLimits.count} + 1 END`,
+							lastRequest: sql`CASE WHEN ${expired} THEN ${nowMs} ELSE ${authRateLimits.lastRequest} END`,
+						},
+						setWhere: sql`${expired} OR ${authRateLimits.count} < ${max}`,
+					})
+					.returning({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest })
+					.get();
+				return row ?? null;
 			},
+			/** Undo one `hitUnder` in the same window (when a later limit refused the request). */
+			giveBack: (key: string, windowStart: number) =>
+				db.update(authRateLimits).set({ count: sql`${authRateLimits.count} - 1` }).where(and(eq(authRateLimits.key, key), eq(authRateLimits.lastRequest, windowStart), gt(authRateLimits.count, 0))).run(),
 			/** Delete expired windows whose key starts with `prefix` (opportunistic cleanup; the rows carry no other data). */
 			prune: (prefix: string, olderThanMs: number) =>
 				db.delete(authRateLimits).where(and(like(authRateLimits.key, `${prefix}%`), lt(authRateLimits.lastRequest, olderThanMs))).run(),

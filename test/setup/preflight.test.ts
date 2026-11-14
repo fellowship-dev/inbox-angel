@@ -8,7 +8,7 @@ const ORIGIN = 'https://ia.example.com';
 const kv = {} as KVNamespace;
 const sendEmail = { send: async () => {} } as unknown as SendEmail;
 const bound = { limit: async () => ({ success: true }) };
-const limiters = { API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound, DNS_PREVIEW_LIMITER: bound };
+const limiters = { API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound, OAUTH_TOKEN_LIMITER: bound, MCP_ANON_LIMITER: bound, DNS_PREVIEW_LIMITER: bound };
 function env(extra: Record<string, unknown> = {}): BoundEnv {
  const db = createMigratedD1();
  return { DB: db as unknown as D1Database, ...extra } as BoundEnv;
@@ -65,8 +65,8 @@ describe('instance preflight', () => {
 describe('rate limit bindings', () => {
  it('hosted: every missing ratelimit binding is action needed, in one item, by name', async () => {
   const item = async (extra: Record<string, unknown>) => (await instancePreflight(env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, ...extra }), ORIGIN)).items.find(i => i.id === 'rate_limits');
-  expect(await item({})).toMatchObject({ severity: 'action', setting: 'API_LIMITER, AUTH_LIMITER, MCP_LIMITER, DNS_PREVIEW_LIMITER', message: expect.stringContaining('agents are refused until MCP_LIMITER and API_LIMITER are both bound') });
-  expect(await item({ API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound })).toMatchObject({ setting: 'DNS_PREVIEW_LIMITER', message: 'A rate limit binding is missing, so the requests it counts are not limited. Add the ratelimit bindings from wrangler.jsonc to this Worker.' });
+  expect(await item({})).toMatchObject({ severity: 'action', setting: 'API_LIMITER, AUTH_LIMITER, MCP_LIMITER, OAUTH_TOKEN_LIMITER, MCP_ANON_LIMITER, DNS_PREVIEW_LIMITER', message: expect.stringContaining('agents are refused until MCP_LIMITER and API_LIMITER are both bound') });
+  expect(await item({ API_LIMITER: bound, AUTH_LIMITER: bound, MCP_LIMITER: bound, OAUTH_TOKEN_LIMITER: bound, MCP_ANON_LIMITER: bound })).toMatchObject({ setting: 'DNS_PREVIEW_LIMITER', message: 'A rate limit binding is missing, so the requests it counts are not limited. Add the ratelimit bindings from wrangler.jsonc to this Worker.' });
   expect(await item(limiters)).toBeUndefined();
  });
  it('self-host: missing bindings are not reported (they are optional there)', async () => {

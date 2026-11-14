@@ -62,7 +62,8 @@ describe('the missing-limiter warning', () => {
 
 describe('the owner learns about a missing DNS_PREVIEW_LIMITER from the setup check, the one place for limiter gaps', () => {
   const OWNER = 'owner@example.com';
-  const limiters = { API_LIMITER: { limit: async () => ({ success: true }) }, AUTH_LIMITER: { limit: async () => ({ success: true }) }, MCP_LIMITER: { limit: async () => ({ success: true }) } };
+  const ok = { limit: async () => ({ success: true }) };
+  const limiters = { API_LIMITER: ok, AUTH_LIMITER: ok, MCP_LIMITER: ok, OAUTH_TOKEN_LIMITER: ok, MCP_ANON_LIMITER: ok };
   const rateItem = async (w: Awaited<ReturnType<typeof hosted>>, who: { token: string; ws: string; id: string }) =>
     (await json(await w.api(who, 'GET', '/api/instance/preflight'))).items.find((i: { id: string }) => i.id === 'rate_limits');
   it('lists it as action needed without the binding, and not with it', async () => {

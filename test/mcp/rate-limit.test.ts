@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { globalQueries } from '@inbox-angel/db';
-import { DNS_CHECK_LIMITS, limitAnonymousAgentRequest, limitBrowserRequest, limitMcpRequest, MCP_REQUEST_LIMITS, MCP_REQUEST_WINDOW_SECONDS, RateLimitedError, spendDnsCheck } from '../../src/mcp/rate-limit';
+import { ANONYMOUS_AGENT_LIMITS, DNS_CHECK_LIMITS, limitAnonymousAgentRequest, limitBrowserRequest, limitMcpRequest, MCP_REQUEST_LIMITS, MCP_REQUEST_WINDOW_SECONDS, RateLimitedError, spendDnsCheck } from '../../src/mcp/rate-limit';
 import { toolFailure } from '../../src/mcp/errors';
 import type { AccessSubject } from '../../src/access/principal';
 import { connection } from './helpers';
@@ -68,13 +68,28 @@ describe('/mcp request limit: per connection and per workspace, never per IP', (
   expect(l.keys).toEqual(['198.51.100.1', '203.0.113.9']);
  });
 
- it('limits registration, token and anonymous agent requests per IP with AUTH_LIMITER', async () => {
-  const l = limiter(k => k === 'oauth:203.0.113.9');
-  expect(await limitAnonymousAgentRequest({ AUTH_LIMITER: l.binding }, new Request('https://ia.example.com/oauth/token', { headers: { 'cf-connecting-ip': '198.51.100.1' } }))).toBeNull();
-  const res = (await limitAnonymousAgentRequest({ AUTH_LIMITER: l.binding }, new Request('https://ia.example.com/oauth/token', { headers: { 'cf-connecting-ip': '203.0.113.9' } })))!;
-  expect(res.status).toBe(429);
-  expect(res.headers.get('Retry-After')).toBe('60');
-  expect(l.keys).toEqual(['oauth:198.51.100.1', 'oauth:203.0.113.9']);
+ it('gives token requests, registrations and token-less /mcp separate per-IP budgets', async () => {
+  const token = limiter(), auth = limiter(() => true), anon = limiter();
+  const env = { OAUTH_TOKEN_LIMITER: token.binding, AUTH_LIMITER: auth.binding, MCP_ANON_LIMITER: anon.binding };
+  const req = (path: string) => new Request(`https://ia.example.com${path}`, { headers: { 'cf-connecting-ip': '203.0.113.9' } });
+  // Registrations from this address are exhausted, but its token refreshes and token-less /mcp still pass.
+  const refused = (await limitAnonymousAgentRequest(env, req('/oauth/register'), 'register'))!;
+  expect(refused.status).toBe(429);
+  expect(refused.headers.get('Retry-After')).toBe('60');
+  expect(await limitAnonymousAgentRequest(env, req('/oauth/token'), 'token')).toBeNull();
+  expect(await limitAnonymousAgentRequest(env, req('/mcp'), 'mcp')).toBeNull();
+  expect(auth.keys).toEqual(['oauth-register:203.0.113.9']);
+  expect(token.keys).toEqual(['oauth-token:203.0.113.9']);
+  expect(anon.keys).toEqual(['mcp-anon:203.0.113.9']);
+ });
+
+ it('declares the per-IP budgets in wrangler.jsonc as documented', () => {
+  const bindings = ts.parseConfigFileTextToJson('wrangler.jsonc', readFileSync('wrangler.jsonc', 'utf8')).config.unsafe.bindings as Array<{ name: string; namespace_id: string; simple: { limit: number } }>;
+  const limit = (name: string) => bindings.find(b => b.name === name)!.simple.limit;
+  expect(limit('OAUTH_TOKEN_LIMITER')).toBe(ANONYMOUS_AGENT_LIMITS.token);
+  expect(limit('AUTH_LIMITER')).toBe(ANONYMOUS_AGENT_LIMITS.register);
+  expect(limit('MCP_ANON_LIMITER')).toBe(ANONYMOUS_AGENT_LIMITS.unauthenticatedMcp);
+  expect(new Set(bindings.map(b => b.namespace_id)).size).toBe(bindings.length);
  });
 });
 
@@ -98,6 +113,25 @@ describe('live DNS check budget (the expensive tools)', () => {
   expect(error.message).toMatch(/^Agents in this workspace ran 30 live DNS checks/);
   // Another workspace has its own budget.
   await expect(spendDnsCheck(env, 'd', 'ws_other')).resolves.toBeUndefined();
+ });
+
+ it('holds under 100 parallel calls: exactly 10 pass per connection and 30 per workspace', async () => {
+  const { env } = await connection();
+  const now = 1_800_000_000_000;
+  // 10 connections x 10 calls each, all fired at once, all in one workspace.
+  const calls = Array.from({ length: 100 }, (_, i) => ({ principal: `p${i % 10}`, run: spendDnsCheck(env, `p${i % 10}`, 'ws_par', { now, prune: false }).then(() => true, () => false) }));
+  const passed = await Promise.all(calls.map(c => c.run));
+  expect(passed.filter(Boolean)).toHaveLength(DNS_CHECK_LIMITS.perWorkspace);
+  const q = globalQueries(env.DB).rateLimit;
+  expect((await q.peek('mcp-dns:workspace:ws_par', now, 60_000))!.count).toBe(DNS_CHECK_LIMITS.perWorkspace);
+  // One connection alone, 100 parallel calls in a fresh workspace: exactly 10 pass, and the workspace keeps only those 10.
+  const single = await Promise.all(Array.from({ length: 100 }, () => spendDnsCheck(env, 'solo', 'ws_solo', { now, prune: false }).then(() => true, () => false)));
+  expect(single.filter(Boolean)).toHaveLength(DNS_CHECK_LIMITS.perConnection);
+  expect((await q.peek('mcp-dns:connection:solo', now, 60_000))!.count).toBe(DNS_CHECK_LIMITS.perConnection);
+  expect((await q.peek('mcp-dns:workspace:ws_solo', now, 60_000))!.count).toBe(DNS_CHECK_LIMITS.perConnection);
+  // Per connection in the shared workspace: nobody went over 10.
+  for (let i = 0; i < 10; i++) expect((await q.peek(`mcp-dns:connection:p${i}`, now, 60_000))?.count ?? 0).toBeLessThanOrEqual(DNS_CHECK_LIMITS.perConnection);
+  expect(calls).toHaveLength(100);
  });
 
  it('a refusal by the workspace limit does not spend the connection\'s count', async () => {

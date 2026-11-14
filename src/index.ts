@@ -100,6 +100,8 @@ export interface Env {
   API_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };  // global rate limiting (200/min)
   DNS_PREVIEW_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // claim DNS preview, per user (10/min)
   MCP_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };  // agent requests per connection (100/min; src/mcp/rate-limit.ts)
+  OAUTH_TOKEN_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> }; // /oauth/token per IP (600/min)
+  MCP_ANON_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };    // /mcp without a token, per IP (60/min)
 }
 
 /** Env after the DB-bound guard: entry points serve the setup page / bail out when DB is unbound. */

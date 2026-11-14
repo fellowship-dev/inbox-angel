@@ -102,7 +102,7 @@ export async function instancePreflight(env: BoundEnv, requestOrigin: string): P
   // Rate limits: a missing ratelimit binding fails open, so the hosted service must have every one.
   // This is the one place that reports them (it replaces reading /api/me's dns_preview_limiter).
   if (hosted) {
-    const missing = (['API_LIMITER', 'AUTH_LIMITER', 'MCP_LIMITER', 'DNS_PREVIEW_LIMITER'] as const).filter(name => !env[name]);
+    const missing = (['API_LIMITER', 'AUTH_LIMITER', 'MCP_LIMITER', 'OAUTH_TOKEN_LIMITER', 'MCP_ANON_LIMITER', 'DNS_PREVIEW_LIMITER'] as const).filter(name => !env[name]);
     if (missing.length) {
       items.push({
         id: 'rate_limits', severity: 'action', setting: missing.join(', '),

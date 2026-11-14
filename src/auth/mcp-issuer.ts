@@ -102,20 +102,15 @@ export function withMcpAuthorization<T extends DefaultHandler>(worker: T, handle
    const limited = await limitBrowserRequest(env, request);
    if (limited) return limited;
   }
-  // Registration, token requests and /mcp without a token: AUTH_LIMITER per IP, before any work.
+  // Per-IP budgets, one per route (src/mcp/rate-limit.ts). A request that presents a token is not limited per IP:
+  // a bad or expired token must get its 401, so the client refreshes.
   const agentPath = path === '/mcp' || path.startsWith('/mcp/');
-  if (path === '/oauth/token' || path === '/oauth/register' || (agentPath && !request.headers.has('authorization'))) {
-   const limited = await limitAnonymousAgentRequest(env, request);
+  const route = path === '/oauth/token' ? 'token' : path === '/oauth/register' ? 'register' : agentPath && !request.headers.has('authorization') ? 'mcp' : null;
+  if (route) {
+   const limited = await limitAnonymousAgentRequest(env, request, route);
    if (limited) return limited;
   }
-  let response: Response;
-  try { response = await (await createMcpProvider(env, new URL(request.url).origin, handler, worker)).fetch(request, env, ctx); }
+  try { return await (await createMcpProvider(env, new URL(request.url).origin, handler, worker)).fetch(request, env, ctx); }
   catch { return Response.json({ error: 'Agent authorization unavailable' }, { status: 503 }); }
-  // A presented token that did not authenticate counts against the same per-IP budget, after the fact.
-  if (agentPath && response.status === 401 && request.headers.has('authorization')) {
-   const limited = await limitAnonymousAgentRequest(env, request);
-   if (limited) return limited;
-  }
-  return response;
  } };
 }
