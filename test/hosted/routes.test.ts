@@ -102,7 +102,7 @@ describe('GET /api/hosted/config', () => {
     const t = await setup();
     const r = await call(t.env, 'GET', '/api/hosted/config', { key: t.A.token });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ enabled: true });
+    expect(await r.json()).toEqual({ enabled: true, reports: true, records: true });
     expect((await call(t.env, 'GET', '/api/hosted/config')).status).toBe(401);
   });
 
@@ -111,7 +111,7 @@ describe('GET /api/hosted/config', () => {
     const key = await setupOwner(env);
     const r = await call(env, 'GET', '/api/hosted/config', { key });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ enabled: false });
+    expect(await r.json()).toEqual({ enabled: false, reports: false, records: false });
   });
 });
 
