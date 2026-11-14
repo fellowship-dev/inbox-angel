@@ -230,8 +230,8 @@ describe('DomainDetailPage: the first screen says what to do', () => {
 		expect(within(items[0]!).getByText(/97% of 100 reported messages passed DMARC in the last 7 days/)).toBeInTheDocument();
 		expect(within(items[0]!).getByText('An owner or admin')).toBeInTheDocument();
 		expect(within(items[0]!).getByRole('link', { name: 'Review the change' })).toHaveAttribute('href', '/domains/1/dmarc-wizard');
-		// Under enforcement the missing reports address is a Note: it changes evidence, not protection.
-		expect(items[1]).toHaveAttribute('data-status', 'note');
+		// At p=quarantine the next step (reject) waits on reports, so the missing reports address is the step, not a note.
+		expect(items[1]).toHaveAttribute('data-status', 'improve');
 		expect(within(items[1]!).getByText('Add the reports address to your DMARC record')).toBeInTheDocument();
 		expect(within(items[1]!).getByText('Do this:')).toBeInTheDocument();
 		expect(within(items[1]!).getByText('Why:')).toBeInTheDocument();
