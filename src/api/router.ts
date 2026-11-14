@@ -1,4 +1,4 @@
-// REST API router for Ready Set Mail Worker.
+// REST API router for InboxAngel Worker.
 // All /api/* routes require authentication: the WorkspaceResolver (default: sessionWorkspaceResolver,
 // src/auth/resolver.ts) turns the deprecated API_KEY, a per-user API key or a Better Auth session
 // into {workspace, user, role}, and the request acts on that workspace only. Members are read-only.
@@ -94,7 +94,7 @@ import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@ready-set-mail/db';
+import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@inbox-angel/db';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
@@ -103,7 +103,7 @@ import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../d
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
-import { PlanLimitError } from '@ready-set-mail/db';
+import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
 import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
@@ -118,10 +118,10 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@ready-set-mail/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
-import { getAllDkimSelectors } from '@ready-set-mail/dns-checks/email-service-providers';
-import { decodeTxtData } from '@ready-set-mail/dns-checks/txt';
+import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
+import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
 import {
   provisionMtaSts,
   updateMtaStsTxtRecord,
@@ -445,7 +445,7 @@ async function _handleApi(
   // GET /api/version — compares running version against latest GitHub release
   // Cached for 24h per-instance via CF Cache API — one GitHub request per day max
   if (path === '/api/version' && method === 'GET') {
-    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/ready-set-mail/main/package.json';
+    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
     const cacheKey = new Request(GH_RAW);
     let latest: string | null = null;
     try {
@@ -468,7 +468,7 @@ async function _handleApi(
       current: version,
       latest,
       update_available: latest !== null && latest !== version,
-      release_url: 'https://github.com/fellowship-dev/ready-set-mail/releases/latest',
+      release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
       // Only when HOSTED_SERVICE_URL is set on a self-hosted installation (src/hosted-service.ts).
       ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
     });
@@ -740,12 +740,13 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
-      // Already added (a second tab, a double click, two requests at once): say so, whatever the cap and whatever DNS says now.
+      // Already added (a second tab, a double click, two requests at once, a retry after a settled claim): say so, whatever the cap and whatever DNS says now.
       const added = await resumeExistingDomain(tenant, claim.domain);
       if (added) {
-        await tenant.scope.claims.delete(claim.id); // a claim for a domain the workspace has is a leftover
+        await tenant.scope.claims.settle(claim.domain, added.domain.id); // a claim for a domain the workspace has is settled, never left open
         return json(added, 200);
       }
+      if (claim.settled_at !== null) return err('claim not found', 404); // it became a domain that has since been removed
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
@@ -757,14 +758,14 @@ async function _handleApi(
     const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);
     if (claimPreviewMatch && method === 'GET') {
       const claim = await tenant.scope.claims.getById(parseInt(claimPreviewMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       return await claimPreviewResponse(tenant, claim, { userId: workspace.userId });
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
     if (claimDeleteMatch && method === 'DELETE') {
       const claim = await tenant.scope.claims.getById(parseInt(claimDeleteMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       await tenant.scope.claims.delete(claim.id);
       return json({ ok: true });
     }
@@ -1005,19 +1006,11 @@ async function _handleApi(
               return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const, wildcard: false };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
-          // DoH fallback
-          const answers = await Promise.all(DKIM_SELECTORS.map(async sel => {
-            const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
-            if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
-            return { name: `${sel}._domainkey.${domain.domain}`, records: t.records };
-          }));
-          // Every name answering with one identical record is a wildcard: it says nothing about which selectors exist.
-          const wildcardRecord = sharedWildcardRecord(answers.filter(a => a !== null).map(a => a!.records));
-          if (wildcardRecord !== null) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: wildcardRecord };
-          const hits = answers.flatMap(a => {
-            const record = a?.records.find(isDkimRecord);
-            return a && record ? [{ name: a.name, record }] : [];
-          });
+          // DoH fallback: the shared scan, so the wildcard rule (identical answers, confirmed by a random name) is the same everywhere.
+          const scan = await scanDkimSelectors(dnsResolver, domain.domain, DKIM_SELECTORS);
+          for (const e of scan.errors) dns_errors.push(`dkim ${e.selector}: ${e.error}`);
+          if (scan.wildcard) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: scan.wildcardRecord };
+          const hits = scan.found.map(f => ({ name: f.name, record: f.txt.find(isDkimRecord)! }));
           return { selectors: hits, source: 'doh' as const, wildcard: false };
         })(),
 
@@ -1234,14 +1227,14 @@ async function _handleApi(
       return json({ ok: true, record: body.record, created: !existingId });
     }
 
-    // POST /api/setup/custom-domain — register ready-set-mail.{BASE_DOMAIN} as CF Custom Domain
+    // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
       if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
       const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
       const workerName = tenant.workerName;
-      const hostname = `ready-set-mail.${bd}`;
+      const hostname = `inbox-angel.${bd}`;
 
       // The hostname is on the base domain's zone.
       let cf: Awaited<ReturnType<typeof tenant.cfFor>>;

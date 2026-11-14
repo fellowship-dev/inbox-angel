@@ -53,6 +53,8 @@ export interface CheckDomainOptions extends ResolverOptions {
   resolver?: Resolver;
   /** DKIM selectors to probe. Default: COMMON_DKIM_SELECTORS */
   dkimSelectors?: readonly string[];
+  /** Names the random wildcard probe (16 hex digits); injectable for tests. */
+  dkimProbeHex?: () => string;
 }
 
 const LABELS: Record<Level, string> = { 0: 'Unprotected', 1: 'Monitoring', 2: 'Enforced', 3: 'Hardened' };
@@ -125,7 +127,7 @@ export async function checkDomain(domain: string, options: CheckDomainOptions = 
     lookupMx(resolver, name),
     analyzeSpf(name, resolver),
     lookupDmarc(resolver, name),
-    scanDkimSelectors(resolver, name, options.dkimSelectors ?? COMMON_DKIM_SELECTORS),
+    scanDkimSelectors(resolver, name, options.dkimSelectors ?? COMMON_DKIM_SELECTORS, { randomHex: options.dkimProbeHex }),
     lookupMtaSts(resolver, name),
     lookupBimi(resolver, name),
     lookupNs(resolver, name),

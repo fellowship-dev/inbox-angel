@@ -204,3 +204,28 @@ describe('AddDomainPage prefill', () => {
 		expect(input.value).toBe('acme.io');
 	});
 });
+
+describe('AuthPage on an instance without bot protection', () => {
+	const CLOSED = { mode: 'saas', signup_open: false, signin_available: false, signup_unavailable_reason: 'bot_protection_not_configured' } as const;
+	const MESSAGE = 'Sign-up and sign-in are not available on this instance yet: bot protection is not configured.';
+
+	it.each([[undefined], ['signup' as const]])('shows one Alert and no form (initialMode %s)', async (initialMode) => {
+		renderApp(<AuthPage initialMode={initialMode} />, { role: null, status: CLOSED });
+		expect(await screen.findByRole('alert')).toHaveTextContent(MESSAGE);
+		expect(screen.getAllByRole('alert')).toHaveLength(1);
+		expect(document.querySelector('form')).toBeNull();
+		expect(screen.queryByLabelText(/email/i)).toBeNull();
+		expect(screen.queryByLabelText(/password/i)).toBeNull();
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(screen.queryByText(/coming soon/i)).toBeNull();
+	});
+
+	it('self-host and a working hosted instance keep their forms', async () => {
+		const { unmount } = renderApp(<AuthPage />, { role: null, status: { signin_available: true } });
+		expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+		expect(screen.queryByText(MESSAGE)).toBeNull();
+		unmount();
+		renderApp(<AuthPage initialMode="signup" />, { role: null, status: { mode: 'saas', signup_open: true, signin_available: true } });
+		expect(await screen.findByRole('button', { name: 'Create account' })).toBeInTheDocument();
+	});
+});

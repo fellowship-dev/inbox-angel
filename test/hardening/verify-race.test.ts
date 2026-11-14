@@ -58,29 +58,35 @@ describe('two simultaneous verifies of the same claim at cap minus one', () => {
     bothLoadTheClaimFirst(w.db, 3);
     const out = await Promise.all([w.verify(), w.verify(), w.verify()]);
     expect(out.map(r => r.status).sort()).toEqual([200, 200, 201]);
+    const bodies = await Promise.all(out.map(json));
+    expect(new Set(bodies.map(b => b.domain.id)).size).toBe(1);
     expect(w.liveRows()).toHaveLength(1);
+    expect((await w.verify()).status).toBe(200); // and a repeat afterwards still finds the domain
   });
 
   it('a claim whose domain is already live in this workspace resumes with 200 at the cap, before the cap check and without a DNS lookup', async () => {
     const w = await atCapMinusOne();
     expect((await w.verify()).status).toBe(201); // now 3 of 3
-    // the claim row survives (a second tab created it again): the domain is ours already
-    w.db.sqlite.prepare("INSERT INTO domain_claims (workspace_id, domain, token, status) VALUES (?, 'acme.org', 'again', 'pending')").run(w.a.ws);
+    // the claim row is open again (a leftover from a second tab): the domain is ours already
+    w.db.sqlite.prepare("UPDATE domain_claims SET settled_at = NULL, settled_domain_id = NULL WHERE domain = 'acme.org'").run();
     const again = w.rows("SELECT id FROM domain_claims WHERE domain = 'acme.org'")[0].id;
     nxdomain(); // no proof is published any more: the answer must not depend on it
     const res = await w.api(w.a, 'POST', `/api/domains/claims/${again}/verify`, {});
     expect(res.status).toBe(200);
     expect((await json(res)).resumed).toBe(true);
     expect(w.liveRows()).toHaveLength(1);
-    expect(w.rows("SELECT id FROM domain_claims WHERE domain = 'acme.org'")).toEqual([]); // the leftover claim is gone
+    expect(w.rows("SELECT id FROM domain_claims WHERE domain = 'acme.org' AND settled_at IS NULL")).toEqual([]); // the leftover claim is settled, not pending
   });
 
-  it('once the first verify has settled the claim, a late second verify is 404 claim not found: the id maps to no domain any more', async () => {
+  it('once the first verify has settled the claim, a late second verify is 200 with the same domain: the settled claim still maps to it', async () => {
     const w = await atCapMinusOne();
-    expect((await w.verify()).status).toBe(201);
+    const first = await w.verify();
+    expect(first.status).toBe(201);
     const late = await w.verify();
-    expect(late.status).toBe(404);
-    expect((await json(late)).error).toBe('claim not found');
+    expect(late.status).toBe(200);
+    const [b1, b2] = [await json(first), await json(late)];
+    expect(b2.resumed).toBe(true);
+    expect(b2.domain.id).toBe(b1.domain.id);
     expect(w.liveRows()).toHaveLength(1);
   });
 

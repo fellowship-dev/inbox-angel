@@ -5,7 +5,7 @@ import { COMMON_DKIM_SELECTORS } from '../src/dkim';
 import { dohFetch, resp, type Zone } from './helpers';
 
 const POLICY = 'version: STSv1\nmode: enforce\nmx: aspmx.l.google.com\nmax_age: 604800\n';
-const run = (zone: Zone, http = {}) => checkDomain('x.com', { resolver: createResolver({ fetch: dohFetch(zone, [], http) }) });
+const run = (zone: Zone, http = {}) => checkDomain('x.com', { resolver: createResolver({ fetch: dohFetch(zone, [], http) }), dkimProbeHex: () => '0123456789abcdef' });
 
 const base: Zone = {
   'MX x.com': ['1 aspmx.l.google.com.'],
@@ -167,7 +167,7 @@ describe('checkDomain – a wildcard TXT under _domainkey (gov.uk answers every 
   const wildcard = (record: string): Zone => ({
     ...base,
     'TXT _dmarc.x.com': [dmarc],
-    ...Object.fromEntries(COMMON_DKIM_SELECTORS.map(s => [`TXT ${s}._domainkey.x.com`, [record]])),
+    ...Object.fromEntries([...COMMON_DKIM_SELECTORS, 'ia-wc-0123456789abcdef'].map(s => [`TXT ${s}._domainkey.x.com`, [record]])),
   });
 
   it('reports no keys, flags the wildcard, and does not call that a missing key', async () => {
@@ -177,5 +177,24 @@ describe('checkDomain – a wildcard TXT under _domainkey (gov.uk answers every 
     expect(r.grade.level).toBe(2);
     expect(r.grade.reasons.join(' ')).not.toContain('No DKIM key found');
     expect(r.grade.reasons).toContain("DKIM can't be checked: every name under the domain answers with the same TXT record");
+  });
+});
+
+describe('checkDomain – the same real key at several selectors', () => {
+  const dmarc = 'v=DMARC1; p=reject; rua=mailto:dmarc@x.com';
+  const key = 'v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A';
+  const three = { ...base, 'TXT _dmarc.x.com': [dmarc], ...Object.fromEntries(['k1', 'k2', 'k3'].map(s => [`TXT ${s}._domainkey.x.com`, [key]])) };
+
+  it('is found, not a wildcard, when the random name has no record', async () => {
+    const r = await run(three);
+    expect(r.dkim.wildcard).toBe(false);
+    expect(r.dkim.found.map(f => f.selector)).toEqual(['k1', 'k2', 'k3']);
+  });
+  it('a failed random probe is an unchecked error: no key and no wildcard claimed', async () => {
+    const r = await run({ ...three, 'TXT ia-wc-0123456789abcdef._domainkey.x.com': 'TIMEOUT' });
+    expect(r.dkim.wildcard).toBe(false);
+    expect(r.dkim.found).toEqual([]);
+    expect(r.errors.some(e => e.check === 'dkim')).toBe(true);
+    expect(r.grade.reasons.join(' ')).toContain('some lookups failed');
   });
 });

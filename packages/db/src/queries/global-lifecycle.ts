@@ -121,6 +121,10 @@ export function lifecycleQueries(dbLike: DbLike) {
 		purgeEvictedDomains: (cutoff: number, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM domains WHERE id IN (SELECT id FROM domains WHERE evicted_at IS NOT NULL AND evicted_at < ${cutoff} LIMIT ${limits.batch})`)),
 
+		/** Claims that became domains before `cutoff`: they were kept a day for a repeat verify. */
+		purgeSettledClaims: (cutoff: number, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM domain_claims WHERE id IN (SELECT id FROM domain_claims WHERE settled_at IS NOT NULL AND settled_at < ${cutoff} LIMIT ${limits.batch})`)),
+
 		purgeAudit: (cutoff: number, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log WHERE created_at < ${cutoff} LIMIT ${limits.batch})`)),
 

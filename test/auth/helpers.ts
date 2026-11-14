@@ -11,8 +11,8 @@ export type TestDb = ReturnType<typeof createMigratedD1>;
 export function makeEnv(db: TestDb = createMigratedD1(), extra: Record<string, unknown> = {}): Env {
   // The platform's sender address, as the setup wizard would have stored it.
   db.sqlite.prepare("INSERT OR IGNORE INTO settings (workspace_id, key, value) VALUES ('ws_default', 'from_email', 'noreply@reports.example.com')").run();
-  // Hosted sign-up is closed without a Turnstile secret; tests send the token 'ok' (see test/setup-files/turnstile.ts).
-  const turnstile = extra.MODE === 'saas' ? { TURNSTILE_SECRET_KEY: 'test-turnstile-secret' } : {};
+  // Hosted sign-up is closed without a Turnstile secret and site key; tests send the token 'ok' (see test/setup-files/turnstile.ts).
+  const turnstile = extra.MODE === 'saas' ? { TURNSTILE_SECRET_KEY: 'test-turnstile-secret', TURNSTILE_SITE_KEY: 'test-turnstile-site' } : {};
   return { BOOTSTRAP_SECRET: 'test-only-installer-proof-32-characters-minimum', DB: db as unknown as D1Database, CLOUDFLARE_ACCOUNT_ID: '', CLOUDFLARE_ZONE_ID: '', CLOUDFLARE_API_TOKEN: '', ...turnstile, ...extra } as unknown as Env;
 }
 

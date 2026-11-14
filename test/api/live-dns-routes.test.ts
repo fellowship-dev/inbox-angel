@@ -119,6 +119,29 @@ describe('GET /api/domains/:id/onboarding-status with a wildcard TXT (gov.uk sty
   });
 });
 
+describe('GET /api/domains/:id/onboarding-status: a shared DKIM key is judged by a random name', () => {
+  const KEY = 'v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A';
+  const sharedAt = (n: string) => ['google', 's1', 's2'].some(s => n === `${s}._domainkey.acme.com`);
+  const probe = (n: string) => /^ia-wc-[0-9a-f]{16}\._domainkey\.acme\.com$/.test(n);
+
+  it('the same real key at three selectors, nothing at the random name: the keys are named, no wildcard', async () => {
+    const asked: string[] = [];
+    stubDns((n, t) => { asked.push(n); return t === 'TXT' && sharedAt(n) ? txt(KEY) : undefined; });
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv(), ctx)).json() as any;
+    expect(body.dkim.wildcard).toBe(false);
+    expect(body.dkim.selectors.map((s: any) => s.name)).toEqual(['google._domainkey.acme.com', 's1._domainkey.acme.com', 's2._domainkey.acme.com']);
+    expect(asked.filter(probe)).toHaveLength(1);
+  });
+
+  it('a failed random probe names no key and claims no wildcard; the failure is a dns_error', async () => {
+    stubDns((n, t) => (t === 'TXT' && probe(n) ? new Error('socket timeout') : t === 'TXT' && sharedAt(n) ? txt(KEY) : undefined));
+    const body = await (await handleApi(get('/api/domains/1/onboarding-status'), makeEnv(), ctx)).json() as any;
+    expect(body.dkim.wildcard).toBe(false);
+    expect(body.dkim.selectors).toEqual([]);
+    expect(body.dns_errors.join(' ')).toContain('dkim ia-wc-');
+  });
+});
+
 describe('GET /api/domains/:id/onboarding-status stores what it resolved', () => {
   const COLS = 'spf_record, dmarc_policy, dmarc_issue, dmarc_inherited_from, dns_checked_at, dns_check_attempted_at, dns_check_status';
   const stored = (env: Env, id = 1) => (env.DB as any).sqlite.prepare(`SELECT ${COLS} FROM domains WHERE id = ?`).get(id) as any;

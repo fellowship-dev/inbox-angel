@@ -199,9 +199,13 @@ export async function verifyClaim(tenant: TenantContext, claim: DomainClaimRow, 
   return txt.ok ? { kind: 'verified', via: 'txt' } : { kind: 'unproven', reason: txt.reason ?? 'not verified' };
 }
 
-/** After a successful insert into `domains`: drop our claim and tell everyone else's they lost. */
+/**
+ * After a successful insert into `domains`: settle our claim and tell everyone else's they lost. The claim row is kept, hidden, for a day
+ * (the retention job purges it) so a repeat verify of it finds the domain: it is the only link from the claim id to the domain.
+ */
 export async function settleClaims(tenant: TenantContext, domain: string): Promise<void> {
-  await tenant.scope.claims.deleteByDomain(domain);
+  const added = await tenant.scope.domains.getByName(domain);
+  if (added) await tenant.scope.claims.settle(domain, added.id);
   await claimLookups(tenant.db).markLost(domain, tenant.workspaceId);
 }
 

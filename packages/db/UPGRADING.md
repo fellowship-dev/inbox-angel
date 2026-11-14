@@ -10,6 +10,10 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## Settled claims
+
+Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.
+
 ## DNS check time
 
 Migration `0008_dns_checked_at.sql` is additive: one nullable `domains.dns_checked_at` column. Apply it before serving the new Worker (the schema guard requires it). Existing domains stay NULL ("Not checked yet" on the overview) until the next daily cron or a visit to the domain's setup page reads their DNS.
