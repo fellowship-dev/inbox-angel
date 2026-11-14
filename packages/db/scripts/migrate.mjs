@@ -6,7 +6,7 @@
  *
  * A thin wrapper over `wrangler d1 migrations apply`: unapplied files in /migrations run in
  * name order, each in one transaction, and are recorded by name in `d1_migrations`.
- * The Worker refuses to serve until the newest one (REQUIRED_MIGRATION) is recorded.
+ * The Worker refuses to serve until every migration it needs (REQUIRED_MIGRATIONS) is recorded.
  */
 import { spawnSync } from 'node:child_process';
 

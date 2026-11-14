@@ -41,14 +41,14 @@ created before the reset must be recreated (`wrangler d1 export` a backup if you
 
 * `wrangler d1 migrations apply` runs the unapplied files in `/migrations` in name order, each in one transaction, and records
   them by file name in `d1_migrations`. `npm run migrate` is a thin wrapper around it.
-* The Worker never changes the schema. On startup it checks that `REQUIRED_MIGRATION` (`src/ready.ts`: the newest migration
-  this build depends on) is recorded in `d1_migrations`; if not it answers `503` with "Database schema is out of date … run
+* The Worker never changes the schema. On startup it checks that every name in `REQUIRED_MIGRATIONS` (`src/ready.ts`: the specific
+  migrations this build depends on; not a contiguous run and not "the latest", so a gap or a newer migration from another branch is fine) is recorded in `d1_migrations`; if not it answers `503` with "Database schema is out of date … run
   `npm run migrate`" (cron and email handlers log the same message).
 * `test/schema-drift.test.ts` and `test/drizzle-baseline.test.ts` fail if `src/schema.ts` and `/migrations` disagree.
 
 ## Adding a migration
 
-See [SCHEMA.md](SCHEMA.md#3-changing-the-schema). Never edit a released migration; add a new numbered file and bump `REQUIRED_MIGRATION`.
+See [SCHEMA.md](SCHEMA.md#3-changing-the-schema). Never edit a released migration; add a new numbered file and add its name to `REQUIRED_MIGRATIONS`.
 Prefer additive changes (new tables, nullable or defaulted columns) so the old Worker keeps running while you migrate.
 
 ## Rollback

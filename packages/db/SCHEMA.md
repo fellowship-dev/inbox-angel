@@ -54,6 +54,6 @@ explicitly. Newer tables (`settings`, `monitor_subscriptions`, `api_keys`, `clou
 1. Edit `src/schema.ts`.
 2. `npm run db:generate` (drizzle-kit) writes the SQL diff to `packages/db/drizzle/`.
 3. Review it, add backfills, and save it as the next `migrations/NNNN_name.sql`.
-4. Bump `REQUIRED_MIGRATION` in `src/ready.ts`; regenerate the drizzle baseline
+4. Add the file name to `REQUIRED_MIGRATIONS` in `src/ready.ts`; regenerate the drizzle baseline
    (`rm -r packages/db/drizzle && npm run db:generate -- --name baseline`).
 5. `npm test` — `schema-drift` and `drizzle-baseline` tell you if you missed something.
