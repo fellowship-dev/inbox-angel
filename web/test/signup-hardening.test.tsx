@@ -69,6 +69,19 @@ describe('the human check is rendered explicitly, per form', () => {
 		expect(t.api.reset).toHaveBeenCalledWith('w1');
 	});
 
+	it('a check that does not pass says so and offers another try', async () => {
+		const t = fakeTurnstile();
+		renderApp(<CheckEmail email="a@example.com" />, { role: null, status: HOSTED });
+		const button = await screen.findByRole('button', { name: 'Resend verification email' });
+		await waitFor(() => expect(t.api.render).toHaveBeenCalledTimes(1));
+		await act(() => t.widgets[0]!.opts['error-callback']());
+		expect(button).toBeDisabled();
+		expect(screen.getByRole('alert')).toHaveTextContent('The human check did not pass. Try it again or reload the page.');
+		await userEvent.setup().click(screen.getByRole('button', { name: 'Try it again' }));
+		await waitFor(() => expect(t.api.render).toHaveBeenCalledTimes(2));
+		expect(t.api.remove).toHaveBeenCalledWith('w1');
+	});
+
 	it('the widget is removed when its form goes away, and a form reached by in-app navigation gets its own', async () => {
 		const t = fakeTurnstile();
 		const { unmount } = renderApp(<CheckEmail email="a@example.com" onBack={() => {}} />, { role: null, status: HOSTED });

@@ -74,7 +74,7 @@ export function useHumanCheck(siteKey: string | null | undefined): HumanCheck {
 
 function HumanCheckBox({ siteKey, onToken, resetRef, hasToken }: { siteKey: string; onToken: (t: string | null) => void; resetRef: { current: (() => void) | null }; hasToken: boolean }) {
 	const box = useRef<HTMLDivElement>(null);
-	const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading');
+	const [state, setState] = useState<'loading' | 'ready' | 'failed' | 'rejected'>('loading');
 	const [attempt, setAttempt] = useState(0);
 
 	useEffect(() => {
@@ -87,12 +87,18 @@ function HumanCheckBox({ siteKey, onToken, resetRef, hasToken }: { siteKey: stri
 				id = api.render(box.current, {
 					sitekey: siteKey,
 					theme: 'auto',
-					callback: (t) => onToken(t),
+					callback: (t) => {
+						setState('ready');
+						onToken(t);
+					},
 					'expired-callback': () => {
 						onToken(null);
 						if (id) api.reset(id);
 					},
-					'error-callback': () => onToken(null),
+					'error-callback': () => {
+						onToken(null);
+						setState('rejected');
+					},
 				});
 				resetRef.current = () => id && api.reset(id);
 				setState('ready');
@@ -119,6 +125,14 @@ function HumanCheckBox({ siteKey, onToken, resetRef, hasToken }: { siteKey: stri
 						try again
 					</Button>
 					.
+				</p>
+			) : state === 'rejected' ? (
+				<p className="text-sm text-danger" role="alert">
+					The human check did not pass.{' '}
+					<Button type="button" variant="link" className="h-auto p-0" onClick={() => setAttempt((n) => n + 1)}>
+						Try it again
+					</Button>
+					{' '}or reload the page.
 				</p>
 			) : !hasToken ? (
 				<p className="text-sm text-ink-2" aria-live="polite">
