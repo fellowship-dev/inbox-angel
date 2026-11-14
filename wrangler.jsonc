@@ -96,6 +96,13 @@
 	//   MAX_DOMAINS_PER_WORKSPACE  domains one workspace may hold (default 10)
 	// A refused request answers 403 with code "plan_limit"; BOOKING_URL (https only) is offered as the way to ask for more.
 
+	// Hosted intake caps and limits (docs/hosted.md): INTAKE_MAX_* (per address / workspace / instance messages and stored records,
+	// unproven mail, records per report, INTAKE_MAX_DECOMPRESSED_BYTES default 3 MiB, INTAKE_MAX_RAW_BYTES default 10 MiB), REPORT_COUNTING
+	// (proven | all: which reports feed the numbers; hosted default proven, self-host all), AUTHSERV_ID + AUTHSERV_HEADER (nothing is proven
+	// until both are set; the Worker logs the authserv-id it sees: {"evt":"intake_authserv"}), INTAKE_TRUSTED_REPORTER_ADDRESSES.
+	// CPU: parsing the largest default report (5,000 records) takes ~0.3-0.5 s, so the 30 s default of "limits": { "cpu_ms": ... } needs no change;
+	// hosted intake needs Workers Paid (the Free plan's 10 ms CPU and 50 D1 queries cannot take a report).
+
 	// Environment variables
 	"vars": {
 		"WORKER_NAME": "inbox-angel-worker"

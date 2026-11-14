@@ -10,6 +10,10 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## Intake hardening (0011)
+
+Migration `0011_intake_hardening.sql` is additive: three nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`), the tables `intake_quota`, `workspace_storage` and `intake_failures`, and indexes. Apply it before serving the new Worker (the schema guard requires it; migrations `0009`/`0010` from other changes are applied first, in name order). Existing reports keep working. **Behaviour change:** on `MODE=saas` only reports whose sender was proven (`reporter_auth = 'pass'`) feed the numbers (`REPORT_COUNTING=proven`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
+
 ## DNS check time
 
 Migration `0008_dns_checked_at.sql` is additive: one nullable `domains.dns_checked_at` column. Apply it before serving the new Worker (the schema guard requires it). Existing domains stay NULL ("Not checked yet" on the overview) until the next daily cron or a visit to the domain's setup page reads their DNS.

@@ -30,7 +30,7 @@ Nothing below is done by the code; it is what the deployment needs. Do it once.
 
 In `wrangler.jsonc` `vars` (or the dashboard):
 
-| Variable | Value | |
+| Variable | Default / value | |
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
@@ -38,16 +38,30 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 | `CANARY_DOMAIN` | `canary.inboxangel.io` | |
 | `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
-| `INTAKE_MAX_REPORTS_PER_DAY` | `50` | optional: reports accepted per intake token **per authenticated reporter domain** per UTC day (over-cap mail is rejected, nothing ingested). A message is attributed to a reporter by an aligned-looking `dkim`/`spf`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
-| `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | optional: raw message bytes per token per authenticated reporter domain per UTC day (50 MiB) |
-| `INTAKE_MAX_REPORTERS_PER_DAY` | `100` | optional: distinct authenticated reporter domains with their own slot per token per UTC day. Well-known reporters (google.com, yahoo.com, microsoft.com…) never use a slot; when the slots are full the least-used unknown reporter makes room instead of the new one being refused |
-| `INTAKE_MAX_TOTAL_REPORTS_PER_DAY`, `INTAKE_MAX_TOTAL_BYTES_PER_DAY` | `1000`, 1 GiB | optional: a token's daily total across proven reporters that are not well known, so reporters coming and going through the slots cannot each bring a fresh allowance. Well-known reporters are outside it |
-| `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `200` | optional: messages the receiver did not prove, per claimed sender domain (SMTP envelope sender) per token per UTC day. Unproven mail never uses a proven reporter's allowance |
-| `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `1073741824` | optional: raw bytes of one such bucket (1 GiB) |
-| `INTAKE_MAX_UNAUTH_SENDERS_PER_DAY` | `50` | optional: claimed sender domains with their own bucket per token per day; the rest share one overflow bucket (never refused outright) |
-| `AUTHSERV_ID`, `AUTHSERV_HEADER` | unset | the receiver's authserv-id and header kind (`ar`/`arc`), see docs/email-funnel.md. **Until both are set nothing is proven**: reports are still accepted, flagged `none` and charged to the unproven buckets above. The defaults are deliberately generous (genuine reporters send 1–2 reports a day) so a spoofed envelope sender needs ~200 messages a day to starve one reporter; setting the two variables removes that weakness |
-| `INTAKE_MAX_RECORDS_PER_REPORT` | `20000` | optional: records in one aggregate report; checked before any per-record IP lookup |
-| `INTAKE_MAX_NEW_IPS_PER_REPORT` | `50` | optional: uncached source IPs enriched (DNS/geo lookups) per report; further records are stored without enrichment |
+| `INTAKE_MAX_REPORTS_PER_DAY` | `50` | reports per intake token **per proven reporter domain** per UTC day (over-cap mail is refused, nothing ingested). A message is attributed to a reporter by an aligned `dkim`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
+| `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | raw message bytes per token per proven reporter domain per UTC day (50 MiB) |
+| `INTAKE_MAX_REPORTERS_PER_DAY` | `100` | distinct proven reporter domains with their own slot per token per UTC day. Well-known reporters (google.com, microsoft.com…) never use a slot; when the slots are full the least-used unknown reporter makes room |
+| `INTAKE_MAX_TOTAL_REPORTS_PER_DAY`, `INTAKE_MAX_TOTAL_BYTES_PER_DAY` | `1000`, 1 GiB | a token's daily total across proven reporters that are not well known |
+| `INTAKE_MAX_UNAUTH_REPORTS_PER_DAY` | `10` | messages the receiver did not prove, per claimed sender domain (SMTP envelope sender) per token per UTC day |
+| `INTAKE_MAX_UNAUTH_BYTES_PER_DAY` | `26214400` | raw bytes of one such bucket (25 MiB) |
+| `INTAKE_MAX_UNAUTH_SENDERS_PER_DAY` | `5` | claimed sender domains with their own bucket per token per day; the rest share one overflow bucket |
+| `INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY` | `25` | **all** unproven messages to one address per day, whatever sender they claim (a forger can claim any domain) |
+| `INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT` | `1000` | records in a report whose sender was not proven |
+| `INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY` | `500` | messages to one report address per UTC day, proven or not |
+| `INTAKE_MAX_ADDRESS_RECORDS_PER_DAY` | `200000` | records stored for one report address per UTC day |
+| `INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY` | `2000` | messages to one workspace per UTC day |
+| `INTAKE_MAX_WORKSPACE_RECORDS` | `1000000` | report records one workspace may hold at once (13 months of data) |
+| `INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY` | `50000` | messages to the whole instance per UTC day |
+| `INTAKE_MAX_INSTANCE_RECORDS` | `10000000` | report records the whole instance may hold, so the shared D1 (10 GB limit) cannot be filled by one tenant or by all of them |
+| `INTAKE_MAX_RECORDS_PER_REPORT` | `5000` | records in one aggregate report, checked before any per-record work (see [Measured limits](#measured-limits)) |
+| `INTAKE_MAX_DECOMPRESSED_BYTES` | `3145728` | a report once decompressed (3 MiB; at most 25 MiB) |
+| `INTAKE_MAX_RAW_BYTES` | `10485760` | the raw message (10 MiB; at most Cloudflare's own 25 MiB) |
+| `INTAKE_MAX_NEW_IPS_PER_REPORT` | `50` | uncached source IPs enriched (DNS-over-HTTPS) per report, busiest first; the rest are stored without enrichment |
+| `INTAKE_MAX_STORAGE_RETRIES_PER_DAY` | `20` | storage failures per domain per day after which a failing message is refused for good instead of being retried |
+| `REPORT_COUNTING` | `proven` | `proven` or `all`: which stored reports feed pass rates, failing senders, anomalies, "safe to enforce", levels, digests and the MCP report. Hosted default `proven`; self-host default `all` ([proven reports](#proven-reports-and-what-counts)) |
+| `AUTHSERV_ID`, `AUTHSERV_HEADER` | unset | the receiver's authserv-id and header kind (`ar`/`arc`); see [AUTHSERV discovery](#authserv-discovery). **Until both are set nothing is proven**: reports are accepted and stored, flagged `none`, and **not counted** in any number |
+| `INTAKE_TRUSTED_REPORTER_ADDRESSES` | unset | comma-separated exact From addresses of report senders on shared-mailbox domains (yahoo.com, outlook.com, gmail.com…); see below |
+| `RETENTION_INTAKE_COUNTERS_DAYS`, `RETENTION_INTAKE_FAILURES_DAYS` | `8`, `90` | how long the daily counters and the "could not be processed" markers are kept |
 | `HOSTED_MAX_DOMAINS_PER_WORKSPACE` | `10` | optional: domains per workspace that may use hosted records (enabling more answers 429) |
 
 A report's `policy_published` domain must be the token's domain or a subdomain of it; it is filed under the token's domain, or under the subdomain's own row if the same workspace has that subdomain as a verified domain. Each stored report also records whether its
@@ -72,7 +86,7 @@ that the Worker reads itself.
    | `check@canary.inboxangel.io` | free check |
 
 3. Check it: send a mail to `rua+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@rua.inboxangel.io` and look for
-   `[intake] rejected {"reason":"Unknown intake token",…}` in the Worker logs. If nothing arrives, Email Routing is not matching
+   `{"evt":"intake",…,"outcome":"refused","reason":"unknown_token",…}` in the Worker logs (`wrangler tail --format json`). If nothing arrives, Email Routing is not matching
    `+` sub-addresses for you; the rules above are then not enough and this needs revisiting (it cannot be tested from the repo).
 
 ### 3. The records token
@@ -204,16 +218,116 @@ Notes for the customer:
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
 
 1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to workspace + domain. The `TenantContext` is built for that workspace. **There is no default-workspace fallback in `saas`**: `resolveInboundWorkspace` throws.
-2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed. Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read.
-3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain (or under the subdomain's own row when the same workspace has it verified). Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**. Subdomains need no registration of their own.
-4. `check+` at `CANARY_DOMAIN`: see below.
+2. **Caps first, before any parsing**: per address, workspace and instance (below). A message over a cap costs a handful of queries and is refused.
+3. The report is parsed (gzip, zip, plain), limited in size, records and fields (below). Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read. A `<!DOCTYPE` or `<!ENTITY` is refused before the parser runs (a DMARC report has neither); the five standard XML escapes still work.
+4. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain (or under the subdomain's own row when the same workspace has it verified). Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**.
+5. A report already stored (same domain and report id) is accepted and ignored **before any enrichment**: one query, no second report, no records or stored-records counters added.
+6. `check+` at `CANARY_DOMAIN`: see below.
+
+### What the sender is told, and what the owner sees
 
 | Outcome | Behaviour |
 |---------|-----------|
-| unknown/expired token, malformed token, unknown base address or host | `setReject` (permanent 5xx), logged `[intake] rejected {reason, …}` |
-| report for a domain the workspace does not own (spoof) | `setReject`, logged with the workspace |
-| malformed or oversized attachment, no policies in a TLS-RPT | `setReject`, logged |
-| schema not migrated, or hosted env missing | the Worker **throws**: the sender retries later and the report is not lost |
+| bad or unknown recipient, host, token; no attachment; not a report; invalid XML/JSON; too large, too many records, a field too long, absurd dates; a domain the token does not own; a TLS-RPT report sent to the rua address (or the reverse) | `setReject`: a permanent 5xx **in the SMTP session** (no backscatter), with a specific reason |
+| over a daily cap, or the workspace/instance holds its record cap | `setReject` too (a retry the same day cannot succeed and only adds load; real reporters send again tomorrow) **and** a counter row the owner sees: "Report storage limit reached; newer reports are not being stored" |
+| D1 failed while storing a valid report | the Worker **throws** (the delivery fails, the sender may retry; one transaction, so nothing half-written) and the failure is counted for the owner ("N reports received for this domain could not be processed"). After `INTAKE_MAX_STORAGE_RETRIES_PER_DAY` failures for a domain the message is refused for good instead. **Cloudflare does not document what an uncaught throw tells the sender**, so retry is never the only record of a failure |
+| schema not migrated, or hosted env missing | the Worker throws (deployment problem, not the sender's) |
+| a report already stored | accepted, nothing stored again |
+
+A report that could not be processed is never shown as "no reports": the dashboard fields `intake` and `uncounted` (see [API fields](#api-fields-for-the-dashboard)) say so.
+
+### Query budget
+
+D1 allows 1,000 queries per Worker invocation on Workers Paid and 50 on Free; "a `db.batch()` call counts as a single query" and a batch is a transaction (all statements commit or none)
+(<https://developers.cloudflare.com/d1/platform/limits/>, <https://developers.cloudflare.com/d1/worker-api/d1-database/>, read 2026-11-14). A report now costs a **fixed** number of queries however many records it has:
+
+| Step | Queries |
+|------|---------|
+| schema check (cold isolate only), token lookup, caps (one batch), tenant load, domain lookup, duplicate check | ~11 |
+| IP cache read (all IPs, `json_each`, one batch) and write (one batch) | 2 |
+| the report, its records and the counters (one batch) | 1 |
+| first-report notification check (first counted report only) | up to 4 |
+
+Measured with the counting binding in `test/helpers/counting-d1.ts` (`prepare().first/all/run/raw` = 1, `batch()` = 1, refusing past the limit): **16 queries for 1, 5,000 and 20,000 records** (before: 15 for one record, **5,058 for 5,000**: the report was lost or the delivery failed on every retry). The tests assert ≤ 40 for any allowed report and that 5,000 records also fit the Free plan's 50.
+Records travel as JSON text in a bound parameter read by `json_each()`, cut so that every bound value is at most 1,000,000 bytes (D1 allows 2,000,000), every statement is a short fixed text (D1: 100,000 bytes, 100 bound parameters), and a batch holds at most ~32 statements even for the widest possible rows (`test/hosted/store-chunks.test.ts`).
+
+### Proven reports and what counts
+
+A report is **proven** when its email proved the organisation it names, as Cloudflare's inbound processing saw it:
+
+1. `AUTHSERV_ID` and `AUTHSERV_HEADER` are set (otherwise nothing is proven).
+2. The header read is the **topmost** `Authentication-Results` (`AUTHSERV_HEADER=ar`) or the topmost `ARC-Authentication-Results` with `i=1` (`arc`), taken from the raw message (`Headers.get` joins duplicates). The other kind is never consulted. Its authserv-id must equal `AUTHSERV_ID`.
+3. It shows a `dkim=pass` whose `header.d` is aligned (same organisational domain) with the **reporter domain**, or a `dmarc=pass` for it. SPF alone never proves.
+4. The **reporter domain comes from the report, not from the mail**: the domain of `report_metadata/email`, else a domain-shaped `org_name`. If both are present and differ, the report is not proven. A forger who authenticates as her own domain `evil.example` is therefore proven as `evil.example` and can never be `google.com`.
+5. **Shared-mailbox domains** (yahoo.com, outlook.com, hotmail.com, gmail.com, icloud.com, gmx.*, proton.*, amazonses.com… the list is `SHARED_MAILBOX_DOMAINS` in `src/dmarc/reporter-auth.ts`) are different: anyone can get a mailbox there and send DKIM-signed mail as that domain. A pass for them proves the reporter **only if the message's From header is exactly a trusted report-sender address of that organisation**. There is **no built-in address**: no provider documents the From address of its report mail with enough certainty to ship it here (google.com and microsoft.com are not shared-mailbox domains and need none). Add the ones you see on real report mail: `INTAKE_TRUSTED_REPORTER_ADDRESSES="noreply@dmarc.yahoo.com,…"` (exact addresses, case-insensitive; a random mailbox on the same domain is never proven). Until then those reporters are stored and listed under "not counted".
+
+Stored with each report: `reporter_auth` (`pass`, `fail`, `none`), `reporter_auth_domain` (who it was proven as) and `reporter_auth_reason` (`authserv_not_configured`, `no_results_header`, `no_reporter_domain`, `org_mismatch`, `authserv_id_not_found`, `not_aligned`, `shared_mailbox_domain`).
+
+**What counts.** `REPORT_COUNTING=proven` (hosted default): only `reporter_auth = 'pass'` reports feed pass rates, failing senders and fix lists, anomalies, "safe to enforce" and the rollout gate, levels, the weekly digest, the CSV totals, the MCP/health report and every other number computed in `packages/db/src/queries/{reports,analytics}.ts`. Reports stored before this column existed (`NULL`) are not counted in `proven` mode. Unproven reports stay visible in the report browser (labelled "not counted in your numbers") and sort **after** proven ones, so a flood of them cannot push real ones out of "latest N".
+
+**Residual risk.** "Proven" means "the mail really came from the domain it claims", not "the reporter is trustworthy". An attacker who owns any domain with working DKIM can be proven as that domain and file fake "100% pass" reports for a victim whose address (the token) she knows. The token is public in the customer's DMARC record. What limits this: the per-reporter and unproven caps above, the shared-mailbox rule (which removes the free-mailbox route), and the dashboard naming the reporters behind the numbers. What would close it: a per-workspace list of trusted reporter domains (not built). Until you have read a real message (below) and set `AUTHSERV_*`, nothing counts: the first deploy shows zero counted reports and the "N reports from senders we could not verify are not counted" line says why.
+
+### AUTHSERV discovery
+
+You do not need a forwarding rule to find `AUTHSERV_ID`. With `AUTHSERV_ID`/`AUTHSERV_HEADER` unset (or set to something the message does not name), the first routed messages log, without storing anything:
+
+```
+{"evt":"intake_authserv","v":1,"configured":false,"ar":"mx.cloudflare.net","arc":{"i":1,"id":"mx.cloudflare.net"},"hint":"Set AUTHSERV_ID=mx.cloudflare.net and AUTHSERV_HEADER=ar"}
+```
+
+Steps: (1) route `rua@` to the Worker (section 2) and put the address in a DMARC record, or send one mail to `rua+<a real token>@…`; (2) `wrangler tail --format json | jq -c 'select(.logs[]?.message[0] | tostring | test("intake_authserv"))'`; (3) set `AUTHSERV_ID` to `ar` and `AUTHSERV_HEADER=ar` (or to `arc.id` and `arc` when there is no plain header); (4) send a crafted message with your own extra `Authentication-Results` line and check it is not trusted ([email-funnel.md](email-funnel.md)). Only messages that reached a valid token are logged, at most 5 per isolate per hour, and only authserv-ids that are host names (never an address).
+
+### Logs
+
+One JSON line per inbound message, `console.log` for accepted, `console.warn` for refused/deferred:
+
+```
+{"evt":"intake","v":1,"kind":"rua","outcome":"accepted","reason":"ok","proven":true,"reporter":"google.com","size":5321,"records":87,"ms":412,"ws":"ws_a1b2","dom":12}
+```
+
+`kind` rua | tls-rpt | canary | other; `outcome` accepted | duplicate | refused | deferred; `proven` true | false | null; `reporter` is the reporting organisation's domain; `ws`/`dom` are internal ids. There are never report contents, tokens, addresses, sender or customer domains. Reasons: `ok duplicate bad_recipient wrong_host unknown_token raw_too_large cap_address_day cap_unauth_day cap_workspace_day cap_instance_day cap_address_records cap_workspace_storage cap_instance_storage no_attachment wrong_attachment_type archive_invalid decompressed_too_large xml_invalid json_invalid kind_mismatch_tlsrpt_to_rua kind_mismatch_rua_to_tlsrpt too_many_records field_too_long date_range_invalid domain_not_owned storage_failed storage_failed_repeatedly not_configured schema_not_ready internal_error`.
+
+### Hostile input
+
+Refused with a reason, nothing stored: gzip/zip bombs (inflation stops at `INTAKE_MAX_DECOMPRESSED_BYTES`; a zip's declared sizes are not trusted; more than 2 entries), a gzip inside a gzip (the inner stream is not inflated), DOCTYPE/ENTITY, invalid UTF-8, fields over their limits (org_name and report_id 256, domains 253, IP 45, other strings 512), a report whose period ends more than a day in the future, ends before it begins, spans more than 31 days or begins before 2012, a count above 2³¹−1 (clamped), a domain the token does not own. A duplicate report id is accepted once and never counted twice.
+
+### Measured limits
+
+Measured on this repository's code (Node 22, arm64, 2026-11-14) with `scripts/measure-parse.ts`, `scripts/measure-mime.ts` and `test/hosted/measure.test.ts` (commands in each file): the parse of a gzip'd report of N distinct-IP records, no database around it.
+
+| Records | XML | Parse + build statements | Live heap after parse | Peak RSS (whole process) | Smallest `--max-old-space-size` tried that ran (lower not tried) |
+|--------:|----:|------------------------:|----------------------:|-------------------------:|-------------------------------------------:|
+| 200 | 0.1 MB | 31 ms | 2 MB | 62 MB | – |
+| 1,000 | 0.3 MB | 86 ms | 8 MB | 87 MB | – |
+| 5,000 | 1.6 MB | 309 ms (CPU 511 ms incl. GC threads) | 36 MB | 136 MB | 48 MB |
+| 10,000 | 3.2 MB | 546 ms | 65 MB | 176 MB | 96 MB |
+| 20,000 | 6.4 MB | 964 ms | 119 MB | 250 MB | 128 MB |
+
+Reading the attachment of a message of 1 / 4 / 8 / 12 / 18 MB (`extractAttachmentBytes`, base64) peaked at 73 / 119 / 177 / 235 / 351 MB RSS: about 16 times the attachment, because the bytes, the decoded text, the base64 text and the decoded bytes are all alive at once.
+
+What follows: the 25 MiB / 20,000-record documented limit was **not realistic** inside a 128 MB isolate (<https://developers.cloudflare.com/workers/platform/limits/>): 20,000 records leave ~119 MB of live heap after parsing and the raw message would add its own copies. The defaults are therefore 5,000 records, 3 MiB decompressed and 10 MiB raw (self-host: 10,000, 6 MiB, 10 MiB; raise them only after measuring your own reports). A typical report (a few hundred records) costs under 100 ms and under 10 MB. CPU is far below the 30 s default of Workers Paid (the limit is configurable with `limits.cpu_ms`, up to 300,000, and does not need raising for these caps; on the Free plan's 10 ms nothing but the tiniest report parses, so a hosted instance needs Workers Paid). Email Workers count toward the standard Workers CPU and memory limits (<https://developers.cloudflare.com/email-routing/limits/>).
+**How far to trust the numbers:** they are V8 on Node, not workerd; they leave out D1 round trips, the isolate's own overhead and Cloudflare's accounting (CPU is billed per workerd CPU time, memory is the isolate's total). Treat them as relative sizes and an order of magnitude, and watch `wrangler tail` and the Workers metrics for the first real week.
+
+### Caps and what happens over them
+
+Counters live in D1 and are checked **before parsing**. Naming: `INTAKE_MAX_*`; the table of defaults is in [Environment](#1-environment).
+
+| Scope | Cap | Enforced |
+|-------|-----|----------|
+| one address (token) | messages/day; stored records/day; unproven messages/day in total and per claimed sender | before parsing; records after the header is read, before enrichment |
+| one workspace | messages/day; records held | same |
+| the instance | messages/day; records held | same |
+
+Over a cap the mail is **refused for good** (5xx in the SMTP session, so no backscatter), counted for the owner and logged with its reason; a duplicate counts as a message received but adds no stored records. The records held are kept by `workspace_storage` and the instance row in `intake_quota` (the same transaction as the report), reduced by the retention sweep when reports are purged, and recounted by the daily job (5 workspaces per run, least recently counted first, so drift and data stored before the counters existed are repaired). A race between two large reports can overshoot a records cap by at most one report.
+**Retention.** In the existing daily `0 4 * * *` job (statement budget 300, deletes in chunks of 500): `intake_usage` and `intake_quota` rows older than 8 days, `intake_failures` older than 90 days; reports and records keep the 13 months.
+
+### API fields for the dashboard
+
+On `GET /api/domains/:id/stats`, `/check-summary` and `/analytics` (and `sections.dmarc` of the MCP health report): `report_counting`; `unverified` (stored reports whose sender was not proven: `reports`, `messages`, `latest_at`, `by_reporter`); `uncounted` (the part of it left out of the numbers; empty when `report_counting` is `all`); `intake` (`status` `ok`/`limited`/`not_processed`, `limit`, `notice`, `not_processed.{messages,last_at,reasons[]}`). `GET /api/reports` rows carry `counted`; the CSV export has a `counted` column. Exact strings: "N reports from senders we could not verify are not counted." · "1 report from a sender we could not verify is not counted." · "Report storage limit reached; newer reports are not being stored" · "Daily report limit reached for this address; newer reports are not being stored until tomorrow" · "N reports received for this domain could not be processed". Web helpers: `web/src/lib/uncounted.ts`.
+
+### Self-host: what changes
+
+Self-host has one tenant and a private address (`rua@reports.<base>`), no tokens, no daily or per-tenant caps. What applies everywhere: the records cap (default 10,000), the decompressed cap (6 MiB), the raw cap (10 MiB), the fixed query budget, atomic storage, specific refusals, the date/field/DOCTYPE checks, and the structured log line. `REPORT_COUNTING` defaults to `all` (with `AUTHSERV_*` unset nothing can be proven, so `proven` would zero every dashboard); set `REPORT_COUNTING=proven` once `AUTHSERV_*` is configured if you want forged reports left out. `unverified` is reported in both modes.
 
 **Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
@@ -266,6 +380,6 @@ The hosted service stores no raw report XML (`RAW_XML_RETENTION_DAYS=0` is the h
 |-|-|
 | Records per hosted domain | 3 (DMARC, SPF, TLS-RPT), 5 with MTA-STS |
 | Zone limit | 3,500 on Pro, about 700 domains at 5 records each or 1,160 at 3 (counts **every** record in the zone, including the ones that are not hosted); warning logged from 3,200; enabling is refused (`507`) if the records would not fit |
-| Report size | 25 MiB raw and 25 MiB decompressed |
+| Report size | 10 MiB raw, 3 MiB decompressed, 5,000 records (configurable up to Cloudflare's 25 MiB; see [Measured limits](#measured-limits)) |
 | Token rotation grace | 72 h |
 | Canary | 1 hour, one email; 5 per authenticated sender domain, 20 unauthenticated, 500 overall, per hour |

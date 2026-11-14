@@ -17,7 +17,7 @@ Copy for the sequence is in **one file**, `src/funnel/copy.ts` (a draft for revi
 - A header the sender adds, or one naming another server, is ignored.
 - The results must show a DKIM pass aligned with the address's domain, or a DMARC pass for it. SPF alone is not accepted.
 
-**Ops step (Max): set both values from one routed message.** Send one email from a domain with working DKIM to a routed address (a `check+<token>@` address, or any Email Routing address that forwards to your own inbox) and open the delivered message's raw source. Look at the header block's very top and find what the receiving side added:
+**Ops step: set both values from one routed message.** On the hosted service you do not need a forwarding rule: with `AUTHSERV_ID` unset the Worker logs the authserv-ids it sees (`{"evt":"intake_authserv",…}`, never an address) for the first messages routed to a report address; see [hosted.md](hosted.md#authserv-discovery). Otherwise: Send one email from a domain with working DKIM to a routed address (a `check+<token>@` address, or any Email Routing address that forwards to your own inbox) and open the delivered message's raw source. Look at the header block's very top and find what the receiving side added:
 
 - `Authentication-Results: <authserv-id>; dkim=pass …` → set `AUTHSERV_HEADER=ar`;
 - or `ARC-Authentication-Results: i=1; <authserv-id>; …` (and no plain one from the same server) → set `AUTHSERV_HEADER=arc`.
