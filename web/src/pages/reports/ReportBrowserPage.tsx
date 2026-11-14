@@ -92,7 +92,7 @@ export function ReportBrowserPage() {
 									{showDomainColumn ? <TableCell>{r.domain}</TableCell> : null}
 									<TableCell>
 										{r.org_name}
-										<ReporterAuthBadge auth={r.reporter_auth} counted={r.counted} />
+										<ReporterAuthBadge tier={r.reporter_tier} counted={r.counted} />
 									</TableCell>
 									<TableCell className="text-right tabular-nums">{r.pass_count.toLocaleString()}</TableCell>
 									<TableCell className={cn('text-right tabular-nums', r.fail_count > 0 && 'font-semibold text-danger')}>{r.fail_count.toLocaleString()}</TableCell>

@@ -160,6 +160,12 @@ export const aggregateReports = sqliteTable(
 		reporter_auth_domain: text('reporter_auth_domain'),
 		/** Why reporter_auth is not 'pass' (a reason code from src/hosted/reasons.ts), or null. */
 		reporter_auth_reason: text('reporter_auth_reason'),
+		/** What the intake decided: 'counted' (authenticated and a known reporter), 'unknown' (authenticated, not known), 'unauthenticated'. Null: stored before 0011. */
+		reporter_tier: text('reporter_tier'),
+		/** Organisation of the known-reporters entry that matched, for 'counted'. */
+		reporter_known_as: text('reporter_known_as'),
+		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>'. Null: stored before 0011. */
+		reporter_identity: text('reporter_identity'),
 		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0011). Null: stored before 0011. */
 		ingest_token: text('ingest_token'),
 		/** Rows stored in report_records for this report. Null: stored before 0011. */
@@ -173,7 +179,7 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_date_end').on(t.date_end),
 		index('idx_agg_reports_created').on(t.created_at),
 		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
-		index('idx_agg_reports_auth').on(t.workspace_id, t.reporter_auth, t.date_begin),
+		index('idx_agg_reports_tier').on(t.workspace_id, t.reporter_tier, t.date_begin),
 	],
 );
 
@@ -719,6 +725,7 @@ export const GLOBAL_TABLES = {
 	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
 	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
 	intake_quota: 'instance-wide intake counters per scope and day; a counter, no tenant content',
+	reporter_candidate_days: 'instance-wide candidates for the reporter registry (authenticated, not in the registry): domain, From, workspace count, days seen; for the instance owner',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */
@@ -791,7 +798,7 @@ export const intakeUsage = sqliteTable(
 );
 
 /**
- * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'u:<domain_id>' (all unproven mail to one address),
+ * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'k:<domain_id>' (all mail from unknown reporters to one address),
  * 'w:<workspace_id>' and '*' (the instance). A counter, not tenant content (GLOBAL_TABLES).
  */
 export const intakeQuota = sqliteTable(
@@ -804,6 +811,21 @@ export const intakeQuota = sqliteTable(
 		bytes: integer('bytes').notNull().default(0),
 	},
 	(t) => [primaryKey({ columns: [t.scope, t.day] }), index('idx_intake_quota_day').on(t.day)],
+);
+
+/** Authenticated senders that are not in the registry, per day and workspace: candidates the instance owner may add by hand (no content, no customer address). */
+export const reporterCandidateDays = sqliteTable(
+	'reporter_candidate_days',
+	{
+		dkim_org: text('dkim_org').notNull(),
+		from_address: text('from_address').notNull(),
+		report_email: text('report_email').notNull(),
+		workspace_id: text('workspace_id').notNull(),
+		day: text('day').notNull(),
+		reports: integer('reports').notNull().default(0),
+		org_name: text('org_name'),
+	},
+	(t) => [primaryKey({ columns: [t.dkim_org, t.from_address, t.report_email, t.workspace_id, t.day] }), index('idx_reporter_candidate_days_day').on(t.day)],
 );
 
 /** report_records rows a workspace holds right now: what the storage cap compares against. */

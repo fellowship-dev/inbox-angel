@@ -26,7 +26,7 @@ export async function handleEmail(
     const kind: IntakeKind = localPart;
     const started = Date.now();
     const line = (outcome: ReportResult['outcome'], reason: ReasonCode, r: Partial<ReportResult> = {}) =>
-      logIntake({ kind, outcome, reason, proven: r.proven ?? null, reporter: r.reporter ?? null, size: message.rawSize ?? 0, records: r.records ?? null, ms: Date.now() - started, ws: tenant.workspaceId, dom: null });
+      logIntake({ kind, outcome, reason, tier: r.tier ?? null, reporter: r.reporter ?? null, dkim_org: r.dkimOrg ?? null, from_org: r.fromOrg ?? null, email_matched: r.emailMatched ?? null, dedup: r.dedup ?? null, size: message.rawSize ?? 0, records: r.records ?? null, ms: Date.now() - started, ws: tenant.workspaceId });
     let r: ReportResult;
     try {
       r = kind === 'rua' ? await handleDmarcReport(message, tenant) : await handleTlsRptReport(message, tenant);

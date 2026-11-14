@@ -13,7 +13,7 @@ import type { TenantContext } from '../tenancy/context';
 import { buildFixes, fixScore, type Fix } from '../analytics/fixes';
 import { assessReadiness, type PolicyState, type Readiness } from '../analytics/readiness';
 import { buildSenders, pct, type AlignModes } from '../analytics/senders';
-import { reportVisibility } from './visibility';
+import { reportVisibility, reporterMix } from './visibility';
 
 const ADVICE_DAYS = 30;
 const MAX_SENDERS = 200;
@@ -89,6 +89,7 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     const readiness = assessReadiness({
       state, messages: advice.messages, passed: advice.passed, daysWithReports: advice.days_with_reports, windowDays: ADVICE_DAYS,
       fixes, newSenders: adviceSenders.filter((s) => s.is_new).length, inherits: domain.parent_id !== null,
+      majorReporter: tenant.scope.counting === 'registry' ? visibility.reporters.major : undefined,
     });
 
     return {
@@ -98,12 +99,13 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     };
   }
 
-  const [allRows, allTrend, earliest, totals, unverified] = await Promise.all([
+  const [allRows, allTrend, earliest, totals, unrecognised, uncounted] = await Promise.all([
     q.senderRows(null, since, adviceSince, now),
     q.trend(null, Math.min(since, adviceSince), now),
     q.earliestReport(null, now),
     q.domainTotals(adviceSince, now),
-    tenant.scope.reports.unverified(null, since),
+    tenant.scope.reports.unrecognised(null, since),
+    tenant.scope.reports.uncounted(null, since),
   ]);
   const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest });
   const adviceRows = inWindow(allRows, 'advice_messages');
@@ -124,7 +126,7 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
 
   return {
     days, totals: sum(trend), trend,
-    report_counting: tenant.scope.counting, unverified, uncounted: tenant.scope.counting === 'proven' ? unverified : { reports: 0, messages: 0, latest_at: null, by_reporter: [] },
+    report_counting: tenant.scope.counting, unrecognised, uncounted, reporters: reporterMix(await tenant.scope.reports.counted(null, since)),
     alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },
     senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes,
     domains: perDomain.map(({ d, readiness }) => ({

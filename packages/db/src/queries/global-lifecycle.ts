@@ -86,7 +86,11 @@ export function lifecycleQueries(dbLike: DbLike) {
 		 * Aggregate reports past their window, and their records. Records go first, a bounded number per statement by rowid
 		 * (one report can hold hundreds of thousands); the reports follow once theirs are gone. Returns reports deleted.
 		 */
-		purgeAggregateReports: async (cutoff: number, limits: SweepLimits): Promise<SweepResult> => {
+		purgeAggregateReports: async (cutoff: number, limits: SweepLimits, unauthenticatedCutoff?: number): Promise<SweepResult> => {
+			// Past the report window, or (when given) an unauthenticated-tier report older than its own, shorter, retention.
+			const old = unauthenticatedCutoff === undefined
+				? sql`(date_end < ${cutoff} OR created_at < ${cutoff})`
+				: sql`(date_end < ${cutoff} OR created_at < ${cutoff} OR (reporter_tier = 'unauthenticated' AND created_at < ${unauthenticatedCutoff}))`;
 			// One statement of the budget is held back for keeping workspace_storage in step with what was deleted (one batch per run).
 			if (limits.budget.left < 2) return { deleted: 0, truncated: true };
 			spend(limits);
@@ -95,12 +99,12 @@ export function lifecycleQueries(dbLike: DbLike) {
 			const result = await loop(limits, async () => {
 				spend(limits);
 				const recs = await db.all<{ workspace_id: string }>(sql`DELETE FROM report_records WHERE rowid IN (
-					SELECT rowid FROM report_records WHERE report_id IN (SELECT id FROM aggregate_reports WHERE date_end < ${cutoff} OR created_at < ${cutoff}) LIMIT ${limits.recordBatch}) RETURNING workspace_id`);
+					SELECT rowid FROM report_records WHERE report_id IN (SELECT id FROM aggregate_reports WHERE ${old}) LIMIT ${limits.recordBatch}) RETURNING workspace_id`);
 				for (const r of recs) recordWorkspaces.push(r.workspace_id);
 				if (recs.length >= limits.recordBatch) return { n: 0, more: true };
 				if (limits.budget.left <= 0) return { n: 0, more: true };
 				spend(limits);
-				const reps = await db.all<{ workspace_id: string }>(sql`DELETE FROM aggregate_reports WHERE id IN (SELECT id FROM aggregate_reports WHERE date_end < ${cutoff} OR created_at < ${cutoff} ORDER BY id LIMIT ${limits.batch}) RETURNING workspace_id`);
+				const reps = await db.all<{ workspace_id: string }>(sql`DELETE FROM aggregate_reports WHERE id IN (SELECT id FROM aggregate_reports WHERE ${old} ORDER BY id LIMIT ${limits.batch}) RETURNING workspace_id`);
 				for (const r of reps) reportWorkspaces.push(r.workspace_id);
 				return { n: reps.length, more: reps.length >= limits.batch };
 			});
@@ -118,6 +122,10 @@ export function lifecycleQueries(dbLike: DbLike) {
 			const b = await simple(limits, () => db.run(sql`DELETE FROM intake_quota WHERE rowid IN (SELECT rowid FROM intake_quota WHERE day < ${cutoffDay} AND day <> ${STORED_ROW.day} LIMIT ${limits.batch})`));
 			return { deleted: a.deleted + b.deleted, truncated: a.truncated || b.truncated };
 		},
+		/** Registry-candidate rows older than `cutoffDay`. */
+		purgeReporterCandidates: (cutoffDay: string, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM reporter_candidate_days WHERE rowid IN (SELECT rowid FROM reporter_candidate_days WHERE day < ${cutoffDay} LIMIT ${limits.batch})`)),
+
 		purgeIntakeFailures: (cutoffDay: string, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM intake_failures WHERE rowid IN (SELECT rowid FROM intake_failures WHERE day < ${cutoffDay} LIMIT ${limits.batch})`)),
 

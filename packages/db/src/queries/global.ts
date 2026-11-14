@@ -180,6 +180,34 @@ export function globalQueries(dbLike: DbLike) {
 			purgeExpired: (nowSeconds: number) => db.delete(canaryTokens).where(lt(canaryTokens.expires_at, nowSeconds - 86400)).run(),
 		},
 
+		/**
+		 * Authenticated senders that are not in the registry, for the instance owner (candidates to add by hand; never promoted automatically).
+		 * One row per (DKIM organisation, From, report email, workspace, day): no report content, no customer address.
+		 */
+		reporterCandidates: {
+			note: (c: { dkimOrg: string; from: string; reportEmail: string; orgName: string | null; workspaceId: string; day: string }) =>
+				db.run(sql`INSERT INTO reporter_candidate_days (dkim_org, from_address, report_email, workspace_id, day, reports, org_name)
+					VALUES (${c.dkimOrg}, ${c.from}, ${c.reportEmail}, ${c.workspaceId}, ${c.day}, 1, ${c.orgName})
+					ON CONFLICT(dkim_org, from_address, report_email, workspace_id, day) DO UPDATE SET reports = reports + 1, org_name = excluded.org_name`),
+			list: (limit = 200) =>
+				db.all<{ dkim_org: string; from_address: string; report_email: string; org_name: string | null; reports: number; workspaces: number; days_seen: number; first_seen: string; last_seen: string }>(sql`
+					SELECT dkim_org, from_address, report_email, MAX(org_name) AS org_name, SUM(reports) AS reports, COUNT(DISTINCT workspace_id) AS workspaces,
+					       COUNT(DISTINCT day) AS days_seen, MIN(day) AS first_seen, MAX(day) AS last_seen
+					FROM reporter_candidate_days GROUP BY dkim_org, from_address, report_email ORDER BY workspaces DESC, days_seen DESC, last_seen DESC LIMIT ${limit}`),
+			purge: (cutoffDay: string) => db.run(sql`DELETE FROM reporter_candidate_days WHERE day < ${cutoffDay}`),
+		},
+
+		/**
+		 * What inbound report mail carried, instance-wide, per day: a counter per kind in intake_quota (scope 'auth:<kind>'), no address.
+		 * Kinds: present (an authentication header of the trusted kind), absent (none), foreign (a header, another authserv-id), ok (authenticated).
+		 */
+		authObservations: {
+			note: (kind: 'present' | 'absent' | 'foreign' | 'ok' | 'unconfigured', day: string) =>
+				db.run(sql`INSERT INTO intake_quota (scope, day, messages) VALUES (${'auth:' + kind}, ${day}, 1) ON CONFLICT(scope, day) DO UPDATE SET messages = messages + 1`),
+			since: (sinceDay: string) =>
+				db.all<{ scope: string; messages: number }>(sql`SELECT scope, SUM(messages) AS messages FROM intake_quota WHERE scope LIKE 'auth:%' AND day >= ${sinceDay} GROUP BY scope`),
+		},
+
 		ipInfo: {
 			/** Cached rows for many IPs in ONE D1 query (chunks of json_each, in one batch), whatever their age. */
 			getMany: async (ips: readonly string[]): Promise<Map<string, IpInfoRow>> => {

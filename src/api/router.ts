@@ -84,7 +84,8 @@ import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
-import { reportVisibility } from '../reports/visibility';
+import { reportVisibility, reporterMix } from '../reports/visibility';
+import { handleUnknownReporterRoutes } from '../reports/unknown-reporters';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
@@ -653,6 +654,8 @@ async function _handleApi(
 
   const leadResponse = await handleLeadRoutes(request, env, instanceOwner);
   if (leadResponse) return leadResponse;
+  const reporterResponse = await handleUnknownReporterRoutes(request, env, instanceOwner);
+  if (reporterResponse) return reporterResponse;
 
   try {
     // POST /api/settings/base-domain — wizard step 0: set the base domain
@@ -1402,8 +1405,12 @@ async function _handleApi(
       const nextStep = plan?.step ?? null;
 
       // Safety: block if pass rate is below threshold
-      const blocked = passRate !== null && passRate < PASS_RATE_THRESHOLD;
-      const blockReason = blocked
+      // Advice rests on counted data from a major reporter (Google or Microsoft), never on uncounted data alone.
+      const noMajorReporter = tenant.scope.counting === 'registry' && passRate !== null && !reporterMix(await tenant.scope.reports.counted(id, since30d)).major;
+      const blocked = (passRate !== null && passRate < PASS_RATE_THRESHOLD) || noMajorReporter;
+      const blockReason = noMajorReporter
+        ? 'No counted report from Google or Microsoft yet — advice needs at least one'
+        : blocked
         ? `Pass rate is ${passRate}% — must be ≥${PASS_RATE_THRESHOLD}% to advance`
         : null;
 

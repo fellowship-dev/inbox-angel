@@ -12,7 +12,11 @@ export const REASONS = {
   unknown_token: 'Unknown intake token',
   raw_too_large: 'Report is larger than the allowed size',
   cap_address_day: 'Daily intake limit for this address reached; try again tomorrow',
-  cap_unauth_day: 'Daily intake limit for this address reached; try again tomorrow',
+  cap_unknown_day: 'Daily intake limit for reports from senders this service does not know reached; try again tomorrow',
+  cap_unknown_reporter_day: 'Daily intake limit for this sender reached; try again tomorrow',
+  cap_unauth_day: 'Daily intake limit for this sender reached; try again tomorrow',
+  cap_unauth_total_day: 'Daily intake limit for this address reached; try again tomorrow',
+  over_cap_accepted_dropped: 'Accepted, not stored: over a daily limit',
   cap_workspace_day: 'Daily intake limit for this account reached; try again tomorrow',
   cap_instance_day: 'The service is receiving more reports than it can take today; try again tomorrow',
   cap_address_records: 'Daily report-record limit for this address reached; try again tomorrow',
@@ -30,6 +34,11 @@ export const REASONS = {
   field_too_long: 'Report contains a field longer than this service accepts',
   date_range_invalid: 'Report date range is not valid',
   domain_not_owned: 'Report is for a domain this address does not belong to',
+  authserv_unconfigured: 'This service cannot authenticate senders yet; try again later',
+  no_authentication_results: 'The message carries no authentication results from the receiving server',
+  authserv_id_not_found: 'The message carries no authentication results from the receiving server',
+  from_invalid: 'The message must have exactly one From address',
+  not_authenticated: 'The sender could not be authenticated for the domain in its From address',
   storage_failed: 'Temporary storage failure; try again later',
   storage_failed_repeatedly: 'Report could not be stored after repeated attempts',
   not_configured: 'Hosted intake is not configured',
@@ -52,6 +61,6 @@ export class IntakeRefusal extends Error {
 
 /** The reasons that mean "mail we could have stored but did not", shown to the owner as reports that were not processed. */
 export const OWNER_VISIBLE: ReadonlySet<ReasonCode> = new Set<ReasonCode>([
-  'cap_address_day', 'cap_unauth_day', 'cap_workspace_day', 'cap_instance_day', 'cap_address_records', 'cap_workspace_storage', 'cap_instance_storage',
-  'storage_failed', 'storage_failed_repeatedly', 'too_many_records', 'decompressed_too_large', 'raw_too_large',
+  'cap_address_day', 'cap_workspace_day', 'cap_instance_day', 'cap_address_records', 'cap_workspace_storage', 'cap_instance_storage',
+  'storage_failed', 'storage_failed_repeatedly', 'over_cap_accepted_dropped', 'too_many_records', 'decompressed_too_large', 'raw_too_large',
 ]);

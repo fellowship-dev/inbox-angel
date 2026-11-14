@@ -1,0 +1,35 @@
+Content-Transfer-Encoding: binary
+Content-Type: multipart/mixed; boundary="_----------=_16907098358682758"
+Date: Sun, 30 Jul 2023 02:37:15 -0700
+From: noreply@dmarc.yahoo.com
+To: postmaster@freitagsrunde.org
+Subject: Report Domain: freitagsrunde.org Submitter: yahoo.com Report-ID: <1690678801.946649>
+Message-Id: <1690709835.521515@dmarc.yahoo.com>
+
+This is a multi-part message in MIME format.
+
+--_----------=_16907098358682758
+Content-Disposition: inline
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+
+This is an aggregate DMARC report from Yahoo. Your domain freitagsrunde.org has a DMARC record set up. You are receiving this report because your email address is included in the 'rua' tag of that domain.  If you no longer wish to receive these reports, or if you would like them to be sent to a different location, kindly update or remove this record or collaborate with your hosting provider.
+
+Please note that this email address is not monitored, and you will not receive a response if you reply to this email. For any feedback or questions, please reach out to dmarchelp@yahooinc.com.
+--_----------=_16907098358682758
+Content-Disposition: attachment; filename="yahoo.com!freitagsrunde.org!1690588800!1690675199.xml.gz"
+Content-Transfer-Encoding: base64
+Content-Type: application/gzip; name="yahoo.com!freitagsrunde.org!1690588800!1690675199.xml.gz"
+
+H4sIAEsvxmQAA41UwXLbIBA9N1/hyT1CShzVmqGkv5GTBqOVxUQCCihN/r4rg0C2005Pgrdvd98+
+dkRfPqZx9w7WSa1+3FdFef/Cvt3RHqA7cvGG592OWjDa+nYCzzvu+RlEWNtTq/gE7JUPWlOS7jEO
+E5cj6yZuxQCj+fm50KQShdATJSEaqbGD7FhVN2X9/XAoq6LZ1/W+oSQHIxtFQGu5Oq2tEDvCSapz
+9vMBs0tKApIIoNbiz1WDVZd7rEeuCqaWFxNTo0cpPlszH0fpBshyNI6iWG9Ben5ydlYdFGgG1g2R
+yOPdm5yYpSQcVtSZ/gwu34gZ9mvmqMdLBZSYBAvPKpxs+QadX0pCN4W2SZ7Vv7MLTs9WQCsNq57K
+oto3xeO+Lh6rAyU5lNhCz8qzpqYknFIg9oV3Ps7oXZciix3SGe2kx41iSi8DbJEtcXHBcOeQkQ0J
+MtGLEMmubOa97osPloaksgM0rpe41DlzAN6BbXurJ4ZWeVd88Vxb0lr4thrlsx9aC24e/abD9Qj/
+uRVhXBhBeG0v2Q/W8YcKLVijm4zQPnoUL9mmCy10a2EW9lcXbuX9u9lmb8mNNQs/LiMl+a/yB1E/
+Zzp4BAAA
+
+--_----------=_16907098358682758--
+

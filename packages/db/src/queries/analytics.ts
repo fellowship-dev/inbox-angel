@@ -41,7 +41,7 @@ export interface TrendRow {
  * Read-only aggregates behind the analytics pages. Every statement is bound to the workspace, and `domainId`
  * (when given) is checked against the workspace's own domains by the join, so a foreign id yields no rows.
  */
-export function analyticsQueries(db: Db, workspaceId: string, counting: CountingMode = 'proven') {
+export function analyticsQueries(db: Db, workspaceId: string, counting: CountingMode = 'registry') {
 	const A = sql`${workspaceId}`;
 	const C = (alias: string) => counted(alias, counting);
 	const scope = (domainId: number | null) => (domainId === null ? sql`` : sql`AND ar.domain_id = ${domainId}`);

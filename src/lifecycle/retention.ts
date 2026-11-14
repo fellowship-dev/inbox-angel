@@ -29,7 +29,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
 
   const report: RetentionReport = {};
   const sweeps: Array<[string, () => Promise<SweepResult>]> = [
-    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits)],
+    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits, ago(p.unauthenticatedReportsDays))],
     ['tls_reports', () => q.purgeTlsReports(ago(p.tlsDays), limits)],
     // 0 days: raw XML is never stored, so clear anything still there
     ['raw_xml_cleared', () => q.clearRawXml(ago(p.rawDays), limits)],
@@ -47,6 +47,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
     ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
     ['intake_failures', () => q.purgeIntakeFailures(dayOf(ago(p.intakeFailureDays)), limits)],
+    ['reporter_candidates', () => q.purgeReporterCandidates(dayOf(ago(p.intakeFailureDays)), limits)],
     // Last: recount a few workspaces' stored records (repairs drift, counts data stored before the counters existed).
     ['storage_reconciled', () => q.reconcileStorage(limits)],
   ];

@@ -7,10 +7,12 @@ import type { TenantContext } from '../tenancy/context';
 import type { RecordTuple } from '@inbox-angel/db';
 import { rawXmlRetentionDays } from '../lifecycle/config';
 import { sendFirstReportNotification } from '../notifications/first-report';
-import type { ReporterAuthResult } from './reporter-auth';
+import type { ReporterInfo } from './reporter-auth';
+export type { ReporterInfo };
 
 export interface StoreReportResult {
   stored: boolean;       // false = duplicate, nothing written
+  superseded?: number;   // uncounted reports with this id replaced by this counted one
   reportId?: number;     // D1 auto-increment id of the aggregate_reports row
   statements?: number;   // statements in the storing batch (for the log)
 }
@@ -70,7 +72,7 @@ export function toTuple(rec: ParserRecord): RecordTuple {
  * @param report      Parsed AggregateReport from parseDmarcEmail()
  * @param rawXml      Original XML string to store for reprocessing (nullable)
  * @param notifyFirstReport  send the first-report notification email when this is the domain's first counted report
- * @param reporterAuth what the receiver proved about the sender (src/dmarc/reporter-auth.ts)
+ * @param reporter what the intake decided about the sender: tier, authenticated domain, known organisation
  * @throws when D1 fails: nothing of the report is stored then (the caller decides what the sender is told)
  */
 export async function storeReport(
@@ -79,7 +81,7 @@ export async function storeReport(
   report: AggregateReport,
   rawXml: string | null = null,
   notifyFirstReport = false,
-  reporterAuth?: Pick<ReporterAuthResult, 'result' | 'domain'> & { reason?: string | null },
+  reporter?: ReporterInfo,
 ): Promise<StoreReportResult> {
   const { total, pass, fail } = computeCounts(report.records);
   const meta = report.report_metadata;
@@ -89,7 +91,8 @@ export async function storeReport(
     domainId,
     report: {
       org_name: meta.org_name,
-      report_id: meta.report_id,
+      // A counted report keeps the report's own id; an uncounted one is stored as '<identity>|<id>' (so it can neither squat nor displace a counted one).
+      report_id: reporter?.tier === 'counted' ? meta.report_id : `${reporter?.identity ?? '~unauth'}|${meta.report_id}`,
       date_begin: isoToUnix(meta.begin_date),
       date_end: isoToUnix(meta.end_date),
       total_count: total,
@@ -97,11 +100,15 @@ export async function storeReport(
       fail_count: fail,
       // RAW_XML_RETENTION_DAYS=0 (the hosted default): the parsed rows are kept, the original XML is not
       raw_xml: rawXmlRetentionDays(tenant.env) > 0 ? rawXml : null,
-      reporter_auth: reporterAuth?.result ?? null,
-      reporter_auth_domain: reporterAuth?.domain ?? null,
-      reporter_auth_reason: reporterAuth?.reason ?? null,
+      reporter_auth: reporter?.auth ?? null,
+      reporter_auth_domain: reporter?.domain ?? null,
+      reporter_auth_reason: reporter?.reason ?? null,
+      reporter_tier: reporter?.tier ?? null,
+      reporter_known_as: reporter?.knownAs ?? null,
+      reporter_identity: reporter?.identity ?? null,
     },
     records: report.records.map(toTuple),
+    supersedeXmlId: reporter?.tier === 'counted' ? meta.report_id : undefined,
     ingestToken: crypto.randomUUID(),
     day: new Date().toISOString().slice(0, 10),
   });
@@ -126,5 +133,5 @@ export async function storeReport(
     }
   }
 
-  return { stored: true, reportId: res.reportId, statements: res.statements };
+  return { stored: true, reportId: res.reportId, statements: res.statements, superseded: res.superseded };
 }

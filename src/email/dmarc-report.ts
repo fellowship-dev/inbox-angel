@@ -21,8 +21,12 @@ import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { intakeLimits } from '../hosted/config';
 import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
-import { reporterAuth } from '../dmarc/reporter-auth';
+import { carrierFromHeaders, decideTier, reporterInfo, type Carrier, type ReporterTier, type TierDecision } from '../dmarc/reporter-auth';
+import type { ReporterInfo } from '../dmarc/store-report';
+import { globalQueries } from '@inbox-angel/db';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
+import { logReporterCandidate } from '../hosted/intake-log';
+import { rawXmlRetentionDays } from '../lifecycle/config';
 import { rawTooLarge, REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
 
 export interface ReportOptions {
@@ -47,6 +51,15 @@ export interface ReportOptions {
   admit?: (recordCount: number) => ReasonCode | null;
   /** The clock, unix seconds (tests). */
   now?: number;
+  /** The carrier, when the caller has already classified it (hosted intake does, to pick caps and the decompression limit). Absent: decided here. */
+  carrier?: Carrier;
+  /**
+   * A registry reporter over a cap is ACCEPTED, not stored, counted for the owner (reason over_cap_accepted_dropped), and never answered with a 5xx:
+   * whether Google or Microsoft stop sending after a 5xx could not be verified. Set for carriers of class 'registry'.
+   */
+  dropOverCap?: boolean;
+  /** Caps on the report's tier, after the tier is known (records stored, unauthenticated records): return a reason to refuse. */
+  admitTier?: (tier: ReporterTier) => ReasonCode | null;
 }
 
 export interface ReportResult {
@@ -55,10 +68,19 @@ export interface ReportResult {
   reason: ReasonCode;
   /** Records in the report (null: it was not parsed far enough to know). */
   records: number | null;
-  /** The reporting organisation's domain as the report names it, null when unknown. */
+  /** The AUTHENTICATED sending domain (never the report's own claim), null when the sender was not authenticated. */
   reporter: string | null;
-  /** Did the receiver prove the reporter (null: not judged). */
-  proven: boolean | null;
+  /** What the intake decided about the sender (null: not decided, refused before). */
+  tier: ReporterTier | null;
+  /** The reporter identity: registry id, else the authenticated organisation, else '~unauth'. */
+  identity?: string | null;
+  /** The passing DKIM organisation and the From organisation of the carrier (reporter data). */
+  dkimOrg?: string | null;
+  fromOrg?: string | null;
+  /** Did report_metadata/email match the registry entry (null: no entry matched the carrier). */
+  emailMatched?: boolean | null;
+  /** What happened to the report id: new, duplicate, or superseded an uncounted report. */
+  dedup?: 'new' | 'duplicate' | 'superseded' | null;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -69,7 +91,7 @@ export async function handleDmarcReport(
   opts: ReportOptions = {},
 ): Promise<ReportResult> {
   const result = (outcome: Outcome, reason: ReasonCode, extra: Partial<ReportResult> = {}): ReportResult =>
-    ({ failure_count: 0, outcome, reason, records: null, reporter: null, proven: null, ...extra });
+    ({ failure_count: 0, outcome, reason, records: null, reporter: null, tier: null, ...extra });
   const refuse = (reason: ReasonCode, text: string = REASONS[reason], extra: Partial<ReportResult> = {}): ReportResult => {
     message.setReject(text);
     return result('refused', reason, extra);
@@ -97,11 +119,18 @@ export async function handleDmarcReport(
     return refuse('archive_invalid', 'Unexpected error reading email');
   }
 
+  // 1b. Who sent it? The carrier (authenticated? which registry entries match?) is classified from the message alone; the tier is decided
+  //     once the report's metadata is known. org_name/Submitter/subject never decide anything.
+  const carrier = opts.carrier ?? carrierFromHeaders(authHeaders, tenant.env);
+  const maxBytes = opts.maxBytes ?? (carrier.class === 'registry' ? limits.maxDecompressedBytes : Math.min(limits.nonRegistryDecompressedBytes, limits.maxDecompressedBytes));
+  const dec: { v: TierDecision | null } = { v: null };
+  const trace = (extra: Partial<ReportResult> = {}): Partial<ReportResult> => ({ tier: dec.v?.tier ?? null, identity: dec.v?.identity ?? null, reporter: dec.v?.identity ?? null, dkimOrg: carrier.dkimOrg, fromOrg: carrier.fromOrg, emailMatched: dec.v?.emailMatched ?? null, ...extra });
+
   // 2. Parse the DMARC XML. The gate runs once the header is known (before any per-record work): it finds the domain, skips a
   //    duplicate and applies the stored-records caps.
   const found: { domain: { id: number; domain: string } | null } = { domain: null };
   let policyDomain = '';
-  const gate = async (info: { report_id: string; policy_domain: string; record_count: number }) => {
+  const gate = async (info: { report_id: string; policy_domain: string; report_email: string | null; record_count: number }) => {
     policyDomain = info.policy_domain;
     if (opts.token) {
       // Hosted: the token's domain or a subdomain of it. Filed under the token's domain, unless the subdomain is itself
@@ -118,24 +147,33 @@ export async function handleDmarcReport(
     // SMTP response: it is attacker-chosen (up to 253 characters), may be copied into bounce mail by an intermediate server, and the hosted
     // answer must not hint at what a domain is registered as. Same text for an unregistered domain and one another workspace owns.
     if (!domain) throw new ParseStop('refused', 'domain_not_owned', opts.token ? REASONS.domain_not_owned : `Unknown domain ${info.policy_domain} — not a registered InboxAngel inbox`);
-    if (await tenant.scope.reports.findReportId(domain.id, info.report_id)) throw new ParseStop('duplicate', 'duplicate');
-    const over = opts.admit?.(info.record_count) ?? null;
+    const decision = decideTier(carrier, { email: info.report_email });
+    dec.v = decision;
+    // Dedup AFTER the sender is classified, keyed on (domain, reporter identity, report id): a forger cannot squat a real reporter's id, and
+    // an uncounted report never displaces a counted one.
+    if (await tenant.scope.reports.isDuplicate(domain.id, decision.identity, info.report_id, decision.tier === 'counted')) throw new ParseStop('duplicate', 'duplicate');
+    const tierCap = decision.tier === 'unauthenticated' ? limits.unauthRecordsPerReport : decision.tier === 'unknown' ? limits.unknownRecordsPerReport : limits.recordsPerReport;
+    if (info.record_count > tierCap) throw new ParseStop('refused', 'too_many_records', `Report has ${info.record_count} records; the limit is ${tierCap}`);
+    const over = opts.admitTier?.(decision.tier) ?? opts.admit?.(info.record_count) ?? null;
     if (over) throw new ParseStop('refused', over);
+    // IP enrichment: a registry reporter gets the normal budget, an authenticated unknown a small one, an unauthenticated report none.
+    return decision.tier === 'unauthenticated' ? { enrich: false } : { enrich: true, maxNewIps: decision.tier === 'unknown' ? Math.min(limits.newIpsPerReport, limits.unknownNewIpsPerReport) : limits.newIpsPerReport };
   };
 
   let report;
   let rawXml: string | null = null;
   try {
     report = await parseDmarcEmail(bytes, false, tenant.db, {
-      maxBytes: opts.maxBytes ?? limits.maxDecompressedBytes,
+      maxBytes,
       maxRecords: opts.maxRecords ?? limits.recordsPerReport,
       maxNewIps: opts.maxNewIps ?? limits.newIpsPerReport,
       ...(opts.now !== undefined && { now: opts.now }),
       gate,
     });
 
-    // Best-effort: store raw XML for plain XML attachments (gz/zip → null)
+    // Best-effort: store raw XML for plain XML attachments (gz/zip → null), only where raw XML is kept at all (hosted keeps none)
     try {
+      if (rawXmlRetentionDays(tenant.env) <= 0) throw new Error('not kept');
       const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
       if (decoded.trimStart().startsWith('<?xml') || decoded.trimStart().startsWith('<feed')) {
         rawXml = decoded;
@@ -145,33 +183,43 @@ export async function handleDmarcReport(
     }
   } catch (err) {
     if (err instanceof ParseStop) {
-      if (err.outcome === 'duplicate') {
-        return result('duplicate', 'duplicate');
+      if (err.outcome === 'duplicate') return result('duplicate', 'duplicate', trace({ dedup: 'duplicate' }));
+      // A registry reporter over a cap: accepted, not stored, counted for the owner, never a 5xx (see ReportOptions.dropOverCap).
+      if ((opts.dropOverCap || carrier.class === 'registry') && dec.v?.tier === 'counted' && err.code.startsWith('cap_') && found.domain) {
+        await tenant.scope.intake.markFailure(found.domain.id, today(), 'over_cap_accepted_dropped', Math.floor(Date.now() / 1000)).catch(() => 0);
+        return result('accepted', 'over_cap_accepted_dropped', trace());
       }
-      return refuse(err.code as ReasonCode, err.message === err.code ? REASONS[err.code as ReasonCode] : err.message);
+      return refuse(err.code as ReasonCode, err.message === err.code ? REASONS[err.code as ReasonCode] : err.message, trace());
     }
     if (err instanceof ParseEmailError) {
       const code = (err.code && err.code in REASONS ? err.code : 'xml_invalid') as ReasonCode;
       const detail = code === 'xml_invalid' || code === 'archive_invalid' || code === 'wrong_attachment_type' || code === 'too_many_records' || code === 'field_too_long' || code === 'date_range_invalid'
         ? `Invalid DMARC report: ${err.message}` : REASONS[code];
-      return refuse(code, code === 'kind_mismatch_tlsrpt_to_rua' || code === 'decompressed_too_large' ? REASONS[code] : detail);
+      return refuse(code, code === 'kind_mismatch_tlsrpt_to_rua' || code === 'decompressed_too_large' ? REASONS[code] : detail, trace());
     }
-    return refuse('xml_invalid', 'Unexpected error parsing DMARC report');
+    return refuse('xml_invalid', 'Unexpected error parsing DMARC report', trace());
   }
 
   const domain = found.domain!;
+  const tierDecision = dec.v!;
+  const reporter: ReporterInfo = reporterInfo(carrier, tierDecision);
 
-  // 3. Judge the sender against the report's own claim (hosted and self-host alike; nothing is proven without AUTHSERV_*)
-  const auth = reporterAuth(authHeaders, report.report_metadata, tenant.env);
+  // Authenticated, self-consistent, not in the registry: a CANDIDATE for the registry. Listed for the instance owner and logged on every message.
+  if (tierDecision.tier === 'unknown' && carrier.authenticated && carrier.from && carrier.dkimOrg) {
+    const day = today();
+    logReporterCandidate({ dkim_org: carrier.dkimOrg, from: carrier.from.slice(carrier.from.lastIndexOf('@') + 1), org_name: report.report_metadata.org_name.slice(0, 120), report_email: (report.report_metadata.org_email ?? '').slice(0, 120), reason: tierDecision.reason });
+    await globalQueries(tenant.db).reporterCandidates.note({ dkimOrg: carrier.dkimOrg, from: carrier.from, reportEmail: (report.report_metadata.org_email ?? '').toLowerCase().slice(0, 200), orgName: report.report_metadata.org_name.slice(0, 120), workspaceId: tenant.workspaceId, day }).catch(() => undefined);
+  }
+
   const failureCount = report.records.reduce((sum, r) => sum + (r.count ?? 0) * (r.policy_evaluated?.dkim === 'fail' || r.policy_evaluated?.spf === 'fail' ? 1 : 0), 0);
-  const known = { failure_count: failureCount, records: report.records.length, reporter: auth.domain, proven: auth.result === 'pass' };
+  const known = { failure_count: failureCount, records: report.records.length, ...trace() };
 
   // 4. Store in D1: one batch, all or nothing
   try {
-    const stored = await storeReport(tenant, domain.id, report, rawXml, true, auth);
-    if (stored.stored) return result('accepted', 'ok', known);
+    const stored = await storeReport(tenant, domain.id, report, rawXml, true, reporter);
+    if (stored.stored) return result('accepted', 'ok', { ...known, dedup: stored.superseded ? 'superseded' : 'new' });
     // Lost the race to a concurrent delivery of the same report: nothing was written, which is the right outcome.
-    return result('duplicate', 'duplicate', known);
+    return result('duplicate', 'duplicate', { ...known, dedup: 'duplicate' });
   } catch (err) {
     console.error('dmarc-report: D1 storage failed for domain', domain.id, err instanceof Error ? err.message : err);
     // Nothing of the report was stored (one transaction). Count it where the owner can see it; this is best effort and

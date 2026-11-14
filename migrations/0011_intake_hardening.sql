@@ -6,16 +6,29 @@
 --                                         inserts no records and a failed batch leaves nothing behind. NULL: stored before 0011.
 -- aggregate_reports.record_count          rows stored in report_records for this report. NULL: stored before 0011.
 -- aggregate_reports.reporter_auth_reason  why reporter_auth is not 'pass' (a reason code), or NULL.
---
--- intake_quota        counters per scope and UTC day: 'a:<domain_id>' (one report address), 'u:<domain_id>' (all unproven mail to
---                     one address), 'w:<workspace_id>', '*' (the whole instance). Not tenant data: a counter, no content.
+-- aggregate_reports.reporter_tier         what the intake decided about the sender: 'counted' (carrier authenticated AND a registry reporter),
+--                                         'unknown' (authenticated, self-consistent, not in the registry: stored, not counted) or
+--                                         'unauthenticated' (stored, not counted, 30-day retention). NULL: stored before 0011.
+-- aggregate_reports.reporter_identity     who the intake took the sender to be: the registry id, else the authenticated organisational domain,
+--                                         else '~unauth'. NULL: stored before 0011. When set, report_id holds '<identity>|<id from the report>'
+--                                         (the existing UNIQUE(domain_id, report_id) therefore dedups per reporter: a forger cannot squat a real
+--                                         reporter's report id, and a counted report supersedes an uncounted one with the same id).
+-- aggregate_reports.reporter_known_as     the registry entry's label ('Google'), for 'counted'.--
+-- intake_quota        counters per scope and UTC day: 'a:<domain_id>' (one report address), 'k:<domain_id>' (all mail from unknown
+--                     reporters to one address), 'w:<workspace_id>', '*' (the whole instance). Not tenant data: a counter, no content.
 -- workspace_storage   report_records rows a workspace holds right now (the storage cap compares against it), kept in step by the
 --                     store batch and the retention sweep, recounted by the daily job.
+-- reporter_candidate_days  authenticated senders that are not in the registry, instance-wide, per day and workspace: DKIM organisation, From,
+--                     the report's own org_name and email. The instance owner reads it as candidates for the registry (distinct workspaces,
+--                     days seen, last seen). No report content, no customer address. Never promoted automatically.
 -- intake_failures     mail that reached a report address and was not stored, counted per domain, UTC day and reason. This is what the
 --                     owner sees as "N reports could not be processed"; one row per (domain, day, reason), never one per message.
 ALTER TABLE aggregate_reports ADD COLUMN ingest_token TEXT;
 ALTER TABLE aggregate_reports ADD COLUMN record_count INTEGER;
 ALTER TABLE aggregate_reports ADD COLUMN reporter_auth_reason TEXT;
+ALTER TABLE aggregate_reports ADD COLUMN reporter_tier TEXT;
+ALTER TABLE aggregate_reports ADD COLUMN reporter_known_as TEXT;
+ALTER TABLE aggregate_reports ADD COLUMN reporter_identity TEXT;
 
 CREATE TABLE intake_quota (
   scope TEXT NOT NULL,
@@ -46,4 +59,16 @@ CREATE TABLE intake_failures (
 CREATE INDEX idx_intake_usage_day ON intake_usage(day);
 CREATE INDEX idx_intake_quota_day ON intake_quota(day);
 CREATE INDEX idx_intake_failures_day ON intake_failures(day);
-CREATE INDEX idx_agg_reports_auth ON aggregate_reports(workspace_id, reporter_auth, date_begin);
+CREATE INDEX idx_agg_reports_tier ON aggregate_reports(workspace_id, reporter_tier, date_begin);
+
+CREATE TABLE reporter_candidate_days (
+  dkim_org TEXT NOT NULL,
+  from_address TEXT NOT NULL,
+  report_email TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  reports INTEGER NOT NULL DEFAULT 0,
+  org_name TEXT,
+  PRIMARY KEY (dkim_org, from_address, report_email, workspace_id, day)
+);
+CREATE INDEX idx_reporter_candidate_days_day ON reporter_candidate_days(day);

@@ -15,14 +15,15 @@
 // Every message leaves one JSON log line (src/hosted/intake-log.ts).
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, globalQueries, intakeLookups } from '@inbox-angel/db';
+import type { Carrier } from '../dmarc/reporter-auth';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport, StorageFailure, type ReportResult } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
-import { claimedSender, provenReporter } from '../dmarc/reporter-auth';
+import { carrierFromHeaders } from '../dmarc/reporter-auth';
 import { readAuthHeaders, trustedResults } from '../email/sender-proof';
-import { hostedConfig, hostedEnabled, intakeLimits, WELL_KNOWN_REPORTERS } from './config';
+import { hostedConfig, hostedEnabled, intakeLimits } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 import { logAuthservDiscovery, logIntake, type IntakeKind } from './intake-log';
@@ -31,17 +32,17 @@ import { OWNER_VISIBLE, rawTooLarge, REASONS, type Outcome, type ReasonCode } fr
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** What the log line is built from, filled in as the message is understood. */
-interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; proven: boolean | null; reporter: string | null; records: number | null }
+interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 'counted' | 'unknown' | 'unauthenticated' | null; reporter: string | null; dkim_org: string | null; from_org: string | null; email_matched: boolean | null; dedup: 'new' | 'duplicate' | 'superseded' | null; records: number | null }
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
 export async function handleHostedEmail(message: ForwardableEmailMessage, env: BoundEnv): Promise<void> {
   const started = Date.now();
-  const seen: Seen = { kind: 'other', ws: null, dom: null, proven: null, reporter: null, records: null };
+  const seen: Seen = { kind: 'other', ws: null, dom: null, tier: null, reporter: null, dkim_org: null, from_org: null, email_matched: null, dedup: null, records: null };
   const line = (v: Verdict) => logIntake({ ...seen, ...v, size: message.rawSize ?? 0, ms: Date.now() - started });
   try {
     line(await intake(message, env, seen));
   } catch (e) {
-    if (e instanceof StorageFailure) Object.assign(seen, { records: e.known.records ?? null, reporter: e.known.reporter ?? null, proven: e.known.proven ?? null });
+    if (e instanceof StorageFailure) Object.assign(seen, { records: e.known.records ?? null, reporter: e.known.reporter ?? null, tier: e.known.tier ?? null, dkim_org: e.known.dkimOrg ?? null, from_org: e.known.fromOrg ?? null });
     line({ outcome: 'deferred', reason: e instanceof StorageFailure ? 'storage_failed' : (e as { reason?: ReasonCode }).reason ?? 'internal_error' });
     throw e;
   }
@@ -90,30 +91,48 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     return refuse(reason);
   };
 
-  // What the receiver proved about the message comes first (its own topmost results header, never the joined headers:
-  // src/email/sender-proof.ts): a proven reporter is charged to its own domain's allowance. Everything else is charged to the
-  // sender domain it CLAIMS, in a small bucket of its own, so junk cannot use up a proven reporter's allowance. Until AUTHSERV_ID and
-  // AUTHSERV_HEADER are set nothing is proven: reports are accepted, stored, flagged, charged this way, and NOT counted in the numbers.
+  // ORDER OF WORK (cheap and unforgeable first, expensive last):
+  //   (a) recipient, token, rawSize (above)   (b) classify the CARRIER from the topmost authentication header (below)
+  //   (c) charge the instance/address/tier caps BEFORE decompressing anything   (d) decompress with a hard cap by carrier class
+  //       (src/email/dmarc-report.ts: 1 MiB unless the carrier matches a registry entry)   (e) parse; decide the tier from the report's metadata.
+  // Tiers: counted (authenticated AND a registry reporter), received-not-counted authenticated (stored, small caps), received-not-counted
+  // unauthenticated (stored, tightest caps, 30 days, no IP lookups). Not stored: malformed, over a cap, domain not owned.
   const [forHeaders, rest] = message.raw.tee();
-  const authHeaders = await readAuthHeaders(forHeaders);
-  const reporter = provenReporter(authHeaders, env);
-  seen.proven = reporter !== null;
-  const trusted = !!(env.AUTHSERV_ID && env.AUTHSERV_HEADER && trustedResults(authHeaders, env.AUTHSERV_ID, env.AUTHSERV_HEADER));
-  logAuthservDiscovery(authHeaders, env, trusted);
+  const headers = await readAuthHeaders(forHeaders);
+  const trusted = !!(env.AUTHSERV_ID && env.AUTHSERV_HEADER && trustedResults(headers, env.AUTHSERV_ID, env.AUTHSERV_HEADER));
+  logAuthservDiscovery(headers, env, trusted);
+  const carrier: Carrier = carrierFromHeaders(headers, env);
+  seen.dkim_org = carrier.dkimOrg;
+  seen.from_org = carrier.fromOrg;
+  const globals = globalQueries(env.DB);
+  // What inbound mail carries, instance-wide (a counter, no address): the instance owner is told when nothing can be authenticated.
+  await globals.authObservations.note(carrier.authenticated ? 'ok' : carrier.presence, day).catch(() => undefined);
 
-  // Caps in one batch: this address, its workspace, the instance (and this address's unproven total), then the per-reporter allowance.
-  const quota = await q.consumeQuota(target.domain_id, day, message.rawSize, !reporter, {
-    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
+  const registryId = carrier.candidates[0]?.id ?? null;
+  /** A registry reporter over a cap is accepted and dropped, not refused: whether Google/Microsoft stop sending after a 5xx is unverified. */
+  const overCap = async (reason: ReasonCode): Promise<Verdict> => {
+    if (carrier.class !== 'registry') return refuseAndMark(reason);
+    await q.markFailure(target.domain_id, day, 'over_cap_accepted_dropped', now()).catch(() => 0);
+    seen.reporter = registryId;
+    return { outcome: 'accepted', reason: 'over_cap_accepted_dropped' };
+  };
+
+  const quota = await q.consumeQuota(target.domain_id, day, message.rawSize, carrier.class, {
+    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unknownTotal: limits.unknownReportsPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
   });
   if (!quota.ok) {
-    return refuseAndMark(({ address: 'cap_address_day', unauth: 'cap_unauth_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
+    return overCap(({ address: 'cap_address_day', unknown: 'cap_unknown_day', unauth: 'cap_unauth_total_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
   }
-  const ok = reporter
-    ? await q.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay, WELL_KNOWN_REPORTERS, { reports: limits.totalReportsPerDay, bytes: limits.totalBytesPerDay })
-    : await q.tryConsume(target.domain_id, day, claimedSender(message.from), message.rawSize, limits.unauthReportsPerDay, limits.unauthBytesPerDay, limits.unauthSendersPerDay);
+  // The sending organisation's own allowance: a registry reporter by its id, an authenticated unknown by its DKIM organisation, an
+  // unauthenticated sender by the (forgeable) envelope-sender domain it claims.
+  const claimed = '~' + (message.from?.split('@').pop()?.trim().toLowerCase() || '');
+  const bucket = carrier.class === 'registry' ? registryId! : carrier.class === 'authenticated' ? carrier.dkimOrg! : claimed;
+  const perReports = carrier.class === 'registry' ? limits.reportsPerDay : carrier.class === 'authenticated' ? limits.unknownReportsPerReporterPerDay : limits.unauthReportsPerDay;
+  const perBytes = carrier.class === 'unauthenticated' ? limits.unauthBytesPerDay : limits.bytesPerDay;
+  const ok = await q.consumeReporter(target.domain_id, day, bucket, message.rawSize, perReports, perBytes);
   if (!ok) {
-    await q.releaseQuota(target.domain_id, day, message.rawSize, [`a:${target.domain_id}`, ...(reporter ? [] : [`u:${target.domain_id}`]), `w:${target.workspace_id}`, '*']);
-    return refuseAndMark(reporter ? 'cap_address_day' : 'cap_unauth_day');
+    await q.releaseQuota(target.domain_id, day, message.rawSize, [`a:${target.domain_id}`, `k:${target.domain_id}`, `u:${target.domain_id}`, `w:${target.workspace_id}`, '*']);
+    return overCap(carrier.class === 'authenticated' ? 'cap_unknown_reporter_day' : carrier.class === 'unauthenticated' ? 'cap_unauth_day' : 'cap_address_day');
   }
 
   const body = new Proxy(message, { get: (t, p) => (p === 'raw' ? rest : Reflect.get(t, p, t) instanceof Function ? (Reflect.get(t, p, t) as Function).bind(t) : Reflect.get(t, p, t)) });
@@ -122,9 +141,10 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   let result: ReportResult;
   if (kind === 'rua') {
     result = await handleDmarcReport(body, tenant, {
-      authHeaders,
-      maxBytes: limits.maxDecompressedBytes,
-      maxRecords: reporter ? limits.recordsPerReport : Math.min(limits.recordsPerReport, limits.unauthRecordsPerReport),
+      authHeaders: headers,
+      carrier,
+      dropOverCap: carrier.class === 'registry',
+      maxRecords: limits.recordsPerReport,
       maxNewIps: limits.newIpsPerReport,
       token: { id: target.domain_id, domain: target.domain },
       admit: (n) =>
@@ -132,13 +152,10 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
         : quota.workspaceRecords + n > limits.workspaceRecords ? 'cap_workspace_storage'
         : quota.instanceRecords + n > limits.instanceRecords ? 'cap_instance_storage' : null,
     });
-    seen.records = result.records;
-    seen.reporter = result.reporter;
-    if (result.proven !== null) seen.proven = result.proven;
+    Object.assign(seen, { records: result.records, tier: result.tier, reporter: result.identity ?? result.reporter, dedup: result.dedup ?? null, email_matched: result.emailMatched ?? null });
     if (result.outcome === 'accepted' || result.outcome === 'duplicate') track(tenant, { event: 'report.received', failure_count: result.failure_count });
   } else {
     result = await handleTlsRptReport(body, tenant, { hosted: { maxBytes: limits.maxDecompressedBytes, token: { id: target.domain_id, domain: target.domain } } });
-    seen.proven = null;
     if (result.outcome === 'accepted') track(tenant, { event: 'tls-rpt.received', failure_count: result.failure_count });
   }
   // Refused after the address was known (a cap on stored records, a report too big): tell the owner.

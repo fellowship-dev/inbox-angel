@@ -57,6 +57,8 @@ CREATE TABLE `aggregate_reports` (
 	`reporter_auth` text,
 	`reporter_auth_domain` text,
 	`reporter_auth_reason` text,
+	`reporter_tier` text,
+	`reporter_known_as` text,
 	`ingest_token` text,
 	`record_count` integer,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
@@ -68,7 +70,7 @@ CREATE INDEX `idx_agg_reports_workspace` ON `aggregate_reports` (`workspace_id`,
 CREATE INDEX `idx_agg_reports_date_end` ON `aggregate_reports` (`date_end`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_created` ON `aggregate_reports` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_raw_xml` ON `aggregate_reports` (`created_at`) WHERE "aggregate_reports"."raw_xml" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX `idx_agg_reports_auth` ON `aggregate_reports` (`workspace_id`,`reporter_auth`,`date_begin`);--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_tier` ON `aggregate_reports` (`workspace_id`,`reporter_tier`,`date_begin`);--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
 CREATE TABLE `api_keys` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -349,6 +351,13 @@ CREATE TABLE `intake_tokens` (
 CREATE UNIQUE INDEX `intake_tokens_token_hash_unique` ON `intake_tokens` (`token_hash`);--> statement-breakpoint
 CREATE INDEX `idx_intake_tokens_workspace` ON `intake_tokens` (`workspace_id`);--> statement-breakpoint
 CREATE INDEX `idx_intake_tokens_prev` ON `intake_tokens` (`prev_token_hash`);--> statement-breakpoint
+CREATE TABLE `intake_unknown_reporters` (
+	`reporter` text PRIMARY KEY NOT NULL,
+	`reports` integer DEFAULT 0 NOT NULL,
+	`first_seen` integer NOT NULL,
+	`last_seen` integer NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `intake_usage` (
 	`domain_id` integer NOT NULL,
 	`workspace_id` text NOT NULL,

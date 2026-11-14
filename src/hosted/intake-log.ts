@@ -15,10 +15,17 @@ export interface IntakeLogLine {
   kind: IntakeKind;
   outcome: Outcome;
   reason: ReasonCode;
-  /** Did the receiver prove the reporter (null: not judged, e.g. refused before the report was read). */
-  proven: boolean | null;
-  /** The reporting organisation's domain as the report names it. */
+  /** counted (authenticated AND a registry reporter), unknown (authenticated, not in the registry), unauthenticated; null: refused before that. */
+  tier: 'counted' | 'unknown' | 'unauthenticated' | null;
+  /** The reporter identity: the registry id, else the authenticated organisational domain, else '~unauth' (null: not decided). */
   reporter: string | null;
+  /** The passing DKIM organisation and the From organisation of the carrier: reporter data, not customer data. */
+  dkim_org: string | null;
+  from_org: string | null;
+  /** Did report_metadata/email match the registry entry (null: no entry matched the carrier). */
+  email_matched: boolean | null;
+  /** new | duplicate | superseded (a counted report replaced an uncounted one); null: not reached. */
+  dedup: 'new' | 'duplicate' | 'superseded' | null;
   /** Raw message size in bytes. */
   size: number;
   /** Records in the report (null: not read). */
@@ -29,8 +36,16 @@ export interface IntakeLogLine {
   dom: number | null;
 }
 
+/** An authenticated reporter that is not in the registry: logged on every message so the list can grow by hand (never auto-promoted). */
+export function logReporterCandidate(c: { dkim_org: string; from: string; org_name: string; report_email: string; reason: string | null }): void {
+  console.log(JSON.stringify({ evt: 'intake_reporter_candidate', v: 1, ...c }));
+}
+
 /** One line per message. Accepted mail logs at info level; refused and deferred mail at warn level so `tail --status` filters work. */
-export function logIntake(line: IntakeLogLine): void {
+type LineInput = Pick<IntakeLogLine, 'kind' | 'outcome' | 'reason' | 'size' | 'ms'> & Partial<IntakeLogLine>;
+
+export function logIntake(input: LineInput): void {
+  const line: IntakeLogLine = { tier: null, reporter: null, dkim_org: null, from_org: null, email_matched: null, dedup: null, records: null, ws: null, dom: null, ...input };
   const text = JSON.stringify({ evt: 'intake', v: 1, ...line });
   if (line.outcome === 'accepted' || line.outcome === 'duplicate') console.log(text);
   else console.warn(text);

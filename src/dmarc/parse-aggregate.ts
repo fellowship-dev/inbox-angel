@@ -84,7 +84,7 @@ export interface ParseLimits {
    * Called once the report's header is validated and before any per-record work (IP enrichment): a place to resolve the domain, skip a
    * duplicate and apply record-count caps. It ends processing by throwing ParseStop.
    */
-  gate?: (info: { report_id: string; policy_domain: string; org_name: string; record_count: number }) => Promise<void>;
+  gate?: (info: { report_id: string; policy_domain: string; org_name: string; report_email: string | null; record_count: number }) => Promise<void | { enrich?: boolean; maxNewIps?: number }>;
 }
 
 /** Longest value kept for the fields we store (the report id and org name are shorter, domains are DNS names). */
@@ -99,7 +99,24 @@ const MAX_SPAN_SECONDS = 31 * 86400;
 /** DMARC aggregate reporting began in 2012; earlier dates are nonsense. */
 const EARLIEST_BEGIN = Date.UTC(2012, 0, 1) / 1000;
 /** A report cannot end more than a day from now (clocks differ, time zones). */
-const FUTURE_SLACK_SECONDS = 86400;
+const FUTURE_SLACK_SECONDS = 2 * 86400;
+/** A report is a few levels deep (feedback > record > auth_results > dkim > domain). Far deeper is an attack on the parser, not a report. */
+const MAX_XML_DEPTH = 20;
+/** Elements in a report: ~15 per record plus the header. A 1 MiB report cannot honestly hold more than this. */
+const MAX_XML_ELEMENTS = 100_000;
+
+/** Refuse pathological nesting or element counts before the parser builds a tree (parsedmarc advisories: depth and node bombs). Linear, no tree. */
+export function checkXmlShape(xml: string): void {
+  const text = xml.includes('<!--') ? xml.replace(/<!--[\s\S]*?-->/g, '') : xml;
+  const re = /<(\/?)([A-Za-z_][^\s>/]*)[^>]*?(\/?)>/g;
+  let depth = 0;
+  let elements = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m[1]) { depth = Math.max(0, depth - 1); continue; }
+    if (++elements > MAX_XML_ELEMENTS) throw new ReportRejected('xml_invalid', `Report has more than ${MAX_XML_ELEMENTS} elements`);
+    if (!m[3]) { if (++depth > MAX_XML_DEPTH) throw new ReportRejected('xml_invalid', `Report is nested deeper than ${MAX_XML_DEPTH} levels`); }
+  }
+}
 
 function tooLong(what: string, value: string, max: number): void {
   if (value.length > max) throw new ReportRejected('field_too_long', `${what} is longer than ${max} characters`);
@@ -220,6 +237,8 @@ export async function parseAggregateReportXml(
 
     if (/<!(?:DOCTYPE|ENTITY)/i.test(xml)) throw new ReportRejected('xml_invalid', 'DOCTYPE and entity declarations are not allowed in a DMARC report');
 
+    checkXmlShape(xml);
+
     let parsed: Record<string, unknown>;
     try {
       parsed = parser.parse(xml) as Record<string, unknown>;
@@ -300,7 +319,7 @@ export async function parseAggregateReportXml(
       throw new ReportRejected('too_many_records', `Report has ${recordList.length} records; the limit is ${limits.maxRecords}`);
     }
 
-    await limits.gate?.({ report_id: reportId, policy_domain: policyPublished.domain, org_name: orgName, record_count: recordList.length });
+    const plan = await limits.gate?.({ report_id: reportId, policy_domain: policyPublished.domain, org_name: orgName, report_email: strOrNull(meta['email']), record_count: recordList.length });
 
     const records: ReportRecord[] = [];
     for (const r of recordList as Record<string, unknown>[]) {
@@ -313,10 +332,10 @@ export async function parseAggregateReportXml(
       }
     }
 
-    if (!offline) {
+    if (!offline && plan?.enrich !== false) {
       const weight = new Map<string, number>();
       for (const r of records) weight.set(r.source.ip, (weight.get(r.source.ip) ?? 0) + r.count);
-      const info = await enrichIps(db, [...weight.keys()], limits.maxNewIps, (ip) => weight.get(ip) ?? 0);
+      const info = await enrichIps(db, [...weight.keys()], plan?.maxNewIps ?? limits.maxNewIps, (ip) => weight.get(ip) ?? 0);
       for (const r of records) r.source = info.get(r.source.ip) ?? r.source;
     }
 
