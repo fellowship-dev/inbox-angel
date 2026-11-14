@@ -40,7 +40,8 @@ export function withReportAddress(record: string, address: string, replace?: str
   if (i < 0) return `${parts.join(';')}; rua=${ours}`;
   const part = parts[i] ?? '';
   const entries = ruaEntries(record);
-  const next = replace !== undefined ? entries.map((e) => (e === replace ? ours : e)) : [...entries, ours];
+  // Replace only an entry that is really there; anything else appends, so ours is never left out.
+  const next = replace !== undefined && entries.includes(replace) ? entries.map((e) => (e === replace ? ours : e)) : [...entries, ours];
   parts[i] = `${/^\s*/.exec(part)?.[0] ?? ''}rua=${next.join(',')}`;
   return parts.join(';');
 }

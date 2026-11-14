@@ -30,6 +30,8 @@ describe('withReportAddress', () => {
     const rec = 'v=DMARC1; p=reject; rua=mailto:a@x.com,mailto:b@y.com!10m';
     expect(withReportAddress(rec, OURS, 'mailto:a@x.com')).toBe(`v=DMARC1; p=reject; rua=mailto:${OURS},mailto:b@y.com!10m`);
     expect(withReportAddress(rec, OURS, 'mailto:b@y.com!10m')).toBe(`v=DMARC1; p=reject; rua=mailto:a@x.com,mailto:${OURS}`);
+    // a stale choice (the record changed meanwhile) never drops ours or anything else
+    expect(withReportAddress(rec, OURS, 'mailto:gone@z.com')).toBe(`v=DMARC1; p=reject; rua=mailto:a@x.com,mailto:b@y.com!10m,mailto:${OURS}`);
   });
   it('never changes the policy: p=, sp= and pct= are identical before and after', () => {
     for (const rec of ['v=DMARC1; p=reject', 'v=DMARC1; p=quarantine; pct=10; sp=reject', 'v=DMARC1; p=none; sp=none; rua=mailto:a@x.com']) {

@@ -34,7 +34,7 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
-| `INTAKE_DOMAIN` | `rua.inboxangel.io` | report intake. With it set, owners and admins can give a verified domain its report address (see [Report address without hosted records](#report-address-without-hosted-records)); needs nothing else from this table |
+| `INTAKE_DOMAIN` | `rua.inboxangel.io` | report intake. With it set (and `MODE`, `SAAS_ENABLED`), owners and admins can give a verified domain its report address (see [Report address without hosted records](#report-address-without-hosted-records)); it does not need `CANARY_DOMAIN` or the `HOSTED_RECORDS_*` settings |
 | `CANARY_DOMAIN` | `canary.inboxangel.io` | optional: the free check. Without it `POST /api/check-sessions` answers `404` and report intake is unaffected |
 | `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
