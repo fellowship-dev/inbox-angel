@@ -512,6 +512,12 @@ describe('domain page for a name that does not resolve', () => {
 					'GET /api/domains/7/onboarding-status': onboarding({ nxdomain }, none),
 					'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
 					'GET /api/domains/7/wizard-state': wizard,
+					// Stored facts as the live read left them: p=none (level 1, setup not finished), or a name that does not exist.
+					'GET /api/domains/7/check-summary': {
+						domain_id: 7, domain: domain.domain, dmarc_policy: nxdomain ? null : 'none', spf_record: nxdomain ? null : 'v=spf1 -all', dns_checked_at: 1_700_000_000, dns_check_attempted_at: 1_700_000_000,
+						dns_check_status: nxdomain ? 'nxdomain' : 'ok', dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: nxdomain ? 'nxdomain' : 'ok', total_messages: 0, pass_messages: 0, fail_messages: 0,
+						dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, spf_lookup_count: 1, dmarc_pct: null, dmarc_sp: null,
+					},
 					'GET /api/hosted/config': { enabled: true, records: true },
 					'GET /api/domains/7/hosted': { enabled: false },
 				},

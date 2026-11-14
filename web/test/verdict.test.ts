@@ -48,7 +48,7 @@ describe('domainActions: Do this next', () => {
 	});
 
 	it('orders by urgency and keeps at most three', () => {
-		const k = keys({ dns: dns(null), onboarding: onboarding({ spf: { record: null, lookup_count: null, flattening_active: false }, dkim: { selectors: [], source: 'doh' } }), reports: reports(null) });
+		const k = keys({ dns: dns(null), onboarding: onboarding({ dmarc: { found: false, has_our_rua: false, current_record: null, effective: NO_POLICY }, spf: { record: null, lookup_count: null, flattening_active: false }, dkim: { selectors: [], source: 'doh' } }), reports: reports(null) });
 		expect(k).toEqual(['attention:spf-missing', 'attention:dmarc-missing', 'unknown:dkim-unknown']);
 	});
 
@@ -138,8 +138,8 @@ describe('getStartedSteps', () => {
 
 describe('slots for hosted help (PR 142)', () => {
 	it('offers a help prompt only where a person may be stuck', () => {
-		expect(domainVerdict(domain, summary({ dns_check_status: 'nxdomain', spf_record: null, dmarc_policy: null }), reports(null)).help).toEqual({ lead: 'Sure this is the right name?', about: 'about example.com' });
-		expect(domainVerdict(domain, summary({ dns_check_status: 'failed' }), reports(null)).help).toEqual({ lead: 'DNS checks keep failing?', about: 'about example.com' });
+		expect(domainVerdict(domain, summary({ dns_check_status: 'nxdomain', spf_record: null, dmarc_policy: null }), reports(null)).help).toEqual({ lead: 'Sure this is the right name?', about: 'about example.com', priority: 50 });
+		expect(domainVerdict(domain, summary({ dns_check_status: 'failed' }), reports(null)).help).toEqual({ lead: 'DNS checks keep failing?', about: 'about example.com', priority: 50 });
 		expect(domainVerdict(domain, summary(), reports(99)).help).toBeNull();
 	});
 
@@ -227,6 +227,8 @@ describe('truth table: Do this next', () => {
 		// Inherited quarantine at pct=5: nothing offered that would weaken or tighten it; the parent's pct is the fix.
 		const partial = { policy: 'quarantine', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=quarantine; pct=5' };
 		expect(k({ effective: partial })).toEqual(['improve:pct']);
+		// Inherited p=none is never "nothing to do"; the fix is at the parent.
+		expect(k({ effective: { policy: 'none', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=none' } })).toEqual(['improve:parent-none']);
 		// The parent's record gives no policy: fix it there.
 		expect(k({ effective: { policy: null, inherited_from: 'example.com', issue: 'invalid', record: 'v=DMARC1; p=banana' } })).toEqual(['attention:dmarc-parent']);
 	});

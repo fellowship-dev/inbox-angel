@@ -257,15 +257,16 @@ describe('hosted report views', () => {
 
 	it('overview, empty hosted workspace: no "Connect Cloudflare", no report promise', async () => {
 		renderApp(<OverviewPage />, { status: HOSTED, routes: { 'GET /api/domains': { domains: [] } } });
-		expect(await screen.findByText('No domains yet')).toBeInTheDocument();
-		expect(screen.getByText(/checked from live DNS/)).toBeInTheDocument();
+		expect(await screen.findByText('Nothing to check yet: this workspace has no domains.')).toBeInTheDocument();
+		expect(screen.getByText(/from public DNS right away/)).toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: 'Connect Cloudflare' })).not.toBeInTheDocument();
 		expect(screen.queryByText(/receiving DMARC reports/)).not.toBeInTheDocument();
 	});
 
-	it('overview, self-host empty: unchanged', async () => {
+	it('overview, self-host empty: one first step, no Cloudflare detour (critique F14: DNS may live anywhere)', async () => {
 		renderApp(<OverviewPage />, { routes: { 'GET /api/domains': { domains: [] } } });
-		expect(await screen.findByRole('link', { name: 'Connect Cloudflare' })).toBeInTheDocument();
+		expect(await screen.findByRole('link', { name: 'Add a domain' })).toHaveAttribute('href', '/setup');
+		expect(screen.queryByRole('link', { name: 'Connect Cloudflare' })).not.toBeInTheDocument();
 	});
 });
 
@@ -290,40 +291,41 @@ describe('overview level cards: Talk to Max at stuck states', () => {
 			status,
 			routes: {
 				'GET /api/domains': { domains: [hostedDomain] },
-				'GET /api/domains/7/check-summary': sum,
-				'GET /api/domains/7/stats': { domain: 'acme.com', days: 7, stats: [] },
-				'GET /api/domains/7/wizard-state': wizard({ spf: 'not_started', dkim: 'not_started', dmarc: 'not_started' }),
+				// The overview reads every summary in one request.
+				'GET /api/domains/summaries': (sum as { __status?: number })?.__status ? sum : { summaries: [sum], next_after: null, window_days: 30 },
 				'GET /api/hosted/config': { enabled: false },
 			},
 		});
 
 	it('a domain that does not resolve offers a person', async () => {
 		overview(summary({ dns_check_status: 'nxdomain' }));
-		const card = await screen.findByRole('group', { name: 'acme.com' });
-		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		const card = await screen.findByRole('listitem', { name: 'acme.com' });
+		expect(within(card).getByText(/DNS says acme\.com does not exist/)).toBeInTheDocument();
+		expect(within(card).getByText(/Sure this is the right name\?/)).toBeInTheDocument();
 		expectSafeTalkLink(within(card).getByRole('link', { name: /Talk to Max/ }));
 	});
 
 	it('a check that keeps failing offers a person, and the card does not lean on reports', async () => {
 		overview(summary({ dns_checked_at: hoursAgo(72), dns_check_attempted_at: hoursAgo(1), dns_check_status: 'failed', dns_last_good_status: 'ok' }));
-		const card = await screen.findByRole('group', { name: /Level \d/ });
+		const card = await screen.findByRole('listitem', { name: 'acme.com' });
 		expect(within(card).getByText(/Last check failed 1 hour ago/)).toBeInTheDocument();
 		expect(within(card).getByText(/DNS checks keep failing\?/)).toBeInTheDocument();
-		// The block above the cards says reports are not connected; the card does not repeat it or claim "no reports".
-		expect(within(card).queryByText(/7-day results|No reports in the last 7 days/)).not.toBeInTheDocument();
+		// One block above the rows says reports are not connected; the row does not repeat it or make a report claim.
+		expect(screen.getAllByTestId('reports-not-connected')).toHaveLength(1);
+		expect(within(card).queryByText(/reported messages|No DMARC reports|Reports are not connected/)).not.toBeInTheDocument();
 		expect(within(card).queryByText(/reports look clean|start receiving reports|Review your reports/)).not.toBeInTheDocument();
 	});
 
 	it('a summary that cannot load offers a person', async () => {
-		overview(fail(404, 'summary unavailable')); // 4xx: the query client does not retry, so the error card shows at once
-		const card = await screen.findByRole('group', { name: 'acme.com' });
+		overview(fail(404, 'summary unavailable')); // 4xx: the query client does not retry, so the error row shows at once
+		const card = await screen.findByRole('listitem', { name: 'acme.com' });
 		expectSafeTalkLink(await within(card).findByRole('link', { name: /Talk to Max/ }));
 	});
 
 	it('no booking link: the same states show no link', async () => {
 		overview(summary({ dns_check_status: 'nxdomain' }), HOSTED_NO_LINK);
-		const card = await screen.findByRole('group', { name: 'acme.com' });
-		expect(within(card).getByText('This domain does not resolve')).toBeInTheDocument();
+		const card = await screen.findByRole('listitem', { name: 'acme.com' });
+		expect(within(card).getByText(/does not exist/)).toBeInTheDocument();
 		expect(talkLinks()).toHaveLength(0);
 	});
 });

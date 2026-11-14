@@ -115,21 +115,26 @@ export function domainActions(input: ActionInput): DomainAction[] {
 		}
 	}
 
+	const inherited = cov?.kind === 'inherited';
 	// Reports: what the senders do under the current policy. p=none is never "nothing to do".
 	const rate = exactRate(reports);
 	const shown = reports && reports.total > 0 ? `${reports.passRate}% of ${formatNumber(reports.total)} reported messages passed DMARC in the last ${reports.days} days` : '';
 	const top = sources?.length ? ` The largest failing source is ${sources[0]!.org ?? sources[0]!.base_domain ?? sources[0]!.source_ip}.` : '';
 	const fix = (status: StatusKind, why: string): DomainAction => ({ key: 'senders', status, do: 'Fix the senders that fail DMARC', why, who: WHO.providers, to: `${page}/analytics`, cta: 'See who fails and why' });
 	const reloadReports = (why: string): DomainAction => ({ key: 'reports-failed', status: 'unknown', do: 'Load the report totals again', why, who: WHO.you, retry: true });
-	if (policy === 'none') {
-		if (rate !== null && rate >= 95) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=quarantine', why: `${shown}, so your senders look ready. Today, mail that fails DMARC is still delivered.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
-		else if (rate !== null) out.push(fix('improve', `${shown}.${top} Move to quarantine only once they pass.`));
+	if (policy === 'none' && cov?.kind === 'inherited') {
+		// p=none from the parent: never "nothing to do", and the change belongs at the parent, not in a record here.
+		out.push({ key: 'parent-none', status: 'improve', do: `Tighten DMARC at _dmarc.${cov.parent} once its senders are confirmed`, why: inheritedSentence(name, cov), who: WHO.dns });
+	} else if (policy === 'none') {
+		// An inherited policy is the parent's to tighten: a record here stricter than the one in force is never proposed.
+		if (rate !== null && rate >= 95 && !inherited) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=quarantine', why: `${shown}, so your senders look ready. Today, mail that fails DMARC is still delivered.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
+		else if (rate !== null && rate < 95) out.push(fix('improve', `${shown}.${top} Move to quarantine only once they pass.`));
 		else if (reports === null) out.push(reloadReports('They could not be loaded, so whether every sender passes is unknown. Under p=none, mail that fails DMARC is still delivered.'));
 		else if (reports && hasReportAddress(domain.rua_address) && !out.some((a) => a.key === 'dmarc-rua')) out.push({ key: 'gathering', status: 'gathering', do: 'Wait for the first DMARC reports', why: 'Receivers send them about once a day. Until they arrive, nobody can confirm that every sender passes, so p=none stays the safe setting.', who: WHO.nobody });
 		else if (reports && !hasReportAddress(domain.rua_address)) out.push({ key: 'no-reports', status: 'unknown', do: 'Confirm every service that sends as you before moving to p=quarantine', why: 'Reports are not connected for this domain, so pass rates are unknown. Under p=none, mail that fails DMARC is still delivered.', who: WHO.providers });
 	} else if (policy === 'quarantine' || policy === 'reject') {
 		if (rate !== null && rate < 70) out.push(fix('attention', `${shown}, so some of your own mail is likely ${policy === 'reject' ? 'rejected' : 'in spam'}.${top}`));
-		else if (policy === 'quarantine' && rate !== null && rate >= 90) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=reject', why: `${shown}. Reject stops spoofed mail outright instead of sending it to spam.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
+		else if (policy === 'quarantine' && rate !== null && rate >= 90 && !inherited) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=reject', why: `${shown}. Reject stops spoofed mail outright instead of sending it to spam.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
 		else if (rate !== null && rate < 95) out.push(fix('improve', `${shown}.${top}`));
 		else if (reports === null) out.push(reloadReports('They could not be loaded, so whether every sender passes is unknown.'));
 		if (ownRecord) {

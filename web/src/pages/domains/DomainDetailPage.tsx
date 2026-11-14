@@ -133,7 +133,7 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Where the domain stands: the level ladder, the state, what is true now and its evidence, and setup progress. */
-function WhereItStands({ domain }: { domain: Domain }) {
+function WhereItStands({ domain, nxdomain = false }: { domain: Domain; /** The live read says the name does not exist: no setup to continue. */ nxdomain?: boolean }) {
 	const summary = useCheckSummary(domain.id);
 	const hosted = useHostedInfo(domain.id);
 	const wizard = useWizardState(domain.id);
@@ -167,7 +167,7 @@ function WhereItStands({ domain }: { domain: Domain }) {
 						<p className="text-sm text-ink-2">Loading what is known about this domain…</p>
 					)}
 					{/* Only while DNS shows the domain is not yet enforcing: an enforced domain's setup is done, whatever the wizard recorded. */}
-					{progress && progress.done < progress.total && v && (v.level === 0 || v.level === 1) ? (
+					{!nxdomain && progress && progress.done < progress.total && v && (v.level === 0 || v.level === 1) ? (
 						<p className="pt-1 text-sm text-ink-2">
 							Setup wizard: {progress.done} of {progress.total} steps done.{' '}
 							<Link to={`/domains/${domain.id}/setup/${progress.nextStep}`} className="font-medium text-brand-ink underline underline-offset-4">
@@ -269,7 +269,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				canWrite={canWrite}
 				onRetry={() => void Promise.all([dns.refetch(), onboarding.refetch()])}
 			/>
-			<WhereItStands domain={domain} />
+			<WhereItStands domain={domain} nxdomain={nxdomain} />
 
 			{/* A name that does not resolve has nothing to host. */}
 			{nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
