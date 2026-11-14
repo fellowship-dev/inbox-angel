@@ -158,8 +158,8 @@ describe('7. Verify before the record is visible', () => {
 
 describe('5. the same verdicts as the website', () => {
 	const base = { spf_record: 'v=spf1 include:a include:b ~all', dmarc_policy: 'reject', dmarc_issue: null, dmarc_inherited_from: null, dns_checked_at: 1_800_000_000, dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, spf_lookup_count: 3, dmarc_pct: 100 };
-	const spf = (a: ReturnType<typeof assessDomain>) => a.findings.find((f) => f.label.startsWith('SPF'))!;
-	const dmarc = (a: ReturnType<typeof assessDomain>) => a.findings.find((f) => f.label.startsWith('DMARC'))!;
+	const spf = (a: ReturnType<typeof assessDomain>) => a.findings.find((f) => String(f.label).startsWith('SPF'))!;
+	const dmarc = (a: ReturnType<typeof assessDomain>) => a.findings.find((f) => String(f.label).startsWith('DMARC'))!;
 
 	it('SPF at 10 of 10 lookups: within the limit, worth a note; the level stands', () => {
 		const a = assessDomain({ ...base, spf_lookup_count: 10 });
