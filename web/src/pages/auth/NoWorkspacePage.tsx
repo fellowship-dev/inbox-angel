@@ -1,3 +1,4 @@
+import { cleanName } from '../../lib/names';
 import { Alert, Button, Input } from '@ready-set-mail/ui';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -40,7 +41,7 @@ export function NoWorkspacePage() {
 					{invites.map((i) => (
 						<li key={i.token} className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
 							<span>
-								<strong>{i.workspace_name ?? 'A workspace'}</strong>
+								<strong>{cleanName(i.workspace_name) || 'A workspace'}</strong>
 								<span className="block text-sm text-muted-foreground">
 									as {i.role}, invited by {i.invited_by}
 								</span>

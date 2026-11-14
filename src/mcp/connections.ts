@@ -9,6 +9,7 @@ import { authorizeResource } from '../access/resolve';
 import type { AccessSubject } from '../access/principal';
 import { isSaas } from '../auth/config';
 import { mcpInstallation } from './discovery';
+import { cleanName } from '../auth/names';
 
 const prefix = 'mcp_connection:';
 export interface AgentConnection { principalId: string; userId: string; workspaceId: string; clientId: string; name: string; createdAt: number; expiresAt: number; lastUsedAt?: number }
@@ -85,7 +86,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
      choices.push({ value: JSON.stringify({ workspaceId: m.workspace_id, domain: d.domain }), domain: d.domain });
      for (const product of products) if ((await scope.access.products.mappings(product.id)).some(map => map.domain_id === d.id)) choices.push({ value: JSON.stringify({ workspaceId: m.workspace_id, productId: product.id, domain: d.domain }), domain: d.domain, product: product.name });
     }
-    workspaces.push({ id: m.workspace_id, name: named.get(m.workspace_id) || 'Unnamed workspace', choices });
+    workspaces.push({ id: m.workspace_id, name: cleanName(named.get(m.workspace_id)) || 'Unnamed workspace', choices });
    }
    const html = renderConsentPage({
     client: { name: description.clientName, publisher: description.clientDomain || undefined, redirectHost: description.redirectHost, loopback: !!description.redirectIsLoopback },

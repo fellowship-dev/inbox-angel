@@ -1,3 +1,4 @@
+import { cleanName } from '../../lib/names';
 import {
 	Badge,
 	Button,
@@ -131,11 +132,11 @@ function MemberRow({ member, isSelf, myRole }: { member: TeamMember; isSelf: boo
 	return (
 		<li className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
 			<span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-sm font-semibold text-brand-ink">
-				{(member.name || member.email).charAt(0).toUpperCase()}
+				{(cleanName(member.name) || member.email).charAt(0).toUpperCase()}
 			</span>
 			<div className="min-w-0 flex-1">
 				<p className="truncate font-medium">
-					{member.name || member.email}
+					{cleanName(member.name) || member.email}
 					{isSelf ? <span className="ml-2 text-sm font-normal text-ink-2">(you)</span> : null}
 				</p>
 				<p className="truncate text-sm text-ink-2">{member.email}</p>

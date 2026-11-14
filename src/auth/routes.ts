@@ -17,7 +17,8 @@ import { currentUser, passesCsrfCheck } from './session';
 import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
 import { hostedSignupClosed, SIGNUP_CLOSED_MESSAGE, turnstileSecret, turnstileSiteKey } from './bot-protection';
-import { completeWelcome, legacyVerifyLinkPage, readVerificationToken, welcomeAttemptAllowed } from './welcome';
+import { clearSigninFailures, completeWelcome, legacyVerifyLinkPage, readVerificationToken, recordSigninFailure, signinWait, welcomeAttemptAllowed } from './welcome';
+import { cleanName } from './names';
 import { helpUrl } from '../funnel/config';
 import { emailCheckAvailable } from '../hosted/config';
 import { hostedServiceUrl } from '../hosted-service';
@@ -90,6 +91,14 @@ function callAuth(
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   }));
+}
+
+/** Too many failed sign-ins for one address: the same answer whether or not it has an account. */
+function throttled(seconds: number): Response {
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  const out = err(`Too many sign-in attempts for this address. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}, or reset your password to sign in now.`, 429, 'signin_throttled');
+  out.headers.set('retry-after', String(seconds));
+  return out;
 }
 
 /** Better Auth's error → our `{ error }` shape, keeping its status. */
@@ -245,7 +254,8 @@ export async function handleAuthRoute(
 
     const email = body.email.toLowerCase().trim();
     const { res, user } = await signUp(env, request, ctx, isSetup ? { kind: 'setup', bootstrapProof } : { kind: 'signup' }, {
-      name: body.name?.trim() || email, email, password: body.password || unusablePassword(),
+      // Hosted: no name before the address is proven (it would be whoever typed it); the welcome page asks for one.
+      name: (isSetup ? cleanName(body.name) : '') || email, email, password: body.password || unusablePassword(),
     });
     if (!res.ok || !user) return authError(res, 'sign-up failed');
 
@@ -272,15 +282,22 @@ export async function handleAuthRoute(
     const body = await readJson<{ email?: string; password?: string; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);
     { const bot = await botCheck(env, request, body.cf_turnstile_token, 'signin'); if (bot) return bot; }
+    const email = body.email.toLowerCase().trim();
+    // Per-address failure throttle (10 in 15 minutes), counted the same for addresses with no account, whether or not the
+    // bot check is configured. A password reset (or choosing one from the emailed link) clears it.
+    const wait = await signinWait(env, email);
+    if (wait) return throttled(wait);
 
     const auth = await createAuth(env, request, { ctx });
-    const res = await callAuth(auth, env, request, '/sign-in/email', { body: { email: body.email.toLowerCase().trim(), password: body.password } });
+    const res = await callAuth(auth, env, request, '/sign-in/email', { body: { email, password: body.password } });
     if (!res.ok) {
       if (res.status === 429) return authError(res, 'too many requests');
       // Right password, unproven mailbox (hosted): Better Auth has just sent a fresh verification email.
       if (res.status === 403) return err('verify your email address first — we sent you a new link', 403, 'email_not_verified');
+      await recordSigninFailure(env, email);
       return err('invalid credentials', 401);
     }
+    await clearSigninFailures(env, email);
 
     const { user } = await res.clone().json() as { user: { id: string; email: string } };
     auditUser(env, ctx, user.id, {
@@ -296,8 +313,10 @@ export async function handleAuthRoute(
   if (path === '/api/auth/resend-verification' && method === 'POST') {
     if (!isSaas(env)) return err('email verification is not used on this instance', 404);
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
-    const body = await readJson<{ email?: string }>(request);
+    const body = await readJson<{ email?: string; cf_turnstile_token?: string }>(request);
     if (!body.email) return err('email is required', 400);
+    // The same bot check as sign-up (and closed when sign-up is): an address's mail allowance is not free to spend.
+    { const bot = await botCheck(env, request, body.cf_turnstile_token, 'signup'); if (bot) return bot; }
     const auth = await createAuth(env, request, { ctx });
     const res = await callAuth(auth, env, request, '/send-verification-email', { body: { email: body.email.toLowerCase().trim(), callbackURL: '/' } });
     if (res.status === 429) return authError(res, 'too many requests');
@@ -314,14 +333,15 @@ export async function handleAuthRoute(
   if (path === '/api/auth/welcome' && method === 'POST') {
     if (!isSaas(env)) return err('email verification is not used on this instance', 404);
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
-    const body = await readJson<{ token?: string; password?: string }>(request);
+    const body = await readJson<{ token?: string; password?: string; name?: string }>(request);
     if (!body.token || !body.password) return err('token and password are required', 400);
     if (body.password.length < 8) return err('password must be at least 8 characters', 400);
     if (!(await welcomeAttemptAllowed(env, body.token, clientIp(request)))) return err('Too many requests — try again later', 429);
     const read = await readVerificationToken(env, body.token);
     if ('refused' in read) return err(read.refused === 'link_expired' ? 'this link has expired' : 'this link is not valid', read.refused === 'link_expired' ? 410 : 400, read.refused);
-    const done = await completeWelcome(env, read.email, body.password);
+    const done = await completeWelcome(env, read.email, body.password, typeof body.name === 'string' ? body.name : '');
     if ('refused' in done) return err(done.refused === 'link_used' ? 'a password was already chosen with this link' : 'this link is not valid', done.refused === 'link_used' ? 409 : 400, done.refused);
+    await clearSigninFailures(env, read.email);
     auditUser(env, ctx, done.userId, {
       actor_id: done.userId, actor_email: read.email, actor_type: 'user',
       action: 'auth.email_verified', resource_type: 'user', resource_id: done.userId, resource_name: read.email,
@@ -381,6 +401,7 @@ export async function handleAuthRoute(
     const auth = await createAuth(env, request, { ctx });
     const reset = await callAuth(auth, env, request, '/reset-password', { body: { newPassword: body.password, token: body.token } });
     if (!reset.ok) return reset.status === 429 ? authError(reset, 'too many requests') : err('reset link is invalid or has expired', 400);
+    await clearSigninFailures(env, user.email); // whoever was guessing this account's password no longer holds the person up
     auditUser(env, ctx, user.id, {
       actor_id: user.id, actor_email: user.email, actor_type: 'user',
       action: 'auth.password_reset', resource_type: 'user', resource_id: user.id,
@@ -434,7 +455,8 @@ export async function handleAuthRoute(
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
     const body = await readJson<{ name?: string; password?: string }>(request);
     // Hosted: the invitee chooses a password once, after verifying (as at sign-up), so none is asked for here.
-    if (!body.name || (!isSaas(env) && !body.password)) return err(isSaas(env) ? 'name is required' : 'name and password are required', 400);
+    // Hosted: no name either; it is given on the welcome page, after the address is proven.
+    if (!isSaas(env) && (!cleanName(body.name) || !body.password)) return err('name and password are required', 400);
     if (body.password && body.password.length < 8) return err('password must be at least 8 characters', 400);
 
     // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary login with no workspace of its
@@ -443,13 +465,13 @@ export async function handleAuthRoute(
       // Closed sign-up creates no account here either. Said explicitly: Better Auth turns a refusal from the user-creation hook
       // into its generic "check your email" answer while email verification is required, which would look like success.
       if (await hostedSignupClosed(env)) return err(SIGNUP_CLOSED_MESSAGE, 503);
-      const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: body.name.trim(), email: invite.email, password: body.password || unusablePassword() });
+      const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: invite.email, email: invite.email, password: body.password || unusablePassword() });
       if (!created.res.ok) return authError(created.res, 'could not create account');
       return sessionResponse(request, created.res, { verification_required: true, invite_pending: true }, 201);
     }
 
     const { res, user } = await signUp(env, request, ctx, { kind: 'invite', token: invite.token }, {
-      name: body.name.trim(), email: invite.email, password: body.password!, // required above for self-host
+      name: cleanName(body.name), email: invite.email, password: body.password!, // required above for self-host
     });
     if (!res.ok || !user) return authError(res, 'could not accept invite');
     // Self-host: an invited teammate is verified by the invite itself (there is no verification mail to rely on).

@@ -1,3 +1,4 @@
+import { cleanName } from './names';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@ready-set-mail/ui';
 import { api, errorMessage } from './api';
@@ -18,7 +19,8 @@ export const workspaceKeys = { all: ['workspaces'] as const };
 export function useWorkspaces(enabled = true) {
 	return useQuery({
 		queryKey: workspaceKeys.all,
-		queryFn: () => api<{ workspaces: WorkspaceSummary[] }>('/api/workspaces').then((r) => r.workspaces),
+		// Names render in the switcher, Settings and dialogs: shown cleaned, whatever was stored.
+		queryFn: () => api<{ workspaces: WorkspaceSummary[] }>('/api/workspaces').then((r) => r.workspaces.map((w) => ({ ...w, name: cleanName(w.name) || 'Unnamed workspace' }))),
 		enabled,
 		staleTime: 30_000,
 	});
