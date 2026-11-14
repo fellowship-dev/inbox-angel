@@ -5,7 +5,20 @@
 // two"), so a record that already lists two never gets a third, or loses one, without the person choosing.
 
 import { parseDmarcTags, readDmarcTag } from './dmarc-tags';
-import type { DmarcLookup } from './dmarc';
+/**
+ * The parts of a `lookupDmarc` result (./dmarc) this module reads. Declared here, not imported, so the dashboard can
+ * import this file alone (like dmarc-tags.ts) without compiling the resolver.
+ */
+export interface DmarcLookupLike {
+  status: 'found' | 'none' | 'multiple' | 'error';
+  domain: string;
+  record: { raw: string; valid: boolean; issues: string[]; subdomainPolicy: string } | null;
+  foundAt: string | null;
+  inherited: boolean;
+  organizationalDomain: string | null;
+  rawRecords?: string[];
+  error?: string;
+}
 
 /** The address part of one rua= entry: no `mailto:`, no `!size` limit, lower-cased (compared case-insensitively). */
 export function ruaEntryAddress(entry: string): string {
@@ -117,7 +130,7 @@ function addTo(name: string, current: string, address: string, created: boolean)
  * What to publish so reports for `domain` reach `address`, from a live DMARC lookup (lookupDmarc). Null when the lookup
  * failed: unknown is never "no record".
  */
-export function planReportAddress(lookup: DmarcLookup, address: string): ReportAddressPlan | InheritedPlan | null {
+export function planReportAddress(lookup: DmarcLookupLike, address: string): ReportAddressPlan | InheritedPlan | null {
   if (lookup.status === 'error') return null;
   const own = `_dmarc.${lookup.domain}`;
   if (lookup.status === 'multiple') return { kind: 'multiple', name: lookup.foundAt ?? own, records: lookup.rawRecords ?? [] };
