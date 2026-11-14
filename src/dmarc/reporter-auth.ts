@@ -21,14 +21,14 @@
 // report_metadata/email together match one entry. org_name, Submitter and subject never decide anything.
 
 import { organizationalDomain } from '@ready-set-mail/dns-checks';
-import { parseAuthResults } from '../email/parse-headers';
-import { readAuthHeaders, trustedResults, type AuthHeaders } from '../email/sender-proof';
+import { authProof, parseAuthResults } from '../email/parse-headers';
+import { readAuthHeaders, selectTrusted, type AuthHeaders } from '../email/sender-proof';
 import { registryCandidates, reportEmailAccepted, type KnownReporter, type RegistryEnv } from './known-reporters';
 
 export type ReporterTier = 'counted' | 'unknown' | 'unauthenticated';
 
 /** Why a carrier is not authenticated (also the reason codes in src/hosted/reasons.ts). */
-export type AuthFailure = 'authserv_unconfigured' | 'no_authentication_results' | 'authserv_id_not_found' | 'from_invalid' | 'not_authenticated';
+export type AuthFailure = 'authserv_unconfigured' | 'no_authentication_results' | 'authserv_id_not_found' | 'authres_malformed' | 'authres_too_long' | 'authres_version_unsupported' | 'from_invalid' | 'not_authenticated';
 
 /** What the inbound mail carried, for the instance-wide auth status (`intakeAuthStatus`). */
 export type AuthPresence = 'unconfigured' | 'absent' | 'foreign' | 'present';
@@ -54,6 +54,8 @@ export interface Carrier {
   via: 'dkim' | 'dmarc' | null;
   /** Registry entries matching the DKIM organisation and From address (empty unless authenticated). */
   candidates: KnownReporter[];
+  /** Why the results header could not be read (tokenizer detail), for the log; never shown to the sender. */
+  detail?: string;
 }
 
 const org = (d: string | null | undefined): string | null => (d ? (organizationalDomain(d) ?? d.toLowerCase()) : null);
@@ -68,12 +70,15 @@ export function carrierFromHeaders(headers: AuthHeaders | undefined, env: Authse
   const mode = env.AUTHSERV_HEADER?.trim().toLowerCase();
   if (!env.AUTHSERV_ID?.trim() || (mode !== 'ar' && mode !== 'arc')) return fail('authserv_unconfigured', 'unconfigured');
   if (!headers || !(mode === 'ar' ? headers.ar : headers.arc)) return fail('no_authentication_results', 'absent');
-  const trusted = trustedResults(headers, env.AUTHSERV_ID, mode);
-  if (!trusted) return fail('authserv_id_not_found', 'foreign');
-  const auth = parseAuthResults(trusted);
-  const dkimOrg = auth?.dkim?.result === 'pass' ? org(auth.dkim.domain) : null;
+  const sel = selectTrusted(headers, env.AUTHSERV_ID, mode);
+  if (sel.kind === 'foreign') return fail('authserv_id_not_found', 'foreign');
+  // The header could not be tokenized cleanly (RFC 8601, src/email/auth-results.ts): nothing in it is believed.
+  if (sel.kind === 'malformed') return fail(sel.failure === 'too_long' ? 'authres_too_long' : sel.failure === 'unsupported_version' ? 'authres_version_unsupported' : 'authres_malformed', 'present', { detail: sel.detail });
+  const proof = authProof(parseAuthResults(sel.value));
+  // EVERY dkim=pass counts (a message can carry several signatures); the one aligned with the From organisation wins, else the first passing one.
+  const dkimOrg = fromOrg && proof.dkimPassOrgs.includes(fromOrg) ? fromOrg : proof.dkimPassOrgs[0] ?? null;
   if (!from || !fromOrg) return fail('from_invalid', 'present', { dkimOrg });
-  const via: Carrier['via'] = dkimOrg === fromOrg ? 'dkim' : auth?.dmarc?.result === 'pass' && org(auth.dmarc.domain) === fromOrg ? 'dmarc' : null;
+  const via: Carrier['via'] = proof.dkimAligned(fromOrg) ? 'dkim' : proof.dmarcAligned(fromOrg) ? 'dmarc' : null;
   if (!via) return fail('not_authenticated', 'present', { dkimOrg });
   const candidates = registryCandidates(dkimOrg, from, env);
   return { class: candidates.length ? 'registry' : 'authenticated', authenticated: true, reason: null, presence: 'present', from, fromOrg, dkimOrg, via, candidates };
