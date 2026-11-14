@@ -42,7 +42,7 @@ export interface ReportVisibility {
   intake: IntakeView;
 }
 
-const EMPTY: UncountedView = { reports: 0, messages: 0, latest_at: null, by_reporter: [] };
+const emptyUncounted = (): UncountedView => ({ reports: 0, messages: 0, latest_at: null, by_reporter: [] });
 
 export const STORAGE_LIMIT_NOTICE = 'Report storage limit reached; newer reports are not being stored';
 export const DAILY_LIMIT_NOTICE = 'Daily report limit reached for this address; newer reports are not being stored until tomorrow';
@@ -90,7 +90,7 @@ export async function reportVisibility(tenant: TenantContext, domainId: number, 
   return {
     report_counting: counting,
     unverified,
-    uncounted: counting === 'proven' ? unverified : EMPTY,
+    uncounted: counting === 'proven' ? unverified : emptyUncounted(),
     // The caps only apply to hosted intake; self-host has no daily caps to hit.
     intake: intakeView(failures, hostedEnabled(tenant.env) ? usage : null, hostedEnabled(tenant.env) ? intakeLimits(tenant.env) : null),
   };
