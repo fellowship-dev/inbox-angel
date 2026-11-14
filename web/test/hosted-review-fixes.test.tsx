@@ -370,3 +370,42 @@ describe('hosted bulk-import results', () => {
 		expect(screen.queryByText(/provisioning/)).not.toBeInTheDocument();
 	});
 });
+
+describe('names that do not resolve, beyond the setup wizard', () => {
+	it('graduation wizard offers nothing, in self-host too', async () => {
+		const selfDomain = { ...domain, rua_address: 'rua@reports.mozilla.test' };
+		renderApp(
+			<Routes>
+				<Route path="/domains/:id/dmarc-wizard" element={<DmarcWizardPage />} />
+			</Routes>,
+			{
+				route: '/domains/7/dmarc-wizard',
+				routes: {
+					'GET /api/domains': { domains: [selfDomain] },
+					'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
+					'GET /api/domains/7/onboarding-status': onboarding({ rua_address: 'rua@reports.mozilla.test', nxdomain: true }, none),
+				},
+			},
+		);
+		expect(await screen.findByText(/does not exist, so there are no records to change/)).toBeInTheDocument();
+		expect(screen.queryByText(/p=quarantine|New record/)).not.toBeInTheDocument();
+	});
+
+	it('self-host add flow offers no record for it', async () => {
+		const selfDomain = { ...domain, domain: 'no-such-name-ia-walk.com', rua_address: 'rua@reports.mozilla.test' };
+		renderApp(<AddDomainPage />, {
+			routes: {
+				'GET /api/zones': fail(400),
+				'POST /api/domains': { domain: selfDomain, rua_hint: '' },
+				'GET /api/domains': { domains: [selfDomain] },
+				'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
+				'GET /api/domains/7/onboarding-status': onboarding({ domain: 'no-such-name-ia-walk.com', nxdomain: true }, none),
+			},
+		});
+		const user = (await import('@testing-library/user-event')).default.setup();
+		await user.type(await screen.findByLabelText('Your domain'), 'no-such-name-ia-walk.com');
+		await user.click(screen.getByRole('button', { name: 'Continue' }));
+		expect(await screen.findByRole('heading', { name: 'This domain does not resolve' })).toBeInTheDocument();
+		expect(screen.queryByText(/rua=mailto/)).not.toBeInTheDocument();
+	});
+});

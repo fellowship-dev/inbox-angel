@@ -125,13 +125,16 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	const livePolicy = parseDmarcPolicy(live);
 	// No record of its own: the new one replaces what it inherits, so it starts at the inherited policy when that enforces.
 	const floor = live ? (livePolicy ?? 'none') : offerPolicy(coverage);
-	const record = rua && lookup === 'done' && floor ? buildRecommendedRecord(live, floor, rua) : null;
+	// DNS says the name does not exist: there is no record to add anywhere.
+	const nxdomain = ob.data?.nxdomain === true;
+	const record = rua && lookup === 'done' && floor && !nxdomain ? buildRecommendedRecord(live, floor, rua) : null;
 	const inPlace = lookup === 'done' && !!q.data?.found && !!q.data.has_rua;
 	const offered = record !== null && !inPlace;
 
 	let heading: { title: string; description: string };
 	if (!rua) heading = { title: 'Reports address needed', description: `${domain.domain} is added, but it has no reports address yet, so there is no DNS record to add.` };
 	else if (lookup === 'reading') heading = { title: 'Reading your DMARC record', description: `Reading the current DMARC record for ${domain.domain}…` };
+	else if (nxdomain) heading = { title: 'This domain does not resolve', description: `DNS says ${domain.domain} does not exist, so there is no DMARC record to add. Check the spelling, or register the domain.` };
 	else if (lookup === 'failed') heading = { title: 'Could not read your DMARC record', description: `We could not read the current DMARC record for ${domain.domain}, so no record is offered until the lookup works.` };
 	else if (inPlace) heading = { title: 'Your DNS record is in place', description: `The DMARC record for ${domain.domain} already sends reports here.` };
 	else if (live) heading = { title: 'Update your DMARC record', description: `${domain.domain} already has a DMARC record. Replace it with this one: it keeps your settings and adds our reports address.` };
@@ -176,7 +179,7 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 					{result.dns_instructions}
 				</Alert>
 			) : null}
-			<LiveDnsCheck q={q} rua={domain.rua_address} />
+			{nxdomain ? null : <LiveDnsCheck q={q} rua={domain.rua_address} />}
 			<Button asChild>
 				<Link to={`/domains/${domain.id}`}>Go to {domain.domain}</Link>
 			</Button>

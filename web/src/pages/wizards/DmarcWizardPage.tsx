@@ -89,7 +89,9 @@ export function DmarcWizardPage() {
 	const coverage = dmarcCoverage(onboarding.data ?? null, onboarding.isError);
 	// Hosted: say only what DNS shows, and offer no tightening while SPF or DMARC is missing. Any mode: a name without a
 	// record of its own that inherits a policy gets no offer, since a record of its own would replace (and could weaken) it.
-	const notReady = !!domain && !!dns.data && !dns.data.error && (hosted ? !dns.data.found || !onboarding.data?.spf.record : !dns.data.found && coverage.kind === 'inherited');
+	// A name DNS says does not exist has nothing to tighten, in any mode.
+	const nxdomain = onboarding.data?.nxdomain === true;
+	const notReady = !!domain && !!dns.data && !dns.data.error && (nxdomain || (hosted ? !dns.data.found || !onboarding.data?.spf.record : !dns.data.found && coverage.kind === 'inherited'));
 	if (domainsPending || dns.isPending || (hosted && onboarding.isPending)) body = <PageSkeleton label="Reading your DMARC record" />;
 	else if (domainsError) body = <LoadError error={domainsError} onRetry={() => void refetchDomains()} title="Could not load this domain" />;
 	else if (!domain) {
@@ -119,16 +121,20 @@ export function DmarcWizardPage() {
 			<StepCard title="Not ready to change the policy">
 				<ul className="list-disc space-y-1 pl-5 text-sm text-ink-2">
 					<li>
-						{dns.data.found
+						{nxdomain
+							? `DNS says ${domain.domain} does not exist, so there are no records to change.`
+							: dns.data.found
 							? 'A DMARC record is published.'
 							: coverage.kind === 'inherited'
 								? inheritedSentence(domain.domain, coverage)
 								: `No DMARC record at _dmarc.${domain.domain}.`}
 					</li>
-					{hosted ? <li>{onboarding.isError ? 'We could not read the SPF record.' : spf ? 'An SPF record is published.' : `No SPF record at ${domain.domain}.`}</li> : null}
+					{hosted && !nxdomain ? <li>{onboarding.isError ? 'We could not read the SPF record.' : spf ? 'An SPF record is published.' : `No SPF record at ${domain.domain}.`}</li> : null}
 				</ul>
 				<p className="text-sm text-ink-2">
-					{dns.data.found || coverage.kind !== 'inherited'
+					{nxdomain
+						? 'Check the spelling, or register the domain.'
+						: dns.data.found || coverage.kind !== 'inherited'
 						? 'Tightening the policy starts from a published SPF record and a DMARC record of its own, so nothing is offered here yet.'
 						: 'Nothing is offered here: change the policy at the parent domain, or publish a record of its own that is at least as strict.'}
 				</p>
