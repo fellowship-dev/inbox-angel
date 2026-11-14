@@ -149,12 +149,12 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 		expect(scan(walk(join(ROOT, 'src'))).found).toEqual([]);
 	});
 
-	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, one in funnel.ts: an unsubscribe removes the address from every workspace, four in workspaces.ts: a user own workspaces, how many they own, and routing by reports domain / hostname, six in auth.ts: resolving a credential to its workspace, four in intake.ts: resolving a report token / hosted id, five in claims.ts: who verified a domain first, finding and detaching an unproven holder; four in access-grants.ts: credential id/hash, principal identity and finite portfolio consent)', () => {
+	it('the query layer (except global.ts) is scoped, with the documented exemptions (one elsewhere, one in funnel.ts: an unsubscribe removes the address from every workspace, four in workspaces.ts: a user own workspaces, how many they own, and routing by reports domain / hostname, six in auth.ts: resolving a credential to its workspace, five in intake.ts: resolving a report token / hosted id / the verified owner of a report sent to the fixed hosted address, five in claims.ts: who verified a domain first, finding and detaching an unproven holder; four in access-grants.ts: credential id/hash, principal identity and finite portfolio consent)', () => {
 		const files = walk(join(ROOT, 'packages/db/src/queries')).filter((f) => !/global(-lifecycle)?\.ts$/.test(f));
 		expect(files.length).toBeGreaterThan(5);
 		const { found, exemptions } = scan(files);
 		expect(found).toEqual([]);
-		expect(exemptions).toBe(26);
+		expect(exemptions).toBe(27);
 	});
 
 	it('pins the privileged access lookup census without exempting scoped access queries', () => {
