@@ -37,12 +37,13 @@
 	// Before first owner setup: wrangler secret put BOOTSTRAP_SECRET (random >=32 characters).
 	// Set BETTER_AUTH_URL to this installation HTTPS origin. Never reuse another instance namespace.
 
-	// D1 database binding
+	// D1 database binding. Substitute the id of this installation's own database (wrangler d1 create ready-set-mail)
+	// before deploying; the placeholder makes a deploy or remote migration fail instead of binding someone else's database.
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "ready-set-mail",
-			"database_id": "cf18a05c-9f6c-4f38-a43c-d85037d17534",
+			"database_id": "REPLACE_WITH_INSTALLATION_D1_DATABASE_ID",
 			"migrations_dir": "migrations"
 		}
 	],
