@@ -4,10 +4,10 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, isNull, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, gte, isNull, max, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
-import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
+import { aggregateReports, domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
@@ -19,6 +19,22 @@ export function intakeQueries(db: Db, workspaceId: string) {
 	const mine = eq(intakeTokens.workspace_id, workspaceId);
 	const forDomain = (id: number) => and(mine, eq(intakeTokens.domain_id, id));
 	const mine_usage = () => eq(intakeUsage.workspace_id, workspaceId);
+	// The first write creates the row; a later one rotates, keeping the previous hash valid for the grace period.
+	const upsert = (domainId: number, tokenHash: string, nowSeconds: number) =>
+		db
+			.insert(intakeTokens)
+			.values({ domain_id: domainId, workspace_id: workspaceId, token_hash: tokenHash })
+			.onConflictDoUpdate({
+				target: intakeTokens.domain_id,
+				// An upsert must never move a row to another workspace.
+				setWhere: mine,
+				set: {
+					prev_token_hash: sql`${intakeTokens.token_hash}`,
+					prev_expires_at: nowSeconds + TOKEN_ROTATION_GRACE_SECONDS,
+					token_hash: sql`excluded.token_hash`,
+					rotated_at: nowSeconds,
+				},
+			});
 
 	return {
 		get(domainId: number) {
@@ -30,21 +46,39 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		 * stays valid for TOKEN_ROTATION_GRACE_SECONDS.
 		 */
 		set(domainId: number, tokenHash: string, nowSeconds: number) {
+			return upsert(domainId, tokenHash, nowSeconds).run();
+		},
+
+		/**
+		 * Issue (or rotate) a domain's report address without hosted records, in one batch: the token hash (a rotation keeps
+		 * the previous one valid for TOKEN_ROTATION_GRACE_SECONDS) and the address itself in `domains.rua_address`. The
+		 * address holds the token in clear on purpose: in this mode the customer publishes it in their DMARC record, so it
+		 * is public anyway, and the dashboard must be able to show it again. Only a live domain of this workspace changes.
+		 */
+		issueAddress(domainId: number, tokenHash: string, address: string, nowSeconds: number) {
+			return db.batch([
+				upsert(domainId, tokenHash, nowSeconds),
+				db.update(domains).set({ rua_address: address, updated_at: sql`unixepoch()` })
+					.where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId), isNull(domains.evicted_at))),
+			]);
+		},
+
+		/** Revoke a domain's report address at once: the token row (current and previous hash) goes, and the address is cleared. */
+		revokeAddress(domainId: number) {
+			return db.batch([
+				db.delete(intakeTokens).where(forDomain(domainId)),
+				db.update(domains).set({ rua_address: '', updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
+			]);
+		},
+
+		/** When the newest aggregate report for the domain was stored, counting only reports stored at or after `sinceSeconds`; null when none. */
+		lastReportSince(domainId: number, sinceSeconds: number) {
 			return db
-				.insert(intakeTokens)
-				.values({ domain_id: domainId, workspace_id: workspaceId, token_hash: tokenHash })
-				.onConflictDoUpdate({
-					target: intakeTokens.domain_id,
-					// An upsert must never move a row to another workspace.
-					setWhere: mine,
-					set: {
-						prev_token_hash: sql`${intakeTokens.token_hash}`,
-						prev_expires_at: nowSeconds + TOKEN_ROTATION_GRACE_SECONDS,
-						token_hash: sql`excluded.token_hash`,
-						rotated_at: nowSeconds,
-					},
-				})
-				.run();
+				.select({ at: max(aggregateReports.created_at) })
+				.from(aggregateReports)
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId), gte(aggregateReports.created_at, sinceSeconds)))
+				.get()
+				.then((r) => r?.at ?? null);
 		},
 
 		/**

@@ -36,15 +36,18 @@ export interface EnableBody {
 export const hostedKey = (id: number) => [...domainKeys.all(id), 'hosted'] as const;
 export const HOSTED_CONFIG_KEY = ['hosted-config'] as const;
 
-/** Is hosted mode on for this deployment? Any failure counts as "off": no hosted UI, no further hosted requests. */
+/**
+ * Is hosted mode on for this deployment? Any failure counts as "off": no hosted UI, no further hosted requests.
+ * `records: false` (a hosted deployment without a records zone) turns off the hosted-records UI only.
+ */
 export function useHostedConfig(): boolean {
 	const q = useQuery({
 		queryKey: HOSTED_CONFIG_KEY,
-		queryFn: () => api<{ enabled: boolean }>('/api/hosted/config'),
+		queryFn: () => api<{ enabled: boolean; reports?: boolean; records?: boolean }>('/api/hosted/config'),
 		staleTime: Infinity,
 		retry: false,
 	});
-	return q.data?.enabled === true;
+	return q.data?.enabled === true && q.data.records !== false;
 }
 
 export function useHostedStatus(domainId: number) {

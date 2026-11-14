@@ -2,6 +2,7 @@ export * from './doh';
 export * from './org-domain';
 export * from './spf';
 export * from './dmarc';
+export * from './dmarc-rua';
 export * from './dkim';
 export * from './domain-name';
 export * from './mx';

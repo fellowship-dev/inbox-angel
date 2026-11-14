@@ -81,6 +81,7 @@ import { handleAccessRoutes } from '../access/routes';
 import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
+import { handleReportAddressRoutes } from '../hosted/report-address-routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
@@ -499,8 +500,10 @@ async function _handleApi(
     if (hit.count > CHECK_SESSIONS_PER_IP) {
       return Response.json({ error: 'too many check sessions from this address, try again later' }, { status: 429, headers: { 'Retry-After': String(CHECK_SESSION_WINDOW_MS / 1000) } });
     }
-    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no workspace.
-    if (hostedEnabled(env) && hostedConfig(env).canaryDomain) {
+    // Hosted: an expiring, single-use check+<token>@canary address that belongs to no workspace. Without CANARY_DOMAIN
+    // the free check is off: report intake does not depend on it, and no address is handed out that nothing routes.
+    if (hostedEnabled(env)) {
+      if (!hostedConfig(env).canaryDomain) return err('The free email check is not available on this server', 404);
       const canary = await issueCanary(env);
       return json(canary, 201);
     }
@@ -1948,6 +1951,10 @@ async function _handleApi(
     // /api/cloudflare/* and /api/domains/:id/connection — Cloudflare connections (owner/admin)
     const connectionResponse = await handleConnectionRoutes(request, tenant, ctx, { role: workspace.role, user: userBySession });
     if (connectionResponse) return connectionResponse;
+
+    // /api/domains/:id/report-address — a report address without hosted records (MODE=saas with INTAKE_DOMAIN)
+    const reportAddressResponse = await handleReportAddressRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
+    if (reportAddressResponse) return reportAddressResponse;
 
     // /api/domains/:id/hosted — hosted records (MODE=saas only)
     const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });

@@ -10,6 +10,7 @@ import { DnsRecords } from '../../components/domain/DnsRecords';
 import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
+import { ConnectReports } from '../../components/reports/ConnectReports';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
@@ -241,6 +242,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
 
+			{/* Hosted with report intake: issue the address and follow it to the first report. Nothing elsewhere. */}
+			<ConnectReports domain={domain} />
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
 				{hasReportAddress(domain.rua_address) ? (
 					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />

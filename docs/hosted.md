@@ -3,7 +3,7 @@
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
 
-> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and run `npm run migrate`. Mail addressed without a valid token is rejected, not filed anywhere.
+> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1`, **every inbound message makes the Worker throw**, so senders see temporary failures and retry; report mail also throws until `INTAKE_DOMAIN` is set. Set `SAAS_ENABLED=1` and `INTAKE_DOMAIN` (and `CANARY_DOMAIN` if the free check is wanted) *before* deploying this version, and run `npm run migrate`. Mail addressed without a valid token is rejected, not filed anywhere.
 
 Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Customer setup](#customer-setup) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits-and-quotas)
 
@@ -34,8 +34,8 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
-| `INTAKE_DOMAIN` | `rua.inboxangel.io` | |
-| `CANARY_DOMAIN` | `canary.inboxangel.io` | |
+| `INTAKE_DOMAIN` | `rua.inboxangel.io` | report intake. With it set, owners and admins can give a verified domain its report address (see [Report address without hosted records](#report-address-without-hosted-records)); needs nothing else from this table |
+| `CANARY_DOMAIN` | `canary.inboxangel.io` | optional: the free check. Without it `POST /api/check-sessions` answers `404` and report intake is unaffected |
 | `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
 | `INTAKE_MAX_REPORTS_PER_DAY` | `50` | optional: reports accepted per intake token **per authenticated reporter domain** per UTC day (over-cap mail is rejected, nothing ingested). A message is attributed to a reporter by an aligned-looking `dkim`/`spf`/`dmarc` pass in its `Authentication-Results` header (checked before parsing) |
@@ -199,6 +199,26 @@ Notes for the customer:
   A hosted record counts toward the domain's **Level** only once its pointer is `ok` (`level_inputs` in the status response).
 * Token rotation (`POST …/hosted/rotate-token`) edits the hosted records; the customer changes nothing. The previous token keeps being accepted for 72 hours.
 
+### Report address without hosted records
+
+The simplest way to receive reports, and the only one that needs no records zone: `POST /api/domains/:id/report-address` (dashboard: **Connect reports** on the domain page).
+It needs `MODE=saas`, `SAAS_ENABLED=1` and `INTAKE_DOMAIN`, an owner or admin, and a verified domain (never a pending or lost claim, an evicted row, or a `legacy` row from before ownership checks).
+It issues `rua+<token>@<INTAKE_DOMAIN>` (the same 160-bit token as hosted records, stored only as its SHA-256 in `intake_tokens`) and keeps the address itself in `domains.rua_address`, which reveals nothing: the customer publishes it in their own DMARC record.
+
+The customer then edits their own `_dmarc` TXT record. `GET /api/domains/:id/report-address` reads it live and says what to publish:
+
+* their current record with the address added to `rua=`, every other tag and the policy unchanged;
+* when the record already lists two addresses (receivers only have to honour two, RFC 7489 §6.2), a choice of which one to replace, or to add a third knowingly; nothing is dropped without that choice;
+* for a subdomain that follows its organizational domain's record: where the record lives, and a record of its own that keeps the policy it gets today (`sp=`, else `p=`) and the parent's addresses;
+* for a domain with no DMARC record: `v=DMARC1; p=none; rua=mailto:<address>`;
+* several DMARC records at one name: no proposal (receivers ignore them all);
+* a failed lookup: `plan: null` and `state: "unknown"`, never "no record".
+
+`state` is `not_issued`, `not_published`, `waiting` (the record lists the address, no report yet), `receiving` (`last_report_at` is the newest report stored since the address was first issued) or `unknown`.
+`POST …/report-address/rotate` issues a new address; the previous one keeps working for 72 hours, then is refused. `DELETE …/report-address` stops both at once; stored reports stay.
+A domain with hosted records keeps its address there: these routes report `managed_by: "hosted_records"` and refuse to change it (`409`).
+Receivers outside the customer's organization only send to the address once the [authorisation record](#4-the-records-zone) `*._report._dmarc.<INTAKE_DOMAIN>` exists.
+
 ## How it works
 
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
@@ -213,7 +233,8 @@ Notes for the customer:
 | unknown/expired token, malformed token, unknown base address or host | `setReject` (permanent 5xx), logged `[intake] rejected {reason, …}` |
 | report for a domain the workspace does not own (spoof) | `setReject`, logged with the workspace |
 | malformed or oversized attachment, no policies in a TLS-RPT | `setReject`, logged |
-| schema not migrated, or hosted env missing | the Worker **throws**: the sender retries later and the report is not lost |
+| schema not migrated, `SAAS_ENABLED` missing, or report mail while `INTAKE_DOMAIN` is missing | the Worker **throws**: the sender retries later and the report is not lost |
+| `check+` mail while `CANARY_DOMAIN` is not set | `setReject` (Unknown recipient) |
 
 **Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
@@ -254,7 +275,18 @@ MTA-STS on a hosted domain: `POST /api/domains/:id/mta-sts` answers `409` (use `
 Errors: `409` already enabled · `422` SPF cannot be resolved, no MX for MTA-STS, several SPF records · `502` Cloudflare/DNS failure · `507` records zone full.
 Enabling is all-or-nothing: if Cloudflare fails part-way, the records already written are removed.
 
-`POST /api/check-sessions` (public) returns `{ token, email, expires_at }` in `saas` (`email` is the `check+…@canary…` address).
+`POST /api/check-sessions` (public) returns `{ token, email, expires_at }` in `saas` (`email` is the `check+…@canary…` address), or `404` when `CANARY_DOMAIN` is not set.
+
+`GET /api/hosted/config` (any signed-in caller) returns `{ enabled, reports, records }`: hosted mode, report addresses (`INTAKE_DOMAIN`), hosted records (`HOSTED_RECORDS_ZONE`).
+
+Report addresses (see [above](#report-address-without-hosted-records); `404` outside hosted mode; writes need an owner/admin):
+
+| Method & path | Response |
+|---------------|----------|
+| `GET /api/domains/:id/report-address` | `{ available: false }` without `INTAKE_DOMAIN`, else `{ available, domain_id, domain, managed_by, can_issue, refusal, address, issued_at, rotated_at, previous_valid_until, last_report_at, state, dns: { checked_at, error, plan } \| null }` |
+| `POST /api/domains/:id/report-address` | `201` with the status; `200` and the unchanged status when an address exists; `403` for a `legacy` row; `409` with hosted records |
+| `POST /api/domains/:id/report-address/rotate` | the status, with `previous_valid_until`; `409` without an address |
+| `DELETE /api/domains/:id/report-address` | the status (`not_issued`) |
 
 ## Data retention
 

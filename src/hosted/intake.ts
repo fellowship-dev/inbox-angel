@@ -2,7 +2,7 @@
 //
 //   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → workspace + domain
 //   tls-rpt+<token>@rua.inboxangel.io   TLS-RPT report
-//   check+<token>@canary.inboxangel.io  anonymous free check (src/hosted/canary.ts)
+//   check+<token>@canary.inboxangel.io  anonymous free check (src/hosted/canary.ts), only when CANARY_DOMAIN is set
 //
 // Subdomains can't have a catch-all, so one Email Routing rule per base address (`rua@`, `tls-rpt@`,
 // `check@`) delivers every `+token` variant here. The token picks the workspace; the report's own
@@ -46,16 +46,19 @@ function reject(message: ForwardableEmailMessage, fields: Record<string, unknown
 
 export async function handleHostedEmail(message: ForwardableEmailMessage, env: BoundEnv): Promise<void> {
   const cfg = hostedConfig(env);
-  if (!hostedEnabled(env) || !cfg.intakeDomain || !cfg.canaryDomain) {
+  if (!hostedEnabled(env)) {
     // A deployment problem, not the sender's: fail the delivery so it is retried once fixed.
-    throw new Error('Hosted intake is not configured: MODE=saas needs SAAS_ENABLED=1, INTAKE_DOMAIN and CANARY_DOMAIN');
+    throw new Error('Hosted intake is not configured: MODE=saas needs SAAS_ENABLED=1');
   }
 
   const rcpt = parseRecipient(message.to);
   const base = { to_host: rcpt?.host ?? null };
   if (!rcpt) return reject(message, base, 'Unknown recipient');
 
-  if (rcpt.host === cfg.canaryDomain) return handleCanaryEmail(message, env, rcpt);
+  // The free check and report intake are independent: each needs only its own domain (CANARY_DOMAIN, INTAKE_DOMAIN).
+  if (cfg.canaryDomain && rcpt.host === cfg.canaryDomain) return handleCanaryEmail(message, env, rcpt);
+  // Anything else is report intake. Without INTAKE_DOMAIN that is a deployment problem: fail so the sender retries.
+  if (!cfg.intakeDomain) throw new Error('Hosted report intake is not configured: MODE=saas needs INTAKE_DOMAIN');
 
   if (rcpt.host !== cfg.intakeDomain) return reject(message, base, 'Unknown recipient');
   if (rcpt.base !== 'rua' && rcpt.base !== 'tls-rpt') return reject(message, base, 'Unknown recipient');

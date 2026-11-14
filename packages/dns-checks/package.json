@@ -12,6 +12,7 @@
     "./spf": "./src/spf.ts",
     "./dmarc": "./src/dmarc.ts",
     "./dmarc-tags": "./src/dmarc-tags.ts",
+    "./dmarc-rua": "./src/dmarc-rua.ts",
     "./dkim": "./src/dkim.ts",
     "./domain-name": "./src/domain-name.ts",
     "./txt": "./src/txt.ts",
