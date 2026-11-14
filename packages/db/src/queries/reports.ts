@@ -154,14 +154,14 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 		const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
 		const w = windowCol(on);
 		/** Not authenticated: what the report says about its sender is only a claim. */
-		const unverified = sql`(COALESCE(aggregate_reports.reporter_tier, '') = 'unauthenticated' OR aggregate_reports.reporter_auth_domain IS NULL)`;
+		const unverified = sql`(COALESCE(aggregate_reports.reporter_tier, '') = 'unauthenticated' OR COALESCE(aggregate_reports.reporter_auth, '') <> 'pass')`;
 		const [tot, by] = await Promise.all([
 			db.all<{ reports: number; messages: number; latest_at: number | null; unknown: number | null; unauthenticated: number | null }>(sql`
 				SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at,
 					SUM(CASE WHEN aggregate_reports.reporter_tier = 'unknown' THEN 1 ELSE 0 END) AS unknown, SUM(CASE WHEN aggregate_reports.reporter_tier = 'unauthenticated' THEN 1 ELSE 0 END) AS unauthenticated
 				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND ${w} >= ${since} AND ${excluded}`),
 			db.all<{ reporter: string; reports: number; unverified: number; claims: string | null }>(sql`
-				SELECT CASE WHEN ${unverified} THEN 'unverified sender' ELSE aggregate_reports.reporter_auth_domain END AS reporter,
+				SELECT CASE WHEN ${unverified} THEN 'unverified sender' ELSE COALESCE(aggregate_reports.reporter_auth_domain, aggregate_reports.org_name) END AS reporter,
 					CASE WHEN ${unverified} THEN 1 ELSE 0 END AS unverified, CASE WHEN ${unverified} THEN aggregate_reports.org_name END AS claims, COUNT(*) AS reports
 				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND ${w} >= ${since} AND ${excluded}
 				GROUP BY reporter, unverified, claims ORDER BY reports DESC, reporter LIMIT 5`),

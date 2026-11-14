@@ -60,12 +60,14 @@ export function signaturesFor(results: string[]): number {
 }
 
 /**
- * A fake inbound message. Results headers given in `headers` (or `rawHeaderLines`) get as many DKIM-Signature fields as their dkim results,
+ * A fake inbound message. Results headers (given in `headers` or `rawHeaderLines`, or already in the raw text) get as many DKIM-Signature fields as their dkim results,
  * so a genuine-looking header stays genuine; `dkimSignatures` overrides that count (a forged header that adds a result, for example).
  */
 export function fakeMessage(to: string, rawMime: string, o: { from?: string; headers?: Record<string, string>; rawSize?: number; rawHeaderLines?: string[]; dkimSignatures?: number } = {}): FakeMessage {
   const head = rawMime.split(/\r?\n\r?\n/)[0];
-  const given = [...Object.entries(o.headers ?? {}).filter(([k]) => /^(arc-)?authentication-results$/i.test(k)).map(([, v]) => v), ...(o.rawHeaderLines ?? []).filter((l) => /^(arc-)?authentication-results:/i.test(l)).map((l) => l.slice(l.indexOf(':') + 1))];
+  // Every results header the message will carry: given as options, or already in the raw text (tests that inject one into a fixture).
+  const inHead = head.replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/).filter((l) => /^(arc-)?authentication-results:/i.test(l)).map((l) => l.slice(l.indexOf(':') + 1));
+  const given = [...Object.entries(o.headers ?? {}).filter(([k]) => /^(arc-)?authentication-results$/i.test(k)).map(([, v]) => v), ...(o.rawHeaderLines ?? []).filter((l) => /^(arc-)?authentication-results:/i.test(l)).map((l) => l.slice(l.indexOf(':') + 1)), ...inHead];
   const already = (head.match(/^dkim-signature:/gim) ?? []).length;
   const wanted = o.dkimSignatures ?? (given.length ? signaturesFor(given) : 0);
   const sigs = Array.from({ length: Math.max(0, wanted - already) }, (_, n) => `DKIM-Signature: v=1; a=rsa-sha256; d=signer${n}.test; s=s; bh=x; b=x`);
