@@ -147,9 +147,9 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 
 	/** The window column: `period` (the default) is the period a report covers (date_begin); `received` is when we stored it (created_at). */
 	const windowCol = (by: ReportWindow) => (by === 'received' ? sql`aggregate_reports.created_at` : sql`aggregate_reports.date_begin`);
-	const summarise = async (domainId: number | null, since: number, excluded: ReturnType<typeof sql>, by: ReportWindow = 'period'): Promise<UncountedSummary> => {
+	const summarise = async (domainId: number | null, since: number, excluded: ReturnType<typeof sql>, on: ReportWindow = 'period'): Promise<UncountedSummary> => {
 		const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
-		const w = windowCol(by);
+		const w = windowCol(on);
 		const [tot, by] = await Promise.all([
 			db.all<{ reports: number; messages: number; latest_at: number | null; unknown: number | null; unauthenticated: number | null }>(sql`
 				SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at,

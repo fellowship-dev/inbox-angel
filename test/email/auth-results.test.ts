@@ -148,8 +148,9 @@ describe('dkim results are collected, never overwritten', () => {
       expect(p.dkimAligned('a.example'), h).toBe(h.includes('pass header.d=a.example'));
     }
   });
-  it('header.i stands in when header.d is absent; relaxed alignment is organisational', () => {
-    const p = authProof(parseAuthResults('mx.example.net; dkim=pass header.i=@mail.notification.microsoft.com'));
+  it('header.i never stands in for header.d (every real report email carries header.d); relaxed alignment is organisational', () => {
+    expect(authProof(parseAuthResults('mx.example.net; dkim=pass header.i=@mail.notification.microsoft.com')).dkimAligned('microsoft.com')).toBe(false);
+    const p = authProof(parseAuthResults('mx.example.net; dkim=pass header.d=mail.notification.microsoft.com'));
     expect(p.dkimAligned('microsoft.com')).toBe(true);
     expect(p.dkimAligned('evil.com')).toBe(false);
   });
