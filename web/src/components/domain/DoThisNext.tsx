@@ -18,6 +18,25 @@ export function DoThisNext({ actions, pending, canWrite, onRetry }: { actions: D
 					<Skeleton className="h-4 w-1/2" />
 					<span className="text-sm text-ink-2">Reading this domain's records from public DNS…</span>
 				</div>
+			) : actions[0]?.key === 'done' ? (
+				// Nothing to do: a plain statement of what was verified and from what, with any notes below it. No numbered step.
+				<div className="space-y-3 rounded-lg border border-line bg-surface-1 px-4 py-4 sm:px-5" data-status="verified">
+					<p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-ink-1">
+						<StatusLabel kind="verified" label="Nothing to do" />
+						<span>{actions[0].why}</span>
+					</p>
+					{actions.length > 1 ? (
+						<ul className="space-y-2 border-t border-line pt-3">
+							{actions.slice(1).map((a) => (
+								<li key={a.key} data-status={a.status} className="space-y-1 text-sm">
+									<StatusLabel kind={a.status} />
+									<p className="text-ink-1">{a.do}</p>
+									<p className="max-w-prose text-ink-2">{a.why}</p>
+								</li>
+							))}
+						</ul>
+					) : null}
+				</div>
 			) : (
 				<ol className="divide-y divide-line rounded-lg border border-line bg-surface-1">
 					{actions.map((a, i) => (

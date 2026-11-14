@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { actionsPending, domainActions, type ActionInput } from '../src/lib/actions';
+import { summaryFetchedAfterRead } from '../src/pages/domains/DomainDetailPage';
 import type { DnsCheck, OnboardingResult } from '../src/lib/domain-queries';
 import { getStartedSteps } from '../src/lib/get-started';
 import type { DomainCheckSummary } from '../src/lib/types';
@@ -66,9 +67,10 @@ describe('domainActions: Do this next', () => {
 		expect(keys({ dns: none, reports: reports(null) })).toEqual(['gathering:gathering']);
 	});
 
-	it('without a reports address, report-dependent advice is Unknown, never "gathering"', () => {
+	it('without a reports address, the step is connecting reports, never "gathering"', () => {
 		const k = keys({ domain: { ...domain, rua_address: '' }, dns: dns('v=DMARC1; p=none'), reports: reports(null) });
-		expect(k).toEqual(['unknown:no-reports']);
+		// Without a reports address, connecting reports is the step (one helper: "Connect reports" once PR 150 lands).
+		expect(k).toEqual(['improve:connect-reports']);
 	});
 
 	it('a record that does not send reports here says so', () => {
@@ -226,7 +228,19 @@ describe('truth table: Do this next', () => {
 		expect(missing.do).toBe('Publish a DMARC record, starting at p=none');
 		// Inherited quarantine at pct=5: nothing offered that would weaken or tighten it; the parent's pct is the fix.
 		const partial = { policy: 'quarantine', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=quarantine; pct=5' };
-		expect(k({ effective: partial })).toEqual(['improve:pct']);
+		expect(k({ effective: partial })).toEqual(['improve:parent-pct']);
+		// The fix is at the parent, on its page when it is listed in this workspace.
+		const pct = domainActions(input({ domain: sub, dns: noOwn, effective: { policy: 'reject', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=reject; pct=10' }, parentId: 9 }));
+		expect(pct.map((a) => a.key)).toEqual(['parent-pct']);
+		expect(pct[0]).toMatchObject({ do: 'Raise pct from 10 to 100 at _dmarc.example.com', to: '/domains/9', cta: 'Open example.com' });
+		// Inherited weaker sp: the subdomain follows sp=none while the parent itself rejects.
+		const sp = domainActions(input({ domain: sub, dns: noOwn, effective: { policy: 'none', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=reject; sp=none' }, parentId: 9 }));
+		expect(sp.map((a) => a.key)).toEqual(['parent-sp']);
+		expect(sp[0]).toMatchObject({ do: 'Set sp=reject at _dmarc.example.com', to: '/domains/9' });
+		// Both: sp=quarantine at pct=10.
+		const both = domainActions(input({ domain: sub, dns: noOwn, effective: { policy: 'quarantine', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=reject; sp=quarantine; pct=10' } }));
+		expect(both.map((a) => a.key).sort()).toEqual(['parent-pct', 'parent-sp']);
+		expect(both.every((a) => a.to === undefined)).toBe(true); // parent not listed: no link to a page that is not there
 		// Inherited p=none is never "nothing to do"; the fix is at the parent.
 		expect(k({ effective: { policy: 'none', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=none' } })).toEqual(['improve:parent-none']);
 		// The parent's record gives no policy: fix it there.
@@ -271,5 +285,59 @@ describe('truth table: Do this next', () => {
 		expect(keys({ onboarding: both })).toEqual(['verified:done', 'note:dkim-old']);
 		const cname = onboarding({ dkim: { selectors: [{ name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' }, { name: 's1._domainkey.example.com', record: 's1.domainkey.u1.wl.sendgrid.net' }], source: 'doh' } });
 		expect(keys({ onboarding: cname })).toEqual(['verified:done', 'note:dkim-old']);
+	});
+});
+
+describe('review round 2', () => {
+	it('quarantine without a reports address: connecting reports is the step, on both pages', () => {
+		const noRua = { ...domain, rua_address: '' };
+		const v = domainVerdict(noRua, summary({ dmarc_policy: 'quarantine', dmarc_sp: 'quarantine' }), reports(null), null, now);
+		expect(v.status).toBe('verified');
+		expect(v.next.label).toBe('Set up a reports address so senders can be confirmed');
+		const k = keys({ domain: noRua, dns: dns('v=DMARC1; p=quarantine'), reports: reports(null) });
+		expect(k).toContain('improve:connect-reports');
+		expect(k).not.toContain('verified:done');
+	});
+
+	it('a reports address missing from a quarantine record is the step; at reject it is a note', () => {
+		expect(keys({ dns: dns('v=DMARC1; p=quarantine', { has_rua: false }), reports: reports(null) })).toContain('improve:dmarc-rua');
+		expect(keys({ dns: dns('v=DMARC1; p=reject', { has_rua: false }) })).toEqual(['verified:done', 'note:dmarc-rua']);
+	});
+
+	it('a last good check older than 7 days supports no advice: re-check first, whatever the status', () => {
+		const old = summary({ dmarc_policy: 'none', dmarc_sp: 'none', dns_checked_at: now - 9 * 86400, dns_check_attempted_at: now - 9 * 86400 });
+		const v = domainVerdict(domain, old, reports(97), null, now);
+		expect(v.status).toBe('unknown'); // not "Awaiting your approval" on 9-day-old facts
+		expect(v.sentence).toMatch(/That was 9 days ago, so it may have changed\./);
+		expect(v.next.label).toBe('Open the domain to check it again');
+		const attention = domainVerdict(domain, summary({ spf_record: null, dns_checked_at: now - 9 * 86400 }), reports(null), null, now);
+		expect(attention.status).toBe('attention');
+		expect(attention.next.label).toBe('Open the domain to check it again');
+	});
+
+	it('an inherited partial policy on the overview points at the parent, and its page when listed', () => {
+		const sub = { ...domain, id: 2, domain: 'mail.example.com' };
+		const s = summary({ domain: 'mail.example.com', dmarc_policy: 'reject', dmarc_inherited_from: 'example.com', dmarc_pct: 10, dmarc_sp: 'reject' });
+		const v = domainVerdict(sub, s, reports(99), null, now, { idByName: new Map([['example.com', 1]]) });
+		expect(v.status).toBe('improve');
+		expect(v.next).toMatchObject({ label: 'Raise pct from 10 to 100 at _dmarc.example.com', to: '/domains/1' });
+	});
+
+	it('a summary fetched before the live read is not used (DMARC issue, does not resolve)', () => {
+		const stale = summary({ dmarc_policy: null, dmarc_issue: 'multiple' });
+		expect(keys({ summary: stale })).toContain('attention:dmarc-multiple');
+		expect(keys({ summary: stale, summaryFresh: false })).not.toContain('attention:dmarc-multiple');
+		expect(keys({ summary: summary({ dns_check_status: 'nxdomain' }), summaryFresh: false })).not.toContain('attention:nxdomain');
+		expect(summaryFetchedAfterRead(1000, 2000)).toBe(false);
+		expect(summaryFetchedAfterRead(2000, 2000)).toBe(true);
+		expect(summaryFetchedAfterRead(500, 0)).toBe(true);
+	});
+
+	it('CNAME selectors (Microsoft 365 style) are usable keys: one revoked TXT key beside them is a note', () => {
+		const ob = onboarding({ dkim: { selectors: [
+			{ name: 'selector1._domainkey.example.com', record: 'selector1-example-com._domainkey.example.onmicrosoft.com' },
+			{ name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' },
+		], source: 'doh' } });
+		expect(keys({ onboarding: ob })).toEqual(['verified:done', 'note:dkim-old']);
 	});
 });

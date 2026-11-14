@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildRecommendedRecord, getGuidance, inheritanceVerdict, normalizeDomain, spTag, sumStats, wizardProgress } from '../src/lib/dmarc';
 import { weeklyBuckets } from '../src/lib/pdf/report';
 import { getRecommendations } from '../src/lib/pdf/recommendations';
-import { buildTree } from '../src/pages/domains/OverviewPage';
+import { buildTree, domainRows } from '../src/pages/domains/OverviewPage';
 import type { Domain } from '../src/lib/types';
 
 const dom = (policy: Domain['dmarc_policy']) => ({ dmarc_policy: policy, domain: 'example.com', rua_address: 'r@reports.example.net' });
@@ -105,5 +105,15 @@ describe('pdf', () => {
 	it('recommendations grade severity', () => {
 		const recs = getRecommendations({ domain_id: 1, domain: 'a.com', dmarc_policy: 'none', spf_record: null, dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null, total_messages: 100, pass_messages: 60, fail_messages: 40, dkim_total: 0, dkim_pass: 0, spf_total: 10, spf_pass: 5, mta_sts_enabled: 0, mta_sts_mode: null });
 		expect(recs.map((r) => r.severity)).toEqual(['critical', 'critical', 'warning', 'info']);
+	});
+});
+
+describe('domainRows', () => {
+	const d = (id: number, name: string, parent_id: number | null) => ({ id, domain: name, parent_id, dmarc_policy: null, rua_address: '', created_at: 0, alerts_enabled: 1, is_default: 0 }) as never;
+	it('nests every domain under its nearest listed ancestor, at any depth, and never loses one to a loop', () => {
+		const rows = domainRows([d(1, 'a.com', null), d(2, 'b.a.com', 1), d(3, 'c.b.a.com', 2), d(4, 'loop1.com', 5), d(5, 'loop2.com', 4)]);
+		expect(rows.map((r) => [(r.d as { domain: string }).domain, r.depth, r.parent ?? null])).toEqual([
+			['a.com', 0, null], ['b.a.com', 1, 'a.com'], ['c.b.a.com', 2, 'b.a.com'], ['loop1.com', 0, null], ['loop2.com', 0, null],
+		]);
 	});
 });

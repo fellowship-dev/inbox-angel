@@ -305,3 +305,19 @@ const healthReport = {
 	remediation: [{ finding: 'spf-softfail', observation: ['~all'], impact: 'Soft fail.', steps: ['Change ~all to -all.'], prerequisites: ['Every sender listed.'], changes: [], verification: ['Re-run the report.'] }],
 	sections: Object.fromEntries(['dmarc', 'tls', 'google', 'inbox_placement'].map((k) => [k, { status: 'unavailable', reason: 'no_reports', source: k, population: 'none', window: { since: 1700000000, until: 1700100000 }, data: null }])),
 };
+
+describe('DomainDetailPage: a domain added elsewhere', () => {
+	it('refetches the cached list once before saying "not found"', async () => {
+		let n = 0;
+		const { calls } = page({ routes: routes({ 'GET /api/domains': () => (n++ === 0 ? { domains: [] } : { domains: [domain] }) }) });
+		expect(await screen.findByRole('heading', { level: 1, name: 'example.com' })).toBeInTheDocument();
+		expect(screen.queryByText('Domain not found')).not.toBeInTheDocument();
+		expect(calls.filter((c) => c.path === '/api/domains').length).toBe(2);
+	});
+
+	it('still missing after that one refetch: says so, once', async () => {
+		const { calls } = page({ routes: routes({ 'GET /api/domains': { domains: [] } }) });
+		expect(await screen.findByText('Domain not found')).toBeInTheDocument();
+		expect(calls.filter((c) => c.path === '/api/domains').length).toBe(2);
+	});
+});

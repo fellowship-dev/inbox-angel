@@ -115,10 +115,10 @@ export function domainVerdict(
 	hosted: HostedLevelInput | null = null,
 	now = Date.now() / 1000,
 	/** `hostedMode`: the hosted service (MODE=saas). There, a domain with no report address has no report intake. */
-	opts: { hostedMode?: boolean } = {},
+	opts: { hostedMode?: boolean; /** The workspace's domains by name: a fix that belongs on a listed parent links to its page. */ idByName?: ReadonlyMap<string, number> } = {},
 ): DomainVerdict {
 	const intakeOff = !!opts.hostedMode && reportsNotConnected(domain);
-	const core = coreVerdict(domain, s, reports, hosted, now, intakeOff);
+	const core = coreVerdict(domain, s, reports, hosted, now, intakeOff, opts.idByName);
 	const about = `about ${domain.domain}`;
 	const unresolved = hosted ? null : didNotResolve(s);
 	const help = unresolved ? { lead: 'Sure this is the right name?', about, priority: HELP_PRIORITY.dnsFailing } : !hosted && s.dns_check_status === 'failed' ? { lead: 'DNS checks keep failing?', about, priority: HELP_PRIORITY.dnsFailing } : null;
@@ -133,6 +133,7 @@ function coreVerdict(
 	hosted: HostedLevelInput | null,
 	now: number,
 	intakeOff: boolean,
+	idByName?: ReadonlyMap<string, number>,
 ): Core {
 	const page = `/domains/${domain.id}`;
 	const name = domain.domain;
@@ -197,10 +198,12 @@ function coreVerdict(
 		if (base.status === 'attention') return { ...base, sentence: `${base.sentence} (From the last good check; the latest check failed.)` };
 		return { ...base, status: 'unknown', sentence: `The latest DNS check failed. At the last good check: ${lower(base.sentence)}`, next: checkAgain };
 	}
-	// A good check that is too old is not current: the state may have changed since.
+	// A good check that is too old is not current, whatever it said: no advice rests on it before a re-check. A problem it
+	// found keeps its status (it was real then), but the next step is the re-check either way.
 	const age = s.dns_checked_at ? now - s.dns_checked_at : 0;
-	if (base.status === 'verified' && age > STALE_DAYS * 86400) {
-		return { ...base, status: 'unknown', sentence: `${base.sentence} That was ${timeAgo(s.dns_checked_at!, now)}, so it may have changed.`, next: checkAgain };
+	if (age > STALE_DAYS * 86400) {
+		const stale = `${base.sentence} That was ${timeAgo(s.dns_checked_at!, now)}, so it may have changed.`;
+		return { ...base, status: base.status === 'attention' ? 'attention' : 'unknown', sentence: stale, next: checkAgain };
 	}
 	return base;
 
@@ -217,11 +220,17 @@ function coreVerdict(
 		}
 
 		const rate = exactRate(reports);
+		// A policy inherited from a parent is changed at the parent: say so, and open the parent's page when it is listed.
+		const parent = sum.dmarc_inherited_from ?? null;
+		const parentId = parent ? idByName?.get(parent) : undefined;
+		const atParent = (label: string): NextAction => ({ label: `${label} at _dmarc.${parent}`, who: WHO.dns, to: parentId !== undefined ? `/domains/${parentId}` : page });
+		const connect = connectReports(page);
 		const fixSenders: NextAction = { label: 'Fix the senders that fail DMARC', who: WHO.providers, to: `${page}/analytics` };
 		const reloadReports: NextAction = { label: 'Open the domain to load its reports', who: WHO.you, to: page };
 
 		if (policy === 'none') {
 			const sentence = `Public DNS shows SPF and DMARC at p=none${so} mail that fails DMARC is still delivered.`;
+			if (parent) return { status: rate !== null && rate >= READY ? 'approval' : 'improve', level, sentence, evidence, checked, next: atParent('Tighten DMARC') };
 			if (rate !== null && rate >= READY) return { status: 'approval', level, sentence, evidence, checked, next: { label: 'Review your senders, then approve p=quarantine', who: WHO.approver, to: `${page}/dmarc-wizard` } };
 			if (rate !== null) return { status: 'improve', level, sentence, evidence, checked, next: fixSenders };
 			if (reports === null) return { status: 'improve', level, sentence, evidence, checked, next: reloadReports };
@@ -231,7 +240,8 @@ function coreVerdict(
 				sentence,
 				evidence,
 				checked,
-				next: hasReportAddress(domain.rua_address) ? { label: 'Make sure your DMARC record sends reports here', who: WHO.dns, to: page } : { label: 'Confirm every sending service before moving to p=quarantine', who: WHO.providers, to: page },
+				// Without a reports address nothing can confirm the senders, so connecting reports is the step, not a note.
+				next: hasReportAddress(domain.rua_address) ? { label: 'Make sure your DMARC record sends reports here', who: WHO.dns, to: page } : connect,
 			};
 		}
 
@@ -247,20 +257,27 @@ function coreVerdict(
 		const sentence = `Public DNS shows SPF and DMARC at p=${policy}${so} mail that fails DMARC is ${outcome}.`;
 		if (rate !== null && rate < HARMFUL) return { status: 'attention', level, sentence: `${sentence} Only ${Math.floor(rate)}% of reported mail passes, so some of your own mail is likely ${policy === 'reject' ? 'rejected' : 'in spam'}.`, evidence, checked, next: fixSenders };
 		if (enforced.level === 'partial') {
-			return { status: 'improve', level, sentence: `Public DNS shows SPF and DMARC at p=${policy} with pct=${enforced.pct}${so} only ${enforced.pct}% of mail that fails DMARC is ${outcome}; receivers handle the rest one policy level weaker.`, evidence, checked, next: { label: `Raise pct from ${enforced.pct} to 100`, who: WHO.dns, to: page } };
+			return { status: 'improve', level, sentence: `Public DNS shows SPF and DMARC at p=${policy} with pct=${enforced.pct}${so} only ${enforced.pct}% of mail that fails DMARC is ${outcome}; receivers handle the rest one policy level weaker.`, evidence, checked, next: parent ? atParent(`Raise pct from ${enforced.pct} to 100`) : { label: `Raise pct from ${enforced.pct} to 100`, who: WHO.dns, to: page } };
 		}
 		if (weakSp) {
 			const sub = weakSp === 'none' ? 'still delivered' : 'quarantined, not rejected';
 			return { status: 'improve', level, sentence: `Public DNS shows SPF and DMARC at p=${policy}, so mail that fails DMARC from ${name} itself is ${outcome}. Subdomains without their own record follow sp=${weakSp}, so failing mail from them is ${sub}.`, evidence, checked, next: { label: `Set sp=${policy} to enforce subdomains too`, who: WHO.dns, to: page } };
 		}
-		if (policy === 'quarantine' && rate !== null && rate >= READY_FOR_REJECT) return { status: 'approval', level, sentence, evidence, checked, next: { label: 'Review your senders, then approve p=reject', who: WHO.approver, to: `${page}/dmarc-wizard` } };
+		if (policy === 'quarantine' && rate !== null && rate >= READY_FOR_REJECT) return { status: 'approval', level, sentence, evidence, checked, next: parent ? atParent('Move to p=reject') : { label: 'Review your senders, then approve p=reject', who: WHO.approver, to: `${page}/dmarc-wizard` } };
 		if (rate !== null && rate < READY) return { status: 'improve', level, sentence, evidence, checked, next: fixSenders };
 		// Report totals that failed to load are unknown evidence: never Verified on them.
 		if (reports === null) return { status: 'unknown', level, sentence, evidence, checked, next: reloadReports };
-		if (policy === 'quarantine') return { status: 'verified', level, sentence, evidence, checked, next: { label: 'Move to p=reject once reports confirm your senders', who: WHO.you, to: page } };
+		if (policy === 'quarantine' && !hasReportAddress(domain.rua_address)) return { status: 'verified', level, sentence, evidence, checked, next: connect };
+		if (policy === 'quarantine') return { status: 'verified', level, sentence, evidence, checked, next: parent ? atParent('Move to p=reject once reports confirm your senders') : { label: 'Move to p=reject once reports confirm your senders', who: WHO.you, to: page } };
 		return { status: 'verified', level, sentence, evidence, checked, next: NOTHING };
 	}
 }
+
+/**
+ * The step when no reports can reach this dashboard for a domain. One place to change when report connection ships as its
+ * own flow (PR 150: "Connect reports").
+ */
+export const connectReports = (page: string): NextAction => ({ label: 'Set up a reports address so senders can be confirmed', who: WHO.you, to: page });
 
 const lower = (s: string) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
 

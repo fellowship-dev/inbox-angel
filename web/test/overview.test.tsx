@@ -321,3 +321,17 @@ describe('OverviewPage: pending ownership claims keep the lazy DNS preview', () 
 		expect(within(step).getByText(/Its live level from public DNS is visible before proof/)).toBeInTheDocument();
 	});
 });
+
+describe('OverviewPage: every counted domain has a row, at any depth', () => {
+	it('lists a sub-subdomain under its nearest listed ancestor (three levels), and the count matches the rows', async () => {
+		const ds = [domain(1, 'stripe.com'), domain(2, 'mail.stripe.com', { parent_id: 1 }), domain(3, 't2.mail.stripe.com', { parent_id: 2 }), domain(4, 'x.orphan.com', { parent_id: 99 })];
+		const routes: Record<string, unknown> = { 'GET /api/domains': { domains: ds } };
+		ds.forEach((d) => (routes[`GET /api/domains/${d.id}/check-summary`] = summary(d.id, d.domain)));
+		renderOverview({ routes });
+		expect(await screen.findByText(/^Done, from public DNS only: all 4 domains are verified\.$/)).toBeInTheDocument();
+		const items = within(screen.getByRole('region', { name: 'Your domains' })).getAllByRole('listitem');
+		expect(items.map((li) => li.querySelector('h3')?.textContent)).toEqual(['stripe.com', 'mail.stripe.com', 't2.mail.stripe.com', 'x.orphan.com']);
+		expect(within(items[2]!).getByText('Subdomain of mail.stripe.com')).toBeInTheDocument();
+		expect(items[2]!.className).toMatch(/sm:pl-16/);
+	});
+});

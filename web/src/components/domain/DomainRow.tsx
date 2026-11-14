@@ -13,6 +13,9 @@ export function ContextHelp({ help }: { help: NonNullable<DomainVerdict['help']>
 	return <TalkToMax priority={help.priority} lead={help.lead} about={help.about} />;
 }
 
+const INDENT = ['', 'sm:pl-10', 'sm:pl-16', 'sm:pl-20'] as const;
+const indent = (depth: number) => INDENT[Math.min(depth, INDENT.length - 1)];
+
 const AREAS = 'grid gap-x-6 gap-y-3 [grid-template-areas:"head"_"ladder"_"body"] lg:grid-cols-[22rem_minmax(0,1fr)] lg:[grid-template-areas:"ladder_head"_"ladder_body"]';
 
 /**
@@ -22,6 +25,7 @@ const AREAS = 'grid gap-x-6 gap-y-3 [grid-template-areas:"head"_"ladder"_"body"]
 export function DomainRow({
 	domain,
 	parent,
+	depth = parent ? 1 : 0,
 	verdict,
 	canWrite,
 	onRetry,
@@ -30,6 +34,8 @@ export function DomainRow({
 	domain: { id: number; domain: string };
 	/** Set for a subdomain listed under its parent. */
 	parent?: string;
+	/** Nesting depth under the nearest listed ancestor (0: a root). */
+	depth?: number;
 	verdict: DomainVerdict | null;
 	canWrite: boolean;
 	onRetry?: () => void;
@@ -41,7 +47,7 @@ export function DomainRow({
 
 	if (!verdict) {
 		return (
-			<li aria-labelledby={nameId} aria-busy="true" className={cn('px-4 py-4 sm:px-5', parent && 'sm:pl-10')}>
+			<li aria-labelledby={nameId} aria-busy="true" className={cn('px-4 py-4 sm:px-5', indent(depth))}>
 				<div className={AREAS}>
 					<h3 id={nameId} className="font-mono text-base font-semibold [grid-area:head] [overflow-wrap:anywhere]">
 						{domain.domain}
@@ -63,7 +69,7 @@ export function DomainRow({
 	const nothing = next.who === 'Nobody';
 
 	return (
-		<li aria-labelledby={nameId} data-status={verdict.status} className={cn('px-4 py-4 sm:px-5', parent && 'sm:pl-10')}>
+		<li aria-labelledby={nameId} data-status={verdict.status} className={cn('px-4 py-4 sm:px-5', indent(depth))}>
 			<div className={AREAS}>
 				<div className="min-w-0 space-y-0.5 [grid-area:head]">
 					<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

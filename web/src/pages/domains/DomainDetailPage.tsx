@@ -2,7 +2,7 @@ import { HealthReportSection, useHealthReport } from './HealthReportSection';
 import { Alert, Badge, Button, EmptyState, LevelLadder, PageHeader, Skeleton, StatusLabel, Tabs, TabsList, TabsTrigger } from '@ready-set-mail/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useDomainId } from '../../app';
 import { DailyChart } from '../../components/domain/DailyChart';
@@ -133,7 +133,10 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Where the domain stands: the level ladder, the state, what is true now and its evidence, and setup progress. */
-function WhereItStands({ domain, nxdomain = false }: { domain: Domain; /** The live read says the name does not exist: no setup to continue. */ nxdomain?: boolean }) {
+/** True when a stored summary fetched at `fetchedAt` (ms) can describe a live read made at `readAt` (ms; 0: none yet). */
+export const summaryFetchedAfterRead = (fetchedAt: number, readAt: number): boolean => readAt === 0 || fetchedAt >= readAt;
+
+function WhereItStands({ domain, nxdomain = false, readAt = 0 }: { domain: Domain; /** The live read says the name does not exist: no setup to continue. */ nxdomain?: boolean; /** When this page's live read answered (ms): an older summary is being refetched. */ readAt?: number }) {
 	const summary = useCheckSummary(domain.id);
 	const hosted = useHostedInfo(domain.id);
 	const wizard = useWizardState(domain.id);
@@ -141,7 +144,9 @@ function WhereItStands({ domain, nxdomain = false }: { domain: Domain; /** The l
 	const hostedMode = useHosted();
 	const headingId = useId();
 	// The same summary and 30-day totals the overview reads, so both pages say the same thing.
-	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted, undefined, { hostedMode }) : null;
+	// A summary fetched before the live read may predate what it stored: wait for the refetch rather than show it.
+	const fresh = summaryFetchedAfterRead(summary.dataUpdatedAt, readAt) || !summary.isFetching;
+	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data && fresh ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted, undefined, { hostedMode }) : null;
 	const progress = canWrite && wizard.data ? wizardProgress(wizard.data, { hosted: hostedMode }) : null;
 	return (
 		<section aria-labelledby={headingId} className="space-y-3">
@@ -221,6 +226,10 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 		summary: summary.data ?? (summary.isError ? null : undefined),
 		reports: week7,
 		sources: sources.data ?? null,
+		// A fix to an inherited policy belongs on the parent: link to it when it is in this workspace.
+		parentId: all.find((d) => d.domain === onboarding.data?.dmarc.effective?.inherited_from)?.id,
+		// The stored summary counts only once it was fetched after this page's live read (compare fetch times).
+		summaryFresh: summaryFetchedAfterRead(summary.dataUpdatedAt, onboarding.isSuccess ? onboarding.dataUpdatedAt : 0),
 	};
 	const actions = domainActions(actionInput);
 
@@ -269,7 +278,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				canWrite={canWrite}
 				onRetry={() => void Promise.all([dns.refetch(), onboarding.refetch()])}
 			/>
-			<WhereItStands domain={domain} nxdomain={nxdomain} />
+			<WhereItStands domain={domain} nxdomain={nxdomain} readAt={onboarding.isSuccess ? onboarding.dataUpdatedAt : 0} />
 
 			{/* A name that does not resolve has nothing to host. */}
 			{nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
@@ -419,7 +428,17 @@ export function DomainDetailPage() {
 	const id = useDomainId();
 	const list = useDomains();
 	const { domain } = useDomain(id);
-	if (list.isPending) return <PageSkeleton label="Loading domain" />;
+	// A domain added in another tab or by an agent is not in a cached list yet: refetch once before saying "not found".
+	const [refetched, setRefetched] = useState(false);
+	const asked = useRef(false);
+	const missing = !list.isPending && !list.isError && !domain;
+	const { refetch } = list;
+	useEffect(() => {
+		if (!missing || asked.current) return;
+		asked.current = true;
+		void refetch().finally(() => setRefetched(true));
+	}, [missing, refetch]);
+	if (list.isPending || (missing && !refetched)) return <PageSkeleton label="Loading domain" />;
 	if (list.isError) return <LoadError error={list.error} onRetry={() => void list.refetch()} title="Could not load this domain" />;
 	if (!domain) {
 		return (

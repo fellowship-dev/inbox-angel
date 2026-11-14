@@ -116,7 +116,7 @@ const answerKey = (a: readonly string[]) => [...a].sort().join('\n');
 export function sharedWildcardRecord(answers: readonly (readonly string[])[]): string | null {
   const answered = answers.filter(a => a.length > 0).map(answerKey);
   if (answered.length < DKIM_WILDCARD_MIN_ANSWERS || answered.some(a => a !== answered[0])) return null;
-  return answers.find(a => a.length > 0)![0];
+  return answers.find(a => a.length > 0)?.[0] ?? null;
 }
 
 export interface DkimScanOptions {

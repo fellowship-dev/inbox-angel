@@ -32,6 +32,60 @@ export function buildTree(domains: Domain[]): Array<{ root: Domain; children: Do
 	return roots.map((root) => ({ root, children: kids.get(root.id) ?? [] }));
 }
 
+/**
+ * Every domain as a row, at any depth: each under its nearest ancestor that is in the list (following parent_id), a
+ * domain whose parent is absent (or whose chain loops) as a root. Siblings and root groups are ordered by `cmp`, a group
+ * ranking by its most urgent member, so every domain counted in the answer has exactly one row.
+ */
+export function domainRows(domains: Domain[], rank: (d: Domain) => number = () => 0): Array<{ d: Domain; parent?: string; depth: number }> {
+	const byId = new Map(domains.map((d) => [d.id, d]));
+	const parentOf = (d: Domain): Domain | null => {
+		// Nearest present ancestor, never itself (a loop makes the domain a root).
+		const seen = new Set<number>([d.id]);
+		let p = d.parent_id ?? null;
+		while (p !== null && p !== undefined) {
+			if (seen.has(p)) return null;
+			seen.add(p);
+			const hit = byId.get(p);
+			if (hit) {
+				// Walking on from hit must not lead back to d either.
+				let q = hit.parent_id ?? null;
+				const chain = new Set<number>([hit.id]);
+				while (q !== null && q !== undefined && byId.has(q)) {
+					if (q === d.id || chain.has(q)) return null;
+					chain.add(q);
+					q = byId.get(q)!.parent_id ?? null;
+				}
+				return hit;
+			}
+			return null; // the parent is not in this workspace's list: the domain stands alone
+		}
+		return null;
+	};
+	const kids = new Map<number, Domain[]>();
+	const roots: Domain[] = [];
+	for (const d of domains) {
+		const p = parentOf(d);
+		if (p) kids.set(p.id, [...(kids.get(p.id) ?? []), d]);
+		else roots.push(d);
+	}
+	const best = new Map<number, number>();
+	const subtree = (d: Domain): number => {
+		if (best.has(d.id)) return best.get(d.id)!;
+		const r = Math.min(rank(d), ...(kids.get(d.id) ?? []).map(subtree));
+		best.set(d.id, r);
+		return r;
+	};
+	const order = (a: Domain, b: Domain) => subtree(a) - subtree(b) || a.domain.localeCompare(b.domain);
+	const out: Array<{ d: Domain; parent?: string; depth: number }> = [];
+	const visit = (d: Domain, depth: number, parent?: string) => {
+		out.push({ d, parent, depth });
+		for (const c of [...(kids.get(d.id) ?? [])].sort(order)) visit(c, depth + 1, d.domain);
+	};
+	for (const r of [...roots].sort(order)) visit(r, 0);
+	return out;
+}
+
 function AddDomainButton() {
 	const { canWrite } = useSession();
 	if (!canWrite) return <WriteButton variant="secondary">Add domain</WriteButton>;
@@ -63,6 +117,7 @@ export function OverviewPage() {
 	const hostedOn = useHostedConfig();
 	const hosted = useQueries({ queries: domains.map((d) => ({ queryKey: hostedKey(d.id), queryFn: () => api<HostedResponse>(`/api/domains/${d.id}/hosted`), enabled: hostedOn })) });
 
+	const idByName = new Map(domains.map((d) => [d.domain, d.id]));
 	const summaryOf = (d: Domain): DomainCheckSummary | null | undefined => (batch.isPending ? undefined : batch.isError ? null : (batch.data.get(d.id) ?? null));
 	const totals: Array<ReportTotals | null | undefined> = domains.map((d) => {
 		const s = summaryOf(d);
@@ -75,7 +130,7 @@ export function OverviewPage() {
 		if (s === undefined || (hostedOn && h.isPending)) return null;
 		if (s === null) return unavailableVerdict('it is not in the summary yet. Reload the page.', d.domain);
 		const info = hostedOn && h.data?.enabled ? h.data : null;
-		return domainVerdict(d, s, totals[i], info, undefined, { hostedMode });
+		return domainVerdict(d, s, totals[i], info, undefined, { hostedMode, idByName });
 	});
 	const retry = batch.isError ? () => void batch.refetch() : undefined;
 	const byId = new Map(domains.map((d, i) => [d.id, { domain: d, verdict: verdicts[i] ?? null, retry }]));
@@ -84,10 +139,8 @@ export function OverviewPage() {
 	// so rows do not jump while they load.
 	const settled = verdicts.every(Boolean);
 	const rank = (d: Domain) => statusRank(byId.get(d.id)?.verdict?.status ?? 'unknown');
-	const cmp = (a: Domain, b: Domain) => rank(a) - rank(b) || a.domain.localeCompare(b.domain);
-	const groups = buildTree(domains).map((g) => ({ ...g, children: settled ? [...g.children].sort(cmp) : g.children }));
-	if (settled) groups.sort((a, b) => Math.min(rank(a.root), ...a.children.map(rank)) - Math.min(rank(b.root), ...b.children.map(rank)) || a.root.domain.localeCompare(b.root.domain));
-	const ordered = groups.flatMap((g) => [{ d: g.root, parent: undefined as string | undefined }, ...g.children.map((c) => ({ d: c, parent: g.root.domain }))]);
+	// Every domain has a row at any depth (a sub-subdomain under its nearest listed ancestor).
+	const ordered = domainRows(domains, settled ? rank : () => 0);
 
 	const answer = workspaceAnswer(domains.map((d, i) => ({ name: d.domain, verdict: verdicts[i] ?? null })), claims.length);
 	const steps = getStartedSteps({
@@ -192,9 +245,9 @@ export function OverviewPage() {
 							</h2>
 							{reportsOff ? <ReportsNotConnected /> : null}
 							<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1">
-								{ordered.map(({ d, parent }) => {
+								{ordered.map(({ d, parent, depth }) => {
 									const row = byId.get(d.id)!;
-									return <DomainRow key={d.id} domain={d} parent={parent} verdict={row.verdict} canWrite={canWrite} onRetry={row.retry} hideEvidence={reportsOff} />;
+									return <DomainRow key={d.id} domain={d} parent={parent} depth={depth} verdict={row.verdict} canWrite={canWrite} onRetry={row.retry} hideEvidence={reportsOff} />;
 								})}
 							</ul>
 						</section>
