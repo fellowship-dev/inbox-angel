@@ -259,8 +259,7 @@ describe('Overview row for a hosted domain', () => {
 				'GET /api/domains': { domains: [domain] },
 				'GET /api/hosted/config': { enabled: config },
 				'GET /api/domains/1/hosted': hosted,
-				'GET /api/domains/1/check-summary': summary,
-				'GET /api/domains/1/stats': { domain: 'example.com', days: 30, stats: [] },
+				'GET /api/domains/summaries': { summaries: [summary], next_after: null, window_days: 30 },
 			},
 		});
 	const row = () => screen.findByRole('listitem', { name: 'example.com' });

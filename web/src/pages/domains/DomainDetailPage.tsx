@@ -14,10 +14,10 @@ import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { Rollout } from '../../components/domain/Rollout';
 import { Disclosure, ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
-import { actionsPending, domainActions } from '../../lib/actions';
+import { actionsPending, domainActions, type SummaryState } from '../../lib/actions';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
-import { domainVerdict, unavailableVerdict, type ReportTotals } from '../../lib/verdict';
+import { domainVerdict, totalsFromSummary, unavailableVerdict, type ReportTotals } from '../../lib/verdict';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
 import { domainKeys, useCheckSummary, useDnsCheck, useFailingSources, useMtaSts, useOnboardingStatus, useRolloutNext, useSpfFlatten, useStats, useWizardState } from '../../lib/domain-queries';
@@ -126,13 +126,14 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Where the domain stands: the level ladder, the state, what is true now and its evidence, and setup progress. */
-function WhereItStands({ domain, reports }: { domain: Domain; reports: ReportTotals | null | undefined }) {
+function WhereItStands({ domain }: { domain: Domain }) {
 	const summary = useCheckSummary(domain.id);
 	const hosted = useHostedInfo(domain.id);
 	const wizard = useWizardState(domain.id);
 	const { canWrite } = useSession();
 	const headingId = useId();
-	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data && reports !== undefined ? domainVerdict(domain, summary.data, reports, hosted) : null;
+	// The same summary and 30-day totals the overview reads, so both pages say the same thing.
+	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted) : null;
 	const progress = canWrite && wizard.data ? wizardProgress(wizard.data) : null;
 	return (
 		<section aria-labelledby={headingId} className="space-y-3">
@@ -157,7 +158,8 @@ function WhereItStands({ domain, reports }: { domain: Domain; reports: ReportTot
 					) : (
 						<p className="text-sm text-ink-2">Loading what is known about this domain…</p>
 					)}
-					{progress && progress.done < progress.total ? (
+					{/* Only while DNS shows the domain is not yet enforcing: an enforced domain's setup is done, whatever the wizard recorded. */}
+					{progress && progress.done < progress.total && v && (v.level === 0 || v.level === 1) ? (
 						<p className="pt-1 text-sm text-ink-2">
 							Setup wizard: {progress.done} of {progress.total} steps done.{' '}
 							<Link to={`/domains/${domain.id}/setup/${progress.nextStep}`} className="font-medium text-brand-ink underline underline-offset-4">
@@ -176,13 +178,14 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const [days, setDays] = useState<number>(7);
 	const stats = useStats(domain.id, days);
 	const week = useStats(domain.id, 7);
-	const month = useStats(domain.id, 30);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
 	const onboarding = useOnboardingStatus(domain.id);
 	const summary = useCheckSummary(domain.id);
 	const rollout = useRolloutNext(domain.id);
-	const health = useHealthReport(domain.id);
+	// The health report runs live DNS and reads collected evidence: only when its section is opened.
+	const [healthOpen, setHealthOpen] = useState(false);
+	const health = useHealthReport(domain.id, healthOpen);
 	const spfTool = useSpfFlatten(domain.id);
 	const mtaTool = useMtaSts(domain.id);
 	const { canWrite } = useSession();
@@ -200,11 +203,20 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 		return { total: s.total, passed: s.passed, failed: s.failed, passRate: s.passRate, days: n };
 	};
 	const week7 = totals(week, 7);
+	// The stored summary is current only once it was fetched after this page's live read stored its facts.
+	const summaryState: SummaryState = summary.isError
+		? 'failed'
+		: !summary.data || (summary.isFetching && summary.dataUpdatedAt < onboarding.dataUpdatedAt)
+			? 'loading'
+			: onboarding.isSuccess && summary.dataUpdatedAt >= onboarding.dataUpdatedAt
+				? 'current'
+				: 'stale';
 	const actionInput = {
 		domain,
 		dns: dns.isPending ? undefined : dns.isError ? null : dns.data,
 		onboarding: onboarding.isPending ? undefined : onboarding.isError ? null : onboarding.data,
-		summary: summary.isSuccess ? summary.data : summary.isError ? null : undefined,
+		summary: summary.data ?? (summary.isError ? null : undefined),
+		summaryState,
 		reports: week7,
 		sources: sources.data ?? null,
 	};
@@ -255,7 +267,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				canWrite={canWrite}
 				onRetry={() => void Promise.all([dns.refetch(), onboarding.refetch()])}
 			/>
-			<WhereItStands domain={domain} reports={totals(month, 30)} />
+			<WhereItStands domain={domain} />
 
 			<HostedPanel key={domain.id} domainId={domain.id} />
 
@@ -263,7 +275,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				<Disclosure
 					id="dns-records"
 					title="DNS records"
-					summary={`DMARC, SPF${selectors === undefined ? ' and DKIM' : selectors === 0 ? ', and no DKIM key among the common selectors' : ` and ${plural(selectors, 'DKIM key')}`}, read live from public DNS.`}
+					summary={`DMARC, SPF${selectors === undefined ? ' and DKIM' : onboarding.data?.dkim.wildcard ? ', and DKIM that public DNS can\'t show (wildcard)' : selectors === 0 ? ', and no DKIM key among the common selectors' : ` and ${plural(selectors, 'DKIM key')}`}, read live from public DNS.`}
 				>
 					<DnsRecords domain={domain} />
 				</Disclosure>
@@ -367,16 +379,19 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				) : null}
 
 				<Disclosure
+					onOpenChange={(o) => o && setHealthOpen(true)}
 					title="Email health report"
 					summary={
-						health.isPending
+						!healthOpen
+							? 'Live DNS findings and proposed fixes, checked when you open this: the same evidence your authorized agent sees.'
+							: health.isPending
 							? 'Checking live DNS and collected evidence…'
 							: health.isError
 								? 'Could not be loaded.'
 								: `${plural(health.data.dns.findings.length, 'finding')} and ${plural(health.data.remediation.length, 'proposed fix', 'proposed fixes')}: the same evidence your authorized agent sees.`
 					}
 				>
-					<HealthReportSection domainId={domain.id} />
+					<HealthReportSection domainId={domain.id} enabled={healthOpen} />
 				</Disclosure>
 
 				{toolsShown ? (

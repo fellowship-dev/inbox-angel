@@ -255,6 +255,11 @@ export interface DomainCheckSummary {
   spf_pass: number;
   mta_sts_enabled: number; // 0 | 1
   mta_sts_mode: string | null;
+  /** SPF DNS lookups at the last refresh; null: not counted. */
+  spf_lookup_count?: number | null;
+  /** pct= and sp= of the DMARC record that applies, from the last read (0012). Null or absent: not read yet. */
+  dmarc_pct?: number | null;
+  dmarc_sp?: string | null;
 }
 
 export type WizardStepState = 'not_started' | 'complete' | 'skipped';

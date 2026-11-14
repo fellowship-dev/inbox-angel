@@ -30,7 +30,7 @@ describe('reports.checkSummary', () => {
       domain_id: id, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 ~all', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null,
       total_messages: 1000, pass_messages: 980, fail_messages: 20,
       dkim_total: 1000, dkim_pass: 950, spf_total: 1000, spf_pass: 950,
-      mta_sts_enabled: 0, mta_sts_mode: null,
+      mta_sts_enabled: 0, mta_sts_mode: null, spf_lookup_count: null, dmarc_pct: null, dmarc_sp: null,
     });
   });
 
@@ -71,5 +71,34 @@ describe('reports.checkSummary', () => {
     const { db, id } = await seed();
     db.sqlite.exec("INSERT INTO workspaces (id, name) VALUES ('ws_b', 'B')");
     expect(await forWorkspace(db, 'ws_b').reports.checkSummary(id, 0)).toBeNull();
+  });
+
+  it('carries the stored pct=, sp= and SPF lookup count the overview needs', async () => {
+    const { db, q, id } = await seed();
+    await q.domains.recordDnsCheck(id, { spf_record: 'v=spf1 ~all', dmarc: { policy: 'reject', issue: null, inherited_from: null, pct: 10, sp: 'none' }, at: NOW });
+    db.sqlite.prepare('UPDATE domains SET spf_lookup_count = 12 WHERE id = ?').run(id);
+    expect(await q.reports.checkSummary(id, 0)).toMatchObject({ dmarc_pct: 10, dmarc_sp: 'none', spf_lookup_count: 12 });
+  });
+});
+
+describe('reports.checkSummaries (the overview batch)', () => {
+  it('returns every live domain of the workspace in id order, a page at a time, with the same totals as checkSummary', async () => {
+    const { db, q, id } = await seed();
+    const ids = [id];
+    for (const d of ['b.com', 'c.com', 'd.com']) ids.push(Number((await q.domains.insert({ domain: d, rua_address: 'rua@r.test' })).meta.last_row_id));
+    db.sqlite.prepare("UPDATE domains SET evicted_at = 1 WHERE domain = 'c.com'").run();
+    const since = NOW - 30 * 86400;
+    const first = await q.reports.checkSummaries(since, { limit: 2 });
+    expect(first.map((r) => r.domain)).toEqual(['example.com', 'b.com']);
+    expect(first[0]).toEqual(await q.reports.checkSummary(id, since));
+    const second = await q.reports.checkSummaries(since, { afterId: first.at(-1)!.domain_id, limit: 2 });
+    expect(second.map((r) => r.domain)).toEqual(['d.com']);
+    expect(second[0]).toMatchObject({ total_messages: 0, dkim_total: 0 });
+  });
+
+  it('never returns another workspace\'s domains', async () => {
+    const { db } = await seed();
+    db.sqlite.exec("INSERT INTO workspaces (id, name) VALUES ('ws_b', 'B')");
+    expect(await forWorkspace(db, 'ws_b').reports.checkSummaries(0, { limit: 50 })).toEqual([]);
   });
 });

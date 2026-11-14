@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { domainActions, type ActionInput } from '../src/lib/actions';
+import { actionsPending, domainActions, type ActionInput } from '../src/lib/actions';
 import type { DnsCheck, OnboardingResult } from '../src/lib/domain-queries';
 import { getStartedSteps } from '../src/lib/get-started';
 import type { DomainCheckSummary } from '../src/lib/types';
@@ -10,7 +10,7 @@ const domain = { id: 1, domain: 'example.com', rua_address: 'r@reports.test' };
 const summary = (o: Partial<DomainCheckSummary> = {}): DomainCheckSummary => ({
 	domain_id: 1, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 -all', dns_checked_at: now - 60, dns_check_attempted_at: now - 60, dns_check_status: 'ok',
 	dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: 'ok', total_messages: 0, pass_messages: 0, fail_messages: 0, dkim_total: 0, dkim_pass: 0,
-	spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, ...o,
+	spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null, spf_lookup_count: 3, dmarc_pct: 100, dmarc_sp: 'reject', ...o,
 });
 const reports = (passRate: number | null, total = 1000): ReportTotals => ({ total: passRate === null ? 0 : total, passed: passRate === null ? 0 : Math.round((total * passRate) / 100), failed: 0, passRate, days: 7 });
 const dns = (record: string | null, o: Partial<DnsCheck> = {}): DnsCheck => ({ found: !!record, has_rua: true, current_record: record, cf_managed: false, ...o });
@@ -64,7 +64,8 @@ describe('domainActions: Do this next', () => {
 	});
 
 	it('a record that does not send reports here says so', () => {
-		expect(keys({ dns: dns('v=DMARC1; p=reject', { has_rua: false }) })).toContain('improve:dmarc-rua');
+		expect(keys({ dns: dns('v=DMARC1; p=reject', { has_rua: false }) })).toEqual(['verified:done', 'note:dmarc-rua']);
+		expect(keys({ dns: dns('v=DMARC1; p=none', { has_rua: false }), reports: reports(null) })).toContain('improve:dmarc-rua');
 	});
 
 	it('enforced mail mostly failing needs attention; partial pct is worth fixing', () => {
@@ -84,7 +85,9 @@ describe('domainActions: Do this next', () => {
 
 	it('revoked DKIM keys need attention; selectors DNS cannot find are Unknown', () => {
 		expect(keys({ onboarding: onboarding({ dkim: { selectors: [{ name: 's._domainkey.example.com', record: 'v=DKIM1; p=' }], source: 'doh' } }) })).toEqual(['attention:dkim-revoked']);
-		expect(keys({ onboarding: onboarding({ dkim: { selectors: [], source: 'doh' } }) })).toEqual(['unknown:dkim-unknown']);
+		// With reports showing mail passing, a selector DNS cannot find is a note under "Nothing to do", not the lead.
+		expect(keys({ onboarding: onboarding({ dkim: { selectors: [], source: 'doh' } }) })).toEqual(['verified:done', 'note:dkim-unknown']);
+		expect(keys({ onboarding: onboarding({ dkim: { selectors: [], source: 'doh' } }), reports: reports(80) })).toEqual(['improve:senders', 'unknown:dkim-unknown']);
 	});
 });
 
@@ -103,7 +106,7 @@ describe('domainVerdict and workspaceAnswer', () => {
 	it('pending ownership proofs are part of the answer', () => {
 		expect(workspaceAnswer([], 2)).toBe('Not yet: 2 domains are waiting for proof that they are yours.');
 		const v = domainVerdict(domain, summary(), reports(99));
-		expect(workspaceAnswer([{ name: 'example.com', verdict: v }], 1)).toBe('Done, from public DNS and reports: example.com is verified. 1 domain is waiting for proof that it is yours.');
+		expect(workspaceAnswer([{ name: 'example.com', verdict: v }], 1)).toBe('Not yet: example.com is verified (public DNS and reports), but 1 domain is waiting for proof that it is yours.');
 	});
 
 	it('says it is still checking until every row is known', () => {
@@ -135,5 +138,121 @@ describe('slots for hosted help (PR 142)', () => {
 	it('reports-not-connected follows an empty report address', () => {
 		expect(domainVerdict({ ...domain, rua_address: '' }, summary(), reports(null)).reportsNotConnected).toBe(true);
 		expect(domainVerdict(domain, summary(), reports(null)).reportsNotConnected).toBe(false);
+	});
+});
+
+// ── Truth table: every state the overview row can be in, and what the domain page's "Do this next" says for it ──
+const ago = (d: number) => now - d * 86400;
+type Row = [name: string, sum: Partial<DomainCheckSummary>, rep: ReportTotals | null, status: string, level: number | null, sentence: RegExp, next: string];
+export const TRUTH: Row[] = [
+	['reject, pct=100, reports pass', {}, reports(99), 'verified', 2, /p=reject, so mail that fails DMARC is rejected\.$/, 'Nothing to do'],
+	['reject, no reports', {}, reports(null), 'verified', 2, /is rejected\.$/, 'Nothing to do'],
+	['reject, report totals failed', {}, null, 'unknown', 2, /is rejected\.$/, 'Open the domain to load its reports'],
+	['reject, pct=10', { dmarc_pct: 10 }, reports(99), 'improve', 2, /with pct=10, so only 10% of mail that fails DMARC is rejected/, 'Raise pct from 10 to 100'],
+	['reject, sp=none (gov.uk)', { dmarc_sp: 'none' }, reports(99), 'improve', 2, /Subdomains without their own record follow sp=none, so failing mail from them is still delivered\./, 'Set sp=reject to enforce subdomains too'],
+	['reject inherited, parent sp weaker is not this domain\'s problem', { dmarc_inherited_from: 'parent.com', dmarc_sp: 'none' }, reports(null), 'verified', 2, /inherited from parent\.com, so mail that fails DMARC is rejected/, 'Nothing to do'],
+	['reject, pct and sp not read yet', { dmarc_pct: null, dmarc_sp: null }, reports(99), 'unknown', 2, /has not been read yet, so it is not called enforced/, 'Open the domain to read its DMARC record'],
+	['reject, SPF over 10 lookups', { spf_lookup_count: 12 }, reports(99), 'attention', 2, /needs 12 DNS lookups/, 'Bring SPF down to 10 DNS lookups or fewer'],
+	['reject, latest check failed after a good one', { dns_check_status: 'failed', dns_check_attempted_at: now - 60, dns_checked_at: ago(2) }, reports(99), 'unknown', 2, /^The latest DNS check failed\. At the last good check: public DNS shows/, 'Open the domain to check it again'],
+	['reject, last good check 8 days old', { dns_checked_at: ago(8), dns_check_attempted_at: ago(8) }, reports(99), 'unknown', 2, /That was 8 days ago, so it may have changed\./, 'Open the domain to check it again'],
+	['reject, 60% passing', {}, reports(60), 'attention', 2, /Only 60% of reported mail passes/, 'Fix the senders that fail DMARC'],
+	['reject, 94.6% passing (not rounded up to 95)', {}, { total: 1000, passed: 946, failed: 54, passRate: 95, days: 30 }, 'improve', 2, /is rejected\.$/, 'Fix the senders that fail DMARC'],
+	['quarantine, 92% passing', { dmarc_policy: 'quarantine', dmarc_sp: 'quarantine' }, reports(92), 'approval', 2, /quarantined, usually to spam/, 'Review your senders, then approve p=reject'],
+	['quarantine, no reports', { dmarc_policy: 'quarantine', dmarc_sp: 'quarantine' }, reports(null), 'verified', 2, /quarantined/, 'Move to p=reject once reports confirm your senders'],
+	['none, 97% passing', { dmarc_policy: 'none', dmarc_sp: 'none' }, reports(97), 'approval', 1, /p=none, so mail that fails DMARC is still delivered/, 'Review your senders, then approve p=quarantine'],
+	['none, report totals failed', { dmarc_policy: 'none', dmarc_sp: 'none' }, null, 'improve', 1, /still delivered/, 'Open the domain to load its reports'],
+	['none, no reports', { dmarc_policy: 'none', dmarc_sp: 'none' }, reports(null), 'improve', 1, /still delivered/, 'Make sure your DMARC record sends reports here'],
+	['no DMARC record', { dmarc_policy: null, dmarc_sp: null, dmarc_pct: null }, reports(null), 'attention', 0, /SPF but no DMARC record/, 'Publish a DMARC record with p=none'],
+	['several DMARC records', { dmarc_policy: null, dmarc_issue: 'multiple' }, reports(null), 'attention', 0, /several DMARC records/, 'Keep one DMARC record and delete the others'],
+	['no SPF', { spf_record: null }, reports(null), 'attention', 0, /no SPF record/, 'Publish an SPF record'],
+	['never checked', { dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, spf_record: null, dmarc_policy: null }, reports(null), 'unknown', null, /Nothing has been read from DNS/, 'Open the domain to read its records from DNS'],
+	['does not resolve', { dns_check_status: 'nxdomain', spf_record: null, dmarc_policy: null }, reports(null), 'attention', null, /does not exist/, 'Check the spelling, or remove this domain'],
+];
+
+describe('truth table: overview row', () => {
+	it.each(TRUTH)('%s', (_n, sum, rep, status, level, sentence, next) => {
+		const v = domainVerdict(domain, summary(sum), rep, null, now);
+		expect(v.status).toBe(status);
+		expect(v.level).toBe(level);
+		expect(v.sentence).toMatch(sentence);
+		expect(v.next.label).toBe(next);
+	});
+
+	it('the workspace is Done only when every domain is Verified from a current check, and says what it rests on', () => {
+		const ok = domainVerdict(domain, summary(), reports(99), null, now);
+		const dnsOnly = domainVerdict(domain, summary(), reports(null), null, now);
+		const partial = domainVerdict(domain, summary({ dmarc_pct: 10 }), reports(99), null, now);
+		const failing = domainVerdict(domain, summary({ dns_check_status: 'failed', dns_checked_at: ago(1) }), reports(99), null, now);
+		expect(workspaceAnswer([{ name: 'a.com', verdict: ok }, { name: 'b.com', verdict: ok }])).toBe('Done, from public DNS and reports: all 2 domains are verified.');
+		expect(workspaceAnswer([{ name: 'a.com', verdict: ok }, { name: 'b.com', verdict: dnsOnly }])).toBe('Done, from public DNS only: all 2 domains are verified.');
+		expect(workspaceAnswer([{ name: 'a.com', verdict: ok }, { name: 'b.com', verdict: partial }])).toMatch(/^Not yet\./);
+		expect(workspaceAnswer([{ name: 'a.com', verdict: ok }, { name: 'b.com', verdict: failing }])).toMatch(/^Not yet\./);
+		expect(workspaceAnswer([{ name: 'a.com', verdict: ok }, { name: 'b.com', verdict: ok }], 1)).toMatch(/^Not yet: all 2 domains are verified \(public DNS and reports\), but 1 domain is waiting/);
+		expect(workspaceAnswer([{ name: 'a.com', verdict: domainVerdict(domain, summary(), null, null, now) }])).toMatch(/^Not yet/);
+	});
+});
+
+describe('truth table: Do this next', () => {
+	const sub = { ...domain, domain: 'mail.example.com' };
+	const noOwn = dns(null);
+	const inherits = summary({ domain: 'mail.example.com', dmarc_policy: 'reject', dmarc_inherited_from: 'example.com' });
+
+	it('a subdomain with no record of its own is offered a DMARC record only when no parent policy covers it, known from a current summary', () => {
+		const k = (o: Partial<ActionInput>) => keys({ domain: sub, dns: noOwn, ...o });
+		expect(k({ summary: inherits, summaryState: 'current' })).toEqual(['verified:done']);
+		for (const state of ['failed', 'stale'] as const) {
+			const got = domainActions(input({ domain: sub, dns: noOwn, summary: inherits, summaryState: state }));
+			expect(got.map((a) => a.key)).toEqual(['dmarc-coverage']);
+			expect(got[0]!.status).toBe('unknown');
+			expect(got.some((a) => /Publish a DMARC record/.test(a.do))).toBe(false);
+		}
+		expect(k({ summary: null })).toEqual(['unknown:dmarc-coverage']);
+		// Loading: nothing yet, and the page shows it is still reading.
+		expect(domainActions(input({ domain: sub, dns: noOwn, summary: undefined }))).toEqual([]);
+		expect(actionsPending({ dns: noOwn, onboarding: onboarding(), summary: undefined, reports: reports(99) })).toBe(true);
+		// Known absent: no own record, a current successful check, and no parent policy.
+		expect(k({ summary: summary({ dmarc_policy: null, dmarc_inherited_from: null }), summaryState: 'current' })).toContain('attention:dmarc-missing');
+		// A summary whose latest check failed is not proof of absence.
+		expect(k({ summary: summary({ dmarc_policy: null, dns_check_status: 'failed' }), summaryState: 'current' })).toEqual(['unknown:dmarc-coverage']);
+	});
+
+	it('p=none is never "nothing to do", whatever the report totals', () => {
+		const none = dns('v=DMARC1; p=none; rua=mailto:r@reports.test');
+		for (const r of [reports(99), reports(80), reports(null), null]) {
+			const got = domainActions(input({ dns: none, reports: r }));
+			expect(got.some((a) => a.key === 'done')).toBe(false);
+		}
+		expect(keys({ dns: none, reports: null })).toEqual(['unknown:reports-failed']);
+		expect(actionsPending({ dns: none, onboarding: onboarding(), summary: summary(), reports: undefined })).toBe(true);
+	});
+
+	it('enforced with report totals that failed to load is not "nothing to do"', () => {
+		expect(keys({ reports: null })).toEqual(['unknown:reports-failed']);
+	});
+
+	it('weaker sp= on the domain page says subdomains are not enforced', () => {
+		const got = domainActions(input({ dns: dns('v=DMARC1; p=reject; sp=none; rua=mailto:r@reports.test') }));
+		expect(got.map((a) => `${a.status}:${a.key}`)).toEqual(['improve:sp']);
+		expect(got[0]!.do).toBe('Set sp=reject to enforce subdomains too');
+	});
+
+	it('94.6% is not 95%: thresholds use the exact share', () => {
+		const r = { total: 1000, passed: 946, failed: 54, passRate: 95, days: 7 };
+		expect(keys({ dns: dns('v=DMARC1; p=none; rua=mailto:r@reports.test'), reports: r })).toEqual(['improve:senders']);
+	});
+
+	it('a DKIM wildcard is "Can\'t tell from public DNS", never "none of the common selectors"', () => {
+		const got = domainActions(input({ reports: reports(80), onboarding: onboarding({ dkim: { selectors: [], source: 'doh', wildcard: true } }) }));
+		const w = got.find((a) => a.key === 'dkim-wildcard')!;
+		expect(w.status).toBe('unknown');
+		expect(w.why).toMatch(/Can't tell from public DNS/);
+		expect(got.some((a) => /common selectors/.test(a.why))).toBe(false);
+	});
+
+	it('revoked old keys next to a working one are a Note; attention only when no usable key exists', () => {
+		const both = onboarding({ dkim: { selectors: [{ name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' }, { name: 'new._domainkey.example.com', record: 'v=DKIM1; k=rsa; p=AAAB' }], source: 'doh' } });
+		expect(keys({ onboarding: both })).toEqual(['verified:done', 'note:dkim-old']);
+		const cname = onboarding({ dkim: { selectors: [{ name: 'old._domainkey.example.com', record: 'v=DKIM1; p=' }, { name: 's1._domainkey.example.com', record: 's1.domainkey.u1.wl.sendgrid.net' }], source: 'doh' } });
+		expect(keys({ onboarding: cname })).toEqual(['verified:done', 'note:dkim-old']);
 	});
 });

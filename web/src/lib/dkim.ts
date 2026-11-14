@@ -10,3 +10,14 @@ import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
 export function isRevokedDkimKey(record: string): boolean {
 	return /(^|;)\s*p=\s*(;|$)/i.test(decodeTxtData(record));
 }
+
+/**
+ * A selector that can sign today: a TXT key with a non-empty base64 `p=` (not a DMARC or SPF record), or a CNAME target
+ * (a host name, delegated to the provider). Revoked keys and other TXT content are not usable.
+ */
+export function isUsableDkimSelector(record: string): boolean {
+	const t = decodeTxtData(record).trim();
+	if (!/[=;]/.test(t)) return /^[a-z0-9.-]+\.[a-z]{2,}\.?$/i.test(t);
+	if (/^v=\s*(DMARC1|spf1)/i.test(t)) return false;
+	return /(^|;)\s*p=\s*[A-Za-z0-9+/]+={0,2}\s*(;|$)/.test(t);
+}

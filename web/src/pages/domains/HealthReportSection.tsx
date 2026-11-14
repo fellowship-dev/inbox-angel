@@ -130,14 +130,16 @@ function Source<T>({ title, section, children }: {
     return <div className="space-y-2 min-w-0 break-words"><H className="font-semibold">{title}</H><p className="text-sm">{section.status}{section.reason ? ` · ${section.reason.replaceAll('_', ' ')}` : ''}</p><p className="text-sm text-ink-2">Source: {section.source} · Requested window {date(section.window.since)} – {date(section.window.until)}</p><p className="text-sm text-ink-2">{section.population}</p>{children}{section.evidence && <><p className="text-sm text-ink-2">{section.evidence.report_count} received reports · {section.evidence.coverage.observed_dates.length} observed dates · {section.evidence.coverage.missing_dates.length} dates without report-start evidence. Coverage does not represent all mail.{section.evidence.truncated ? ' Observation list truncated.' : ''}</p><p className="text-sm text-ink-2">Latest source-period age: {age(section.evidence.freshness.period_end_age_seconds)} · Receipt age: {age(section.evidence.freshness.receipt_age_seconds)}</p>{section.evidence.observations.length > 0 && <details><summary className="cursor-pointer text-sm">Original source periods and counts</summary><ul className="space-y-2 text-sm mt-2">{section.evidence.observations.map(o => <li key={o.id}>{o.reporter}{o.source_report_id ? ` · ${o.source_report_id}` : ''}: {date(o.date_begin)} – {date(o.date_end)}; received {date(o.received_at)} ({age(o.receipt_age_seconds)} ago); {o.total_count} total, {o.pass_count} passed, {o.fail_count} failed.</li>)}</ul></details>}</>}</div>;
 }
 /** The shared HTTP/MCP health report for a domain (live DNS plus collected evidence). One cached request per page. */
-export function useHealthReport(domainId: number) {
+export function useHealthReport(domainId: number, enabled = true) {
     const workspace = useWorkspaceId();
-    return useQuery({ queryKey: ['health-report', workspace, domainId], queryFn: () => api<HealthReport>(`/api/domains/${domainId}/health-report`), retry: false, staleTime: 60000 });
+    return useQuery({ queryKey: ['health-report', workspace, domainId], queryFn: () => api<HealthReport>(`/api/domains/${domainId}/health-report`), retry: false, staleTime: 60000, enabled });
 }
-export function HealthReportSection({ domainId }: {
+export function HealthReportSection({ domainId, enabled = true }: {
     domainId: number;
+    /** False until the report is wanted: it runs live DNS and reads collected evidence. */
+    enabled?: boolean;
 }) {
-    const q = useHealthReport(domainId);
+    const q = useHealthReport(domainId, enabled);
     const H3 = useHeadingTag(1);
     const H4 = useHeadingTag(2);
     const H5 = useHeadingTag(3);

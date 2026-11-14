@@ -363,6 +363,23 @@ async function getDomainCheckSummary(tenant: TenantContext, domainId: string): P
   return json(summary);
 }
 
+/** Page size for /api/domains/summaries: the overview asks for all of a workspace's domains, a page at a time. */
+export const SUMMARIES_PAGE_MAX = 200;
+
+async function getDomainCheckSummaries(tenant: TenantContext, url: URL): Promise<Response> {
+  const after = url.searchParams.get('after');
+  const afterId = after === null ? 0 : parseInt(after, 10);
+  const limitParam = url.searchParams.get('limit');
+  const limit = limitParam === null ? SUMMARIES_PAGE_MAX : parseInt(limitParam, 10);
+  if (!Number.isInteger(afterId) || afterId < 0 || !/^\d*$/.test(after ?? '')) return err('invalid after', 400);
+  if (!Number.isInteger(limit) || limit < 1 || limit > SUMMARIES_PAGE_MAX) return err(`limit must be 1-${SUMMARIES_PAGE_MAX}`, 400);
+  const since = Math.floor(Date.now() / 1000) - 30 * 86400;
+  // One row more than asked tells whether another page exists.
+  const rows = await tenant.scope.reports.checkSummaries(since, { afterId, limit: limit + 1 });
+  const page = rows.slice(0, limit);
+  return json({ summaries: page, next_after: rows.length > limit ? page[page.length - 1]!.domain_id : null, window_days: 30 });
+}
+
 async function getDomainReportByDate(tenant: TenantContext, domainId: string, url: URL): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
@@ -753,6 +770,10 @@ async function _handleApi(
       if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
       const result = await commitVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
       return json(result, result.resumed ? 200 : 201);
+    }
+    // GET /api/domains/summaries — check-summary for every domain of the workspace in one request (?after=<id>&limit=<n>, by id)
+    if (path === '/api/domains/summaries' && method === 'GET') {
+      return await getDomainCheckSummaries(tenant, url);
     }
     // GET /api/domains/claims/:id/preview — public DNS of a claimed-but-unverified domain. Read-only: writes nothing.
     const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);

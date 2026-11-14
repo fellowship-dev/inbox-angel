@@ -10,6 +10,10 @@ export interface DmarcFacts {
 	policy: string | null;
 	issue: 'multiple' | 'invalid' | null;
 	inherited_from: string | null;
+	/** pct= of the record that applies (100 when absent); null when there is no usable record. Optional for older callers. */
+	pct?: number | null;
+	/** sp= of the record that applies (its p= when absent); null when there is no usable record. */
+	sp?: string | null;
 }
 
 export function domainQueries(db: Db, workspaceId: string) {
@@ -138,6 +142,8 @@ export function domainQueries(db: Db, workspaceId: string) {
 				set.dmarc_policy = r.dmarc.policy;
 				set.dmarc_issue = r.dmarc.issue;
 				set.dmarc_inherited_from = r.dmarc.inherited_from;
+				if (r.dmarc.pct !== undefined) set.dmarc_pct = r.dmarc.pct;
+				if (r.dmarc.sp !== undefined) set.dmarc_sp = r.dmarc.sp;
 			}
 			if (complete) {
 				set.dns_checked_at = r.at;

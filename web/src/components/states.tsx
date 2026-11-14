@@ -137,7 +137,7 @@ export function Section({ title, description, actions, children }: { title: Reac
  * A collapsed section: an h2 whose button says what is inside ("DNS records: DMARC, SPF and 12 DKIM keys") and shows it
  * on demand (WAI-ARIA accordion pattern). The content stays mounted while closed, so its data is loaded once.
  */
-export function Disclosure({ title, summary, children, defaultOpen = false, id }: { title: ReactNode; summary?: ReactNode; children: ReactNode; defaultOpen?: boolean; id?: string }) {
+export function Disclosure({ title, summary, children, defaultOpen = false, id, onOpenChange }: { title: ReactNode; summary?: ReactNode; children: ReactNode; defaultOpen?: boolean; id?: string; onOpenChange?: (open: boolean) => void }) {
 	const [open, setOpen] = useState(defaultOpen);
 	const bodyId = useId();
 	return (
@@ -147,7 +147,10 @@ export function Disclosure({ title, summary, children, defaultOpen = false, id }
 					type="button"
 					aria-expanded={open}
 					aria-controls={bodyId}
-					onClick={() => setOpen((o) => !o)}
+					onClick={() => {
+						setOpen(!open);
+						onOpenChange?.(!open);
+					}}
 					className="flex w-full items-start justify-between gap-3 rounded-lg px-4 py-3 text-left hover:bg-surface-2 sm:px-5"
 				>
 					<span className="min-w-0 space-y-0.5">

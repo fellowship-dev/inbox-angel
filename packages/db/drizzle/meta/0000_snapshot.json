@@ -1772,6 +1772,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "dmarc_sp": {
+          "name": "dmarc_sp",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

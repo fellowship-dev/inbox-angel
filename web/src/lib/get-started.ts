@@ -25,7 +25,7 @@ export function getStartedSteps(i: GetStartedInput): Step[] {
 
 	steps.push(
 		n + i.claims > 0
-			? { key: 'add', title: 'Add the domain you send email from', state: 'done', detail: `${plural(n + i.claims, 'domain')} added.` }
+			? { key: 'add', title: 'Add the domain you send email from', state: 'done', detail: i.claims > 0 ? `${plural(n, 'domain')} added, and ${i.claims} waiting for proof of ownership.` : `${plural(n, 'domain')} added.` }
 			: {
 					key: 'add',
 					title: 'Add the domain you send email from',

@@ -1,16 +1,18 @@
 import { statusRank, type StatusKind } from '@inbox-angel/ui';
-import { isRevokedDkimKey } from './dkim';
-import { enforcementLevel, hasReportAddress, parseDmarcPolicy } from './dmarc-record';
+import { isRevokedDkimKey, isUsableDkimSelector } from './dkim';
+import { dkimWildcardSummary } from './dkim-wildcard';
+import { enforcementLevel, hasReportAddress, parseDmarcPolicy, weakerSubdomainPolicy } from './dmarc-record';
 import type { DnsCheck, OnboardingResult } from './domain-queries';
 import { formatNumber } from './format';
 import { didNotResolve } from './levels';
 import type { Domain, DomainCheckSummary, FailingSource } from './types';
-import { WHO, type ReportTotals } from './verdict';
+import { WHO, exactRate, type ReportTotals } from './verdict';
 
 /**
  * "Do this next" on a domain page: one to three actions, each as Do this / Why, built from what the page already
  * reads (live DNS, the stored DNS facts, the last 7 days of reports). Every item names who acts and, when there is
- * one, where to do it. A lookup that failed is Unknown, never "not found".
+ * one, where to do it. A lookup that failed is Unknown, never "not found", and no record is offered for a name unless
+ * DNS has shown the record is absent.
  */
 export interface DomainAction {
 	key: string;
@@ -29,15 +31,50 @@ export interface DomainAction {
 	retry?: boolean;
 }
 
+/**
+ * Whether the stored summary reflects the live read on this page: `current` once it was fetched after the read stored its
+ * facts, `loading` while it is being fetched, `failed` when that fetch failed, `stale` when it predates the read.
+ */
+export type SummaryState = 'current' | 'stale' | 'loading' | 'failed';
+
 export interface ActionInput {
 	domain: Pick<Domain, 'id' | 'domain' | 'rua_address'>;
 	/** Undefined while loading, null when the request failed. */
 	dns: DnsCheck | null | undefined;
 	onboarding: OnboardingResult | null | undefined;
 	summary: DomainCheckSummary | null | undefined;
+	/** Defaults to `current` when a summary is given (tests and callers that read once). */
+	summaryState?: SummaryState;
 	/** Totals for the last `days` days of reports. Undefined while loading, null when it failed. */
 	reports: ReportTotals | null | undefined;
 	sources?: FailingSource[] | null;
+}
+
+/**
+ * Which DMARC policy covers this name, and how sure we are. The live lookup reads `_dmarc.<name>` only, so a parent's
+ * record that covers it is known only from the stored summary, and only when that summary is current.
+ * (PR 142's `dmarcCoverage` / onboarding `dmarc.effective` can replace the body: the shape is the same idea.)
+ */
+export type DmarcCoverage =
+	| { kind: 'own'; policy: string | null; record: string }
+	| { kind: 'inherited'; policy: string; from: string }
+	| { kind: 'issue'; issue: 'multiple' | 'invalid' }
+	| { kind: 'none' }
+	| { kind: 'unknown'; reason: 'lookup' | 'loading' | 'failed' | 'stale' };
+
+export function dmarcCoverage(i: Pick<ActionInput, 'dns' | 'summary' | 'summaryState'>): DmarcCoverage {
+	const { dns, summary } = i;
+	const state: SummaryState = i.summaryState ?? (summary === undefined ? 'loading' : summary === null ? 'failed' : 'current');
+	if (dns === undefined) return { kind: 'unknown', reason: 'loading' };
+	if (dns === null || dns.error) return { kind: 'unknown', reason: 'lookup' };
+	const usable = state === 'current' && summary ? summary : null;
+	if (usable && !usable.dmarc_policy && (usable.dmarc_issue === 'multiple' || usable.dmarc_issue === 'invalid')) return { kind: 'issue', issue: usable.dmarc_issue };
+	if (dns.found && dns.current_record) return { kind: 'own', policy: parseDmarcPolicy(dns.current_record), record: dns.current_record };
+	// No record at _dmarc.<name>: the effective policy is the parent's, if any, and only a current summary can say.
+	if (!usable) return { kind: 'unknown', reason: state === 'current' ? 'failed' : state };
+	if (usable.dmarc_policy && usable.dmarc_inherited_from) return { kind: 'inherited', policy: usable.dmarc_policy, from: usable.dmarc_inherited_from };
+	if (usable.dns_check_status !== 'ok' || !usable.dns_checked_at) return { kind: 'unknown', reason: 'stale' };
+	return { kind: 'none' };
 }
 
 const MAX = 3;
@@ -71,61 +108,86 @@ export function domainActions(input: ActionInput): DomainAction[] {
 		}
 	}
 
-	// DMARC, from the live record; a subdomain covered by its parent's record has none of its own and needs none.
-	const live = dns && !dns.error ? dns : null;
-	const inherited = summary?.dmarc_inherited_from && summary.dmarc_policy ? summary.dmarc_inherited_from : null;
-	const issue = summary && !summary.dmarc_policy ? summary.dmarc_issue : null;
+	// DMARC: offer a record only when DNS has shown that no policy covers this name.
+	const cov = dmarcCoverage(input);
 	let policy: string | null = null;
-	if (issue === 'multiple') {
+	let ownRecord: string | null = null;
+	if (cov.kind === 'issue' && cov.issue === 'multiple') {
 		out.push({ key: 'dmarc-multiple', status: 'attention', do: 'Keep one DMARC record and delete the others', why: 'With several DMARC records published, receivers ignore all of them.', who: WHO.dns });
-	} else if (issue === 'invalid') {
+	} else if (cov.kind === 'issue') {
 		out.push({ key: 'dmarc-invalid', status: 'attention', do: 'Fix the DMARC record so it has a valid p= policy', why: 'Without a valid policy, receivers ignore the record.', who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
-	} else if (live && !live.found && !inherited) {
-		out.push({ key: 'dmarc-missing', status: 'attention', do: 'Publish a DMARC record, starting at p=none', why: `Receivers get no instruction for mail that fails, and nobody sends reports about who mails as ${name}.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
-	} else if (live?.found && live.current_record) {
-		policy = parseDmarcPolicy(live.current_record);
-		if (!live.has_rua && hasReportAddress(domain.rua_address)) {
-			out.push({ key: 'dmarc-rua', status: 'improve', do: 'Add the reports address to your DMARC record', why: `Until reports arrive here, nobody can confirm which services send as ${name} and pass.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
+	} else if (cov.kind === 'none') {
+		out.push({ key: 'dmarc-missing', status: 'attention', do: 'Publish a DMARC record, starting at p=none', why: `Neither ${name} nor a parent domain publishes a DMARC record, so receivers get no instruction for mail that fails, and nobody sends reports about who mails as ${name}.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
+	} else if (cov.kind === 'unknown' && (cov.reason === 'failed' || cov.reason === 'stale')) {
+		out.push({
+			key: 'dmarc-coverage',
+			status: 'unknown',
+			do: `Check again whether a parent domain's DMARC record covers ${name}`,
+			why: `There is no DMARC record at _dmarc.${name}, and whether a parent domain's record covers it ${cov.reason === 'failed' ? 'could not be loaded' : 'has not been confirmed by the latest check'}. Nothing is suggested until it is known.`,
+			who: WHO.you,
+			retry: true,
+		});
+	} else if (cov.kind === 'own') {
+		policy = cov.policy;
+		ownRecord = cov.record;
+		if (dns && !dns.has_rua && hasReportAddress(domain.rua_address)) {
+			// Under enforcement this changes evidence, not protection: a Note, so the page agrees with the overview's Verified.
+			const enforcedNow = policy === 'quarantine' || policy === 'reject';
+			out.push({ key: 'dmarc-rua', status: enforcedNow ? 'note' : 'improve', do: 'Add the reports address to your DMARC record', why: `Until reports arrive here, nobody can confirm which services send as ${name} and pass.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
 		}
-	} else if (inherited) {
-		policy = summary?.dmarc_policy ?? null;
+	} else if (cov.kind === 'inherited') {
+		policy = cov.policy;
 	}
 
-	// Reports: what the senders do under the current policy.
-	if (policy) {
-		const has = reports && reports.total > 0 && reports.passRate !== null;
-		const rate = has ? reports.passRate! : null;
-		const tally = has ? `${rate}% of ${formatNumber(reports.total)} reported messages passed DMARC in the last ${reports.days} days` : '';
-		const top = sources?.length ? ` The largest failing source is ${sources[0]!.org ?? sources[0]!.base_domain ?? sources[0]!.source_ip}.` : '';
-		const fix = (status: StatusKind, why: string): DomainAction => ({ key: 'senders', status, do: 'Fix the senders that fail DMARC', why, who: WHO.providers, to: `${page}/analytics`, cta: 'See who fails and why' });
-		const enforced = enforcementLevel(live?.current_record ?? null);
-		if (policy === 'none') {
-			if (rate !== null && rate >= 95) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=quarantine', why: `${tally}, so your senders look ready. Today, mail that fails DMARC is still delivered.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
-			else if (rate !== null) out.push(fix('improve', `${tally}.${top} Move to quarantine only once they pass.`));
-			else if (reports && hasReportAddress(domain.rua_address) && !out.some((a) => a.key === 'dmarc-rua')) out.push({ key: 'gathering', status: 'gathering', do: 'Wait for the first DMARC reports', why: 'Receivers send them about once a day. Until they arrive, nobody can confirm that every sender passes, so p=none stays the safe setting.', who: WHO.nobody });
-			else if (reports && !hasReportAddress(domain.rua_address)) out.push({ key: 'no-reports', status: 'unknown', do: 'Confirm every service that sends as you before moving to p=quarantine', why: 'Reports are not connected for this domain, so pass rates are unknown.', who: WHO.providers });
-		} else if (policy === 'quarantine' || policy === 'reject') {
-			if (rate !== null && rate < 70) out.push(fix('attention', `${tally}, so some of your own mail is likely ${policy === 'reject' ? 'rejected' : 'in spam'}.${top}`));
-			else if (policy === 'quarantine' && rate !== null && rate >= 90) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=reject', why: `${tally}. Reject stops spoofed mail outright instead of sending it to spam.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
-			else if (rate !== null && rate < 95) out.push(fix('improve', `${tally}.${top}`));
+	// Reports: what the senders do under the current policy. p=none is never "nothing to do".
+	const rate = exactRate(reports);
+	const shown = reports && reports.total > 0 ? `${reports.passRate}% of ${formatNumber(reports.total)} reported messages passed DMARC in the last ${reports.days} days` : '';
+	const top = sources?.length ? ` The largest failing source is ${sources[0]!.org ?? sources[0]!.base_domain ?? sources[0]!.source_ip}.` : '';
+	const fix = (status: StatusKind, why: string): DomainAction => ({ key: 'senders', status, do: 'Fix the senders that fail DMARC', why, who: WHO.providers, to: `${page}/analytics`, cta: 'See who fails and why' });
+	const reloadReports = (why: string): DomainAction => ({ key: 'reports-failed', status: 'unknown', do: 'Load the report totals again', why, who: WHO.you, retry: true });
+	if (policy === 'none') {
+		if (rate !== null && rate >= 95) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=quarantine', why: `${shown}, so your senders look ready. Today, mail that fails DMARC is still delivered.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
+		else if (rate !== null) out.push(fix('improve', `${shown}.${top} Move to quarantine only once they pass.`));
+		else if (reports === null) out.push(reloadReports('They could not be loaded, so whether every sender passes is unknown. Under p=none, mail that fails DMARC is still delivered.'));
+		else if (reports && hasReportAddress(domain.rua_address) && !out.some((a) => a.key === 'dmarc-rua')) out.push({ key: 'gathering', status: 'gathering', do: 'Wait for the first DMARC reports', why: 'Receivers send them about once a day. Until they arrive, nobody can confirm that every sender passes, so p=none stays the safe setting.', who: WHO.nobody });
+		else if (reports && !hasReportAddress(domain.rua_address)) out.push({ key: 'no-reports', status: 'unknown', do: 'Confirm every service that sends as you before moving to p=quarantine', why: 'Reports are not connected for this domain, so pass rates are unknown. Under p=none, mail that fails DMARC is still delivered.', who: WHO.providers });
+	} else if (policy === 'quarantine' || policy === 'reject') {
+		if (rate !== null && rate < 70) out.push(fix('attention', `${shown}, so some of your own mail is likely ${policy === 'reject' ? 'rejected' : 'in spam'}.${top}`));
+		else if (policy === 'quarantine' && rate !== null && rate >= 90) out.push({ key: 'approve', status: 'approval', do: 'Approve moving DMARC to p=reject', why: `${shown}. Reject stops spoofed mail outright instead of sending it to spam.`, who: WHO.approver, to: `${page}/dmarc-wizard`, cta: 'Review the change', writes: true });
+		else if (rate !== null && rate < 95) out.push(fix('improve', `${shown}.${top}`));
+		else if (reports === null) out.push(reloadReports('They could not be loaded, so whether every sender passes is unknown.'));
+		if (ownRecord) {
+			const enforced = enforcementLevel(ownRecord);
 			if (enforced.level === 'partial') out.push({ key: 'pct', status: 'improve', do: `Raise pct from ${enforced.pct} to 100`, why: `Today the policy applies to ${enforced.pct}% of mail that fails; receivers handle the rest one level weaker.`, who: WHO.dns });
+			const weak = weakerSubdomainPolicy(ownRecord);
+			if (weak) out.push({ key: 'sp', status: 'improve', do: `Set sp=${policy} to enforce subdomains too`, why: `Mail that fails DMARC from ${name} itself is ${policy === 'reject' ? 'rejected' : 'quarantined'}, but subdomains without their own record follow sp=${weak}, so failing mail from them is ${weak === 'none' ? 'still delivered' : 'quarantined, not rejected'}.`, who: WHO.dns });
 		}
 	}
 
-	// DKIM: DNS cannot list selectors, so finding none is Unknown, not missing.
+	// DKIM. DNS cannot list selectors: none found, or a wildcard answer, is Unknown, never missing. Revoked old keys next
+	// to a working one are a Note; they need attention only when no usable key exists.
 	if (onboarding && !errors.some((e) => e.startsWith('dkim'))) {
-		const sel = onboarding.dkim.selectors;
-		const revoked = sel.filter((s) => isRevokedDkimKey(s.record)).length;
-		if (sel.length === 0) out.push({ key: 'dkim-unknown', status: 'unknown', do: 'Ask your email provider which DKIM selector it signs with', why: 'None of the common selectors we check has a key. Your provider may use another one, so this is not proof DKIM is missing.', who: WHO.providers });
-		else if (revoked === sel.length) out.push({ key: 'dkim-revoked', status: 'attention', do: 'Publish a working DKIM key from your email provider', why: `Every DKIM key we found has an empty p=, which means it was revoked, so nothing signed with it passes.`, who: WHO.providers });
+		const { selectors, wildcard } = onboarding.dkim;
+		const revoked = selectors.filter((s) => isRevokedDkimKey(s.record)).length;
+		const usable = selectors.filter((s) => !isRevokedDkimKey(s.record) && isUsableDkimSelector(s.record)).length;
+		if (wildcard) out.push({ key: 'dkim-wildcard', status: 'unknown', do: 'Ask your email provider which DKIM selector it signs with', why: `${dkimWildcardSummary(name)} Can't tell from public DNS whether DKIM is set up.`, who: WHO.providers });
+		else if (selectors.length === 0) out.push({ key: 'dkim-unknown', status: 'unknown', do: 'Ask your email provider which DKIM selector it signs with', why: 'None of the common selectors we check has a key. Your provider may use another one, so this is not proof DKIM is missing.', who: WHO.providers });
+		else if (usable === 0 && revoked > 0) out.push({ key: 'dkim-revoked', status: 'attention', do: 'Publish a working DKIM key from your email provider', why: 'Every DKIM key we found has an empty p=, which means it was revoked, so nothing signed with it passes.', who: WHO.providers });
+		else if (usable > 0 && revoked > 0) out.push({ key: 'dkim-old', status: 'note', do: `${revoked} old DKIM ${revoked === 1 ? 'key is' : 'keys are'} revoked`, why: `${usable} other ${usable === 1 ? 'key works' : 'keys work'}, so nothing breaks. Remove the revoked ones when convenient.`, who: WHO.nobody });
 	}
 
-	const sorted = out.sort((a, b) => statusRank(a.status) - statusRank(b.status)).slice(0, MAX);
-	if (sorted.length > 0) return sorted;
-	if (dns === undefined || onboarding === undefined) return [];
+	// Order by consequence. When reports show mail passing, a DKIM selector DNS cannot find is not a problem in practice.
+	if (rate !== null && rate >= 95) for (const a of out) if (a.key === 'dkim-unknown' || a.key === 'dkim-wildcard') a.status = 'note';
+	const sorted = out.sort((a, b) => statusRank(a.status) - statusRank(b.status));
+	const pending = dns === undefined || onboarding === undefined || reports === undefined || cov.kind === 'unknown' && cov.reason === 'loading';
+	const blocking = sorted.filter((a) => a.status !== 'note');
+	if (blocking.length > 0) return sorted.slice(0, MAX);
+	if (pending) return [];
+	// Nothing to do only with every fact known: coverage settled, reports loaded, policy enforced.
 	const scope = reports && reports.total > 0 ? `public DNS and ${formatNumber(reports.total)} reported messages` : 'public DNS';
-	return [{ key: 'done', status: 'verified', do: 'Nothing to do', why: `Nothing in ${scope} needs a change right now.`, who: WHO.nobody }];
+	return [{ key: 'done', status: 'verified', do: 'Nothing to do', why: `Nothing in ${scope} needs a change right now.`, who: WHO.nobody } as DomainAction, ...sorted].slice(0, MAX);
 }
 
-/** Still reading: the list would change once DNS answers. */
-export const actionsPending = (i: Pick<ActionInput, 'dns' | 'onboarding'>) => i.dns === undefined || i.onboarding === undefined;
+/** Still reading: the list would change once DNS, the summary or the report totals answer. */
+export const actionsPending = (i: Pick<ActionInput, 'dns' | 'onboarding' | 'summary' | 'summaryState' | 'reports'>) =>
+	i.dns === undefined || i.onboarding === undefined || i.reports === undefined || (dmarcCoverage(i).kind === 'unknown' && (dmarcCoverage(i) as { reason: string }).reason === 'loading');

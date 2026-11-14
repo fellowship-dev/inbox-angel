@@ -22,10 +22,12 @@ export function spfFromTxt(records: readonly string[]): string | null {
 export function dmarcFactsFromLookup(l: DmarcLookup): DmarcFacts | undefined {
   if (l.status === 'error') return undefined;
   const inherited_from = l.inherited ? l.organizationalDomain : null;
-  if (l.status === 'none') return { policy: null, issue: null, inherited_from: null };
-  if (l.status === 'multiple') return { policy: null, issue: 'multiple', inherited_from };
-  if (!l.record?.valid) return { policy: null, issue: 'invalid', inherited_from };
-  return { policy: l.inherited ? l.record.subdomainPolicy : l.record.policy, issue: null, inherited_from };
+  if (l.status === 'none') return { policy: null, issue: null, inherited_from: null, pct: null, sp: null };
+  if (l.status === 'multiple') return { policy: null, issue: 'multiple', inherited_from, pct: null, sp: null };
+  if (!l.record?.valid) return { policy: null, issue: 'invalid', inherited_from, pct: null, sp: null };
+  // pct= and sp= of the applicable record, so the overview can tell full enforcement from partial (pct below 100) and an
+  // enforced domain whose subdomains are not (sp weaker than p).
+  return { policy: l.inherited ? l.record.subdomainPolicy : l.record.policy, issue: null, inherited_from, pct: l.record.pct, sp: l.record.subdomainPolicy };
 }
 
 /**

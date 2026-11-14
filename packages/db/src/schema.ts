@@ -126,6 +126,8 @@ export const domains = sqliteTable(
 		dmarc_inherited_from: text('dmarc_inherited_from'),
 		/** Result of the last check that read both SPF and DMARC: 'ok' | 'nxdomain'. Kept when a later attempt fails, so the card can still say the domain did not resolve at that check. */
 		dns_last_good_status: text('dns_last_good_status'),
+		/** The DMARC record's sp= as read at the last good check (0012): own record's sp (its p when absent), or the covering record's. Null: not read since 0012. dmarc_pct holds pct= from the same read. */
+		dmarc_sp: text('dmarc_sp'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),

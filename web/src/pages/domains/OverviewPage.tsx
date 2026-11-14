@@ -8,14 +8,13 @@ import { DomainRow } from '../../components/domain/DomainRow';
 import { GetStarted } from '../../components/GetStarted';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
-import { sumStats } from '../../lib/dmarc';
-import { domainKeys, fetchStats, fetchSummary } from '../../lib/domain-queries';
+import { domainKeys, fetchStats, fetchSummary, useDomainSummaries } from '../../lib/domain-queries';
 import { getStartedSteps } from '../../lib/get-started';
 import { hostedKey, useHostedConfig, type HostedResponse } from '../../lib/hosted';
 import { useDomainClaims, useDomains } from '../../lib/queries';
 import { useSession } from '../../lib/session';
-import type { DailyStat, Domain } from '../../lib/types';
-import { domainVerdict, unavailableVerdict, workspaceAnswer, type DomainVerdict, type ReportTotals } from '../../lib/verdict';
+import type { DailyStat, Domain, DomainCheckSummary } from '../../lib/types';
+import { domainVerdict, totalsFromSummary, unavailableVerdict, workspaceAnswer, type DomainVerdict, type ReportTotals } from '../../lib/verdict';
 
 /** Days of reports each row's evidence covers. */
 const WINDOW = 30;
@@ -54,27 +53,28 @@ export function OverviewPage() {
 	const [exporting, setExporting] = useState(false);
 	const listId = useId();
 
-	// One stored-DNS summary and one report total per domain; the domain page reuses both from the cache.
-	const summaries = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.summary(d.id), queryFn: () => fetchSummary(d.id) })) });
-	const stats = useQueries({ queries: domains.map((d) => ({ queryKey: domainKeys.stats(d.id, WINDOW), queryFn: () => fetchStats(d.id, WINDOW) })) });
+	// One request for every domain's stored DNS facts and 30-day report totals (paged by 200); hosted status per domain only
+	// when hosted records are on for the deployment.
+	const batch = useDomainSummaries(domains.length > 0);
 	const hostedOn = useHostedConfig();
 	const hosted = useQueries({ queries: domains.map((d) => ({ queryKey: hostedKey(d.id), queryFn: () => api<HostedResponse>(`/api/domains/${d.id}/hosted`), enabled: hostedOn })) });
 
-	const totals: Array<ReportTotals | null | undefined> = stats.map((q) => {
-		if (q.isPending) return undefined;
-		if (q.isError) return null;
-		const s = sumStats(q.data.stats);
-		return { total: s.total, passed: s.passed, failed: s.failed, passRate: s.passRate, days: WINDOW };
+	const summaryOf = (d: Domain): DomainCheckSummary | null | undefined => (batch.isPending ? undefined : batch.isError ? null : (batch.data.get(d.id) ?? null));
+	const totals: Array<ReportTotals | null | undefined> = domains.map((d) => {
+		const s = summaryOf(d);
+		return s ? totalsFromSummary(s, WINDOW) : s;
 	});
 	const verdicts: Array<DomainVerdict | null> = domains.map((d, i) => {
-		const sq = summaries[i]!;
-		if (sq.isError) return unavailableVerdict(errorMessage(sq.error), d.domain);
+		const s = summaryOf(d);
+		if (batch.isError) return unavailableVerdict(errorMessage(batch.error), d.domain);
 		const h = hosted[i]!;
-		if (sq.isPending || stats[i]!.isPending || (hostedOn && h.isPending)) return null;
+		if (s === undefined || (hostedOn && h.isPending)) return null;
+		if (s === null) return unavailableVerdict('it is not in the summary yet. Reload the page.', d.domain);
 		const info = hostedOn && h.data?.enabled ? h.data : null;
-		return domainVerdict(d, sq.data, totals[i], info);
+		return domainVerdict(d, s, totals[i], info);
 	});
-	const byId = new Map(domains.map((d, i) => [d.id, { domain: d, verdict: verdicts[i] ?? null, retry: summaries[i]!.isError ? () => void summaries[i]!.refetch() : undefined }]));
+	const retry = batch.isError ? () => void batch.refetch() : undefined;
+	const byId = new Map(domains.map((d, i) => [d.id, { domain: d, verdict: verdicts[i] ?? null, retry }]));
 
 	// Most urgent first, a subdomain right under its parent. Until every row is known the order stays as listed,
 	// so rows do not jump while they load.
@@ -90,7 +90,7 @@ export function OverviewPage() {
 		hosted: status?.mode === 'saas',
 		domains,
 		claims: claims.length,
-		summaries: summaries.map((q) => (q.isPending ? undefined : q.isError ? null : q.data)),
+		summaries: domains.map(summaryOf),
 		verdicts,
 		reports: totals,
 	});
