@@ -11,6 +11,7 @@ import type { BoundEnv } from '../index';
 import { globalQueries } from '@ready-set-mail/db';
 import { effectiveRegistry, parseOperatorEntries } from '../dmarc/known-reporters';
 import { intakeAuthStatus } from './auth-status';
+import { senderText } from '../hosted/intake-log';
 
 const DAY = 86400;
 
@@ -21,7 +22,8 @@ export async function handleUnknownReporterRoutes(request: Request, env: BoundEn
   if (!instanceOwner) return Response.json({ error: 'instance owner only' }, { status: 403 });
   if (url.pathname === '/api/instance/intake-status') return Response.json(await intakeAuthStatus(env));
   const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '100', 10) || 100, 1), 500);
-  const candidates = await globalQueries(env.DB).reporterCandidates.list(limit);
+  // Sender-written text is cleaned again on the way out (rows stored by an older build, or by anything else, are not trusted): no control characters, at most 64 characters.
+  const candidates = (await globalQueries(env.DB).reporterCandidates.list(limit)).map((c) => ({ ...c, dkim_org: senderText(c.dkim_org), from_address: senderText(c.from_address), report_email: senderText(c.report_email), org_name: c.org_name === null ? null : senderText(c.org_name) }));
   return Response.json({
     candidates,
     registry: effectiveRegistry(env).map((e) => ({ id: e.id, label: e.label, dkim_orgs: e.dkimOrgs, from: e.from, report_emails: e.reportEmails, report_email_domains: e.reportEmailDomains ?? [], caveat: e.caveat ?? null })),

@@ -39,10 +39,15 @@ describe('matching', () => {
     expect(registryCandidates(null, 'noreply-dmarc-support@google.com', {})).toEqual([]);
   });
   it('wildcard From: one or more labels, never the bare domain, never another local part', () => {
+    const env = { INTAKE_KNOWN_REPORTERS: 'wild|Wild|wild.example|no-reply@*.wild.example|dmarc@wild.example' };
+    expect(registryCandidates('wild.example', 'no-reply@au-1.wild.example', env).map((e) => e.id)).toEqual(['wild']);
+    expect(registryCandidates('wild.example', 'no-reply@wild.example', env)).toEqual([]);
+    expect(registryCandidates('wild.example', 'x@au-1.wild.example', env)).toEqual([]);
+    expect(registryCandidates('wild.example', 'no-reply@au-1.wild.example.evil.example', env)).toEqual([]);
+    // Mimecast: only the observed region (au-1), exactly
     expect(registryCandidates('mimecastreport.com', 'no-reply@au-1.mimecastreport.com', {}).map((e) => e.id)).toEqual(['mimecast']);
+    expect(registryCandidates('mimecastreport.com', 'no-reply@us-1.mimecastreport.com', {})).toEqual([]);
     expect(registryCandidates('mimecastreport.com', 'no-reply@mimecastreport.com', {})).toEqual([]);
-    expect(registryCandidates('mimecastreport.com', 'x@au-1.mimecastreport.com', {})).toEqual([]);
-    expect(registryCandidates('mimecastreport.com', 'no-reply@au-1.mimecastreport.com.evil.example', {})).toEqual([]);
   });
   it('the report email must be in the accepted set (Yahoo accepted both of its addresses over time); org_name is never consulted', () => {
     const yahoo = KNOWN_REPORTERS.find((e) => e.id === 'yahoo')!;
@@ -51,8 +56,12 @@ describe('matching', () => {
     expect(reportEmailAccepted(yahoo, 'someone@yahoo.com')).toBe(false);
     expect(reportEmailAccepted(yahoo, null)).toBe(false);
     const mc = KNOWN_REPORTERS.find((e) => e.id === 'mimecast')!;
-    expect(reportEmailAccepted(mc, 'dmarc@us-1.mimecastreport.com')).toBe(true);
-    expect(reportEmailAccepted(mc, 'dmarc@mimecastreport.com.evil.example')).toBe(false);
+    expect(reportEmailAccepted(mc, 'no-reply@au-1.mimecastreport.com')).toBe(true);
+    expect(reportEmailAccepted(mc, 'dmarc@us-1.mimecastreport.com')).toBe(false); // not observed: not accepted
+    // an entry may accept any address under a domain
+    const dom = { id: 't', label: 'T', dkimOrgs: ['t.example'], from: ['a@t.example'], reportEmails: [], reportEmailDomains: ['t.example'], verified: 'x', evidence: [] };
+    expect(reportEmailAccepted(dom, 'dmarc@us-1.t.example')).toBe(true);
+    expect(reportEmailAccepted(dom, 'dmarc@t.example.evil.example')).toBe(false);
   });
 });
 

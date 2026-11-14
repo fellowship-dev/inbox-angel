@@ -27,7 +27,7 @@ import { carrierFromHeaders, decideTier, reporterInfo, type Carrier, type Report
 import type { ReporterInfo } from '../dmarc/store-report';
 import { globalQueries } from '@ready-set-mail/db';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
-import { logReporterCandidate } from '../hosted/intake-log';
+import { logReporterCandidate, senderText } from '../hosted/intake-log';
 import { rawXmlRetentionDays } from '../lifecycle/config';
 import { rawTooLarge, REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
 
@@ -222,8 +222,12 @@ export async function handleDmarcReport(
   // Authenticated, self-consistent, not in the registry: a CANDIDATE for the registry. Listed for the instance owner and logged on every message.
   if (tierDecision.tier === 'unknown' && carrier.authenticated && carrier.from && carrier.dkimOrg) {
     const day = today();
-    logReporterCandidate({ dkim_org: carrier.dkimOrg, from: carrier.from.slice(carrier.from.lastIndexOf('@') + 1), org_name: report.report_metadata.org_name.slice(0, 120), report_email: (report.report_metadata.org_email ?? '').slice(0, 120), reason: tierDecision.reason });
-    await globalQueries(tenant.db).reporterCandidates.note({ dkimOrg: carrier.dkimOrg, from: carrier.from, reportEmail: (report.report_metadata.org_email ?? '').toLowerCase().slice(0, 200), orgName: report.report_metadata.org_name.slice(0, 120), workspaceId: tenant.workspaceId, day }).catch(() => undefined);
+    // org_name, the report email and the From address are the SENDER'S text: no control characters, at most 64 characters, in the log line and in the list the owner reads.
+    const orgName = senderText(report.report_metadata.org_name);
+    const reportEmail = senderText(report.report_metadata.org_email).toLowerCase();
+    const from = senderText(carrier.from).toLowerCase();
+    logReporterCandidate({ dkim_org: carrier.dkimOrg, from: senderText(carrier.from.slice(carrier.from.lastIndexOf('@') + 1)), org_name: orgName, report_email: reportEmail, reason: tierDecision.reason });
+    await globalQueries(tenant.db).reporterCandidates.note({ dkimOrg: carrier.dkimOrg, from, reportEmail, orgName, workspaceId: tenant.workspaceId, day }).catch(() => undefined);
   }
 
   const failureCount = report.records.reduce((sum, r) => sum + (r.count ?? 0) * (r.policy_evaluated?.dkim === 'fail' || r.policy_evaluated?.spf === 'fail' ? 1 : 0), 0);

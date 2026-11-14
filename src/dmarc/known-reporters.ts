@@ -72,9 +72,11 @@ export const KNOWN_REPORTERS: readonly KnownReporter[] = [
     evidence: [{ ref: 'tadamcz/mail-auth@29cea4c resources/dmarc-feedback/104.eml (Stalwart test data, 2022; read, not copied: licence not confirmed)', note: 'From postmaster@amazonses.com; DKIM d=amazonses.com; metadata postmaster@amazonses.com', copied: false }],
   },
   {
-    id: 'mimecast', label: 'Mimecast', dkimOrgs: ['mimecastreport.com'], from: ['no-reply@*.mimecastreport.com'], reportEmails: [], reportEmailDomains: ['mimecastreport.com'], verified: VERIFIED,
-    caveat: 'confirm on the first live report: the sample\'s report XML could not be extracted (malformed gzip framing), so the accepted report email is only "under mimecastreport.com"',
-    evidence: [{ ref: 'test/fixtures/third-party/parsedmarc/mimecast-weird-gzip.eml (domainaware/parsedmarc@70a0ea0, Apache-2.0)', note: 'From no-reply@au-1.mimecastreport.com; DKIM d=au-1.mimecastreport.com (pass); Submitter mimecast.org', copied: true }],
+    // Only the region that was OBSERVED (au-1) is listed: Mimecast has other regions (us-1, eu-1, ...), but no report from them has been seen, so they are stored as
+    // unknown and listed as candidates until an operator confirms one (INTAKE_KNOWN_REPORTERS).
+    id: 'mimecast', label: 'Mimecast', dkimOrgs: ['mimecastreport.com'], from: ['no-reply@au-1.mimecastreport.com'], reportEmails: ['no-reply@au-1.mimecastreport.com'], verified: VERIFIED,
+    caveat: 'only the au-1 region was observed (From and report email no-reply@au-1.mimecastreport.com); other regions are stored as unknown until confirmed',
+    evidence: [{ ref: 'test/fixtures/third-party/parsedmarc/mimecast-weird-gzip.eml (domainaware/parsedmarc@70a0ea0, Apache-2.0)', note: 'From no-reply@au-1.mimecastreport.com; DKIM d=au-1.mimecastreport.com (pass); Submitter mimecast.org; the report XML extracts with the hardened extractor (the gzip framing is malformed) and report_metadata/email is no-reply@au-1.mimecastreport.com', copied: true }],
   },
   {
     id: 'xs4all', label: 'XS4ALL', dkimOrgs: ['xs4all.net'], from: ['noreply@dmarc-reports.xs4all.net'], reportEmails: ['noreply@dmarc-reports.xs4all.net'], verified: VERIFIED,

@@ -36,6 +36,18 @@ export interface IntakeLogLine {
   dom: number | null;
 }
 
+/** Longest sender-written text (org_name, report email, From) kept in a log line or in the candidates list. */
+export const SENDER_TEXT_MAX = 64;
+
+/**
+ * Text a SENDER wrote (the report's org_name and email, the From address), made safe to log and list: control characters (C0, DEL, C1, line and
+ * paragraph separators, bidi controls) are dropped, runs of whitespace collapse to one space, and the result is cut at SENDER_TEXT_MAX characters. An
+ * attacker can otherwise put escape sequences, newlines or a thousand characters into a line an operator reads or a list the owner opens.
+ */
+export function senderText(v: string | null | undefined, max = SENDER_TEXT_MAX): string {
+  return (v ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
 /** An authenticated reporter that is not in the registry: logged on every message so the list can grow by hand (never auto-promoted). */
 export function logReporterCandidate(c: { dkim_org: string; from: string; org_name: string; report_email: string; reason: string | null }): void {
   console.log(JSON.stringify({ evt: 'intake_reporter_candidate', v: 1, ...c }));

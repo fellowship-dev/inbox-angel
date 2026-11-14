@@ -15,7 +15,7 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 import worker from '../../src/index';
 import { generateToken, hashToken } from '../../src/hosted/tokens';
 import { KNOWN_REPORTERS } from '../../src/dmarc/known-reporters';
-import { fakeMessage } from '../helpers/mail';
+import { dmarcXml, fakeMessage, gzipReportMime } from '../helpers/mail';
 import { nxdomain, quiet, twoWorkspaces } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -105,13 +105,35 @@ describe('the same real reports are NOT counted when they are not authenticated 
     expect(log()).toMatchObject({ tier: 'unknown', email_matched: null }); // no registry entry matched DKIM org + From, so no report email was even compared
   });
 
-  it('the Mimecast sample (weird gzip framing) is stored by neither tier as counted until the report email is confirmed: it is refused or unknown, never silently counted wrong', async () => {
+  // Mimecast. The security review found the registry entry said "unconfirmed" while the fixture test accepted `counted`. The sample's XML DOES extract with the
+  // hardened extractor and its report_metadata/email is no-reply@au-1.mimecastreport.com, so the entry now lists exactly the observed region (au-1) and the
+  // caveat about an unseen report email is gone; every other Mimecast region is stored as unknown until confirmed. The file's own Authentication-Results is
+  // Microsoft's (nonstandard `action=none`, `compauth=pass reason=100`), which the RFC 8601 tokenizer correctly refuses: the header Cloudflare would have written
+  // for the same DKIM result is injected instead.
+  const mimecast = () => {
+    const stripped = fixture('parsedmarc/mimecast-weird-gzip.eml').replace(/^Authentication-Results:[\s\S]*?compauth=pass reason=100\r?\n/im, '');
+    expect(stripped).not.toMatch(/^Authentication-Results:/im);
+    return inject(stripped, 'spf=pass smtp.mailfrom=au-1.mimecastreport.com; dkim=pass header.d=au-1.mimecastreport.com; dmarc=pass header.from=au-1.mimecastreport.com');
+  };
+
+  it('the real Mimecast sample is counted, as the registry entry says (entry and test agree: no unconfirmed caveat left)', async () => {
     const w = await twoWorkspaces();
     const token = await own(w, 'ab.id.au');
-    const eml = fixture('parsedmarc/mimecast-weird-gzip.eml').replace(/^Authentication-Results: /im, `Authentication-Results: ${ID}; `);
+    const m = await deliver(w, token, mimecast());
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(tiers(w)).toEqual([{ t: 'counted', i: 'mimecast', k: 'Mimecast' }]);
+    expect(log()).toMatchObject({ outcome: 'accepted', tier: 'counted', reporter: 'mimecast', dkim_org: 'mimecastreport.com', email_matched: true });
+    const entry = KNOWN_REPORTERS.find((e) => e.id === 'mimecast')!;
+    expect(entry.reportEmails).toEqual(['no-reply@au-1.mimecastreport.com']);
+    expect(entry.caveat ?? '').not.toMatch(/confirm on the first live report|could not be extracted/);
+  });
+
+  it('the same carrier from a region that was never observed (us-1) is stored as unknown, not counted', async () => {
+    const w = await twoWorkspaces();
+    const token = await own(w, 'ab.id.au');
+    const eml = mimecast().replaceAll('au-1.mimecastreport.com', 'us-1.mimecastreport.com');
     const m = await deliver(w, token, eml);
-    // Either outcome is honest; what must not happen is a crash or a counted report with an unchecked report email.
-    if (m.setReject.mock.calls.length) expect(log().outcome).toBe('refused');
-    else expect(['counted', 'unknown']).toContain(tiers(w)[0].t);
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(tiers(w)).toEqual([{ t: 'unknown', i: 'mimecastreport.com', k: null }]);
   });
 });
