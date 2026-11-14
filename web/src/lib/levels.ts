@@ -12,8 +12,10 @@ import type { DomainCheckSummary } from './types';
  *
  * The same reading as the Ready Set Mail website's check (frontend/lib/level.ts there): SPF that needs more than 10 DNS lookups
  * is a permanent error (RFC 7208 4.6.4), so it counts as broken; 10 is within the limit, not over it, and 8 or more is worth
- * a note. `spf_lookup_count` and `dmarc_pct` absent (undefined) mean the caller does not know them, and nothing is judged;
- * `dmarc_pct` null next to an enforcing policy means pct= was not read yet, so full enforcement is not claimed.
+ * a note. `spf_lookup_count` and `dmarc_pct` absent (undefined) mean the caller does not know them, and nothing is judged.
+ * `dmarc_pct` null next to an enforcing policy means the last check predates pct= being recorded (every read since records a
+ * number): the level from that check stands, with an "enforcement share not re-checked yet" note, until the next refresh
+ * (the check-summary request starts one).
  *
  * The stored SPF record and DMARC policy are null until DNS has been read (`dns_checked_at`), so for a self-managed domain
  * null before that means "not checked yet", never "not found": it is shown as a neutral unknown and the level counts only
@@ -80,10 +82,11 @@ export function assessDomain(
 	const spfWorks = hasSpf && !spf!.broken;
 	const policy = s.dmarc_policy;
 	const enforcing = policy === 'quarantine' || policy === 'reject';
-	// Enforcing on part of the mail (pct below 100) is not full protection; pct not read yet (null) is not claimed as 100.
+	// Enforcing on part of the mail (pct below 100) is not full protection. pct not recorded at the last check (null): the
+	// level from that check stands, noted as not re-checked, rather than dropping a domain the moment this rule shipped.
 	const pctUnknown = enforcing && s.dmarc_pct === null;
 	const partial = enforcing && typeof s.dmarc_pct === 'number' && s.dmarc_pct < 100;
-	const enforcedOnAll = enforcing && !pctUnknown && !partial;
+	const enforcedOnAll = enforcing && !partial;
 	const spfUnknown = !hasSpf && nullMeans === 'unknown';
 	const issue = policy ? null : (s.dmarc_issue ?? null); // a stored policy always wins over a stale issue
 	const dmarcUnknown = !policy && !issue && nullMeans === 'unknown';
@@ -102,7 +105,6 @@ export function assessDomain(
 	else if (issue === 'multiple') findings.push({ status: 'warn', label: 'Multiple DMARC records: receivers ignore them', detail: `Keep one DMARC record at _dmarc.${s.dmarc_inherited_from ?? 'your domain'} and delete the others.` });
 	else if (issue === 'invalid') findings.push({ status: 'warn', label: 'DMARC record is invalid', detail: `It has no valid p= policy, so receivers ignore it. Fix the record at _dmarc.${s.dmarc_inherited_from ?? 'your domain'}.` });
 	else if (!policy) findings.push({ status: 'missing', label: 'DMARC record', detail: 'No DMARC record found.' });
-	else if (pctUnknown) findings.push({ status: 'unknown', label: `DMARC p=${policy}${from}: how much mail it applies to is not checked yet`, detail: NOT_CHECKED_DETAIL });
 	else if (partial)
 		findings.push({
 			status: 'warn',
@@ -113,6 +115,9 @@ export function assessDomain(
 	else findings.push({ status: 'warn', label: `DMARC is monitoring only (p=none)${from}`, detail: reports
 				? 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.'
 				: 'Failing mail is still delivered. Reports are not connected, so it cannot be confirmed here that every service sending as this domain passes; check that before you move to quarantine.' });
+	// After the DMARC finding: the last check predates pct= being recorded (the level from that check stands).
+	if (pctUnknown && !dmarcUnknown && !issue)
+		findings.push({ status: 'unknown', label: 'Enforcement share (pct=) not re-checked yet', detail: 'The level is from the last check, which did not record how much of the failing mail the policy applies to. It is being checked again now.' });
 
 	if (s.dkim_total > 0) {
 		const ok = s.dkim_pass / s.dkim_total >= DKIM_HEALTHY;
@@ -120,7 +125,7 @@ export function assessDomain(
 	}
 	if (s.mta_sts_enabled) findings.push({ status: 'pass', label: `MTA-STS ${s.mta_sts_mode ?? 'enabled'}` });
 
-	const unchecked = spfUnknown || dmarcUnknown || pctUnknown;
+	const unchecked = spfUnknown || dmarcUnknown;
 	const description = unchecked
 		? 'This level counts only what has been checked. Open the domain to see its records in DNS.'
 		: level === 1 && partial

@@ -108,7 +108,7 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, demoteOrphanedSubdomains, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { isClaimProof, recordFirstDnsCheck } from '../domains/first-check';
+import { isClaimProof, needsPctRecheck, recheckStoredDns, recordFirstDnsCheck } from '../domains/first-check';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitResponse } from '../hosted/plan-limits';
@@ -369,7 +369,7 @@ async function exportDomainData(tenant: TenantContext, domainId: string): Promis
   });
 }
 
-async function getDomainCheckSummary(tenant: TenantContext, domainId: string): Promise<Response> {
+async function getDomainCheckSummary(tenant: TenantContext, domainId: string, ctx?: ExecutionContext): Promise<Response> {
   const id = parseInt(domainId, 10);
   if (isNaN(id)) return err('invalid domain id', 400);
 
@@ -379,6 +379,8 @@ async function getDomainCheckSummary(tenant: TenantContext, domainId: string): P
   const since = Math.floor(Date.now() / 1000) - 30 * 86400;
   const [summary, visibility] = await Promise.all([tenant.scope.reports.checkSummary(id, since), reportVisibility(tenant, id, since)]);
   if (!summary) return err('check summary not found', 404);
+  // Stored before pct= was recorded: the level stands (marked not re-checked); this view starts the refresh that records it.
+  if (ctx && needsPctRecheck(summary)) ctx.waitUntil(recheckStoredDns(tenant, id, domain.domain));
 
   return json({ ...summary, ...visibility });
 }
@@ -866,7 +868,7 @@ async function _handleApi(
     // GET /api/domains/:id/check-summary — DMARC/SPF/DKIM/MTA-STS summary for PDF report
     const checkSummaryMatch = path.match(/^\/api\/domains\/([^/]+)\/check-summary$/);
     if (checkSummaryMatch && method === 'GET') {
-      return await getDomainCheckSummary(tenant, checkSummaryMatch[1]);
+      return await getDomainCheckSummary(tenant, checkSummaryMatch[1], ctx);
     }
     const healthReportMatch = path.match(/^\/api\/domains\/(\d+)\/health-report$/);
     if (healthReportMatch && method === 'GET') {

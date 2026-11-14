@@ -181,19 +181,27 @@ the pointer instructions name `h.<zone>` from config, so they must read the doma
 ## Trust model: who can do what
 
 **Email verification.** A hosted account has no session until its email is verified, and delegated credentials of unverified human users are refused. Sign-up
-asks for the email only (and the bot check) and sends a link; the account gets a random password nobody is told. The link opens
-`#/welcome/<token>` ("Choose your password"): the person chooses their password there, once, and is signed in. Verifying itself never
-signs anyone in: any password set before the address was proven (one an API client sent anyway) is discarded, every session of that user
-ends, and the person who clicked the link sets their own (so registering someone else's address gains nothing, and a forwarded link gives
-only what a password-reset link gives). Opening the link again after that changes nothing. A login with a password set before verifying
-answers `403 email_not_verified` (and sends a fresh link). An invite link alone does not grant membership: the invitee gives a name, verifies
-and chooses a password the same way, and accepts while signed in as the invited address. First OAuth link ends the user's other sessions.
+asks for the email only (and the bot check); the account gets a random password nobody is told. The emailed link is
+`<origin>/#/welcome/<token>`: the token sits in the URL fragment, which no server receives, so it is in no request line, log or
+Referer. Opening the link changes nothing, so a mail scanner or link-preview bot that fetches it cannot use up the person's click.
+The welcome page's `POST /api/auth/welcome` (token + password; same-origin; 10 attempts an hour per token, 30 per IP) does
+everything in one transaction: it verifies the address, replaces any earlier password (one a registrant chose is dead), ends every
+session and signs the person in. The token then refuses ("already used"); until a password has been chosen with it, it works from
+any device and after any number of opens, for its whole lifetime: 24 hours (`VERIFICATION_LINK_SECONDS`, the number the mail and
+the pages state). An expired or used link gets a page that offers a new link (or sign-in and a reset). Links in the old shape
+(`GET /api/auth/verify-email?token=…`) get a page that moves the token into the fragment (no `Location`, `Referrer-Policy:
+no-referrer`) and change nothing. Verification mail is capped per address across every route that sends it (sign-up, resend, a
+sign-in of an unverified account, a hosted invitee): 3 an hour and 10 a day; over the cap nothing is sent and every answer is
+unchanged, so the cap reveals nothing about which addresses exist. An invite link alone does not grant membership: the invitee gives
+a name, uses the same welcome link, and accepts while signed in as the invited address. First OAuth link ends the user's other sessions.
 
-**Bot check (required).** Hosted sign-up fails closed (503) unless both `TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` (the public key served to the sign-up page) are set.
-While it is closed no route creates an account: the password sign-up and sign-in answer 503, `POST /api/auth/sign-in/social` answers 503 (so no
-OAuth flow starts, for new or existing users, matching `signin_available: false` in the status), and the user-creation hook refuses any account
-(an OAuth callback or an invite included). OAuth sign-in for an existing, linked user would be safe without the bot check (it sends no mail and
-creates nothing), but the closed status tells the page that signing in is unavailable, so the server refuses it too. OAuth logins link to an
+**Bot check (required for sign-up).** Hosted sign-up fails closed (503) unless both `TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` (the public key served to the sign-up page) are set.
+Closed means no NEW accounts, by any route: the password sign-up and a new invitee answer 503, and the user-creation hook refuses any
+account (an OAuth callback included). Existing users are never locked out by missing keys: they sign in (by password, without the
+check, since the page cannot render it; or by OAuth), use "Forgot password" and reset links, and finish a pending welcome link. The
+status says exactly that: `signup_open: false`, `signin_available: true`, `signup_unavailable_reason: bot_protection_not_configured`.
+Why sign-in without the check is acceptable: it creates nothing and sends mail only for an unverified account, which the per-address cap
+bounds; sign-in is rate limited per IP (`AUTH_LIMITER`, and Better Auth's 10 a minute). When the keys are configured, sign-in keeps the check. OAuth logins link to an
 existing account only when both the local account's email and the provider's are verified, and an OAuth sign-up matches a
 pending invite only on a provider-verified email. Verification mail uses the platform sender (`from_email` setting of the
 default workspace) over `SEND_EMAIL`; without it nothing is sent and the Worker log records only a static reason (never the link or address). Self-host is unchanged: the owner

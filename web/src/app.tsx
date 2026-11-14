@@ -13,6 +13,7 @@ import { ForgotPage } from './pages/auth/ForgotPage';
 import { InvitePage } from './pages/auth/InvitePage';
 import { NoWorkspacePage } from './pages/auth/NoWorkspacePage';
 import { ResetPage } from './pages/auth/ResetPage';
+import { WelcomePage } from './pages/auth/WelcomePage';
 
 /** Waits for the session, then shows the app, the sign-in screen (deep link preserved) or a "server unreachable" state. */
 function Gate({ children, initialMode }: { children: ReactNode; initialMode?: 'signup' }) {
@@ -102,7 +103,7 @@ function AppRoutes() {
 			<Route path="/invite/:token" element={<InvitePage />} />
 			<Route path="/reset/:token" element={<ResetPage />} />
 			{/* Where a hosted verification link lands: a new account chooses its password here, once. */}
-			<Route path="/welcome/:token" element={<ResetPage welcome />} />
+			<Route path="/welcome/:token" element={<WelcomePage />} />
 			<Route path="/forgot" element={<ForgotPage />} />
 			{/* From the website: the create-account screen when anonymous, the app (and its setup redirect) when signed in. */}
 			<Route path="/signup" element={<Gate initialMode="signup"><Navigate to="/" replace /></Gate>} />

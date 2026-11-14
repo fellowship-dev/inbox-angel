@@ -9,7 +9,7 @@ import { assessDomain } from '../src/lib/levels';
 import type { AuthStatus } from '../src/lib/types';
 import { AuthPage } from '../src/pages/auth/AuthPage';
 import { InvitePage } from '../src/pages/auth/InvitePage';
-import { ResetPage } from '../src/pages/auth/ResetPage';
+import { WelcomePage } from '../src/pages/auth/WelcomePage';
 import { DomainStep } from '../src/pages/wizards/setup/DomainStep';
 import { fail, me, renderApp } from './render';
 
@@ -36,32 +36,64 @@ describe('1. one password, chosen once', () => {
 		expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
 		expect(calls.find((c) => c.path === '/api/auth/signup')?.body).toEqual({ name: '', email: 'new@example.com' });
 		expect(screen.getByText('Open the link we sent. It confirms your email and opens a page where you choose your password.')).toBeInTheDocument();
-		expect(screen.getByText(/The link works on any device and expires in 24 hours\. Once you save your password you are signed in\./)).toBeInTheDocument();
+		expect(screen.getByText(/The link works on any device until you save a password, for 24 hours\. Saving the password signs you in\./)).toBeInTheDocument();
 	});
 
-	it('the verification link lands on "Choose your password", which signs in', async () => {
-		let saved = false;
-		const { calls } = renderApp(
+	const welcome = (routes: Record<string, unknown>) =>
+		renderApp(
 			<Routes>
-				<Route path="/welcome/:token" element={<ResetPage welcome />} />
+				<Route path="/welcome/:token" element={<WelcomePage />} />
 				<Route path="/" element={<p>home</p>} />
+				<Route path="/forgot" element={<p>forgot</p>} />
 			</Routes>,
-			{ role: null, route: '/welcome/abcdefghijklmnop', routes: { 'POST /api/auth/reset': () => ((saved = true), { ok: true }), 'GET /api/me': () => (saved ? me('owner') : fail(401)) } },
+			{ role: null, status: HOSTED, route: '/welcome/eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6ImFAYi5jIn0.sig', routes },
 		);
+
+	it('the link lands on "Choose your password"; saving it confirms the email and signs in, in one request', async () => {
+		let saved = false;
+		const { calls } = welcome({ 'POST /api/auth/welcome': () => ((saved = true), { ok: true }), 'GET /api/me': () => (saved ? me('owner') : fail(401)) });
 		const user = userEvent.setup();
 		expect(await screen.findByRole('heading', { name: 'Choose your password' })).toBeInTheDocument();
-		expect(screen.getByText('Your email is confirmed. Choose the password you will sign in with.')).toBeInTheDocument();
-		expect(screen.queryByText(/new password/i)).toBeNull();
+		expect(screen.getByText('Saving it confirms your email and signs you in.')).toBeInTheDocument();
+		expect(calls.some((c) => c.method === 'POST')).toBe(false); // opening the link sends nothing
 		await user.type(screen.getByLabelText('Password'), 'chosen-once-1');
 		await user.type(screen.getByLabelText('Confirm password'), 'chosen-once-1');
 		await user.click(screen.getByRole('button', { name: 'Save password and continue' }));
 		await screen.findByText('home');
-		expect(calls.find((c) => c.path === '/api/auth/reset')?.body).toEqual({ token: 'abcdefghijklmnop', password: 'chosen-once-1' });
+		expect(calls.find((c) => c.path === '/api/auth/welcome')?.body).toEqual({ token: 'eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6ImFAYi5jIn0.sig', password: 'chosen-once-1' });
 	});
 
-	it('a password reset still reads as a reset', async () => {
-		renderApp(<Routes><Route path="/reset/:token" element={<ResetPage />} /></Routes>, { role: null, route: '/reset/abcdefghijklmnop' });
-		expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
+	it('an expired link offers "Send me a new link", with the same answer whether or not the address has an account', async () => {
+		const { calls } = welcome({ 'POST /api/auth/welcome': { __status: 410, body: { error: 'this link has expired', code: 'link_expired' } }, 'POST /api/auth/resend-verification': { ok: true } });
+		const user = userEvent.setup();
+		await user.type(await screen.findByLabelText('Password'), 'chosen-once-1');
+		await user.type(screen.getByLabelText('Confirm password'), 'chosen-once-1');
+		await user.click(screen.getByRole('button', { name: 'Save password and continue' }));
+		expect(await screen.findByRole('heading', { name: 'This link has expired' })).toBeInTheDocument();
+		expect(screen.getByText(/Links work for 24 hours\. Enter your email and we will send you a new one\./)).toBeInTheDocument();
+		await user.type(screen.getByLabelText('Email'), 'a@b.c');
+		await user.click(screen.getByRole('button', { name: 'Send me a new link' }));
+		expect(await screen.findByText('If that address has an account waiting to be confirmed, a new link is on its way. It can take a minute to arrive.')).toBeInTheDocument();
+		expect(calls.find((c) => c.path === '/api/auth/resend-verification')?.body).toEqual({ email: 'a@b.c' });
+	});
+
+	it('a used link says so and offers sign-in and a password reset', async () => {
+		welcome({ 'POST /api/auth/welcome': { __status: 409, body: { error: 'used', code: 'link_used' } } });
+		const user = userEvent.setup();
+		await user.type(await screen.findByLabelText('Password'), 'chosen-once-1');
+		await user.type(screen.getByLabelText('Confirm password'), 'chosen-once-1');
+		await user.click(screen.getByRole('button', { name: 'Save password and continue' }));
+		expect(await screen.findByRole('heading', { name: 'This link was already used' })).toBeInTheDocument();
+		expect(screen.getByText("A password was already chosen with this link. Sign in with it, or reset it if you don't remember it.")).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'Forgot your password?' })).toBeInTheDocument();
+	});
+
+	it('hosted with sign-up closed: the sign-in form, and a plain sentence instead of "Create an account"', async () => {
+		renderApp(<AuthPage />, { role: null, status: { ...HOSTED, signup_open: false, signin_available: true } });
+		expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+		expect(screen.getByText("New accounts can't be created here right now. If you already have one, sign in.")).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Create an account' })).toBeNull();
+		expect(screen.queryByText(/Ask an owner for an invite link/)).toBeNull();
 	});
 
 	it('a hosted invitee gives a name only', async () => {
@@ -188,11 +220,16 @@ describe('5. the same verdicts as the website', () => {
 		expect(assessDomain({ ...base, dmarc_pct: 100 }).level).toBe(2);
 	});
 
-	it('pct= not read yet (stored before it was) is not called fully enforced', () => {
+	it('pct= not recorded at the last check (stored before this change): the level stands, marked not re-checked yet', () => {
 		const a = assessDomain({ ...base, dmarc_pct: null });
-		expect(a.level).toBe(1);
-		expect(dmarc(a)).toMatchObject({ status: 'unknown' });
-		expect(a.next).toBe('Open the domain to check its SPF and DMARC records in DNS.');
+		expect(a.level).toBe(2);
+		expect(dmarc(a)).toMatchObject({ status: 'pass', label: 'DMARC enforced (p=reject)' });
+		expect(a.findings.find((f) => String(f.label).startsWith('Enforcement share'))).toMatchObject({ status: 'unknown', label: 'Enforcement share (pct=) not re-checked yet' });
+		expect(a.next).toBeNull();
+		// p=none is unaffected (fellowship.dev on staging)
+		const none = assessDomain({ ...base, dmarc_policy: 'none', dmarc_pct: null });
+		expect(none.level).toBe(1);
+		expect(none.findings.some((f) => String(f.label).startsWith('Enforcement share'))).toBe(false);
 	});
 
 	it('the claim preview judges the same read the same way (github.com: 10 of 10 is a note, not a plain Pass)', () => {

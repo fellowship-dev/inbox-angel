@@ -47,3 +47,26 @@ export async function recordFirstDnsCheck(
     return null;
   }
 }
+
+/** Re-check at most every 5 minutes per domain, however often it is viewed. */
+const RECHECK_AFTER_SECONDS = 300;
+
+/**
+ * A domain whose last good check stored an enforcing policy but no pct= (every read since pct= is recorded stores a number):
+ * its level stands, marked "not re-checked yet", and viewing it starts one refresh, the daily job's snapshot and store.
+ */
+export function needsPctRecheck(s: { dmarc_policy: string | null; dmarc_pct: number | null; dns_checked_at: number | null; dns_check_attempted_at: number | null }, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  const enforcing = s.dmarc_policy === 'quarantine' || s.dmarc_policy === 'reject';
+  return enforcing && s.dmarc_pct === null && s.dns_checked_at !== null && nowSeconds - (s.dns_check_attempted_at ?? 0) >= RECHECK_AFTER_SECONDS;
+}
+
+/** The daily job's refresh for one domain (src/cron.ts): one snapshot, stored with recordDnsCheck's rules (a failure keeps the stored values). */
+export async function recheckStoredDns(tenant: TenantContext, domainId: number, domain: string, resolver?: Resolver): Promise<void> {
+  try {
+    const found = await snapshotDns(domain, resolver);
+    if (found.spf_lookup_count !== undefined) await tenant.scope.domains.updateSpfLookupCount(domainId, found.spf_lookup_count);
+    await tenant.scope.domains.recordDnsCheck(domainId, { spf_record: found.spf_record, dmarc: found.dmarc, nxdomain: found.nxdomain, at: Math.floor(Date.now() / 1000) });
+  } catch (e) {
+    console.warn(`[dns.recheck] not stored for ${domain}:`, e instanceof Error ? e.message : e);
+  }
+}

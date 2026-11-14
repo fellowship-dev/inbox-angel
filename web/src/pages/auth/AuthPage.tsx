@@ -36,8 +36,8 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
-	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either. Visitors
-	// get a plain sentence; the reason stays machine-readable in /api/auth/status (signup_unavailable_reason) for operators.
+	// Older servers said signin_available: false when hosted bot protection was missing. Current servers always let existing
+	// users sign in (closed means no new accounts), so this only shows against an older server.
 	if (status.signin_available === false) {
 		return (
 			<AuthLayout title="Ready Set Mail">
@@ -186,9 +186,10 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			) : null}
 			{status.configured && !status.signup_open ? (
 				<Alert variant="info" className="text-left">
-					Sign-up is closed on this instance. Ask an owner for an invite link.
+					{hosted ? "New accounts can't be created here right now. If you already have one, sign in." : 'Sign-up is closed on this instance. Ask an owner for an invite link.'}
 				</Alert>
 			) : null}
+			{hosted && status.configured && !status.signup_open ? <TalkToMax className="text-center" lead="Want an account?" about="about your domains" /> : null}
 			{mode === 'signup' ? <TalkToMax className="text-center" lead="Questions first, or rather have someone set it up for you?" about="about your domains" /> : null}
 		</AuthLayout>
 	);
