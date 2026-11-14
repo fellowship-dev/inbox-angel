@@ -46,6 +46,7 @@ export const REASONS = {
   cap_unattributed_sender_day: 'Daily intake limit for this sender reached; try again tomorrow',
   cap_unattributed_total_day: 'The service is receiving more reports from unknown senders than it can take today; try again tomorrow',
   fixed_address_busy: 'The service is busy; try again later',
+  fixed_address_busy_unauthenticated: 'The service is not accepting reports from unauthenticated senders right now',
   authserv_unconfigured: 'This service cannot authenticate senders yet; try again later',
   no_authentication_results: 'The message carries no authentication results from the receiving server',
   authserv_id_not_found: 'The message carries no authentication results from the receiving server',

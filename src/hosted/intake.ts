@@ -134,6 +134,9 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     early = { headers, carrier: guardEnvelope(carrierFromHeaders(headers, env), message.from) };
     if (!(await takePeek(env, early.carrier, Date.now()))) {
       await globalQueries(env.DB).capObservations.note('fixed_address_busy', today()).catch(() => undefined);
+      // Unauthenticated mail can never count: refuse it for good (a retry would only hold the ceiling, and nothing depends on what a
+      // thrown handler tells the sender). Only authenticated non-registry mail is deferred, so its sender retries later.
+      if (!early.carrier.authenticated) return refuse('fixed_address_busy_unauthenticated');
       throw Object.assign(new Error('The shared report address is busy; the sender should retry'), { reason: 'fixed_address_busy' as ReasonCode });
     }
     const [forPeek, afterPeek] = raw.tee();

@@ -111,8 +111,11 @@ export interface UncountedSummary {
 	/** Of `reports`: authenticated but not in the registry (tier unknown), and not authenticated (tier unauthenticated). */
 	unknown: number;
 	unauthenticated: number;
-	/** The reporters that account for most of them (at most 5), by the domain the report named. */
-	by_reporter: Array<{ reporter: string; reports: number }>;
+	/**
+	 * The reporters that account for most of them (at most 5): an authenticated sender by its authenticated domain; a sender that was NOT
+	 * authenticated is `reporter: 'unverified sender'`, `unverified: true`, and the org name it wrote only as `claims` (anyone can write "google.com").
+	 */
+	by_reporter: Array<{ reporter: string; reports: number; unverified?: boolean; claims?: string | null }>;
 }
 
 type NewReport = Omit<typeof aggregateReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
@@ -150,17 +153,21 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 	const summarise = async (domainId: number | null, since: number, excluded: ReturnType<typeof sql>, on: ReportWindow = 'period'): Promise<UncountedSummary> => {
 		const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
 		const w = windowCol(on);
+		/** Not authenticated: what the report says about its sender is only a claim. */
+		const unverified = sql`(COALESCE(aggregate_reports.reporter_tier, '') = 'unauthenticated' OR aggregate_reports.reporter_auth_domain IS NULL)`;
 		const [tot, by] = await Promise.all([
 			db.all<{ reports: number; messages: number; latest_at: number | null; unknown: number | null; unauthenticated: number | null }>(sql`
 				SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at,
 					SUM(CASE WHEN aggregate_reports.reporter_tier = 'unknown' THEN 1 ELSE 0 END) AS unknown, SUM(CASE WHEN aggregate_reports.reporter_tier = 'unauthenticated' THEN 1 ELSE 0 END) AS unauthenticated
 				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND ${w} >= ${since} AND ${excluded}`),
-			db.all<{ reporter: string; reports: number }>(sql`
-				SELECT COALESCE(aggregate_reports.reporter_auth_domain, aggregate_reports.org_name) AS reporter, COUNT(*) AS reports
+			db.all<{ reporter: string; reports: number; unverified: number; claims: string | null }>(sql`
+				SELECT CASE WHEN ${unverified} THEN 'unverified sender' ELSE aggregate_reports.reporter_auth_domain END AS reporter,
+					CASE WHEN ${unverified} THEN 1 ELSE 0 END AS unverified, CASE WHEN ${unverified} THEN aggregate_reports.org_name END AS claims, COUNT(*) AS reports
 				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND ${w} >= ${since} AND ${excluded}
-				GROUP BY reporter ORDER BY reports DESC, reporter LIMIT 5`),
+				GROUP BY reporter, unverified, claims ORDER BY reports DESC, reporter LIMIT 5`),
 		]);
-		return { reports: tot[0]?.reports ?? 0, messages: tot[0]?.messages ?? 0, latest_at: tot[0]?.latest_at ?? null, unknown: tot[0]?.unknown ?? 0, unauthenticated: tot[0]?.unauthenticated ?? 0, by_reporter: by };
+		const byReporter = by.map((r) => (r.unverified ? { reporter: r.reporter, reports: r.reports, unverified: true, claims: r.claims } : { reporter: r.reporter, reports: r.reports }));
+		return { reports: tot[0]?.reports ?? 0, messages: tot[0]?.messages ?? 0, latest_at: tot[0]?.latest_at ?? null, unknown: tot[0]?.unknown ?? 0, unauthenticated: tot[0]?.unauthenticated ?? 0, by_reporter: byReporter };
 	};
 
 	return {

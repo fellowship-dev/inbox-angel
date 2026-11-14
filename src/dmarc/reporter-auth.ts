@@ -74,7 +74,15 @@ export function carrierFromHeaders(headers: AuthHeaders | undefined, env: Authse
   if (sel.kind === 'foreign') return fail('authserv_id_not_found', 'foreign');
   // The header could not be tokenized cleanly (RFC 8601, src/email/auth-results.ts): nothing in it is believed.
   if (sel.kind === 'malformed') return fail(sel.failure === 'too_long' ? 'authres_too_long' : sel.failure === 'unsupported_version' ? 'authres_version_unsupported' : 'authres_malformed', 'present', { detail: sel.detail });
-  const proof = authProof(parseAuthResults(sel.value));
+  const parsed = parseAuthResults(sel.value);
+  // A receiver writes one dkim result per DKIM-Signature it verified, and one dmarc result per message. More dkim results (other than
+  // "none") than the message has signatures, or more than one dmarc result, means part of the header was not written by the receiver: a
+  // sender-chosen value copied back unquoted (smtp.helo=x;dkim=pass(c)header.d=google.com). Nothing in it is believed.
+  const dkimResults = parsed?.dkimAll.filter((d) => d.result !== 'none').length ?? 0;
+  if ((headers.dkimSignatures !== undefined && dkimResults > headers.dkimSignatures) || (parsed?.dmarcAll.length ?? 0) > 1) {
+    return fail('authres_malformed', 'present', { detail: `${dkimResults} dkim results for ${headers.dkimSignatures ?? '?'} signatures, ${parsed?.dmarcAll.length ?? 0} dmarc results` });
+  }
+  const proof = authProof(parsed);
   // EVERY dkim=pass counts (a message can carry several signatures); the one aligned with the From organisation wins, else the first passing one.
   const dkimOrg = fromOrg && proof.dkimPassOrgs.includes(fromOrg) ? fromOrg : proof.dkimPassOrgs[0] ?? null;
   if (!from || !fromOrg) return fail('from_invalid', 'present', { dkimOrg });
