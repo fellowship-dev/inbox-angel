@@ -119,7 +119,7 @@ import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/sp
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
 import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
-import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
+import { dmarcFactsFromLookup, dmarcLookupFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
 import {
@@ -927,6 +927,7 @@ async function _handleApi(
       const dns_errors: string[] = [];
       // What this read resolved, stored below. A key stays unset when its lookup failed (unknown is never stored as absent).
       const resolved: { spf_record?: string | null; dmarc?: DmarcFacts; nxdomain?: boolean } = {};
+      let inheritedRecord: string | null = null;
 
       const [spfLiveData, dmarcData, routingData, dkimData, nullSenderData, authRecordData] = await Promise.all([
         // SPF: TXT lookup for {domain} → find v=spf1
@@ -944,7 +945,10 @@ async function _handleApi(
             return { found: false, has_our_rua: false, current_record: null as string | null, error: t.error };
           }
           // The effective policy (RFC 7489): the parent's is read only when this domain has no record of its own (1 extra subrequest).
-          resolved.dmarc = await dmarcFactsFor(dnsResolver, domain.domain, t).catch(() => undefined);
+          const lookup = await dmarcLookupFor(dnsResolver, domain.domain, t).catch(() => undefined);
+          resolved.dmarc = lookup ? dmarcFactsFromLookup(lookup) : undefined;
+          // The inherited record itself, so the dashboard can say how much mail its policy covers (pct=).
+          inheritedRecord = lookup?.inherited ? (lookup.record?.raw ?? null) : null;
           return { found: t.records.length > 0, has_our_rua: !!domain.rua_address?.trim() && t.records.some(r => r.toLowerCase().includes(domain.rua_address.trim().toLowerCase())), current_record: t.records[0] ?? null };
         }),
 
@@ -1067,7 +1071,7 @@ async function _handleApi(
         cf_available: tenant.hasCloudflare(),
         // `effective`: the policy that applies (RFC 7489), own or inherited from the organizational domain; null when DNS
         // could not say. The dashboard never offers a record weaker than this.
-        dmarc: { ...dmarcData, auth_record: authRecordData, effective: resolved.dmarc ? { policy: resolved.dmarc.policy, inherited_from: resolved.dmarc.inherited_from, issue: resolved.dmarc.issue } : null },
+        dmarc: { ...dmarcData, auth_record: authRecordData, effective: resolved.dmarc ? { policy: resolved.dmarc.policy, inherited_from: resolved.dmarc.inherited_from, issue: resolved.dmarc.issue, record: inheritedRecord } : null },
         // DNS said the name itself does not exist.
         nxdomain: resolved.nxdomain === true,
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },

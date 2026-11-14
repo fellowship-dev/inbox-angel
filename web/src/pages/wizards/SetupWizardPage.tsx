@@ -1,4 +1,6 @@
-import { Button, toast } from '@inbox-angel/ui';
+import { Button, CheckResult, CheckResultList, toast } from '@inbox-angel/ui';
+import { StepCard } from '../../components/wizard/StepCard';
+import { StepFooter } from '../../components/wizard/StepNav';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
@@ -157,12 +159,37 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 			wizard={wizard}
 			current={index}
 		>
-			{index === 1 ? <SpfStep {...props} /> : null}
-			{index === 2 ? <DkimStep {...props} /> : null}
-			{index === 3 ? <DmarcStep {...props} /> : null}
+			{/* DNS says the name does not exist: there is nothing to check or publish, the same verdict as the domain page. */}
+			{status.nxdomain && index >= 1 && index <= 3 ? <DoesNotResolveStep domain={status.domain} onDone={done} onRetry={props.onRetry} /> : null}
+			{index === 1 && !status.nxdomain ? <SpfStep {...props} /> : null}
+			{index === 2 && !status.nxdomain ? <DkimStep {...props} /> : null}
+			{index === 3 && !status.nxdomain ? <DmarcStep {...props} /> : null}
 			{/* Hosted: leaving the Reports step saves nothing, because there is nothing to complete there yet. */}
 			{index === 4 ? (hosted ? <ReportsStep {...props} onNext={done} /> : <RoutingStep {...props} />) : null}
 			{(status.dns_errors?.length ?? 0) > 0 ? <TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="DNS lookups still failing after a retry?" about={`about ${status.domain}`} /> : null}
 		</Frame>
+	);
+}
+
+/** Steps 2 to 4 for a name DNS says does not exist: no records to read, nothing offered, and the one person to ask. */
+function DoesNotResolveStep({ domain, onDone, onRetry }: { domain: string; onDone: () => void; onRetry: () => void }) {
+	return (
+		<StepCard title="This domain does not resolve">
+			<CheckResultList>
+				<CheckResult
+					status="missing"
+					statusLabel="Does not resolve"
+					title={domain}
+					summary="DNS says this name does not exist, so there are no SPF, DKIM or DMARC records to check or publish. Check the spelling, or register the domain."
+					onRetry={onRetry}
+				/>
+			</CheckResultList>
+			<TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="Sure this is the right name?" about={`about ${domain}`} />
+			<StepFooter
+				end={
+					<Button onClick={onDone}>Go to domain</Button>
+				}
+			/>
+		</StepCard>
 	);
 }

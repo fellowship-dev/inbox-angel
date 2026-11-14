@@ -8,7 +8,7 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
-import { dmarcCoverage, inheritedSentence } from '../../../lib/dmarc-coverage';
+import { dmarcCoverage, inheritedSentence, offerPolicy } from '../../../lib/dmarc-coverage';
 import { useHosted } from '../../../lib/session';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../../lib/dmarc-record';
 import type { OnboardingStatus } from '../../../lib/types';
@@ -56,8 +56,15 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	// No report address, no recommended record: a record ending in `mailto:` is broken, so there is nothing to copy.
 	// Hosted: a plain p=none record (no rua=) only when no policy applies at all. A record of its own would replace an
 	// inherited policy, so an inherited, unknown or failed lookup gets no offer: never weaker than the effective policy.
+	// Self-host with no record of its own: the new record replaces whatever it inherits, so it starts at the inherited
+	// policy when that enforces (never weaker), and nothing is offered when the policy that applies is unknown.
+	const floor = offerPolicy(coverage);
 	const recommended = rua
-		? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua)
+		? dmarc.current_record
+			? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua)
+			: floor
+				? buildRecommendedRecord(null, floor, rua)
+				: null
 		: hostedNoReports && coverage.kind === 'none'
 			? buildRecommendedRecord(null, 'none', null)
 			: null;
@@ -137,7 +144,16 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
 						</Alert>
 					) : null}
-					{severity === 'error' && rua && !applied ? (
+					{rua && !applied && coverage.kind === 'inherited' ? (
+						<p className="text-sm text-ink-2">
+							{inheritedSentence(status.domain, coverage)}
+							{floor ? ` To receive reports here, publish the record below: it keeps p=${floor} and adds Inbox Angel's report address.` : ''}
+						</p>
+					) : null}
+					{rua && !applied && coverage.kind === 'unknown' && !dmarc.found ? (
+						<p className="text-sm text-ink-2">We could not tell which DMARC policy applies to this name, so no record is offered. Try again in a moment.</p>
+					) : null}
+					{severity === 'error' && rua && !applied && coverage.kind === 'none' ? (
 						<p className="text-sm text-ink-2">
 							Without a DMARC record receiving servers send no reports, so Inbox Angel has nothing to analyse. Create one with <code className="font-mono text-ink-1">p=none</code>{' '}
 							(monitor only) so reports start flowing.

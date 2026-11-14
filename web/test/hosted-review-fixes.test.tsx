@@ -7,6 +7,8 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/app';
 import { DnsRecords } from '../src/components/domain/DnsRecords';
+import { ImportResults } from '../src/components/domain/ImportResults';
+import { EmailCheckPage } from '../src/pages/check/EmailCheckPage';
 import { TalkToMax, TalkToMaxScope } from '../src/components/TalkToMax';
 import { dmarcCoverage } from '../src/lib/dmarc-coverage';
 import { wizardProgress } from '../src/lib/dmarc';
@@ -48,7 +50,7 @@ const wizard: WizardState = { domain: 'complete', spf: 'complete', dkim: 'comple
 describe('dmarcCoverage', () => {
 	it('own record, inherited, none, unknown', () => {
 		expect(dmarcCoverage(onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' } }))).toEqual({ kind: 'own' });
-		expect(dmarcCoverage(onboarding({}, inherits('reject')))).toEqual({ kind: 'inherited', parent: 'mozilla.test', policy: 'reject', issue: null });
+		expect(dmarcCoverage(onboarding({}, inherits('reject')))).toEqual({ kind: 'inherited', parent: 'mozilla.test', policy: 'reject', issue: null, pct: 100 });
 		expect(dmarcCoverage(onboarding({}, none))).toEqual({ kind: 'none' });
 		expect(dmarcCoverage(onboarding({}, null))).toEqual({ kind: 'unknown' });
 		expect(dmarcCoverage(onboarding({}, none), true)).toEqual({ kind: 'unknown' });
@@ -74,7 +76,7 @@ describe('hosted wizard DMARC step: never weaker than the policy that applies', 
 	it.each(['reject', 'quarantine'])('inherited p=%s: explains it and offers no record', async (policy) => {
 		dmarcStep(onboarding({}, inherits(policy)));
 		expect(await screen.findByText(new RegExp(`inherits p=${policy} from mozilla\\.test`))).toBeInTheDocument();
-		expect(screen.getByText(/There is nothing to publish here/)).toBeInTheDocument();
+		expect(screen.getByText(/would replace that policy/)).toBeInTheDocument();
 		expect(screen.queryByText(/No DMARC record found/)).not.toBeInTheDocument();
 		expect(offered()).toBe(false);
 		expect(screen.queryByText('Recommended record')).not.toBeInTheDocument();
@@ -233,11 +235,138 @@ describe('hosted DMARC graduation wizard', () => {
 			{
 				route: '/domains/7/dmarc-wizard',
 				status: HOSTED,
-				routes: { 'GET /api/domains': { domains: [domain] }, 'GET /api/domains/7/dns-check': { found: true, has_rua: false, current_record: 'v=DMARC1; p=none', cf_managed: false } },
+				routes: { 'GET /api/domains': { domains: [domain] }, 'GET /api/domains/7/dns-check': { found: true, has_rua: false, current_record: 'v=DMARC1; p=none', cf_managed: false }, 'GET /api/domains/7/onboarding-status': onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' } }) },
 			},
 		);
-		expect(await screen.findByText(/From DNS alone we can confirm/)).toBeInTheDocument();
+		expect(await screen.findByText(/DNS shows that this domain publishes an SPF record and a DMARC record/)).toBeInTheDocument();
 		expect(screen.queryByText(/pass rate/i)).not.toBeInTheDocument();
 		expect(screen.getByText(/Not sure every sender passes\?/)).toBeInTheDocument();
+	});
+});
+
+// ── Second review: before sign-up ─────────────────────────────────────────────────────────
+
+const stepAt = (step: number, ob: OnboardingStatus, status: Partial<AuthStatus> = HOSTED, dom: Record<string, unknown> = domain) =>
+	renderApp(
+		<Routes>
+			<Route path="/domains/:id/setup/:step" element={<SetupWizardPage />} />
+		</Routes>,
+		{
+			route: `/domains/7/setup/${step}`,
+			status,
+			routes: { 'GET /api/domains': { domains: [dom] }, 'GET /api/domains/7/onboarding-status': ob, 'GET /api/domains/7/wizard-state': wizard, 'PUT /api/domains/7/wizard-state': {} },
+		},
+	);
+
+describe('wizard for a name that does not resolve', () => {
+	it.each([2, 3, 4])('step %i gives the page\'s verdict and offers nothing', async (step) => {
+		stepAt(step, onboarding({ nxdomain: true, spf: { record: null, lookup_count: null, flattening_active: false } }, none));
+		expect(await screen.findByRole('heading', { name: 'This domain does not resolve' })).toBeInTheDocument();
+		expect(screen.queryByText(/No SPF record found|No DMARC record found|No DMARC policy applies/)).not.toBeInTheDocument();
+		expect(offered()).toBe(false);
+		expect(screen.getByText(/Sure this is the right name\?/)).toBeInTheDocument();
+	});
+});
+
+describe('inherited policy with pct below 100', () => {
+	it('says only that share is affected, never "already reject"', async () => {
+		dmarcStep(onboarding({}, { policy: 'reject', inherited_from: 'mozilla.test', issue: null, record: 'v=DMARC1; p=reject; pct=25' }));
+		expect(await screen.findByText(/receivers reject 25% of the mail from this name that fails SPF and DKIM \(pct=25\)/)).toBeInTheDocument();
+		expect(screen.queryByText(/already reject/)).not.toBeInTheDocument();
+	});
+});
+
+describe('hosted DMARC graduation wizard: nothing to tighten without SPF and DMARC', () => {
+	const wiz = (dns: unknown, ob: OnboardingStatus, status: Partial<AuthStatus> = HOSTED, dom: Record<string, unknown> = domain) =>
+		renderApp(
+			<Routes>
+				<Route path="/domains/:id/dmarc-wizard" element={<DmarcWizardPage />} />
+			</Routes>,
+			{ route: '/domains/7/dmarc-wizard', status, routes: { 'GET /api/domains': { domains: [dom] }, 'GET /api/domains/7/dns-check': dns, 'GET /api/domains/7/onboarding-status': ob } },
+		);
+
+	it('no SPF and no DMARC: says what DNS shows, offers no record', async () => {
+		wiz({ found: false, has_rua: false, current_record: null, cf_managed: false }, onboarding({ spf: { record: null, lookup_count: null, flattening_active: false } }, none));
+		expect(await screen.findByRole('heading', { name: 'Not ready to change the policy' })).toBeInTheDocument();
+		expect(screen.getByText('No DMARC record at _dmarc.developer.mozilla.test.')).toBeInTheDocument();
+		expect(screen.getByText('No SPF record at developer.mozilla.test.')).toBeInTheDocument();
+		expect(screen.queryByText('New record')).not.toBeInTheDocument();
+		expect(screen.queryByText(/we can confirm/)).not.toBeInTheDocument();
+	});
+
+	it('DMARC published but no SPF: still nothing offered', async () => {
+		wiz({ found: true, has_rua: false, current_record: 'v=DMARC1; p=none', cf_managed: false }, onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' }, spf: { record: null, lookup_count: null, flattening_active: false } }));
+		expect(await screen.findByText(`No SPF record at developer.mozilla.test.`)).toBeInTheDocument();
+		expect(screen.queryByText('New record')).not.toBeInTheDocument();
+	});
+
+	it('self-host: a subdomain inheriting reject gets no weaker step', async () => {
+		const selfDomain = { ...domain, rua_address: 'rua@reports.mozilla.test' };
+		wiz({ found: false, has_rua: false, current_record: null, cf_managed: false }, onboarding({ rua_address: 'rua@reports.mozilla.test' }, inherits('reject')), {}, selfDomain);
+		expect(await screen.findByText(/inherits p=reject from mozilla\.test/)).toBeInTheDocument();
+		expect(screen.queryByText(/p=quarantine|p=none/)).not.toBeInTheDocument();
+	});
+});
+
+describe('self-host: never weaker than an inherited policy', () => {
+	const selfDomain = { ...domain, rua_address: 'rua@reports.mozilla.test' };
+	const selfOb = (effective: Effective | null) => onboarding({ rua_address: 'rua@reports.mozilla.test' }, effective);
+
+	it('wizard step 4: a record at the inherited level with the report address, and why', async () => {
+		stepAt(4, selfOb(inherits('reject')), {}, selfDomain);
+		expect(await screen.findAllByText('v=DMARC1; p=reject; rua=mailto:rua@reports.mozilla.test')).not.toHaveLength(0);
+		expect(screen.queryByText(/p=none/)).not.toBeInTheDocument();
+		expect(screen.getByText(/would replace that policy/)).toBeInTheDocument();
+	});
+
+	it('wizard step 4: inherited p=none keeps offering p=none with the report address', async () => {
+		stepAt(4, selfOb(inherits('none')), {}, selfDomain);
+		expect(await screen.findAllByText('v=DMARC1; p=none; rua=mailto:rua@reports.mozilla.test')).not.toHaveLength(0);
+	});
+
+	it('wizard step 4: unknown policy, nothing offered', async () => {
+		stepAt(4, selfOb(null), {}, selfDomain);
+		expect(await screen.findByText(/could not tell which DMARC policy applies/)).toBeInTheDocument();
+		expect(screen.queryByText(/rua=mailto/)).not.toBeInTheDocument();
+	});
+
+	it('domain page: a record at the inherited level', async () => {
+		renderApp(<DnsRecords domain={selfDomain as never} />, { routes: { 'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false }, 'GET /api/domains/7/onboarding-status': selfOb(inherits('quarantine')) } });
+		expect(await screen.findAllByText('v=DMARC1; p=quarantine; rua=mailto:rua@reports.mozilla.test')).not.toHaveLength(0);
+		expect(screen.queryByText(/p=none/)).not.toBeInTheDocument();
+	});
+
+	it('add flow: a record at the inherited level', async () => {
+		renderApp(<AddDomainPage />, {
+			routes: {
+				'GET /api/zones': fail(400),
+				'POST /api/domains': { domain: selfDomain, rua_hint: '' },
+				'GET /api/domains': { domains: [selfDomain] },
+				'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
+				'GET /api/domains/7/onboarding-status': selfOb(inherits('reject')),
+			},
+		});
+		const user = (await import('@testing-library/user-event')).default.setup();
+		await user.type(await screen.findByLabelText('Your domain'), 'developer.mozilla.org');
+		await user.click(screen.getByRole('button', { name: 'Continue' }));
+		expect(await screen.findByText('v=DMARC1; p=reject; rua=mailto:rua@reports.mozilla.test')).toBeInTheDocument();
+		expect(screen.queryByText(/p=none means/)).not.toBeInTheDocument();
+	});
+});
+
+describe('email check page, hosted without a canary domain', () => {
+	it('opened by URL, it says it is unavailable and offers no button that can only fail', async () => {
+		const { calls } = renderApp(<EmailCheckPage />, { status: { ...HOSTED, email_check: false } });
+		expect(await screen.findByText("The email check isn't available here")).toBeInTheDocument();
+		expect(screen.queryByRole('button')).toBeNull();
+		expect(calls.some((c) => c.path.startsWith('/api/check'))).toBe(false);
+	});
+});
+
+describe('hosted bulk-import results', () => {
+	it('a plain sentence, not "DNS provisioning: manual required"', async () => {
+		renderApp(<ImportResults result={{ total: 1, imported: 1, results: [{ domain: 'acme-agency.com', status: 'imported', manual_dns: true }] } as never} />, { status: HOSTED });
+		expect(await screen.findByText('Added. Its SPF, DKIM and DMARC records are checked from live DNS')).toBeInTheDocument();
+		expect(screen.queryByText(/provisioning/)).not.toBeInTheDocument();
 	});
 });

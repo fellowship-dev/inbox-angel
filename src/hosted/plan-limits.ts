@@ -37,8 +37,8 @@ export function planHelpUrl(env: Partial<LimitEnv>): string | null {
 export function planLimitBody(env: Partial<LimitEnv>, kind: PlanLimitKind, max: number) {
   return {
     error: kind === 'domains_per_workspace'
-      ? `This workspace has reached its limit of ${max} domains.`
-      : `You have reached the limit of ${max} workspaces you can own.`,
+      ? `This workspace has reached its limit of ${max} ${max === 1 ? 'domain' : 'domains'}.`
+      : `You have reached the limit of ${max} ${max === 1 ? 'workspace' : 'workspaces'} you can own.`,
     code: 'plan_limit' as const,
     limit: { kind, max },
     help_url: planHelpUrl(env),

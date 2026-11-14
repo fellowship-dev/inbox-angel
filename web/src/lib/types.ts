@@ -208,7 +208,7 @@ export interface OnboardingStatus {
      * The policy that applies (RFC 7489): the domain's own record, else its organizational domain's (`inherited_from`).
      * Null when DNS could not say; absent from older servers. Never offer a record weaker than this policy.
      */
-    effective?: { policy: string | null; inherited_from: string | null; issue: string | null } | null;
+    effective?: { policy: string | null; inherited_from: string | null; issue: string | null; /** The inherited record's text (its pct= matters), null when not inherited. */ record?: string | null } | null;
   };
   /** DNS said the name itself does not exist (NXDOMAIN). */
   nxdomain?: boolean;

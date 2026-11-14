@@ -64,7 +64,7 @@ describe('onboarding-status: the DMARC policy that applies', () => {
     w.cf.doh['_dmarc.example.org'] = ['v=DMARC1; p=reject'];
     const s = await json(await call(w.env, 'GET', `/api/domains/${id}/onboarding-status`, { key: w.token }));
     expect(s.dmarc.found).toBe(false);
-    expect(s.dmarc.effective).toEqual({ policy: 'reject', inherited_from: 'example.org', issue: null });
+    expect(s.dmarc.effective).toEqual({ policy: 'reject', inherited_from: 'example.org', issue: null, record: 'v=DMARC1; p=reject' });
     expect(s.nxdomain).toBe(false);
   });
 
@@ -73,7 +73,7 @@ describe('onboarding-status: the DMARC policy that applies', () => {
     const id = domainRow(w, 'plain.example.net');
     w.cf.doh['plain.example.net'] = ['v=spf1 -all'];
     const s = await json(await call(w.env, 'GET', `/api/domains/${id}/onboarding-status`, { key: w.token }));
-    expect(s.dmarc.effective).toEqual({ policy: null, inherited_from: null, issue: null });
+    expect(s.dmarc.effective).toEqual({ policy: null, inherited_from: null, issue: null, record: null });
   });
 
   it('a name that does not exist says nxdomain', async () => {
@@ -106,5 +106,15 @@ describe('planHelpUrl uses the shared https-only helpUrl', () => {
   });
   it('accepts an https link', () => {
     expect(planHelpUrl({ MODE: 'saas', BOOKING_URL: 'https://cal.example.com/max' })).toBe('https://cal.example.com/max');
+  });
+});
+
+describe('plan-limit sentences', () => {
+  it('singular and plural', async () => {
+    const { planLimitBody } = await import('../../src/hosted/plan-limits');
+    expect(planLimitBody({}, 'domains_per_workspace', 1).error).toBe('This workspace has reached its limit of 1 domain.');
+    expect(planLimitBody({}, 'domains_per_workspace', 10).error).toBe('This workspace has reached its limit of 10 domains.');
+    expect(planLimitBody({}, 'workspaces_per_user', 1).error).toBe('You have reached the limit of 1 workspace you can own.');
+    expect(planLimitBody({}, 'workspaces_per_user', 5).error).toBe('You have reached the limit of 5 workspaces you can own.');
   });
 });

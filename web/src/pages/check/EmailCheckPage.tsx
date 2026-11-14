@@ -8,6 +8,8 @@ import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { CHECK_GIVE_UP_MS, CHECK_POLL_MS } from '../../lib/reports';
 import type { CheckResult } from '../../lib/types';
+import { useSession } from '../../lib/session';
+import { HELP_PRIORITY, TalkToMax } from '../../components/TalkToMax';
 
 interface CheckSession {
 	token: string;
@@ -139,7 +141,29 @@ function History({ expandedId, setExpandedId }: { expandedId: number | null; set
 	);
 }
 
+/**
+ * Hosted without a canary domain the check cannot receive a test email, so the page (reachable by URL even though the
+ * menu hides it) says so instead of offering a button that can only fail.
+ */
 export function EmailCheckPage() {
+	const { status } = useSession();
+	if (status?.email_check === false) {
+		return (
+			<div className="space-y-6">
+				<PageHeader title="Email check" />
+				<EmptyState
+					icon={<MailQuestion />}
+					title="The email check isn't available here"
+					description="It needs an address that can receive your test email, and none is set up on this service. Your SPF, DKIM and DMARC records are still checked from live DNS on each domain's page."
+					action={<TalkToMax priority={HELP_PRIORITY.page} lead="Want a real email checked?" about="about your domains" />}
+				/>
+			</div>
+		);
+	}
+	return <EmailCheckAvailable />;
+}
+
+function EmailCheckAvailable() {
 	const qc = useQueryClient();
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	const [expandedId, setExpandedId] = useState<number | null>(null);

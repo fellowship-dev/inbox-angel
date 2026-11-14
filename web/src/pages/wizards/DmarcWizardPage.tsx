@@ -13,6 +13,8 @@ import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api, errorMessage } from '../../lib/api';
 import { buildRecommendedRecord, enforcementLevel, invalidDmarcSp, parseDmarcPolicy, weakerSubdomainPolicy } from '../../lib/dmarc-record';
 import { keys, useDomain } from '../../lib/queries';
+import { useOnboardingStatus } from '../../lib/domain-queries';
+import { dmarcCoverage, inheritedSentence } from '../../lib/dmarc-coverage';
 import { useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { HELP_PRIORITY, TalkToMax } from '../../components/TalkToMax';
 
@@ -48,7 +50,7 @@ const STEP_COPY = [
  * being published is checkable; every sender passing is not.
  */
 const HOSTED_STEP_BODY = [
-	'Quarantine tells receiving servers to put mail that fails DMARC in the spam folder. From DNS alone we can confirm that your SPF and DMARC records are published, not that every service sending as this domain passes: reports are not connected. Check each one (your mail provider, newsletter, invoicing and support tools) before you switch.',
+	'Quarantine tells receiving servers to put mail that fails DMARC in the spam folder. DNS shows that this domain publishes an SPF record and a DMARC record; it cannot show whether every service sending as this domain passes, because reports are not connected. Check each one (your mail provider, newsletter, invoicing and support tools) before you switch.',
 	'Reject tells receiving servers to refuse mail that fails DMARC. DNS alone cannot show whether every service sending as this domain passes, because reports are not connected. Switch only once you have checked each sender yourself.',
 ] as const;
 
@@ -69,6 +71,8 @@ export function DmarcWizardPage() {
 
 	const [step, setStep] = useState<number | null>(null);
 	const hosted = useReportsNotConnected(domain);
+	// SPF and what the name inherits: a policy is only tightened from a DMARC record of its own (and, hosted, with SPF published).
+	const onboarding = useOnboardingStatus(domainId);
 	const [appliedRecord, setAppliedRecord] = useState<string | null>(null);
 
 	const apply = useMutation({
@@ -82,7 +86,11 @@ export function DmarcWizardPage() {
 
 	const back = `/domains/${domainId}`;
 	let body;
-	if (domainsPending || dns.isPending) body = <PageSkeleton label="Reading your DMARC record" />;
+	const coverage = dmarcCoverage(onboarding.data ?? null, onboarding.isError);
+	// Hosted: say only what DNS shows, and offer no tightening while SPF or DMARC is missing. Any mode: a name without a
+	// record of its own that inherits a policy gets no offer, since a record of its own would replace (and could weaken) it.
+	const notReady = !!domain && !!dns.data && !dns.data.error && (hosted ? !dns.data.found || !onboarding.data?.spf.record : !dns.data.found && coverage.kind === 'inherited');
+	if (domainsPending || dns.isPending || (hosted && onboarding.isPending)) body = <PageSkeleton label="Reading your DMARC record" />;
 	else if (domainsError) body = <LoadError error={domainsError} onRetry={() => void refetchDomains()} title="Could not load this domain" />;
 	else if (!domain) {
 		body = (
@@ -103,6 +111,35 @@ export function DmarcWizardPage() {
 					/>
 				</CheckResultList>
 				<p className="text-sm text-ink-2">We need to read your current record before suggesting the next policy, so nothing is offered until the lookup works.</p>
+			</StepCard>
+		);
+	} else if (notReady) {
+		const spf = onboarding.data?.spf.record;
+		body = (
+			<StepCard title="Not ready to change the policy">
+				<ul className="list-disc space-y-1 pl-5 text-sm text-ink-2">
+					<li>
+						{dns.data.found
+							? 'A DMARC record is published.'
+							: coverage.kind === 'inherited'
+								? inheritedSentence(domain.domain, coverage)
+								: `No DMARC record at _dmarc.${domain.domain}.`}
+					</li>
+					{hosted ? <li>{onboarding.isError ? 'We could not read the SPF record.' : spf ? 'An SPF record is published.' : `No SPF record at ${domain.domain}.`}</li> : null}
+				</ul>
+				<p className="text-sm text-ink-2">
+					{dns.data.found || coverage.kind !== 'inherited'
+						? 'Tightening the policy starts from a published SPF record and a DMARC record of its own, so nothing is offered here yet.'
+						: 'Nothing is offered here: change the policy at the parent domain, or publish a record of its own that is at least as strict.'}
+				</p>
+				<TalkToMax priority={HELP_PRIORITY.tightening} lead="Not sure what to publish?" about={`about ${domain.domain}`} />
+				<StepFooter
+					end={
+						<Button asChild>
+							<Link to={back}>Back to domain</Link>
+						</Button>
+					}
+				/>
 			</StepCard>
 		);
 	} else {

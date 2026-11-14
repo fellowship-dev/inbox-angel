@@ -13,7 +13,8 @@ import { api, errorMessage } from '../../lib/api';
 import { useHosted } from '../../lib/session';
 import { normalizeDomain } from '../../lib/dmarc';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
-import { domainKeys, type DnsCheck } from '../../lib/domain-queries';
+import { domainKeys, useOnboardingStatus, type DnsCheck } from '../../lib/domain-queries';
+import { dmarcCoverage, inheritedSentence, offerPolicy } from '../../lib/dmarc-coverage';
 import { clearSignupDomainIf, readSignupDomain } from '../../lib/signup-intent';
 import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
@@ -115,11 +116,16 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	const { domain } = result;
 	const rua = hasReportAddress(domain.rua_address) ? domain.rua_address.trim() : null;
 	const q = useLiveDnsCheck(domain.id, domain.rua_address);
-	const lookup = q.isPending ? 'reading' : q.isError || q.data.error ? 'failed' : 'done';
+	// What the name inherits when it has no record of its own (a subdomain under an enforcing parent).
+	const ob = useOnboardingStatus(domain.id);
+	const coverage = dmarcCoverage(ob.data ?? null, ob.isError || (ob.data?.dns_errors ?? []).some((e) => e.startsWith('dmarc:')));
+	const lookup = q.isPending || (!q.data?.found && ob.isPending) ? 'reading' : q.isError || q.data.error ? 'failed' : 'done';
 	// The live record decides what is offered: it is built from, and never to a weaker policy than, the one published.
 	const live = lookup === 'done' && q.data?.found ? q.data.current_record : null;
 	const livePolicy = parseDmarcPolicy(live);
-	const record = rua && lookup === 'done' ? buildRecommendedRecord(live, livePolicy ?? 'none', rua) : null;
+	// No record of its own: the new one replaces what it inherits, so it starts at the inherited policy when that enforces.
+	const floor = live ? (livePolicy ?? 'none') : offerPolicy(coverage);
+	const record = rua && lookup === 'done' && floor ? buildRecommendedRecord(live, floor, rua) : null;
 	const inPlace = lookup === 'done' && !!q.data?.found && !!q.data.has_rua;
 	const offered = record !== null && !inPlace;
 
@@ -129,6 +135,8 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	else if (lookup === 'failed') heading = { title: 'Could not read your DMARC record', description: `We could not read the current DMARC record for ${domain.domain}, so no record is offered until the lookup works.` };
 	else if (inPlace) heading = { title: 'Your DNS record is in place', description: `The DMARC record for ${domain.domain} already sends reports here.` };
 	else if (live) heading = { title: 'Update your DMARC record', description: `${domain.domain} already has a DMARC record. Replace it with this one: it keeps your settings and adds our reports address.` };
+	else if (!floor) heading = { title: 'Could not tell which DMARC policy applies', description: `We could not tell whether a parent domain's policy covers ${domain.domain}, so no record is offered until the lookup works.` };
+	else if (coverage.kind === 'inherited') heading = { title: 'Add this DNS record', description: `${inheritedSentence(domain.domain, coverage)} To receive reports here, add this TXT record: it keeps p=${floor} and adds our reports address.` };
 	else heading = { title: 'Add this DNS record', description: `Log in to wherever you manage ${domain.domain} (GoDaddy, Namecheap, Cloudflare, Route 53 …) and add this TXT record.` };
 
 	return (
@@ -153,7 +161,7 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 			{offered ? (
 				<RecordBlock title="DMARC record" record={{ type: 'TXT', name: `_dmarc.${domain.domain}`, value: record, ttl: '3600 (or your provider default)' }} />
 			) : null}
-			{offered && !live ? (
+			{offered && !live && floor === 'none' ? (
 				<p className="text-sm text-ink-2">
 					<strong className="text-ink-1">p=none</strong> means you are just watching. No email gets blocked or redirected. Once DMARC reports start coming in (usually within 24 hours), the dashboard shows whether your mail is fully aligned and when it is safe to enforce.
 				</p>
