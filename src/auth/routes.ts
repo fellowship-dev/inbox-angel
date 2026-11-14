@@ -16,6 +16,7 @@ import type { SignupIntent } from './signup-policy';
 import { currentUser, passesCsrfCheck } from './session';
 import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
+import { hostedSignupClosed, SIGNUP_CLOSED_MESSAGE, turnstileSecret, turnstileSiteKey } from './bot-protection';
 import { helpUrl } from '../funnel/config';
 import { emailCheckAvailable } from '../hosted/config';
 import { hostedServiceUrl } from '../hosted-service';
@@ -123,23 +124,25 @@ async function limited(env: Env, request: Request): Promise<boolean> {
   return !success;
 }
 
-/** The Turnstile secret in force: hosted env var, else the platform setting. Used by the bot check and by the status route, so both agree. */
-const turnstileSecret = async (env: Env) => (isSaas(env) ? env.TURNSTILE_SECRET_KEY : undefined) || (await platform(env).settings.get('turnstile_secret_key'))?.value || undefined;
-
-/** The public site key the page renders the widget with. */
-const turnstileSiteKey = async (env: Env) => (isSaas(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY : (await platform(env).settings.get('turnstile_site_key'))?.value) || null;
-
 /**
  * Bot check. A configured Turnstile secret (hosted: TURNSTILE_SECRET_KEY; else the platform setting) requires a valid
  * token. Hosted fails closed: without a secret nobody can sign up, so a misconfiguration cannot turn Ready Set Mail into
  * an open mail relay. Returns the refusal, or null to carry on.
  */
 async function botCheck(env: Env, request: Request, token: string | undefined): Promise<Response | null> {
+  // Hosted with either key missing is closed (hostedSignupClosed): the same answer the status route gives the page.
+  if (await hostedSignupClosed(env)) return err(SIGNUP_CLOSED_MESSAGE, 503);
   const secret = await turnstileSecret(env);
-  if (!secret) return isSaas(env) ? err('sign-up is unavailable: bot protection is not configured on this service', 503) : null;
+  if (!secret) return null;
   if (!token || !(await verifyTurnstile(token, secret, request.headers.get('CF-Connecting-IP') ?? ''))) return err('Bot check failed', 403);
   return null;
 }
+
+/**
+ * A random password nobody is told, for a hosted account created before its mailbox is proven. It cannot be used to
+ * sign in, and verification replaces it with the password the mailbox owner chooses.
+ */
+const unusablePassword = (): string => [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('');
 
 /** Creates a user through Better Auth under the given sign-up intent and returns its session response. */
 async function signUp(
@@ -180,9 +183,9 @@ export async function handleAuthRoute(
     // when they are signed in; an anonymous visitor gets the self-host instance's, or nothing in saas.
     const t = await tenantFor();
     const mine = !saas || !!t.userId ? t : null;
-    const [siteKey, secret, customDomainRow, telemetryRow] = await Promise.all([
+    const [siteKey, closed, customDomainRow, telemetryRow] = await Promise.all([
       turnstileSiteKey(env),
-      saas ? turnstileSecret(env) : null,
+      hostedSignupClosed(env),
       mine?.scope.settings.get('custom_domain') ?? null,
       mine?.scope.settings.get('telemetry_opted_in') ?? null,
     ]);
@@ -190,7 +193,7 @@ export async function handleAuthRoute(
     const baseDomain = mine?.settings.baseDomain;
     // Hosted without bot protection: sign-up and login both fail closed (503, see botCheck: a login of an unverified address sends mail),
     // and the page cannot render the widget without the site key. Say so, so the page does not offer a form that cannot work.
-    const noBotProtection = saas && (!secret || !siteKey);
+    const noBotProtection = closed;
     return json({
       configured,
       mode: saas ? 'saas' : 'self-host',
@@ -199,7 +202,8 @@ export async function handleAuthRoute(
       signup_open: saas && !noBotProtection,
       signin_available: !noBotProtection,
       ...(noBotProtection ? { signup_unavailable_reason: 'bot_protection_not_configured' } : {}),
-      oauth_providers: enabledOAuthProviders(env),
+      // Closed: no OAuth start is accepted either (see the passthrough below), so none is offered.
+      oauth_providers: noBotProtection ? [] : enabledOAuthProviders(env),
       prefill: { name: '', email: '' },
       telemetry_default: telemetryRow?.value === 'true',
       turnstile_site_key: siteKey,
@@ -229,14 +233,17 @@ export async function handleAuthRoute(
       || '';
     if (isSetup && !(await verifyBootstrapProof(env, bootstrapProof))) return err('installer proof required', 403);
     const body = await readJson<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
-    if (!body.email || !body.password) return err('email and password are required', 400);
-    if (body.password.length < 8) return err('password must be at least 8 characters', 400);
+    // Hosted sign-up asks for the email only: the person chooses their password once, on the page the verification link
+    // opens (see /verify-email). A password sent here anyway (older clients, scripts) is accepted and discarded at
+    // verification like any password set before the mailbox was proven.
+    if (!body.email || (isSetup && !body.password)) return err(isSetup ? 'email and password are required' : 'email is required', 400);
+    if (body.password !== undefined && body.password !== '' && body.password.length < 8) return err('password must be at least 8 characters', 400);
     if (!EMAIL_RE.test(body.email)) return err('invalid email', 400);
     { const bot = await botCheck(env, request, body.cf_turnstile_token); if (bot) return bot; }
 
     const email = body.email.toLowerCase().trim();
     const { res, user } = await signUp(env, request, ctx, isSetup ? { kind: 'setup', bootstrapProof } : { kind: 'signup' }, {
-      name: body.name?.trim() || email, email, password: body.password,
+      name: body.name?.trim() || email, email, password: body.password || unusablePassword(),
     });
     if (!res.ok || !user) return authError(res, 'sign-up failed');
 
@@ -297,7 +304,9 @@ export async function handleAuthRoute(
 
   // ── GET /api/auth/verify-email — the emailed link ──
   // Proving the mailbox must not hand over an account whose password someone else chose, so a password set before
-  // the address was verified is discarded, every session ends, and the person who clicked sets their own.
+  // the address was verified is discarded, every session ends, and the person who clicked sets their own. Hosted
+  // sign-up asks for no password, so for a new account this page is where the password is chosen, once: it opens as
+  // "Choose your password" (/#/welcome/), not as a reset.
   if (path === '/api/auth/verify-email' && method === 'GET') {
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
     let verified: { id: string } | null = null;
@@ -311,7 +320,7 @@ export async function handleAuthRoute(
     await q.sessions.revokeAll(id);
     const token = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, '0')).join('');
     await q.verifications.createResetToken(id, token, Math.floor(Date.now() / 1000));
-    return new Response(null, { status: 302, headers: { location: `/#/reset/${token}` } });
+    return new Response(null, { status: 302, headers: { location: `/#/welcome/${token}` } });
   }
 
   // ── POST /api/auth/logout ───────────────────────────────────
@@ -415,13 +424,14 @@ export async function handleAuthRoute(
 
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
     const body = await readJson<{ name?: string; password?: string }>(request);
-    if (!body.name || !body.password) return err('name and password are required', 400);
-    if (body.password.length < 8) return err('password must be at least 8 characters', 400);
+    // Hosted: the invitee chooses a password once, after verifying (as at sign-up), so none is asked for here.
+    if (!body.name || (!isSaas(env) && !body.password)) return err(isSaas(env) ? 'name is required' : 'name and password are required', 400);
+    if (body.password && body.password.length < 8) return err('password must be at least 8 characters', 400);
 
     // Hosted: holding the link is not proof of owning the address. The invitee gets an ordinary login with no workspace of its
     // own (it must be verified, and sets its password at verification) and then accepts while signed in as that verified address.
     if (isSaas(env)) {
-      const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: body.name.trim(), email: invite.email, password: body.password });
+      const created = await signUp(env, request, ctx, { kind: 'invitee', token: invite.token }, { name: body.name.trim(), email: invite.email, password: body.password || unusablePassword() });
       if (!created.res.ok) return authError(created.res, 'could not create account');
       return sessionResponse(request, created.res, { verification_required: true, invite_pending: true }, 201);
     }
@@ -446,6 +456,9 @@ export async function handleAuthRoute(
     const rel = path.slice(AUTH_BASE_PATH.length);
     if (!PASSTHROUGH.some(re => re.test(`${method} ${rel}`))) return err('not found', 404);
     if (await limited(env, request)) return err('Too many requests — try again later', 429);
+    // Hosted with sign-up closed: an OAuth start could create an account (no bot check runs on it), and the status tells the
+    // page that signing in is unavailable too, so none starts. The user-creation hook refuses accounts on any route besides.
+    if (method === 'POST' && rel === '/sign-in/social' && (await hostedSignupClosed(env))) return err(SIGNUP_CLOSED_MESSAGE, 503);
     const auth = await createAuth(env, request, { ctx });
     // The dashboard holds its session token in X-Api-Key; Better Auth reads it as a Bearer token.
     const headers = new Headers(request.headers);

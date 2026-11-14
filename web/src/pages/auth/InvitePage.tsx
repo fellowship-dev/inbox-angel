@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import { hashFor, workspaceStore } from '../../lib/workspace';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
@@ -30,15 +30,19 @@ export function InvitePage() {
 	const [error, setError] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
+	// Hosted: the invitee confirms their email first and chooses the password on the page that link opens, so none is asked here.
+	const hosted = useHosted();
 
 	async function submit(e: FormEvent) {
 		e.preventDefault();
 		setError('');
-		if (password.length < 8) return setError('Password must be at least 8 characters.');
-		if (password !== confirm) return setError('Passwords do not match.');
+		if (!hosted) {
+			if (password.length < 8) return setError('Password must be at least 8 characters.');
+			if (password !== confirm) return setError('Passwords do not match.');
+		}
 		setBusy(true);
 		try {
-			const res = await api<{ verification_required?: boolean }>(`/api/invites/${token}`, { method: 'POST', body: { name: name.trim(), password } });
+			const res = await api<{ verification_required?: boolean }>(`/api/invites/${token}`, { method: 'POST', body: hosted ? { name: name.trim() } : { name: name.trim(), password } });
 			if (res.verification_required) {
 				setVerifyFor(invite.data?.email ?? '');
 				return;
@@ -54,7 +58,7 @@ export function InvitePage() {
 		}
 	}
 
-	if (verifyFor) return <CheckEmail email={verifyFor} note="Confirm your email address and choose your password from the link we sent. Then open this invite link again, signed in, to join the workspace." />;
+	if (verifyFor) return <CheckEmail email={verifyFor} note="Open the link we sent to confirm your email and choose your password. Then open this invite link again, signed in, to join the workspace." />;
 
 	if (invite.isPending) {
 		return (
@@ -106,12 +110,18 @@ export function InvitePage() {
 				<Field id="name" label="Your name">
 					<Input id="name" required autoFocus autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
 				</Field>
-				<Field id="password" label="Password" hint="At least 8 characters.">
-					<Input id="password" type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
-				</Field>
-				<Field id="confirm" label="Confirm password">
-					<Input id="confirm" type="password" required autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-				</Field>
+				{hosted ? (
+					<p className="text-sm text-ink-2">We'll email {info.email} a link to confirm it. It opens a page where you choose your password.</p>
+				) : (
+					<>
+						<Field id="password" label="Password" hint="At least 8 characters.">
+							<Input id="password" type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
+						</Field>
+						<Field id="confirm" label="Confirm password">
+							<Input id="confirm" type="password" required autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+						</Field>
+					</>
+				)}
 				{error ? <FieldError>{error}</FieldError> : null}
 				<Button type="submit" className="w-full" loading={busy}>
 					Accept invite

@@ -100,16 +100,16 @@ async function provenByParent(tenant: TenantContext, domain: string): Promise<bo
 }
 
 /** Is the claim's token published at `_readysetmail.<domain>`? Throws nothing: a lookup failure is reported as the reason. */
-export async function provenByTxt(claim: DomainClaimRow, resolver: Resolver): Promise<{ ok: boolean; reason?: string }> {
+export async function provenByTxt(claim: DomainClaimRow, resolver: Resolver): Promise<{ ok: boolean; reason?: string; code?: UnprovenCode }> {
   const res = await resolver.txt(claimTxtName(claim.domain));
-  if (res.status === 'error') return { ok: false, reason: `DNS lookup failed (${res.error ?? 'error'}) — try again in a minute` };
+  if (res.status === 'error') return { ok: false, reason: `DNS lookup failed (${res.error ?? 'error'}) — try again in a minute`, code: 'lookup_failed' };
   const want = CLAIM_TXT_PREFIX + claim.token;
   const holds = (records: string[], value: string) => records.some(r => r.trim().replace(/^"|"$/g, '').trim() === value);
   if (holds(res.records, want)) return { ok: true };
   // A claim made before the rename may already be published under the old record name: accept it too.
   const legacy = await resolver.txt(`${LEGACY_CLAIM_TXT_LABEL}.${claim.domain}`);
   if (legacy.status !== 'error' && holds(legacy.records, LEGACY_CLAIM_TXT_PREFIX + claim.token)) return { ok: true };
-  return { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
+  return { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)`, code: 'not_found_yet' };
 }
 
 /** How long an evicted workspace can still export the report history of the domain it lost. */
@@ -180,10 +180,13 @@ export async function admitDomain(tenant: TenantContext, domain: string): Promis
   return { kind: 'pending', claim: await tenant.scope.claims.upsert(domain, newToken()) };
 }
 
+/** Why a Verify did not prove the claim: the record is not visible (yet), or DNS could not be asked. Neither counts against anything. */
+export type UnprovenCode = 'not_found_yet' | 'lookup_failed';
+
 export type VerifyOutcome =
   | { kind: 'verified'; via: VerifiedVia }
   | { kind: 'taken' }
-  | { kind: 'unproven'; reason: string };
+  | { kind: 'unproven'; reason: string; code?: UnprovenCode };
 
 /** The "Verify" button: re-check every kind of proof for a pending claim. */
 export async function verifyClaim(tenant: TenantContext, claim: DomainClaimRow, resolver: Resolver = createResolver()): Promise<VerifyOutcome> {
@@ -196,7 +199,7 @@ export async function verifyClaim(tenant: TenantContext, claim: DomainClaimRow, 
   const txt = await provenByTxt(claim, resolver);
   await tenant.scope.claims.recordCheck(claim.id, txt.ok ? null : (txt.reason ?? null));
   if (txt.ok) await evictLegacyHolder(tenant, claim.domain, 'txt');
-  return txt.ok ? { kind: 'verified', via: 'txt' } : { kind: 'unproven', reason: txt.reason ?? 'not verified' };
+  return txt.ok ? { kind: 'verified', via: 'txt' } : { kind: 'unproven', reason: txt.reason ?? 'not verified', ...(txt.code ? { code: txt.code } : {}) };
 }
 
 /**

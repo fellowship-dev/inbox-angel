@@ -34,16 +34,23 @@ export async function sendPasswordResetEmail(
   }
 }
 
+export const VERIFICATION_SUBJECT = 'Confirm your email for Ready Set Mail';
+
+/** The verification email's body: what the link does, in the order it happens (confirm, choose a password, signed in). */
+export function verificationEmailText(verifyUrl: string): string {
+  return `Hi,\n\nOpen this link to confirm your email address and choose your Ready Set Mail password. You are signed in as soon as you save it:\n${verifyUrl}\n\nThe link works on any device and expires in 24 hours. If you did not ask for a Ready Set Mail account, ignore this email: nobody can sign in to it without this link.\n\nReady Set Mail`;
+}
+
 export async function sendVerificationEmail(
   env: AuthEnv,
   user: { email: string; name: string },
   verifyUrl: string,
 ): Promise<void> {
-  const text = `Hi,\n\nConfirm your email address to finish setting up your Ready Set Mail account (you will choose your password on the next page):\n${verifyUrl}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.\n\nReady Set Mail`;
+  const text = verificationEmailText(verifyUrl);
   const from = await senderAddress(env);
   if (env.SEND_EMAIL && from) {
     try {
-      await env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: from }, to: [user.email], subject: 'Confirm your Ready Set Mail email', text });
+      await env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: from }, to: [user.email], subject: VERIFICATION_SUBJECT, text });
     } catch {
       console.error('[auth] verification email send failed (provider error not logged)');
     }

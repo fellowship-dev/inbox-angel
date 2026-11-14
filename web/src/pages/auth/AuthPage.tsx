@@ -50,12 +50,14 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	// The installer-proof screen is self-host only: the hosted service never asks a registrant for one.
 	const mode: Mode = !status.configured && !hosted ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
 	const registering = mode !== 'signin';
+	// Hosted sign-up asks for the email only: the password is chosen once, on the page the verification link opens.
+	const asksPassword = mode !== 'signup';
 	const providers = status.oauth_providers.filter((p) => p in PROVIDER_LABELS);
 
 	async function submit(e: FormEvent<HTMLFormElement>) {
 		e.preventDefault();
 		setError('');
-		if (registering) {
+		if (mode === 'setup') {
 			if (password.length < 8) return setError('Password must be at least 8 characters.');
 			if (password !== confirm) return setError('Passwords do not match.');
 		}
@@ -65,7 +67,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			const cf = status?.turnstile_site_key ? turnstileToken(e.currentTarget) : undefined;
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
+			const body = mode === 'setup' ? { name, email, password, telemetry, ...turnstile } : mode === 'signup' ? { name, email, ...turnstile } : { email, password, ...turnstile };
 			if (mode === 'signup') bindSignupDomainToEmail(email);
 			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Ready-Set-Mail-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
@@ -124,13 +126,15 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />
 					</Field>
 				) : null}
-				<Field id="email" label="Email" hint={registering ? (hosted ? 'Used to sign in.' : 'Used to sign in and to receive monitoring alerts.') : undefined}>
+				<Field id="email" label="Email" hint={mode === 'signup' ? "We'll email you a link. It opens a page where you choose your password and are signed in." : registering ? (hosted ? 'Used to sign in.' : 'Used to sign in and to receive monitoring alerts.') : undefined}>
 					<Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@yourcompany.com" aria-describedby={registering ? 'email-hint' : undefined} />
 				</Field>
-				<Field id="password" label="Password" hint={registering ? 'At least 8 characters.' : undefined}>
-					<Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={registering ? 'new-password' : 'current-password'} aria-describedby={registering ? 'password-hint' : undefined} />
-				</Field>
-				{registering ? (
+				{asksPassword ? (
+					<Field id="password" label="Password" hint={registering ? 'At least 8 characters.' : undefined}>
+						<Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={registering ? 'new-password' : 'current-password'} aria-describedby={registering ? 'password-hint' : undefined} />
+					</Field>
+				) : null}
+				{mode === 'setup' ? (
 					<Field id="confirm" label="Confirm password">
 						<Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required autoComplete="new-password" />
 					</Field>

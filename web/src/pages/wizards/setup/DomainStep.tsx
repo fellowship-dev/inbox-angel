@@ -1,4 +1,4 @@
-import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ready-set-mail/ui';
+import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@ready-set-mail/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import { ClaimCard } from '../../../components/domain/ClaimCard';
@@ -8,6 +8,7 @@ import { WriteButton } from '../../../components/states';
 import { DomainRefusalHelp } from '../../../components/TalkToMax';
 import { PlanLimitNotice, planLimitOf } from '../../../components/PlanLimitNotice';
 import { api, errorMessage } from '../../../lib/api';
+import { useDomainClaims } from '../../../lib/queries';
 import { normalizeDomainInput } from '../../../lib/domain-input';
 import { useHosted } from '../../../lib/session';
 import { clearSignupDomainIf, readSignupDomain } from '../../../lib/signup-intent';
@@ -40,7 +41,11 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	const [manual, setManual] = useState(false);
 	const [validation, setValidation] = useState('');
 	const [claim, setClaim] = useState<DomainClaim | null>(null);
+	/** The person chose "Add a different domain" over the claims already waiting. */
+	const [adding, setAdding] = useState(false);
 	const hosted = useHosted();
+	// Hosted: claims made on an earlier visit, still waiting for their DNS proof. Coming back, the person lands on them, not on an empty field.
+	const claims = useDomainClaims();
 
 	// A failed zone lookup (no Cloudflare token, API down) just means typing the domain by hand.
 	const zones = useQuery({ queryKey: ['zones'], queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
@@ -72,6 +77,35 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 		return (
 			<StepCard title="Verify you own this domain" focusHeading={false}>
 				<ClaimCard claim={claim} preview onVerified={(d) => onDomainSet(d.id)} onRemoved={() => setClaim(null)} />
+			</StepCard>
+		);
+	}
+
+	if (hosted && !adding && claims.isPending) {
+		return (
+			<StepCard title="Which domain do you send email from?" focusHeading={false}>
+				<Skeleton className="h-24 w-full" role="status" aria-label="Checking for domains you added" />
+			</StepCard>
+		);
+	}
+	const requested = readSignupDomain();
+	const waiting = hosted && !adding ? (claims.data ?? []).filter((c) => c.status === 'pending').sort((a, b) => Number(b.domain === requested) - Number(a.domain === requested)) : [];
+	if (waiting.length > 0) {
+		return (
+			<StepCard title={waiting.length === 1 ? 'Verify you own this domain' : 'Verify you own these domains'} focusHeading={false}>
+				<div className="space-y-4">
+					<p className="text-sm text-ink-2">
+						{waiting.length === 1
+							? 'You added this domain earlier. It is waiting for the DNS record that proves it is yours.'
+							: 'You added these domains earlier. Each is waiting for the DNS record that proves it is yours.'}
+					</p>
+					{waiting.map((c, i) => (
+						<ClaimCard key={c.id} claim={c} preview={i === 0 ? true : 'lazy'} onVerified={(d) => onDomainSet(d.id)} />
+					))}
+					<button type="button" className="text-sm text-brand-ink underline underline-offset-4" onClick={() => setAdding(true)}>
+						Add a different domain
+					</button>
+				</div>
 			</StepCard>
 		);
 	}

@@ -5,7 +5,11 @@ import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { AuthLayout, Field } from './AuthLayout';
 
-export function ResetPage() {
+/**
+ * Sets the password from an emailed token, then signs in. `welcome`: the page a hosted verification link opens, where a new
+ * account chooses its password for the first time (sign-up asks for none); otherwise a password reset.
+ */
+export function ResetPage({ welcome = false }: { welcome?: boolean } = {}) {
 	const { token = '' } = useParams();
 	const { signedIn } = useSession();
 	const navigate = useNavigate();
@@ -37,8 +41,8 @@ export function ResetPage() {
 	if (expired) {
 		return (
 			<AuthLayout title="Link expired">
-				<Alert variant="warning" title="This reset link is invalid or has expired">
-					Request a new one from the sign-in page.
+				<Alert variant="warning" title={welcome ? 'This link is invalid or has expired' : 'This reset link is invalid or has expired'}>
+					{welcome ? 'Your email is confirmed. Ask for a new link and we will email you one to choose your password.' : 'Request a new one from the sign-in page.'}
 				</Alert>
 				<Button asChild variant="secondary" className="w-full">
 					<Link to="/forgot">Request a new link</Link>
@@ -47,9 +51,9 @@ export function ResetPage() {
 		);
 	}
 	return (
-		<AuthLayout title="Set a new password">
+		<AuthLayout title={welcome ? 'Choose your password' : 'Set a new password'} description={welcome ? 'Your email is confirmed. Choose the password you will sign in with.' : undefined}>
 			<form onSubmit={submit} className="space-y-4">
-				<Field id="password" label="New password" hint="At least 8 characters.">
+				<Field id="password" label={welcome ? 'Password' : 'New password'} hint="At least 8 characters.">
 					<Input id="password" type="password" required autoFocus autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
 				</Field>
 				<Field id="confirm" label="Confirm password">
@@ -57,7 +61,7 @@ export function ResetPage() {
 				</Field>
 				{error ? <FieldError>{error}</FieldError> : null}
 				<Button type="submit" className="w-full" loading={busy}>
-					Set password and sign in
+					{welcome ? 'Save password and continue' : 'Set password and sign in'}
 				</Button>
 			</form>
 		</AuthLayout>

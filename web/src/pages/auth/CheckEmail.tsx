@@ -22,11 +22,11 @@ export function CheckEmail({ email, onBack, note }: { email: string; onBack?: ()
 	}
 
 	return (
-		<AuthLayout title="Check your email" description={note ?? 'Open the link we sent to finish creating your account.'}>
+		<AuthLayout title="Check your email" description={note ?? 'Open the link we sent. It confirms your email and opens a page where you choose your password.'}>
 			<p className="rounded-md border border-line bg-surface-2 px-3 py-2 font-mono text-sm" aria-label="Verification email address">
 				{email}
 			</p>
-			<p className="text-sm text-ink-2">Verify your email address to sign in: the link opens a page where you choose your password. If nothing arrives within a few minutes, check your spam folder or send it again.</p>
+			<p className="text-sm text-ink-2">The link works on any device and expires in 24 hours. Once you save your password you are signed in. If nothing arrives within a few minutes, check your spam folder or send it again.</p>
 			{state === 'sent' ? <Alert variant="info">Verification email sent. It can take a minute to arrive.</Alert> : null}
 			{error ? <Alert variant="danger">{error}</Alert> : null}
 			<Button variant="secondary" className="w-full" loading={state === 'sending'} onClick={() => void resend()}>

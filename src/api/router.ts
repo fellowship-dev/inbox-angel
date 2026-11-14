@@ -107,6 +107,7 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
+import { isClaimProof, recordFirstDnsCheck } from '../domains/first-check';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitResponse } from '../hosted/plan-limits';
@@ -715,6 +716,8 @@ async function _handleApi(
         throw e;
       }
       if (created !== null) await settleClaims(tenant, domain);
+      // Hosted, proven through a parent domain or a Cloudflare zone: store the first DNS read, so the overview shows the real level.
+      if (created !== null && isClaimProof(admission.via)) await recordFirstDnsCheck(tenant, created, domain);
       await refreshTenant(tenant);
       const zoneId = tenant.settings.zoneId;
       const cfAccountId = tenant.settings.cfAccountId;
@@ -786,7 +789,7 @@ async function _handleApi(
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
-      if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
+      if (outcome.kind === 'unproven') return json({ verified: false, error: outcome.reason, ...(outcome.code ? { code: outcome.code } : {}), claim: claimView((await tenant.scope.claims.getById(claim.id)) ?? claim) }, 422);
       const result = await commitVerifiedDomain(tenant, claim.domain, outcome.via, userBySession?.email, ctx, userBySession?.id);
       return json(result, result.resumed ? 200 : 201);
     }

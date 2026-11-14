@@ -102,6 +102,10 @@ export interface DomainCheckSummary {
 	spf_pass: number;
 	mta_sts_enabled: number; // 0 or 1
 	mta_sts_mode: string | null;
+	/** SPF DNS lookups at the last refresh (null: not counted). */
+	spf_lookup_count: number | null;
+	/** pct= of the applicable DMARC record at the last read (null: not read yet). */
+	dmarc_pct: number | null;
 }
 
 export interface UncountedSummary {
@@ -452,6 +456,8 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 					d.dmarc_issue,
 					d.dmarc_inherited_from,
 					d.dns_last_good_status,
+					d.spf_lookup_count,
+					d.dmarc_pct,
 					COALESCE(SUM(ar.total_count), 0) AS total_messages,
 					COALESCE(SUM(ar.pass_count),  0) AS pass_messages,
 					COALESCE(SUM(ar.fail_count),  0) AS fail_messages,
@@ -466,7 +472,7 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 				LEFT JOIN report_records rr    ON rr.report_id = ar.id AND rr.workspace_id = ${A}
 				LEFT JOIN mta_sts_config m     ON m.domain_id = d.id AND m.workspace_id = ${A}
 				WHERE d.workspace_id = ${A} AND d.id = ${domainId}
-				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, d.dns_checked_at, d.dns_check_attempted_at, d.dns_check_status, d.dmarc_issue, d.dmarc_inherited_from, d.dns_last_good_status, m.enabled, m.mode
+				GROUP BY d.id, d.domain, d.dmarc_policy, d.spf_record, d.dns_checked_at, d.dns_check_attempted_at, d.dns_check_status, d.dmarc_issue, d.dmarc_inherited_from, d.dns_last_good_status, d.spf_lookup_count, d.dmarc_pct, m.enabled, m.mode
 			`);
 			return rows[0] ?? null;
 		},

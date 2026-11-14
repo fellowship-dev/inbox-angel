@@ -101,6 +101,8 @@ function AppRoutes() {
 		<Routes>
 			<Route path="/invite/:token" element={<InvitePage />} />
 			<Route path="/reset/:token" element={<ResetPage />} />
+			{/* Where a hosted verification link lands: a new account chooses its password here, once. */}
+			<Route path="/welcome/:token" element={<ResetPage welcome />} />
 			<Route path="/forgot" element={<ForgotPage />} />
 			{/* From the website: the create-account screen when anonymous, the app (and its setup redirect) when signed in. */}
 			<Route path="/signup" element={<Gate initialMode="signup"><Navigate to="/" replace /></Gate>} />
