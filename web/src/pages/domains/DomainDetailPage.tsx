@@ -1,5 +1,5 @@
 import { HealthReportSection, useHealthReport } from './HealthReportSection';
-import { Alert, Badge, Button, EmptyState, LevelLadder, PageHeader, Skeleton, StatusLabel, Tabs, TabsList, TabsTrigger } from '@inbox-angel/ui';
+import { Alert, Badge, Button, EmptyState, LevelLadder, PageHeader, Skeleton, StatusLabel, Tabs, TabsList, TabsTrigger } from '@ready-set-mail/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';

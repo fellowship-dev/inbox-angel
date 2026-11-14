@@ -1,4 +1,4 @@
-import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@inbox-angel/ui';
+import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@ready-set-mail/ui';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { Link } from 'react-router';
 import { failLabel, isActive, isFailing } from '../../lib/reports';

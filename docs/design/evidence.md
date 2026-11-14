@@ -5,7 +5,7 @@ Branch `design-system-refinement`. Screenshots are binaries and are **not** comm
 ## Reproduce
 
 ```
-npm run build -w @inbox-angel/ui && npm run build:gallery -w @inbox-angel/ui
+npm run build -w @ready-set-mail/ui && npm run build:gallery -w @ready-set-mail/ui
 npx vite preview --config packages/ui/gallery/vite.config.ts --host 0.0.0.0 --port 8787
 PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-browsers node packages/ui/scripts/evidence.mjs after /tmp/design-evidence http://127.0.0.1:8787/
 ```
@@ -19,7 +19,7 @@ The script captures each route at 375, 768 and 1440 px (light and dark; long fix
 
 ## Verified in the repository (jsdom + token maths)
 
-`npm run test:ui` (render, axe without contrast, token/site-globals parity, per-mode WCAG contrast for every `contrastPairs` entry, dist smoke), `npm run test:web`, `npm run build:dashboard`, `npm run typecheck`, `npm run typecheck -w @inbox-angel/ui`.
+`npm run test:ui` (render, axe without contrast, token/site-globals parity, per-mode WCAG contrast for every `contrastPairs` entry, dist smoke), `npm run test:web`, `npm run build:dashboard`, `npm run typecheck`, `npm run typecheck -w @ready-set-mail/ui`.
 
 ## Gaps
 
@@ -27,4 +27,4 @@ The worker sandbox cannot run Chromium (missing system libraries, no root), so b
 
 ## Integration receipt (rebased onto main 86e308d)
 
-Rebased cleanly (no conflicts) onto `86e308da4881b1866370ab31bc1816ca64576942`; `npm ci` exit 0; manifests and lockfile identical to main. Then: `npm run test:ui` 147 passed (exit 0), `npm run test:web` 294 passed (exit 0), `npm run build:dashboard` exit 0, `npm run typecheck` exit 0, `npm run typecheck -w @inbox-angel/ui` exit 0, `npm run build:gallery -w @inbox-angel/ui` exit 0 with bundle `index-CaA5zCQk.js` / `index-q6fYaaUy.css`, identical to the pre-rebase build.
+Rebased cleanly (no conflicts) onto `86e308da4881b1866370ab31bc1816ca64576942`; `npm ci` exit 0; manifests and lockfile identical to main. Then: `npm run test:ui` 147 passed (exit 0), `npm run test:web` 294 passed (exit 0), `npm run build:dashboard` exit 0, `npm run typecheck` exit 0, `npm run typecheck -w @ready-set-mail/ui` exit 0, `npm run build:gallery -w @ready-set-mail/ui` exit 0 with bundle `index-CaA5zCQk.js` / `index-q6fYaaUy.css`, identical to the pre-rebase build.

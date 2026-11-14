@@ -7,7 +7,7 @@ import type { FindingStatus } from "./level-card.js";
 import type { StatusDotStatus } from "./status-dot.js";
 
 /**
- * The status vocabulary shared with the Inbox Angel website (`frontend/components/site/Status.tsx` there): a state says
+ * The status vocabulary shared with the Ready Set Mail website (`frontend/components/site/Status.tsx` there): a state says
  * what it means and who acts next, always as an icon plus a word, never colour alone. Same keys, labels and order as the
  * website, so a domain reads the same before and after sign-up.
  *

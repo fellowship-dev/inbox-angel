@@ -6,7 +6,7 @@ export interface LogoMarkProps extends React.SVGAttributes<SVGSVGElement> {
 }
 
 /**
- * Inbox Angel mark: gold halo over a gold envelope on a navy square, the same geometry as the website
+ * Ready Set Mail mark: gold halo over a gold envelope on a navy square, the same geometry as the website
  * (viewBox 0 0 100 100). The navy square is part of the mark, so it reads in light and dark mode alike.
  * Square: size it with one dimension (`size-8`, `h-7 w-7`); `rounded-md` softens the corners if wanted.
  */

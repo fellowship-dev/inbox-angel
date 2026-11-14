@@ -6,7 +6,7 @@ import {
 	SelectValue, Skeleton, Stat, StatGroup, StatusDot, Switch, Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader,
 	TableRow, Tabs, TabsContent, TabsList, TabsTrigger, toast, Tooltip, TooltipContent,
 	TooltipProvider, TooltipTrigger, cn,
-} from "@inbox-angel/ui";
+} from "@ready-set-mail/ui";
 import { ChevronDown, Plus, Settings, Trash2 } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { SAMPLE_DOMAIN, SampleBanner } from "./sample";
@@ -87,7 +87,7 @@ export function ComponentsPage() {
 		<TooltipProvider>
 			<main className="mx-auto max-w-6xl space-y-12 px-4 py-8 sm:px-6">
 				<PageHeader
-					eyebrow={<span className="flex items-center gap-2"><LogoMark className="size-6 rounded-md" /> Inbox Angel design system</span>}
+					eyebrow={<span className="flex items-center gap-2"><LogoMark className="size-6 rounded-md" /> Ready Set Mail design system</span>}
 					title="Component gallery"
 					description="Every component in light and dark. Sample data throughout."
 				/>

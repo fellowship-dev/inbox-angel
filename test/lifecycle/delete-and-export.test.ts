@@ -240,7 +240,7 @@ describe('DELETE /api/account', () => {
   });
 
   it('the self-host instance owner cannot delete the default workspace out from under everyone', async () => {
-    const { createMigratedD1 } = await import('@inbox-angel/db/testing');
+    const { createMigratedD1 } = await import('@ready-set-mail/db/testing');
     const { call, makeEnv, setupOwner } = await import('../auth/helpers');
     const db = createMigratedD1();
     const env = makeEnv(db);
@@ -354,7 +354,7 @@ void ws;
 describe('transferOwnership (one batch)', () => {
   it('a stale request (the caller is no longer an owner, or the target is no member) changes nothing and never leaves the workspace ownerless', async () => {
     const w = await world();
-    const { workspaceLifecycle } = await import('@inbox-angel/db');
+    const { workspaceLifecycle } = await import('@ready-set-mail/db');
     const life = workspaceLifecycle(w.db as any);
     const id = (email: string) => w.rows('SELECT id FROM users WHERE email = ?', email)[0].id as string;
     const roles = () => Object.fromEntries(w.rows('SELECT u.email, m.role FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = ?', w.A.ws).map(r => [r.email, r.role]));

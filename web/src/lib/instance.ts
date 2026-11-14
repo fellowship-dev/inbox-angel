@@ -17,7 +17,7 @@ export function usePreflight() {
 
 /** What a person types to their assistant after connecting. Read-only on purpose: it asks for advice, not changes. */
 export const FIRST_PROMPT =
-	'Use the Inbox Angel connector. First call whoami to see which domains I gave you access to, then list_domains. ' +
+	'Use the Ready Set Mail connector. First call whoami to see which domains I gave you access to, then list_domains. ' +
 	'For each domain (start with five if there are more, and ask me before doing the rest), get its email health report. ' +
 	'Then tell me in plain words the three things that matter most for my email being trusted, most urgent first. ' +
 	'For each one, say what to change, where, and how I can check that it worked. ' +

@@ -1,5 +1,5 @@
 import type { Severity } from '../../../components/wizard/SeverityBadge';
-import { findUnsignedSpfProviders } from '@inbox-angel/dns-checks/email-service-providers';
+import { findUnsignedSpfProviders } from '@ready-set-mail/dns-checks/email-service-providers';
 import { isRevokedDkimKey } from '../../../lib/dkim';
 import type { OnboardingStatus, WizardState } from '../../../lib/types';
 

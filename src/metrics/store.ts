@@ -1,4 +1,4 @@
-import type { WorkspaceScope } from '@inbox-angel/db';
+import type { WorkspaceScope } from '@ready-set-mail/db';
 import type { EvidenceSection } from '../reports/contracts';
 import type { MetricObservation, MetricWindow } from './contracts';
 export interface GoogleEvidence { observations:MetricObservation[];connectionStatus:string;lastAttemptAt:number|null;lastSuccessAt:number|null;stale:boolean }

@@ -1,5 +1,5 @@
 import type { OAuthProviderOptions } from '@cloudflare/workers-oauth-provider';
-import { accessLookups, globalQueries, forWorkspace } from '@inbox-angel/db';
+import { accessLookups, globalQueries, forWorkspace } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import type { AccessSubject } from '../access/principal';
 import { resolveAccessSubject } from '../access/resolve';
@@ -72,8 +72,8 @@ export async function createMcpProvider(env: BoundEnv, origin: string, handler: 
   tokenEndpoint: `${local.issuer}/oauth/token`,
   ...(dcrEnabled ? { clientRegistrationEndpoint: `${local.issuer}/oauth/register` } : {}),
   clientIdMetadataDocumentEnabled: true,
-  resourceMetadata: { resource: local.resource, authorization_servers: [local.issuer], resource_name: 'Inbox Angel' },
-  scopesSupported: ['inbox-angel'], requiredScopes: ['inbox-angel'],
+  resourceMetadata: { resource: local.resource, authorization_servers: [local.issuer], resource_name: 'Ready Set Mail' },
+  scopesSupported: ['ready-set-mail'], requiredScopes: ['ready-set-mail'],
   accessTokenTTL: 900, refreshTokenTTL: 30 * 86400,
   async resolveExternalToken({ token, env }) {
    const key = await resolveApiKey(env.DB, token);

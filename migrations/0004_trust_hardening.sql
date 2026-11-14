@@ -8,7 +8,7 @@ CREATE TABLE domain_claims (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   domain TEXT NOT NULL,
-  token TEXT NOT NULL,                         -- value of the TXT record _inboxangel.<domain>
+  token TEXT NOT NULL,                         -- value of the TXT record _readysetmail.<domain>
   status TEXT NOT NULL DEFAULT 'pending',      -- pending | lost (another workspace verified it first)
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   last_checked_at INTEGER,

@@ -8,7 +8,7 @@
 //  - DNS errors never become findings: they go to `unchecked`.
 // The DMARC vendor-stuck signal of the Python original stays in prospecting: it is not a finding.
 
-import { PROVIDERS, type DetectedProvider, type DnsHost, type DomainReport, type Grade, type SpfIssue } from '@inbox-angel/dns-checks';
+import { PROVIDERS, type DetectedProvider, type DnsHost, type DomainReport, type Grade, type SpfIssue } from '@ready-set-mail/dns-checks';
 
 export type Severity = 'high' | 'medium' | 'low';
 export type Effort = 'S' | 'M' | 'L';

@@ -1,6 +1,6 @@
 // Shared setup: a saas D1 with two workspaces (A has two domains), a fake Cloudflare, and the mock OAuth server.
 import { vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, inviteAndAccept, makeEnv, signupVerified } from '../auth/helpers';
 import { FakeCloudflare } from '../helpers/cf-fake';
 import { seedSettings } from '../helpers/tenant';

@@ -1,4 +1,4 @@
-import { Button, EmptyState, PageHeader, statusRank, toast } from '@inbox-angel/ui';
+import { Button, EmptyState, PageHeader, statusRank, toast } from '@ready-set-mail/ui';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Download, Plus } from 'lucide-react';
 import { useId, useState } from 'react';

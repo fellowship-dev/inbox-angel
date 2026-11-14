@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Alert, Badge, Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';

@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldError, Input } from '@inbox-angel/ui';
+import { Badge, Button, Card, CardContent, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldError, Input } from '@ready-set-mail/ui';
 import { useState, type FormEvent } from 'react';
 import { Section } from '../../components/states';
 import { ApiError, errorMessage } from '../../lib/api';
@@ -110,7 +110,7 @@ function DeleteButton({ id, name, then }: { id: string; name: string; then: () =
 							<DialogTitle>Delete {name}?</DialogTitle>
 							<DialogDescription>
 								{count > 0
-									? `This removes its ${count} ${count === 1 ? 'domain' : 'domains'} (and the DNS records Inbox Angel added for them), every report, its members' access and its Cloudflare connections. This cannot be undone.`
+									? `This removes its ${count} ${count === 1 ? 'domain' : 'domains'} (and the DNS records Ready Set Mail added for them), every report, its members' access and its Cloudflare connections. This cannot be undone.`
 									: 'It has no domains. Its members lose access. This cannot be undone.'}
 							</DialogDescription>
 						</DialogHeader>

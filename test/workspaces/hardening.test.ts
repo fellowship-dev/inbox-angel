@@ -1,8 +1,8 @@
 // Reports-domain ownership, delete preflight, and single-use invites under concurrency.
 import { describe, it, expect, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept } from '../auth/helpers';
-import { workspaceLifecycle } from '@inbox-angel/db';
+import { workspaceLifecycle } from '@ready-set-mail/db';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
@@ -153,7 +153,7 @@ describe('an invite can be spent once, even by simultaneous accepts', () => {
 
 	it('claimInvite is a single conditional update: first caller wins, expired and unknown tokens never claim', async () => {
 		const { db, owner, env, b } = await world();
-		const { forWorkspace } = await import('@inbox-angel/db');
+		const { forWorkspace } = await import('@ready-set-mail/db');
 		const team = forWorkspace(db as any, b).team;
 		const inv = await json(await call(env, 'POST', '/api/team/invite', { key: owner, headers: ws(b), body: { email: 'x@y.test' } }));
 		expect(await team.claimInvite(inv.token)).toBe(true);

@@ -1,4 +1,4 @@
-import { Button, StatusLabel, cn } from '@inbox-angel/ui';
+import { Button, StatusLabel, cn } from '@ready-set-mail/ui';
 import { useId } from 'react';
 import { Link } from 'react-router';
 

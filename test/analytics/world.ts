@@ -1,5 +1,5 @@
 // Seeded report data for the analytics tests: one story per domain, dated relative to a fixed "now".
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 
 export const DAY = 86400;
 

@@ -1,4 +1,4 @@
-import { Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Badge, Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -79,7 +79,7 @@ export function ExplorePage() {
 				) : (
 					<EmptyState
 						title={`No sources in the last ${days} days`}
-						description="No DMARC reports arrived in this window. Receivers send them about once a day once your DMARC record points to Inbox Angel; a longer window may show older ones."
+						description="No DMARC reports arrived in this window. Receivers send them about once a day once your DMARC record points to Ready Set Mail; a longer window may show older ones."
 						action={days < 90 ? <Button variant="secondary" onClick={() => setDays(90)}>Look back 90 days</Button> : undefined}
 					/>
 				)

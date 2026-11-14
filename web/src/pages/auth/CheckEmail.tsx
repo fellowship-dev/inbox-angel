@@ -1,4 +1,4 @@
-import { Alert, Button } from '@inbox-angel/ui';
+import { Alert, Button } from '@ready-set-mail/ui';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { TalkToMax } from '../../components/TalkToMax';

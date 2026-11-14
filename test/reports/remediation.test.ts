@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { createResolver } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 import { makeTenant } from '../helpers/tenant';
 import { seedDomainReports } from '../analytics/world';

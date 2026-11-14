@@ -1,4 +1,4 @@
-# InboxAngel Worker — secrets
+# Ready Set Mail Worker — secrets
 # Deploy button: fill these in during setup.
 # CLI: copy to .dev.vars for local dev, or set via: wrangler secret put <NAME>
 

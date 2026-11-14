@@ -5,8 +5,8 @@
 // only its hash is stored. (It is also published in the hosted DMARC / TLS-RPT records, which is why rotation
 // edits those records rather than asking the customer to change anything.)
 
-import { createResolver, type Resolver } from '@inbox-angel/dns-checks';
-import { globalQueries, type PointerStatus } from '@inbox-angel/db';
+import { createResolver, type Resolver } from '@ready-set-mail/dns-checks';
+import { globalQueries, type PointerStatus } from '@ready-set-mail/db';
 import type { TenantContext } from '../tenancy/context';
 import { CfError, CfNotConfiguredError, cfErrorText } from '../tenancy/cf-client';
 import { logAudit } from '../audit/log';
@@ -157,7 +157,7 @@ export async function enableHosted(
   const created: Array<{ id: string; name: string }> = [];
   const zones = globalQueries(tenant.db).hostedZones;
   const write = async (type: string, name: string, content: string, extra: { proxied?: boolean; ttl?: number } = {}) => {
-    const rec = await writer.create({ type, name, content, ttl: extra.ttl ?? 300, proxied: extra.proxied, comment: 'InboxAngel hosted record' });
+    const rec = await writer.create({ type, name, content, ttl: extra.ttl ?? 300, proxied: extra.proxied, comment: 'Ready Set Mail hosted record' });
     created.push({ id: rec.id, name });
     await zones.addCount(slot.key, 1);
     return rec.id;

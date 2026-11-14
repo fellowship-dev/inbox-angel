@@ -1,4 +1,4 @@
-import { createResolver } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 import { describe, it, expect } from 'vitest';
 import { toolWorld } from './tool-fixture';
@@ -11,14 +11,14 @@ describe('public MCP tool contract', () => {
   expect(list.tools.map(t => t.name).sort()).toEqual(names.sort());
   for (const tool of list.tools) { expect(tool.inputSchema.type).toBe('object'); expect(tool.outputSchema?.type).toBe('object'); }
   const identity = await client.callTool({ name: 'whoami', arguments: {} });
-  expect(identity.structuredContent).toMatchObject({ schema: 'inbox-angel-tool/v1', data: { kind: 'service', principalId: 'service-agent' } });
+  expect(identity.structuredContent).toMatchObject({ schema: 'ready-set-mail-tool/v1', data: { kind: 'service', principalId: 'service-agent' } });
   expect(await world.scope.domains.list()).toHaveLength(0);
   expect((await client.callTool({ name: 'add_domain', arguments: { domain: 'example.com' } })).isError).not.toBe(true);
   await client.close();
   const reconnected = await world.connect();
   const report = await reconnected.callTool({ name: 'get_email_report', arguments: { domain: 'example.com' } });
   expect(report.isError).not.toBe(true);
-  expect(report.structuredContent).toMatchObject({ data: { report: { schema: 'inbox-angel-health/v1', intake: { status: 'unavailable' }, sections: { dmarc: { status: 'unavailable', reason: 'no_reports' }, google: { reason: 'not_connected' } } } } });
+  expect(report.structuredContent).toMatchObject({ data: { report: { schema: 'ready-set-mail-health/v1', intake: { status: 'unavailable' }, sections: { dmarc: { status: 'unavailable', reason: 'no_reports' }, google: { reason: 'not_connected' } } } } });
   const data = report.structuredContent as any;
   expect(data.data.report.remediation.some((f: any) => f.finding === 'dmarc-missing' && f.verification.length)).toBe(true);
   expect((await reconnected.callTool({ name: 'verify_domain', arguments: { domain: 'example.com' } })).isError).not.toBe(true);

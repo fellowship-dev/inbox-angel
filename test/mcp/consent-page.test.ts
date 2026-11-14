@@ -90,7 +90,7 @@ describe('consent page', () => {
    workspaces: [{ id: 'w', name: 'Solo', choices: [{ value: '{"workspaceId":"w","domain":"solo.example"}', domain: 'solo.example' }] }],
   }));
   expect(html).toContain('<h1>An app is asking to work with your domains</h1>');
-  expect(html).toContain('<title>An app is asking for access · Inbox Angel</title>');
+  expect(html).toContain('<title>An app is asking for access · Ready Set Mail</title>');
   expect(html).not.toMatch(/<h1>[^<]*Claude/);
   const text = visible(html);
   expect(text).toContain('Name it gives "Claude". Not verified: the app chose this name itself');

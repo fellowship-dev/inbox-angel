@@ -1,4 +1,4 @@
-import { Button, EmptyState, Toaster } from '@inbox-angel/ui';
+import { Button, EmptyState, Toaster } from '@ready-set-mail/ui';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router';
@@ -23,7 +23,7 @@ function Gate({ children, initialMode }: { children: ReactNode; initialMode?: 's
 			<div className="mx-auto max-w-lg p-8">
 				<EmptyState
 					title="Waiting for the server"
-					description="Inbox Angel did not answer. On the very first start it runs database migrations, which can take a minute."
+					description="Ready Set Mail did not answer. On the very first start it runs database migrations, which can take a minute."
 					action={<Button onClick={retry}>Try again</Button>}
 				/>
 			</div>

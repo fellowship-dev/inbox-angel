@@ -74,7 +74,7 @@ test('operator enrollment, finite product access, revocation and responsive repo
   } });
   expect(registered.status()).toBe(201);
   const { client_id } = await registered.json();
-  const query = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: 'https://client.example/callback', scope: 'inbox-angel', resource: origin + '/mcp', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256' });
+  const query = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: 'https://client.example/callback', scope: 'ready-set-mail', resource: origin + '/mcp', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256' });
   await page.goto('/oauth/authorize?' + query);
   // A self-registered client is unverified: its claimed name is not the heading.
   await expect(page.getByRole('heading', { name: 'An app is asking to work with your domains' })).toBeVisible();

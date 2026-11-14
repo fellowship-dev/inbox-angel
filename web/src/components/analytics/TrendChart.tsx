@@ -1,4 +1,4 @@
-import { EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
+import { EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@ready-set-mail/ui';
 import { useId, useState } from 'react';
 import { bucketTrend, fmtPct, type TrendDay } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';

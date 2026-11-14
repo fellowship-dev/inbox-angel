@@ -1,4 +1,4 @@
-import { statusRank, type StatusKind } from '@inbox-angel/ui';
+import { statusRank, type StatusKind } from '@ready-set-mail/ui';
 import { isRevokedDkimKey, isUsableDkimSelector } from './dkim';
 import { dkimWildcardSummary } from './dkim-wildcard';
 import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement } from './dmarc-coverage';

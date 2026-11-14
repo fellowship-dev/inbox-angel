@@ -6,14 +6,14 @@
 // everything else (grade, providers, unchecked) from the run with the fewest failed lookups.
 // Everything is redacted (`build`): no DMARC report mailbox read from DNS leaves the process.
 
-import type { DetectedProvider, DnsHost, DomainReport, Grade } from '@inbox-angel/dns-checks';
+import type { DetectedProvider, DnsHost, DomainReport, Grade } from '@ready-set-mail/dns-checks';
 import { bimiReadiness, type BimiReadiness } from './bimi-readiness';
 import { CATALOG } from './catalog/index';
 import { consensus } from './consensus';
 import { build, type Facts, type Finding } from './findings';
 import { derived, fill, type Fix } from './fixes';
 
-export const REPORT_SCHEMA = 'inbox-angel-report/v1' as const;
+export const REPORT_SCHEMA = 'ready-set-mail-report/v1' as const;
 /** Below this a finding is a hint ("possible"), not a counted problem (Z render_report.py MIN_CONFIDENCE). */
 export const MIN_CONFIDENCE = 0.6;
 /** Stands for a mailbox address redacted from the report (`redact`). */
@@ -26,7 +26,7 @@ export interface BuildReportInput {
   ns?: string[];
   /** DNS host; defaults to the one detected from `ns` in that run. */
   dnsHost?: DnsHost;
-  /** Where the report will live (`https://inboxangel.io/r/<token>`); this package does not serve it. */
+  /** Where the report will live (`https://readysetmail.com/r/<token>`); this package does not serve it. */
   reportUrl?: string | null;
   generatedAt: string;
 }

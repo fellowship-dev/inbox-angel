@@ -1,4 +1,4 @@
-import { Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';

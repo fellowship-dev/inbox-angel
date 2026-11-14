@@ -1,4 +1,4 @@
-import { cn } from '@inbox-angel/ui';
+import { cn } from '@ready-set-mail/ui';
 import type { ReactNode } from 'react';
 
 export interface SegmentedOption<T> {

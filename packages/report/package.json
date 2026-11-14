@@ -1,7 +1,7 @@
 {
-  "name": "@inbox-angel/report",
+  "name": "@ready-set-mail/report",
   "version": "0.1.0",
-  "description": "Email-authentication findings, the fix catalog, BIMI readiness and multi-resolver consensus over @inbox-angel/dns-checks reports.",
+  "description": "Email-authentication findings, the fix catalog, BIMI readiness and multi-resolver consensus over @ready-set-mail/dns-checks reports.",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -17,6 +17,6 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@inbox-angel/dns-checks": "*"
+    "@ready-set-mail/dns-checks": "*"
   }
 }

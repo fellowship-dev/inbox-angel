@@ -1,4 +1,4 @@
-import { toast } from '@inbox-angel/ui';
+import { toast } from '@ready-set-mail/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { HashRouter } from 'react-router';

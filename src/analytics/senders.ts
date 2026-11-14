@@ -9,9 +9,9 @@
 // assumed. Every number derived from this is an ESTIMATE and is labelled so: only the reports' own pass/fail
 // totals (trend, pass rate) are exact, and only those may block a rollout step.
 
-import { organizationalDomain } from '@inbox-angel/dns-checks/org-domain';
-import { identifySender, type SenderProvider } from '@inbox-angel/dns-checks/sender-providers';
-import type { SenderRow } from '@inbox-angel/db';
+import { organizationalDomain } from '@ready-set-mail/dns-checks/org-domain';
+import { identifySender, type SenderProvider } from '@ready-set-mail/dns-checks/sender-providers';
+import type { SenderRow } from '@ready-set-mail/db';
 
 /** A sender whose first report is newer than this is flagged "new" (when older history exists to compare with). */
 export const NEW_SENDER_DAYS = 7;

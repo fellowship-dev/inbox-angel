@@ -1,4 +1,4 @@
-import { Button, CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@inbox-angel/ui';
+import { Button, CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
@@ -99,8 +99,8 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 					title="DMARC record"
 					summary={
 						enforcing
-							? 'Published, read from public DNS. Reports are not connected yet, so it sends no reports to Inbox Angel.'
-							: `Published, read from public DNS. ${p === 'none' ? 'p=none only monitors: mail that fails SPF and DKIM is still delivered.' : 'It has no valid p= policy, so receivers ignore it.'} Reports are not connected yet, so it sends no reports to Inbox Angel.`
+							? 'Published, read from public DNS. Reports are not connected yet, so it sends no reports to Ready Set Mail.'
+							: `Published, read from public DNS. ${p === 'none' ? 'p=none only monitors: mail that fails SPF and DKIM is still delivered.' : 'It has no valid p= policy, so receivers ignore it.'} Reports are not connected yet, so it sends no reports to Ready Set Mail.`
 					}
 				>
 					<RecordBlock title="Current record" record={{ type: 'TXT', name: dmarcName, value: current }} />
@@ -158,15 +158,15 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 				title="DMARC record"
 				summary={
 					!ruaReady
-						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Inbox Angel report address yet, so there is no record to suggest.`
+						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Ready Set Mail report address yet, so there is no record to suggest.`
 						: !found && offerBlocked
 							? `No TXT record at ${dmarcName}, and we could not tell whether a parent domain's policy covers this name, so no record is offered.`
 							: !found && coverage.kind === 'inherited'
-								? `${inheritedSentence(domain.domain, coverage)} To receive reports here, publish the record below: it keeps ${floor ? keptEnforcement(coverage, floor) : ''} and adds Inbox Angel's report address.`
+								? `${inheritedSentence(domain.domain, coverage)} To receive reports here, publish the record below: it keeps ${floor ? keptEnforcement(coverage, floor) : ''} and adds Ready Set Mail's report address.`
 							: !found
 							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
 							: has_rua
-								? 'Published, and aggregate reports are sent to Inbox Angel.'
+								? 'Published, and aggregate reports are sent to Ready Set Mail.'
 								: `Published, but it does not send reports to ${domain.rua_address}. Update it with the record below.`
 				}
 			>
@@ -180,7 +180,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 									Apply to Cloudflare
 								</WriteButton>
 							) : (
-								<p className="text-ink-2">Add this record at your DNS provider. Inbox Angel cannot change DNS for this domain.</p>
+								<p className="text-ink-2">Add this record at your DNS provider. Ready Set Mail cannot change DNS for this domain.</p>
 							)}
 						</>
 					) : null}

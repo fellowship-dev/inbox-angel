@@ -1,5 +1,5 @@
-import { forWorkspace } from '@inbox-angel/db';
-import type { createMigratedD1 } from '@inbox-angel/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
+import type { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { describe, it, expect } from 'vitest';
 import { toolWorld } from './tool-fixture';
 describe('MCP call authorization', () => {

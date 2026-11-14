@@ -5,7 +5,7 @@
 //   CLOUDFLARE_EMAIL_TOKEN=<zone-token> \
 //   CLOUDFLARE_ZONE_ID=<zone-id> \
 //   REPORTS_DOMAIN=reports.yourdomain.com \
-//   WORKER_NAME=inbox-angel-worker \
+//   WORKER_NAME=ready-set-mail-worker \
 //   npx tsx scripts/setup-email-routing.ts
 //
 // What it does:
@@ -19,7 +19,7 @@
 const TOKEN  = process.env.CLOUDFLARE_EMAIL_TOKEN;
 const ZONE   = process.env.CLOUDFLARE_ZONE_ID;
 const DOMAIN = process.env.REPORTS_DOMAIN;
-const WORKER = process.env.WORKER_NAME ?? 'inbox-angel-worker';
+const WORKER = process.env.WORKER_NAME ?? 'ready-set-mail-worker';
 
 if (!TOKEN || !ZONE || !DOMAIN) {
   console.error('Missing required env vars: CLOUDFLARE_EMAIL_TOKEN, CLOUDFLARE_ZONE_ID, REPORTS_DOMAIN');

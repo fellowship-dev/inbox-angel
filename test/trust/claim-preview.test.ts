@@ -1,10 +1,10 @@
 // Read-only public-DNS preview of a claimed-but-unverified domain (GET /api/domains/claims/:id/preview).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, signupVerified } from '../auth/helpers';
 import { HOSTED_ENV } from '../hosted/world';
 import { dohFetch, fakeResolver, type Zone } from '../../packages/dns-checks/test/helpers';
-import { COMMON_DKIM_SELECTORS } from '@inbox-angel/dns-checks';
+import { COMMON_DKIM_SELECTORS } from '@ready-set-mail/dns-checks';
 import { __resetPreviewCacheForTests, previewClaimDns } from '../../src/domains/claim-preview';
 import { snapshotDns } from '../../src/email/dns-snapshot';
 import { assessDomain } from '../../web/src/lib/levels';
@@ -70,7 +70,7 @@ describe('GET /api/domains/claims/:id/preview', () => {
       mx: { status: 'found' }, lookup_failed: [],
     });
     expect(Number.isNaN(Date.parse(body.checked_at))).toBe(false);
-    expect(JSON.stringify(body)).not.toMatch(/inboxangel-verify|token/i);
+    expect(JSON.stringify(body)).not.toMatch(/readysetmail-verify|token/i);
   });
 
   it('another workspace’s claim is a 404, and no DNS is looked up', async () => {

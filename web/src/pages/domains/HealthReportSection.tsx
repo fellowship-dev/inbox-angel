@@ -1,4 +1,4 @@
-import { Button, Card, CardContent, FieldError } from '@inbox-angel/ui';
+import { Button, Card, CardContent, FieldError } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { Section, useHeadingTag } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';

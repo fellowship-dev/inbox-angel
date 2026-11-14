@@ -1,16 +1,16 @@
 // Shared setup for the hosted tests: a saas D1 with two workspaces that each own a domain.
 import { vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forWorkspace } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
 import type { BoundEnv } from '../../src/index';
 import { hashToken, generateToken } from '../../src/hosted/tokens';
 
 export const HOSTED_ENV = {
   MODE: 'saas',
   SAAS_ENABLED: '1',
-  INTAKE_DOMAIN: 'rua.inboxangel.io',
-  CANARY_DOMAIN: 'canary.inboxangel.io',
-  HOSTED_RECORDS_ZONE: 'inboxangel.io',
+  INTAKE_DOMAIN: 'rua.readysetmail.com',
+  CANARY_DOMAIN: 'canary.readysetmail.com',
+  HOSTED_RECORDS_ZONE: 'readysetmail.com',
   HOSTED_RECORDS_LABEL: 'h',
   HOSTED_RECORDS_TOKEN: 'hosted-token',
   AUTHSERV_ID: 'mx.cloudflare.net',

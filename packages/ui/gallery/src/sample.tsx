@@ -1,4 +1,4 @@
-import { Alert, Badge } from "@inbox-angel/ui";
+import { Alert, Badge } from "@ready-set-mail/ui";
 import type { ReactNode } from "react";
 
 /** `?fixture=long` swaps in worst-case lengths to prove nothing overflows the document. */

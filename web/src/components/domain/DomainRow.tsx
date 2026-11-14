@@ -1,4 +1,4 @@
-import { Button, LevelLadder, Skeleton, StatusLabel, cn } from '@inbox-angel/ui';
+import { Button, LevelLadder, Skeleton, StatusLabel, cn } from '@ready-set-mail/ui';
 import { RefreshCw } from 'lucide-react';
 import { useId } from 'react';
 import { Link } from 'react-router';

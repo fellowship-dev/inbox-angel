@@ -1,4 +1,4 @@
-import { Badge } from '@inbox-angel/ui';
+import { Badge } from '@ready-set-mail/ui';
 import { ShieldAlert } from 'lucide-react';
 
 export const UNAUTHENTICATED_TIP = 'The report email did not pass DMARC-aligned authentication, so treat it as unverified.';

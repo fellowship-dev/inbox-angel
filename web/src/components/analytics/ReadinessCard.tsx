@@ -1,4 +1,4 @@
-import { Alert, Badge } from '@inbox-angel/ui';
+import { Alert, Badge } from '@ready-set-mail/ui';
 import { AlertTriangle, CheckCircle2, Info, ShieldCheck, XCircle } from 'lucide-react';
 import { READINESS_LABEL, fmtPct, type Readiness } from '../../lib/analytics';
 

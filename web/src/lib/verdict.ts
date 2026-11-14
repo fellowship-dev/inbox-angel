@@ -1,4 +1,4 @@
-import { STATUS_RANK, statusRank, type Level, type StatusKind } from '@inbox-angel/ui';
+import { STATUS_RANK, statusRank, type Level, type StatusKind } from '@ready-set-mail/ui';
 import { enforcementLevel, hasReportAddress, weakerSubdomainPolicy } from './dmarc-record';
 import { formatNumber, timeAgo } from './format';
 import { applyHostedInputs, assessDomain, didNotResolve, dnsCheckLine, type HostedLevelInput } from './levels';

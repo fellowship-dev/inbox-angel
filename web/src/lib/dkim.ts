@@ -1,6 +1,6 @@
 /** Pure DKIM record helpers. */
 
-import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
+import { decodeTxtData } from '@ready-set-mail/dns-checks/txt';
 
 /**
  * A DKIM key record with an empty `p=` tag: the key has been revoked (RFC 6376, section 3.6.1), so nothing

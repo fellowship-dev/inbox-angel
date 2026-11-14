@@ -1,4 +1,4 @@
-import { AppShell, Button, EmptyState, IconButton, LogoMark, PageHeader, type NavSection } from "@inbox-angel/ui";
+import { AppShell, Button, EmptyState, IconButton, LogoMark, PageHeader, type NavSection } from "@ready-set-mail/ui";
 import { Bell, FileText, Globe, LayoutDashboard, Plus, Settings, User } from "lucide-react";
 
 const nav: NavSection[] = [
@@ -20,7 +20,7 @@ export function DomainEmpty() {
 			brand={
 				<>
 					<LogoMark className="size-8 shrink-0 rounded-md" />
-					<span className="truncate text-base font-bold tracking-tight">Inbox Angel</span>
+					<span className="truncate text-base font-bold tracking-tight">Ready Set Mail</span>
 				</>
 			}
 			nav={nav}

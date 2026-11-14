@@ -309,7 +309,7 @@ describe('OverviewPage: get to a first answer', () => {
 });
 
 describe('OverviewPage: pending ownership claims keep the lazy DNS preview', () => {
-	const claim = { id: 5, domain: 'acme.com', status: 'pending', txt_name: '_inboxangel-challenge.acme.com', txt_value: 'ia-verify=abc123', created_at: 1700000000, last_checked_at: null, last_error: null };
+	const claim = { id: 5, domain: 'acme.com', status: 'pending', txt_name: '_readysetmail-challenge.acme.com', txt_value: 'ia-verify=abc123', created_at: 1700000000, last_checked_at: null, last_error: null };
 
 	it('shows "Check public DNS" on the claim, requests nothing until pressed, and the proof step says the level is visible first', async () => {
 		const { calls } = renderOverview({ routes: { 'GET /api/domains': { domains: [], pending_claims: [claim] } } });

@@ -22,7 +22,7 @@ import {
   detectExistingMtaStsMode as detectExistingMtaStsModePure,
   generatePolicyId,
   lookupMx,
-} from '@inbox-angel/dns-checks';
+} from '@ready-set-mail/dns-checks';
 
 export { buildPolicyFile, generatePolicyId };
 
@@ -244,7 +244,7 @@ export async function provisionMtaSts(
     name: `_mta-sts.${domain}`,
     content: `v=STSv1; id=${policy_id}`,
     ttl: 300,
-    comment: `InboxAngel MTA-STS for ${domain}`,
+    comment: `Ready Set Mail MTA-STS for ${domain}`,
   }, audit);
 
   // Create _smtp._tls TXT
@@ -253,7 +253,7 @@ export async function provisionMtaSts(
     name: `_smtp._tls.${domain}`,
     content: `v=TLSRPTv1; rua=mailto:tls-rpt@${tenant.settings.reportsDomain}`,
     ttl: 3600,
-    comment: `InboxAngel TLS-RPT for ${domain}`,
+    comment: `Ready Set Mail TLS-RPT for ${domain}`,
   }, audit);
 
   // Create mta-sts CNAME (proxied so CF handles TLS)
@@ -263,7 +263,7 @@ export async function provisionMtaSts(
     content: workerHost,
     ttl: 1,       // 1 = auto (CF proxied)
     proxied: true,
-    comment: `InboxAngel MTA-STS policy server for ${domain}`,
+    comment: `Ready Set Mail MTA-STS policy server for ${domain}`,
   }, audit, workerHost);
 
   return { mta_sts_record_id, tls_rpt_record_id, cname_record_id, mx_hosts, policy_id, mode };

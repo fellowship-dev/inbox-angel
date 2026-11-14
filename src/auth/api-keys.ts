@@ -1,5 +1,5 @@
 // Machine credentials deliberately replace prelaunch broad ia_ keys. Only hashes persist.
-import { accessLookups, forWorkspace, type MembershipRole } from '@inbox-angel/db';
+import { accessLookups, forWorkspace, type MembershipRole } from '@ready-set-mail/db';
 import { resolveAccessSubject } from '../access/resolve';
 import type { AccessSubject } from '../access/principal';
 export const API_KEY_PREFIX = 'ias_';

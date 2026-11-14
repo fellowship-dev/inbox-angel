@@ -1,6 +1,6 @@
 ---
-name: Inbox Angel Dashboard
-description: Calm, competent, honest operator UI for email authentication, built on @inbox-angel/ui.
+name: Ready Set Mail Dashboard
+description: Calm, competent, honest operator UI for email authentication, built on @ready-set-mail/ui.
 colors:
   navy: "#0B1F3A"
   navy-hover: "#173A63"
@@ -151,11 +151,11 @@ components:
     padding: "8px 16px"
 ---
 
-# Design System: Inbox Angel Dashboard
+# Design System: Ready Set Mail Dashboard
 
 ## Overview
 
-The dashboard (`web/`) is built on the shared design system `@inbox-angel/ui` (`packages/ui`), which is also used by the Inbox Angel website. The brand is shared with the website: the name, the personality **Calm · Competent · Honest** (friendly, technical when needed), the palette roles below, Geist Sans and Geist Mono, the halo-envelope mark, WCAG AA, and no invented proof (no user counts, logos, badges or testimonials). Values here are read from `packages/ui/src/styles/{tokens,theme,base}.css` and the components, not from the website. The dashboard is the next step after registering from the website: the same person arrives from the site, so it continues the same brand rather than introducing a separate product look (Max, 2026-11-13).
+The dashboard (`web/`) is built on the shared design system `@ready-set-mail/ui` (`packages/ui`), which is also used by the Ready Set Mail website. The brand is shared with the website: the name, the personality **Calm · Competent · Honest** (friendly, technical when needed), the palette roles below, Geist Sans and Geist Mono, the halo-envelope mark, WCAG AA, and no invented proof (no user counts, logos, badges or testimonials). Values here are read from `packages/ui/src/styles/{tokens,theme,base}.css` and the components, not from the website. The dashboard is the next step after registering from the website: the same person arrives from the site, so it continues the same brand rather than introducing a separate product look (Max, 2026-11-13).
 
 Source-stated qualities: sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion, light mode by default with a full dark mode. Technical content (DNS records, error codes, addresses) is first-class and set in monospace. Rejected by the source: sky blue as a primary, mascot faces, enterprise-security imagery (shields, padlocks, badge walls), hype-landing devices, and cutesiness that undermines competence. Gradients are banned outright (see The No-Gradients Rule).
 
@@ -197,7 +197,7 @@ A restrained palette: cool neutrals, one brand fill that swaps between navy and 
 The dashboard has none: skeletons are a solid `surface-3` opacity pulse (`ia-pulse`), and an overflowing table marks the edge that hides columns with a `control-border` hairline plus a "Scroll sideways" label. `packages/ui/test/tokens.test.ts` fails if a gradient appears in `packages/ui/src` or `web/src`.
 
 Known gradient debt (to remove):
-- Website (same rule): `frontend/app/globals.css` `.shimmer` and `.section-rule` in fellowship-dev/inbox-angel-website; the reference snapshot `docs/design/site-globals.css` (lines 354 and 412) copies both and is not shipped.
+- Website (same rule): `frontend/app/globals.css` `.shimmer` and `.section-rule` in fellowship-dev/ready-set-mail-website; the reference snapshot `docs/design/site-globals.css` (lines 354 and 412) copies both and is not shipped.
 
 ## Typography
 

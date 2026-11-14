@@ -1,4 +1,4 @@
-import { Alert, IconButton } from '@inbox-angel/ui';
+import { Alert, IconButton } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useState } from 'react';

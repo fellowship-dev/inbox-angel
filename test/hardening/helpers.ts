@@ -1,6 +1,6 @@
 // A hosted (saas) D1 world with signed-up users, shared by the sign-up hardening tests.
 import { vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, signupVerified } from '../auth/helpers';
 import { HOSTED_ENV } from '../hosted/world';
 

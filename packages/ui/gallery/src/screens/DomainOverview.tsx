@@ -2,7 +2,7 @@ import {
 	AppShell, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CheckResult, CheckResultList, DropdownMenu,
 	DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, IconButton, LevelCard,
 	LogoMark, PageHeader, RecordBlock, Stat, StatGroup, toast, type NavSection,
-} from "@inbox-angel/ui";
+} from "@ready-set-mail/ui";
 import { Bell, FileText, Globe, LayoutDashboard, Plus, RefreshCw, Settings, User } from "lucide-react";
 import { SAMPLE_DOMAIN, SampleBanner } from "../sample";
 
@@ -24,7 +24,7 @@ export function DomainOverview() {
 			brand={
 				<>
 					<LogoMark className="size-8 shrink-0 rounded-md" />
-					<span className="truncate text-base font-bold tracking-tight">Inbox Angel</span>
+					<span className="truncate text-base font-bold tracking-tight">Ready Set Mail</span>
 				</>
 			}
 			nav={nav}

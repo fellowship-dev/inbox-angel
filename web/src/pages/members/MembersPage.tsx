@@ -17,7 +17,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 	toast,
-} from '@inbox-angel/ui';
+} from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy } from 'lucide-react';
 import { useState, type FormEvent } from 'react';

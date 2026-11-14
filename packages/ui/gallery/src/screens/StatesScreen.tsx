@@ -1,4 +1,4 @@
-import { Alert, AppShell, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CheckResult, CheckResultList, IconButton, LogoMark, PageHeader, Skeleton, type NavSection } from "@inbox-angel/ui";
+import { Alert, AppShell, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CheckResult, CheckResultList, IconButton, LogoMark, PageHeader, Skeleton, type NavSection } from "@ready-set-mail/ui";
 import { FileText, Globe, LayoutDashboard, RefreshCw, User } from "lucide-react";
 import { useState } from "react";
 import { SAMPLE_DOMAIN } from "../sample";
@@ -25,7 +25,7 @@ export function StatesScreen({ initial }: { initial: "loading" | "error" }) {
 			brand={
 				<>
 					<LogoMark className="size-8 shrink-0 rounded-md" />
-					<span className="truncate text-base font-bold tracking-tight">Inbox Angel</span>
+					<span className="truncate text-base font-bold tracking-tight">Ready Set Mail</span>
 				</>
 			}
 			nav={nav}

@@ -2,7 +2,7 @@
 // verified account whose email is OWNER_EMAIL: without OWNER_EMAIL nobody can see this check (src/funnel/routes.ts isInstanceOwner). Workers have no startup hook, so the dashboard
 // asks for it (GET /api/instance/preflight, instance owner only). Every message names a setting and what it breaks;
 // none ever contains a configured value, so a secret cannot leak through it.
-import { forImplicitWorkspace } from '@inbox-angel/db';
+import { forImplicitWorkspace } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import { mcpInstallation } from '../mcp/discovery';
 import { getMode } from '../tenancy/mode';

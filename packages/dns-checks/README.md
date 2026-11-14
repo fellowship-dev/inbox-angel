@@ -1,13 +1,13 @@
-# @inbox-angel/dns-checks
+# @ready-set-mail/dns-checks
 
 Pure, runtime-agnostic email-authentication DNS checks: **SPF, DKIM, DMARC, MTA-STS, BIMI**,
 MX and provider detection, over DNS-over-HTTPS with an **injectable `fetch`**.
 
 No D1, no Cloudflare zone API, no environment globals. It runs in Workers, Node ≥ 18 and browsers.
-The Inbox Angel worker and the free public checker tools share this one implementation.
+The Ready Set Mail worker and the free public checker tools share this one implementation.
 
 ```ts
-import { checkDomain } from '@inbox-angel/dns-checks';
+import { checkDomain } from '@ready-set-mail/dns-checks';
 
 const report = await checkDomain('example.com');
 report.grade;      // { level: 0|1|2|3|null, label, complete, reasons[], nextSteps[] }
@@ -20,7 +20,7 @@ report.mtaSts; report.bimi; report.mx; report.providers;
 Inject your own `fetch` (tests, proxies, other DoH servers):
 
 ```ts
-import { createResolver, checkDomain } from '@inbox-angel/dns-checks';
+import { createResolver, checkDomain } from '@ready-set-mail/dns-checks';
 const resolver = createResolver({ fetch: myFetch, endpoint: 'https://dns.google/resolve', timeoutMs: 3000 });
 await checkDomain('example.com', { resolver });
 ```
@@ -76,7 +76,7 @@ suffix is never queried.
 ## Modules
 
 `doh` · `org-domain` · `spf` · `dmarc` · `dkim` · `mx` · `mta-sts` · `bimi` · `providers` · `report`
-(each importable as `@inbox-angel/dns-checks/<module>`).
+(each importable as `@ready-set-mail/dns-checks/<module>`).
 
 BIMI checks the SVG and VMC for presence/reachability only; the VMC certificate is **not** cryptographically validated.
 

@@ -1,10 +1,10 @@
 // Report fixtures: three resolver runs per domain (KTD3), built from the DomainReport helpers.
-import type { DomainReport } from '@inbox-angel/dns-checks';
+import type { DomainReport } from '@ready-set-mail/dns-checks';
 import { buildReport, type BuildReportInput } from '../../src/index';
 import { GOOGLE, RESEND, makeRec, type RecOptions } from '../helpers';
 
 export const GENERATED = '2026-10-25T15:00:00.000Z';
-export const REPORT_URL = 'https://inboxangel.io/r/Zm9vYmFyYmF6cXV4MTIzNDU2';
+export const REPORT_URL = 'https://readysetmail.com/r/Zm9vYmFyYmF6cXV4MTIzNDU2';
 
 const three = (domain: string, o: RecOptions): DomainReport[] => [makeRec(domain, o), makeRec(domain, o), makeRec(domain, o)];
 

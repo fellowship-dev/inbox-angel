@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { storeReport } from '../../src/dmarc/store-report';
 import { makeTenant } from '../helpers/tenant';
 import type { AggregateReport, ReportRecord } from '../../src/dmarc/types';
@@ -90,7 +90,7 @@ function makeReport(overrides: Partial<{
 function makeDb() {
   const db = createMigratedD1();
   db.sqlite
-    .prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'example.com', 'rua@reports.inboxangel.io')")
+    .prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'example.com', 'rua@reports.readysetmail.com')")
     .run();
   const reports = () => db.sqlite.prepare('SELECT * FROM aggregate_reports ORDER BY id').all() as Record<string, any>[];
   const records = () => db.sqlite.prepare('SELECT * FROM report_records ORDER BY id').all() as Record<string, any>[];

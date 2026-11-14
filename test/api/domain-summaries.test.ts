@@ -8,7 +8,7 @@ vi.mock('../../src/api/auth', () => ({
     constructor(msg: string, public status = 401) { super(msg); this.name = 'AuthError'; }
   },
 }));
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
@@ -27,7 +27,7 @@ function makeEnv(n: number): Env {
   db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id) VALUES (999, 'other-secret.com', 'r@x', 'ws_other')").run();
   return { DB: db as unknown as D1Database, API_KEY: 'k' } as unknown as Env;
 }
-const get = async (env: Env, path: string) => handleApi(new Request(`https://api.inboxangel.com${path}`), env, ctx);
+const get = async (env: Env, path: string) => handleApi(new Request(`https://api.readysetmail.com${path}`), env, ctx);
 
 describe('GET /api/domains/summaries', () => {
   it('returns every domain of the workspace with pct, sp, SPF lookups and report totals counted once', async () => {

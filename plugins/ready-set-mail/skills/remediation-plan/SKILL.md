@@ -1,6 +1,6 @@
 ---
 name: remediation-plan
-description: Use when turning an Inbox Angel finding into a concrete proposed fix with evidence and verification.
+description: Use when turning an Ready Set Mail finding into a concrete proposed fix with evidence and verification.
 ---
 
 Call whoami first and operate only within its exact grants. Retrieve get_email_report and plan_remediation for the same domain, workspace, product and days. Use the shared finding IDs, observations, impact, prerequisites, proposed changes and verification steps returned by the service. Do not invent a competing checklist or treat failed DNS lookups as confirmed absence.

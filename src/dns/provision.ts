@@ -6,8 +6,8 @@
 //
 //   {policy-domain}._report._dmarc.{reports-domain}  TXT  "v=DMARC1;"
 //
-// Example: adding acme.com, reports domain is reports.inboxangel.io
-//   → create: acme.com._report._dmarc.reports.inboxangel.io  TXT  "v=DMARC1;"
+// Example: adding acme.com, reports domain is reports.readysetmail.com
+//   → create: acme.com._report._dmarc.reports.readysetmail.com  TXT  "v=DMARC1;"
 //
 // We manage this record via Cloudflare DNS API. The CF record ID is stored in
 // domains.dns_record_id so we can delete it when the domain is removed.
@@ -77,7 +77,7 @@ export async function provisionDomain(
       name: recordName,
       content: 'v=DMARC1;',
       ttl: 3600,
-      comment: `InboxAngel DMARC auth for ${policyDomain}`,
+      comment: `Ready Set Mail DMARC auth for ${policyDomain}`,
     });
   } catch (e) {
     if (e instanceof CfNetworkError) throw new DnsProvisionError(`DNS provision fetch failed: ${e.message}`, e);

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-11-13T12:22:53.705Z",
-  "title": "Design System: Inbox Angel Dashboard",
+  "title": "Design System: Ready Set Mail Dashboard",
   "extensions": {
     "colorMeta": {
       "navy": {
@@ -275,7 +275,7 @@
   ],
   "narrative": {
     "northStar": null,
-    "overview": "Shared brand with the Inbox Angel website: Calm, Competent, Honest. Sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion. Creative North Star is an open decision.",
+    "overview": "Shared brand with the Ready Set Mail website: Calm, Competent, Honest. Sober navy in light mode, halo gold in dark mode, cool slate-navy neutrals, soft radii, thin hairlines, little shadow, subtle motion. Creative North Star is an open decision.",
     "keyCharacteristics": [
       "Navy fill (light) or gold fill (dark) for the one primary action per section; everything else is neutral.",
       "Hairline-bordered cards on a cool-grey page; depth is tonal first, shadow second.",

@@ -1,7 +1,7 @@
 // Hosted caps: workspaces one person may own, domains one workspace may hold. Self-host has none.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PlanLimitError, forWorkspace } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { PlanLimitError, forWorkspace } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, signupVerified } from '../auth/helpers';
 import { HOSTED_ENV } from './world';
 import { planLimitBody, planLimitResponse, planLimits } from '../../src/hosted/plan-limits';
@@ -174,7 +174,7 @@ describe('domains per workspace', () => {
       const u = new URL(url);
       return new Response(JSON.stringify(u.searchParams.get('name') === host ? { Status: 0, Answer: [{ name: host, type: 16, TTL: 60, data: `"${txt}"` }] } : { Status: 3 }));
     });
-    proven('_inboxangel.acme.org', claim.txt_value);
+    proven('_readysetmail.acme.org', claim.txt_value);
     const res = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: a.token, body: {} });
     expect(res.status).toBe(403);
     expect((await json(res)).code).toBe('plan_limit');
@@ -189,7 +189,7 @@ describe('domains per workspace', () => {
     const { claim } = await json(await add(w, a, 'acme.org'));
     vi.stubGlobal('fetch', async (url: string) => {
       const name = new URL(url).searchParams.get('name');
-      return new Response(JSON.stringify(name === '_inboxangel.acme.org' ? { Status: 0, Answer: [{ name, type: 16, TTL: 60, data: `"${claim.txt_value}"` }] } : { Status: 3 }));
+      return new Response(JSON.stringify(name === '_readysetmail.acme.org' ? { Status: 0, Answer: [{ name, type: 16, TTL: 60, data: `"${claim.txt_value}"` }] } : { Status: 3 }));
     });
     expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: a.token, body: {} })).status).toBe(201);
     expect(w.liveDomains(a.ws)).toBe(10);

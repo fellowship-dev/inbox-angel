@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, CheckResult, CheckResultList, FieldError, FieldHint, Input, Label, PageHeader, RecordBlock, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@inbox-angel/ui';
+import { Alert, Badge, Button, CheckResult, CheckResultList, FieldError, FieldHint, Input, Label, PageHeader, RecordBlock, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
@@ -157,7 +157,7 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 			{result.parent_context ? <InheritanceBanner pc={result.parent_context} subdomain={domain.domain} /> : null}
 			{!rua ? (
 				<Alert variant="warning" title="Report address not configured yet">
-					This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
+					This domain has no Ready Set Mail report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
 				</Alert>
 			) : null}
 			{lookup === 'reading' && rua ? <Skeleton className="h-24 w-full" /> : null}

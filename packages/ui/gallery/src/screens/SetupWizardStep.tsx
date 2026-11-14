@@ -1,7 +1,7 @@
 import {
 	Alert, Button, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Checkbox, FieldHint, Input, Label, LogoMark,
 	RecordBlock, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn,
-} from "@inbox-angel/ui";
+} from "@ready-set-mail/ui";
 import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { useId, useState } from "react";
 import { SAMPLE_DKIM, SAMPLE_DOMAIN, SAMPLE_EMAIL, SampleBanner } from "../sample";
@@ -17,7 +17,7 @@ export function SetupWizardStep() {
 			<header className="border-b border-line bg-surface-1">
 				<div className="mx-auto flex h-16 max-w-3xl items-center gap-2 px-4 sm:px-6">
 					<LogoMark className="size-8 rounded-md" />
-					<span className="text-base font-bold tracking-tight">Inbox Angel</span>
+					<span className="text-base font-bold tracking-tight">Ready Set Mail</span>
 					<span className="ml-auto text-sm text-ink-2">Setup</span>
 				</div>
 			</header>
