@@ -11,16 +11,16 @@ import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { ConnectReports } from '../../components/reports/ConnectReports';
-import { useReportIntakeEnabled } from '../../lib/report-address';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
-import { useDnsCheck, useFailingSources, useStats, useWizardState } from '../../lib/domain-queries';
+import { useDnsCheck, useFailingSources, useOnboardingStatus, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
 import { hasReportAddress } from '../../lib/dmarc-record';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
 const WINDOWS = [7, 30, 60] as const;
@@ -39,9 +39,15 @@ function PolicyBadge({ policy }: { policy: Domain['dmarc_policy'] }) {
  */
 function LivePolicyBadge({ domain }: { domain: Domain }) {
 	const dns = useDnsCheck(domain.id);
+	const onboarding = useOnboardingStatus(domain.id); // same query as the DNS records card: nxdomain and the inherited policy
 	if (dns.isPending) return <Badge variant="outline">Checking DMARC policy…</Badge>;
+	if (onboarding.data?.nxdomain) return <Badge variant="outline">Does not resolve</Badge>;
 	const lastKnown = domain.dmarc_policy && domain.dmarc_policy !== 'none' ? ` (last known policy: p=${domain.dmarc_policy})` : '';
 	if (dns.isError || dns.data.error) return <Badge variant="outline">DMARC lookup failed{lastKnown}</Badge>;
+	const inherited = onboarding.data?.dmarc.effective;
+	if ((!dns.data.found || !dns.data.current_record) && inherited?.inherited_from && inherited.policy) {
+		return <Badge variant="outline">No record of its own: inherits p={inherited.policy} from {inherited.inherited_from}</Badge>;
+	}
 	if (!dns.data.found || !dns.data.current_record) return <Badge variant="outline">No DMARC record found{lastKnown}</Badge>;
 	const live = dns.data.current_record.match(/(^|;\s*)p=([a-z]+)/i)?.[2]?.toLowerCase();
 	return live ? <PolicyBadge policy={live as Domain['dmarc_policy']} /> : <Badge variant="outline">DMARC record has no p= tag</Badge>;
@@ -50,9 +56,10 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
 	const { canWrite } = useSession();
+	const hosted = useHosted();
 	if (!canWrite) return null; // read-only members cannot run the setup wizard
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
-	const { done, total, nextStep } = wizardProgress(q.data);
+	const { done, total, nextStep } = wizardProgress(q.data, { hosted });
 	if (done >= total) return null;
 	return (
 		<Alert variant="warning" title={`Setup incomplete: ${done}/${total} steps done`}>
@@ -138,9 +145,12 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const stats = useStats(domain.id, days);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
+	const onboarding = useOnboardingStatus(domain.id); // shared with the DNS records card: is the name resolvable at all?
 	const { canWrite } = useSession();
-	// Hosted with report intake: the DMARC reports panel shows the address, so the self-host RUA section would repeat it.
-	const hostedReports = useReportIntakeEnabled();
+	// Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros.
+	const reportsOff = useReportsNotConnected(domain);
+	// Hosted: the self-host "RUA reporting address" section never applies (the DMARC reports panel shows the address).
+	const hosted = useHosted();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
@@ -174,9 +184,16 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				}
 			/>
 			<ReadOnlyNotice />
-			<SetupBanner domainId={domain.id} />
-			<HealthReportSection domainId={domain.id} />
+			{/* A name that does not resolve has no setup to continue and nothing to host. */}
+			{onboarding.data?.nxdomain ? null : <SetupBanner domainId={domain.id} />}
+			{/* A name DNS says does not exist has no records to report on: the DNS records card says so once. */}
+			{onboarding.data?.nxdomain ? null : <HealthReportSection domainId={domain.id} />}
 
+			{reportsOff ? (
+				<Section title="Results">
+					<ReportsNotConnected domain={domain.domain} domainId={domain.id} />
+				</Section>
+			) : (
 			<Section
 				title="Results"
 				actions={
@@ -229,11 +246,13 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					</>
 				)}
 			</Section>
+			)}
 
-			<HostedPanel key={domain.id} domainId={domain.id} />
+			{onboarding.data?.nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
 			<DnsRecords domain={domain} />
 			<Rollout domain={domain} />
 
+			{reportsOff ? null : (
 			<Section
 				title={`Last ${days} days`}
 				actions={
@@ -244,10 +263,12 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			>
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
+			)}
 
-			{/* Hosted with report intake: connect reports and follow them to the first report. Renders nothing elsewhere. */}
-			<ConnectReports domain={domain} />
-			{hostedReports ? null : (
+			{/* Hosted with report intake, once connected: connected → published → received. Before that, ReportsNotConnected
+			    (in Results above) carries the Connect reports action. Renders nothing elsewhere. */}
+			{reportsOff ? null : <ConnectReports domain={domain} />}
+			{hosted || reportsOff ? null : (
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
 				{hasReportAddress(domain.rua_address) ? (
 					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
@@ -258,7 +279,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			)}
 
 			<Context domain={domain} all={all} />
-			<FailingSources domainId={domain.id} q={sources} />
+			{reportsOff ? null : <FailingSources domainId={domain.id} q={sources} />}
 			<DnsTools domainId={domain.id} />
 		</div>
 	);

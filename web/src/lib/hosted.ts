@@ -38,7 +38,8 @@ export const HOSTED_CONFIG_KEY = ['hosted-config'] as const;
 
 /**
  * Is hosted mode on for this deployment? Any failure counts as "off": no hosted UI, no further hosted requests.
- * `records: false` (a hosted deployment without a records zone) turns off the hosted-records UI only.
+ * The hosted-records UI also needs `records: true` (a records zone is configured): without it "Enable hosted records"
+ * could only fail ("Hosted records are not enabled on this deployment").
  */
 export function useHostedConfig(): boolean {
 	const q = useQuery({
@@ -47,7 +48,7 @@ export function useHostedConfig(): boolean {
 		staleTime: Infinity,
 		retry: false,
 	});
-	return q.data?.enabled === true && q.data.records !== false;
+	return q.data?.enabled === true && q.data.records === true;
 }
 
 export function useHostedStatus(domainId: number) {

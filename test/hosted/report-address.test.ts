@@ -116,7 +116,7 @@ describe('connecting reports (G1, fixed address)', () => {
     const w = await world();
     txt['_dmarc.a-corp.com'] = ['v=DMARC1; p=reject; rua=mailto:dmarc@a-corp.com'];
     const { body } = await w.connect(5);
-    expect(body.dns.plan).toMatchObject({ kind: 'inherited', from: 'a-corp.com', policy: 'reject', own: { kind: 'add', name: '_dmarc.mail.a-corp.com', record: `v=DMARC1; p=reject; rua=mailto:dmarc@a-corp.com,mailto:${FIXED}` } });
+    expect(body.dns.plan).toMatchObject({ kind: 'inherited', from: 'a-corp.com', policy: 'reject', own: { kind: 'add', name: '_dmarc.mail.a-corp.com', record: `v=DMARC1; p=reject; rua=mailto:${FIXED}` } });
     expect(body.parent).toEqual({ domain_id: 1, domain: 'a-corp.com', connected: false });
     await w.connect(1);
     expect((await w.status(5)).parent).toEqual({ domain_id: 1, domain: 'a-corp.com', connected: true });
@@ -326,8 +326,8 @@ describe('report intake without the free check (G3)', () => {
     await handleHostedEmail(check, w.env as any);
     expect(check.setReject).toHaveBeenCalledWith('Unknown recipient');
     const session = await call(w.env, 'POST', '/api/check-sessions', { body: {} });
-    expect(session.status).toBe(404);
-    expect(await session.json()).toEqual({ error: 'The free email check is not available on this server' });
+    expect(session.status).toBe(503);
+    expect(await session.json()).toEqual({ error: 'The email check is not available here: no address is set up to receive the test email.' });
   });
 
   it('CANARY_DOMAIN alone: the free check still takes its mail; report mail is deferred (the sender retries) until INTAKE_DOMAIN is set', async () => {

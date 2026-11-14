@@ -44,9 +44,11 @@ describe('withReportAddress', () => {
 });
 
 describe('ownRecordFromInherited', () => {
-  it('keeps every parent tag, sets p= to the policy the subdomain gets now (sp= when present)', () => {
-    expect(ownRecordFromInherited('v=DMARC1; p=reject; sp=quarantine; pct=50; adkim=s; rua=mailto:a@x.com', 'quarantine'))
-      .toBe('v=DMARC1; p=quarantine; sp=quarantine; pct=50; adkim=s; rua=mailto:a@x.com');
+  it('carries exactly the enforcement in force: p= (sp= when present), pct= when enforcing below 100, adkim=/aspf=', () => {
+    expect(ownRecordFromInherited('v=DMARC1; p=reject; sp=quarantine; pct=50; adkim=s; rua=mailto:a@x.com; fo=1', 'quarantine', OURS))
+      .toBe(`v=DMARC1; p=quarantine; pct=50; adkim=s; rua=mailto:${OURS}`);
+    expect(ownRecordFromInherited('v=DMARC1; p=none; pct=10; aspf=s', 'none')).toBe('v=DMARC1; p=none; aspf=s'); // pct means nothing at p=none
+    expect(ownRecordFromInherited('v=DMARC1; p=reject; adkim=r', 'reject')).toBe('v=DMARC1; p=reject; adkim=r');
   });
 });
 
@@ -89,21 +91,21 @@ describe('planReportAddress', () => {
     expect(p).toEqual({ kind: 'multiple', name: '_dmarc.dup.test', records: ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] });
   });
 
-  it('a subdomain that inherits: names the organizational domain, keeps the effective policy (sp=) in its own record, and keeps the parent’s addresses', async () => {
+  it('a subdomain that inherits: names the organizational domain and offers a record of its own with the effective policy (sp=)', async () => {
     const parent = 'v=DMARC1; p=reject; sp=quarantine; rua=mailto:a@iana.test';
     const p = await plan({ 'TXT _dmarc.mail.iana.test': 'NODATA', 'TXT _dmarc.iana.test': [parent] }, 'mail.iana.test');
     expect(p).toEqual({
       kind: 'inherited', from: 'iana.test', parent_record: parent, policy: 'quarantine', policy_tag: 'sp', parent_has_address: false,
-      own: { kind: 'add', name: '_dmarc.mail.iana.test', current: null, record: `v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:a@iana.test,mailto:${OURS}`, created: true },
+      own: { kind: 'add', name: '_dmarc.mail.iana.test', current: null, record: `v=DMARC1; p=quarantine; rua=mailto:${OURS}`, created: true },
     });
   });
 
-  it('a subdomain whose parent lists two addresses → its own record needs the same choice', async () => {
+  it('a subdomain whose parent lists two addresses → its own record lists only ours (nothing to choose)', async () => {
     const p = await plan({ 'TXT _dmarc.iana.test': ['v=DMARC1; p=reject; rua=mailto:a@x.com,mailto:b@y.com'] }, 'sub.iana.test');
     expect(p?.kind).toBe('inherited');
     if (p?.kind !== 'inherited') return;
     expect(p.policy).toBe('reject');
-    expect(p.own.kind).toBe('choose');
+    expect(p.own).toMatchObject({ kind: 'add', record: `v=DMARC1; p=reject; rua=mailto:${OURS}` });
   });
 
   it('an invalid record (no p=, or p= not a policy) is reported as invalid, with nothing proposed', async () => {

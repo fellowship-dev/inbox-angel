@@ -16,6 +16,7 @@ import {
 import { CopyField } from '../domain/CopyField';
 import { ConfirmDialog } from '../domain/ConfirmDialog';
 import { RadioCard } from '../wizard/RadioCard';
+import { inheritedCoverage, keptEnforcement, offerEnforcement, recordFor } from '../../lib/dmarc-coverage';
 import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
 
 /**
@@ -25,14 +26,14 @@ import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
  * (GET /api/hosted/config `reports: true`), so self-hosted instances are unchanged.
  *
  * Integration: `<ConnectReports domain={domain} />` anywhere a domain is known (`{ id, domain }`). `bare` is for a
- * container that already says reports are not connected (ReportsNotConnected, a wizard step): no section heading, and
- * before reports are connected only the action itself.
+ * container that already says reports are not connected (ReportsNotConnected): no section heading, and before reports
+ * are connected only the action itself. `headless` drops only the section heading (a wizard step that has its own).
  */
-export function ConnectReports({ domain, bare = false }: { domain: { id: number; domain: string }; bare?: boolean }) {
+export function ConnectReports({ domain, bare = false, headless = false }: { domain: { id: number; domain: string }; bare?: boolean; headless?: boolean }) {
 	const enabled = useReportIntakeEnabled();
 	if (!enabled) return null;
 	const body = <Panel domainId={domain.id} domainName={domain.domain} bare={bare} />;
-	return bare ? (
+	return bare || headless ? (
 		<div data-testid="connect-reports">{body}</div>
 	) : (
 		<div data-testid="connect-reports">
@@ -96,7 +97,7 @@ function Panel({ domainId, domainName, bare }: { domainId: number; domainName: s
 		<div className="space-y-4 rounded-lg border border-line bg-surface-1 p-4" data-state={s.state}>
 			<StateLine s={s} />
 			<CopyField label="Report address" value={s.address} />
-			{s.dns?.plan ? <PlanView plan={s.dns.plan} domain={domainName} parent={s.parent ?? null} /> : null}
+			{s.dns?.plan ? <PlanView plan={s.dns.plan} domain={domainName} parent={s.parent ?? null} address={s.address} /> : null}
 			<div className="flex flex-wrap gap-2">
 				<Button variant="secondary" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
 					<RefreshCw aria-hidden />
@@ -154,7 +155,7 @@ function StateLine({ s }: { s: ReportAddressView }) {
 
 const Mono = ({ children }: { children: ReactNode }) => <code className="font-mono text-sm text-ink-1 [overflow-wrap:anywhere]">{children}</code>;
 
-function PlanView({ plan, domain, parent }: { plan: ReportAddressPlan; domain: string; parent: ReportAddressView['parent'] }) {
+function PlanView({ plan, domain, parent, address }: { plan: ReportAddressPlan; domain: string; parent: ReportAddressView['parent']; address: string }) {
 	if (plan.kind === 'published') return null;
 	if (plan.kind === 'multiple') {
 		return (
@@ -208,11 +209,7 @@ function PlanView({ plan, domain, parent }: { plan: ReportAddressPlan; domain: s
 						<>To keep following {plan.from}, add {plan.from} to this workspace and connect reports there instead. Reports about {domain} then arrive with its reports.</>
 					)}
 				</p>
-				<p className="text-sm text-ink-2">
-					Or give {domain} a record of its own. It keeps the policy it gets today ({plan.policy}) and the addresses {plan.from} lists, but later changes to {plan.from}
-					&apos;s record no longer apply to it.
-				</p>
-				<OwnPlanView plan={plan.own} domain={domain} inherited />
+				<InheritedOwnRecord plan={plan} domain={domain} address={address} />
 			</div>
 		);
 	}
@@ -312,6 +309,27 @@ function RecordToPublish({ replace, name, value }: { replace: boolean; name: str
 					This record is longer than 255 characters, so it must be entered as the quoted strings shown, one after another in the same TXT record.
 				</p>
 			) : null}
+		</div>
+	);
+}
+
+/**
+ * A record of the subdomain's own, built by the same rule as every other offered record (offerEnforcement + recordFor):
+ * exactly the enforcement in force, inherited pct= and alignment included, never weaker or stricter.
+ */
+function InheritedOwnRecord({ plan, domain, address }: { plan: Extract<ReportAddressPlan, { kind: 'inherited' }>; domain: string; address: string }) {
+	const coverage = inheritedCoverage(plan.from, plan.parent_record, plan.policy);
+	const e = offerEnforcement(coverage);
+	if (!e) return null;
+	const align = [e.adkim ? `adkim=${e.adkim}` : null, e.aspf ? `aspf=${e.aspf}` : null].filter(Boolean).join(', ');
+	return (
+		<div className="space-y-2">
+			<p className="text-sm text-ink-2">
+				Or give {domain} a record of its own. It keeps {keptEnforcement(coverage, e)}
+				{align ? ` with ${align}` : ''}, so nothing changes for its mail, and its reports go only to the report address. Later changes to {plan.from}&apos;s record no
+				longer apply to it.
+			</p>
+			<RecordToPublish replace={false} name={plan.own.name} value={recordFor(e, address)} />
 		</div>
 	);
 }

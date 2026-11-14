@@ -126,6 +126,20 @@ export function useSession(): Session {
 	return s;
 }
 
+/**
+ * The "Talk to Max" booking link, or null. Null outside a session provider, before the status loads, in
+ * self-host mode and whenever the server has no https link: callers then render nothing at all.
+ */
+export function useHelpUrl(): string | null {
+	const url = useContext(SessionContext)?.status?.help_url;
+	return typeof url === 'string' && /^https:\/\/[^\s/]+/i.test(url) ? url : null;
+}
+
+/** True on the hosted service (MODE=saas). False until the status loads, and on a self-hosted instance. */
+export function useHosted(): boolean {
+	return useContext(SessionContext)?.status?.mode === 'saas';
+}
+
 /** For write controls: `disabled` + the reason to show next to them. */
 export function useWriteAccess(): { canWrite: boolean; reason: string | undefined } {
 	const { canWrite } = useSession();

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { ConnectReports } from '../src/components/reports/ConnectReports';
 import { READ_ONLY_REASON } from '../src/lib/session';
 import { fail, renderApp } from './render';
+import { ownRecordFromInherited } from '@inbox-angel/dns-checks/dmarc-rua';
+import { inheritedCoverage, offerEnforcement, recordFor } from '../src/lib/dmarc-coverage';
 
 const ADDR = 'rua@rua.example.net';
 const domain = { id: 1, domain: 'example.com' };
@@ -104,7 +106,7 @@ describe('Connect reports', () => {
 		});
 		expect(await screen.findByText(/has no DMARC record of its own/)).toBeInTheDocument();
 		expect(screen.getByText(/add parent\.test to this workspace and connect reports there instead/)).toBeInTheDocument();
-		expect(screen.getByText(/later changes to parent\.test/)).toBeInTheDocument();
+		expect(screen.getByText(/Later changes to parent\.test/)).toBeInTheDocument();
 		expect(screen.getByText(`v=DMARC1; p=reject; rua=mailto:${ADDR}`)).toBeInTheDocument();
 	});
 
@@ -250,5 +252,22 @@ describe('Connect reports', () => {
 		expect(screen.getByText('1 report received since connecting.')).toBeInTheDocument();
 		expect(screen.getByText('2 reports received before this connection.')).toBeInTheDocument();
 		expect(screen.queryByText('Reports received')).not.toBeInTheDocument();
+	});
+
+	it.each([
+		['v=DMARC1; p=reject', 'reject'],
+		['v=DMARC1; p=quarantine; pct=5', 'quarantine'],
+		['v=DMARC1; p=reject; sp=quarantine; pct=25; adkim=s; aspf=s', 'quarantine'],
+		['v=DMARC1; p=reject; sp=none; pct=10; aspf=r', 'none'],
+		['v=DMARC1; p=quarantine; adkim=S; fo=1; ruf=mailto:f@x.test; rua=mailto:a@x.test,mailto:b@y.test', 'quarantine'],
+	])('parity: the server and the dashboard offer the same inherited record (%s)', (parent, policy) => {
+		const e = offerEnforcement(inheritedCoverage('parent.test', parent, policy))!;
+		expect(ownRecordFromInherited(parent, policy, ADDR)).toBe(recordFor(e, ADDR));
+	});
+
+	it('inherited record shown carries pct and alignment, and says so', async () => {
+		show({ 'GET /api/domains/1/report-address': inherited({ parent_record: 'v=DMARC1; p=reject; sp=quarantine; pct=25; adkim=s', policy: 'quarantine' }, null) });
+		expect(await screen.findByText(`v=DMARC1; p=quarantine; pct=25; adkim=s; rua=mailto:${ADDR}`)).toBeInTheDocument();
+		expect(screen.getByText(/It keeps the inherited sp=quarantine as its p=quarantine at pct=25 with adkim=s, so nothing changes for its mail/)).toBeInTheDocument();
 	});
 });

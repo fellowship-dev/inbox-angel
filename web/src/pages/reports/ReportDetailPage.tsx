@@ -1,4 +1,5 @@
 import { Card, EmptyState, PageHeader, Stat, StatGroup, cn } from '@inbox-angel/ui';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, ChevronDown, FileText, XCircle } from 'lucide-react';
 import { useState } from 'react';
@@ -102,12 +103,21 @@ export function ReportDetailPage() {
 	});
 
 	const name = q.data?.domain ?? domain?.domain;
+	const reportsOff = useReportsNotConnected(domain);
 	const record = dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null;
 	const live: LiveDmarc | undefined = name && record ? { domain: name, sp: parseDmarcSp(record), invalidSp: invalidDmarcSp(record), pct: parseDmarcPct(record), monitoredSubdomain: !!domain?.parent_id } : undefined;
 	const header = (title: string, description?: string) => (
 		<PageHeader eyebrow={<BackLink to={`/domains/${id}`}>{name ?? 'Back'}</BackLink>} title={title} description={description} />
 	);
 
+	if (reportsOff) {
+		return (
+			<div className="space-y-6">
+				{header(date ? formatDayWithRelative(date) : 'Report')}
+				<ReportsNotConnected domain={domain?.domain} domainId={domain?.id} />
+			</div>
+		);
+	}
 	if (q.isPending) {
 		return (
 			<div className="space-y-6">

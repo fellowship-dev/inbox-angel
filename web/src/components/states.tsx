@@ -1,4 +1,5 @@
 import { Alert, Button, Skeleton, cn } from '@inbox-angel/ui';
+import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
 import { Lock } from 'lucide-react';
 import type { ButtonProps } from '@inbox-angel/ui';
 import { forwardRef, useId, type ReactNode } from 'react';
@@ -16,6 +17,7 @@ export function LoadError({ error, onRetry, title = 'Could not load this' }: { e
 					Try again
 				</Button>
 			) : null}
+			{onRetry && !forbidden ? <TalkToMax className="mt-2" priority={HELP_PRIORITY.loadError} lead="Still failing after a retry?" /> : null}
 		</Alert>
 	);
 }

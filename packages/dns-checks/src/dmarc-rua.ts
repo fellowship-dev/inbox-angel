@@ -47,17 +47,22 @@ export function withReportAddress(record: string, address: string, replace?: str
 }
 
 /**
- * A record for a subdomain that today follows its organizational domain's record: the same tags, `p=` set to the policy
- * the subdomain gets now (the parent's `sp=`, else its `p=`), and rua= rebuilt by the caller. Nothing gets weaker.
+ * A record for a subdomain that today follows its organizational domain's record, carrying exactly the enforcement in
+ * force, never weaker or stricter: `p=` the policy the subdomain gets now (the parent's `sp=`, else its `p=`), the
+ * parent's `pct=` when that policy enforces and covers less than 100%, and the parent's `adkim=`/`aspf=` when it sets
+ * them. The same shape as the dashboard's `offerEnforcement` + `recordFor` (web/src/lib/dmarc-coverage.ts), checked by
+ * a parity test there. Reports for the subdomain then go to `address` only.
  */
-export function ownRecordFromInherited(parentRecord: string, effectivePolicy: string): string {
-  const parts = strip(parentRecord).split(';').map((p) => p.trim()).filter(Boolean);
+export function ownRecordFromInherited(parentRecord: string, effectivePolicy: string, address?: string): string {
+  const tags = parseDmarcTags(parentRecord);
   const out = ['v=DMARC1', `p=${effectivePolicy}`];
-  for (const p of parts) {
-    const tag = readDmarcTag(p);
-    if (!tag || tag.key === 'v' || tag.key === 'p') continue;
-    out.push(p);
+  const pct = /^\d+$/.test(tags['pct'] ?? '') ? parseInt(tags['pct']!, 10) : 100;
+  if ((effectivePolicy === 'quarantine' || effectivePolicy === 'reject') && pct < 100) out.push(`pct=${pct}`);
+  for (const key of ['adkim', 'aspf'] as const) {
+    const v = tags[key]?.toLowerCase();
+    if (v === 'r' || v === 's') out.push(`${key}=${v}`);
   }
+  if (address) out.push(`rua=mailto:${address.trim()}`);
   return out.join('; ');
 }
 
@@ -126,8 +131,7 @@ export function planReportAddress(lookup: DmarcLookup, address: string): ReportA
   const policy = lookup.record.subdomainPolicy;
   const sp = parseDmarcTags(record)['sp']?.toLowerCase();
   const policy_tag = sp === 'none' || sp === 'quarantine' || sp === 'reject' ? 'sp' as const : 'p' as const;
-  // The subdomain's own record starts from the parent's tags; its rua= list starts as the parent's (they get these reports today).
-  const base = ownRecordFromInherited(record, policy);
+  // The subdomain's own record: the enforcement in force today, reports to our address.
   return {
     kind: 'inherited',
     from: lookup.organizationalDomain ?? lookup.domain,
@@ -135,6 +139,6 @@ export function planReportAddress(lookup: DmarcLookup, address: string): ReportA
     policy,
     policy_tag,
     parent_has_address: recordHasAddress(record, address),
-    own: addTo(own, base, address, true),
+    own: { kind: 'add', name: own, current: null, record: ownRecordFromInherited(record, policy, address), created: true },
   };
 }
