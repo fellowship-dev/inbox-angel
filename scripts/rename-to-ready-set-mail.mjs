@@ -6,7 +6,8 @@
  *
  * Run from the repository root on any branch. It rewrites the contents of tracked text files and renames tracked
  * paths (`git mv`), using the ordered MAPPINGS below, then scans again and exits 1 if any form of the old name is left
- * outside the EXCLUSIONS and PROTECTED entries. It is idempotent: a second run changes nothing and exits 0.
+ * outside the EXCLUSIONS and PROTECTED entries, or if "an Ready Set Mail" (any case or separator) appears: articles are
+ * fixed by hand, never by the mapping. It is idempotent: a second run changes nothing and exits 0.
  * No dependencies; Node 22+ and git.
  *
  *   --dry-run          report what would change, write nothing
@@ -189,6 +190,20 @@ function remaining(path, text) {
 	return found;
 }
 
+/**
+ * Grammar the swap cannot fix by itself: "an Inbox Angel" becomes "an Ready Set Mail". The mapping deliberately does not
+ * touch articles (that would change the scripted output); instead the check below fails and names each line, so every
+ * branch fixes its own sentences by hand ("a Ready Set Mail").
+ */
+const ARTICLE_BREAK = /(^|[^A-Za-z])(an[\s*_`"'([]+ready[ _-]?set[ _-]?mail)/gi;
+function articleBreaks(path, text) {
+	const found = [];
+	text.split('\n').forEach((line, idx) => {
+		for (const m of line.matchAll(ARTICLE_BREAK)) found.push({ path, line: idx + 1, form: m[2] });
+	});
+	return found;
+}
+
 const census = (texts) => {
 	const forms = {};
 	for (const t of texts) for (const m of t.matchAll(OLD_NAME)) forms[m[0]] = (forms[m[0]] ?? 0) + 1;
@@ -276,6 +291,8 @@ for (const path of tracked) {
 	if (OLD_NAME.test(finalPath) && !/^migrations\//.test(finalPath)) leftovers.push({ path: finalPath, line: 0, form: '(path)' });
 }
 for (const [path, text] of afterByPath) leftovers.push(...remaining(renamedTo.get(path) ?? path, text));
+const grammar = [];
+for (const [path, text] of afterByPath) grammar.push(...articleBreaks(renamedTo.get(path) ?? path, text));
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 const touched = [...new Set([...changedFiles.map(p => renamedTo.get(p) ?? p), ...renames.map(r => r.to)])].sort();
@@ -304,9 +321,14 @@ for (const [reason, paths] of Object.entries(skipped.excluded).sort()) console.l
 console.log(`  ${skipped.binary.length} binary file(s); ${skipped.symlink.length} symlink(s): ${skipped.symlink.join(', ') || '-'}`);
 if (PATHS_OUT && !DRY) console.log(`\ntouched paths written to ${PATHS_OUT} (${touched.length})`);
 
+if (grammar.length) {
+	console.error(`\nFAIL: ${grammar.length} article break(s) the rename caused; change "an" to "a" by hand:`);
+	for (const g of grammar.slice(0, 200)) console.error(`  ${g.path}:${g.line} ${g.form}`);
+}
 if (leftovers.length) {
 	console.error(`\nFAIL: ${leftovers.length} occurrence(s) of the old name remain outside the exclusions:`);
 	for (const l of leftovers.slice(0, 200)) console.error(`  ${l.path}:${l.line} ${l.form}`);
 	process.exit(1);
 }
-console.log('\nOK: no occurrence of the old name remains outside the exclusions.');
+if (grammar.length) process.exit(1);
+console.log('\nOK: no occurrence of the old name remains outside the exclusions, and no "an Ready Set Mail".');

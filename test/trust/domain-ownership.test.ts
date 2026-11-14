@@ -93,6 +93,18 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     expect(w.rows('SELECT * FROM domain_claims WHERE workspace_id = ? AND settled_at IS NULL', w.A.ws)).toEqual([]);
   });
 
+  it('still accepts a claim published under the record name used before the rename to Ready Set Mail', async () => {
+    const w = await world();
+    const { claim } = await json(await add(w, w.A, 'acme.com'));
+    const token = String(claim.txt_value).replace(/^readysetmail-verify=/, '');
+    w.cf.doh['_inboxangel.acme.com'] = ['readysetmail-verify=' + token]; // @legacy-name: new value under the old name proves nothing
+    expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} })).status).toBe(422);
+    w.cf.doh['_inboxangel.acme.com'] = ['inboxangel-verify=' + token]; // @legacy-name
+    const res = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} });
+    expect(res.status).toBe(201);
+    expect(w.rows("SELECT verified_via FROM domains WHERE domain = 'acme.com'")).toEqual([{ verified_via: 'txt' }]);
+  });
+
   it('proves and resumes a domain without configuring an intake hub', async () => {
     const w = await world();
     w.db.sqlite.prepare("DELETE FROM settings WHERE workspace_id = ?").run(w.A.ws);

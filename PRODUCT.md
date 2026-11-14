@@ -40,6 +40,8 @@ Hosted: sign up, prove you own a domain and see from live DNS where it stands an
 - Hosted mode (`MODE=saas`) is the registrant's route (decided November 13, 2026). What it covers today: live DNS checks, levels, fix guidance and records to copy, for one domain or many (one workspace per client). Not connected yet: DMARC report intake, the free email check and alert mail.
 
 ## Brand Commitments
+Name (Max, 2026-11-13): **Ready Set Mail**, formerly Inbox Angel. The repository is `fellowship-dev/ready-set-mail` and the website's is `fellowship-dev/ready-set-mail-website`; the old GitHub URLs redirect.
+
 Shared with the Ready Set Mail website (readysetmail.com): the name; the personality **Calm · Competent · Honest** (friendly, technical when needed); the palette roles (navy `#0B1F3A`, halo gold `#FAD172`, blush `#FCA0A4`; see DESIGN.md); Geist Sans and Geist Mono; the halo-envelope `LogoMark`; WCAG AA.
 
 - The voice names the email, not the protocol ("signup emails", "password reset"), then SPF/DKIM/DMARC.

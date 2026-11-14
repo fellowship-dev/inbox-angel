@@ -26,6 +26,9 @@ export const MAX_PENDING_CLAIMS = 25;
 
 export const CLAIM_TXT_LABEL = '_readysetmail';
 export const CLAIM_TXT_PREFIX = 'readysetmail-verify=';
+/** The record a claim made before the rename to Ready Set Mail (2026-11-13) told its owner to publish. Still accepted; never shown. */
+export const LEGACY_CLAIM_TXT_LABEL = '_inboxangel'; // @legacy-name
+export const LEGACY_CLAIM_TXT_PREFIX = 'inboxangel-verify='; // @legacy-name
 
 export type Admission =
   | { kind: 'verified'; via: VerifiedVia }
@@ -138,8 +141,12 @@ export async function provenByTxt(claim: DomainClaimRow, resolver: Resolver): Pr
   const res = await resolver.txt(claimTxtName(claim.domain));
   if (res.status === 'error') return { ok: false, reason: `DNS lookup failed (${res.error ?? 'error'}) — try again in a minute` };
   const want = CLAIM_TXT_PREFIX + claim.token;
-  const found = res.records.some(r => r.trim().replace(/^"|"$/g, '').trim() === want);
-  return found ? { ok: true } : { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
+  const holds = (records: string[], value: string) => records.some(r => r.trim().replace(/^"|"$/g, '').trim() === value);
+  if (holds(res.records, want)) return { ok: true };
+  // A claim made before the rename may already be published under the old record name: accept it too.
+  const legacy = await resolver.txt(`${LEGACY_CLAIM_TXT_LABEL}.${claim.domain}`);
+  if (legacy.status !== 'error' && holds(legacy.records, LEGACY_CLAIM_TXT_PREFIX + claim.token)) return { ok: true };
+  return { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
 }
 
 /** How long an evicted workspace can still export the report history of the domain it lost. */

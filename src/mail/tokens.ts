@@ -22,6 +22,8 @@ const unb64 = (s: string): Uint8Array => Uint8Array.from(atob(s.replace(/-/g, '+
 async function derive(env: AuthEnv, label: string): Promise<ArrayBuffer> {
   const secret = await authSecret(env);
   const root = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  // Fixed key-derivation label from before the product was renamed. Keep it: links in emails already sent are signed
+  // with it, including unsubscribe links (scripts/rename-to-ready-set-mail.mjs, PROTECTED).
   return crypto.subtle.sign('HMAC', root, enc.encode(`inbox-angel:email-links:v2:${label}`));
 }
 
