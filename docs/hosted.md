@@ -333,17 +333,17 @@ Measured on this repository's code (2026-11-14) in two ways. The first is author
 
 **1. The real Worker under `wrangler dev` (workerd 4.92.0, linux-arm64).** A local worker with `MODE=saas`, a seeded workspace, domain and token in local D1, driven by HTTP POSTs. `wrangler dev`'s own email endpoint (`POST /cdn-cgi/handler/email`) refuses messages over **1 MiB** ("the lower 1Mib limit for testing locally"), so the size runs used a measurement-only entry point (not committed) that hands a request body to the Worker's real `email()` export as the `raw` stream; the end-to-end runs below used the real `/cdn-cgi/handler/email` endpoint. Per message: **CPU** = delta of `utime+stime` of every `workerd` process from `/proc/<pid>/stat` (10 ms ticks; includes GC threads and the local D1's SQLite, which in production runs remotely), **memory** = peak of the summed `VmRSS` of the `workerd` processes sampled every 5 ms from `/proc/<pid>/status`, minus the sum just before the message (after a warm-up message), on a fresh `wrangler dev` per case. Timers inside workerd cannot measure CPU: `Date.now()` and `performance.now()` only advance on I/O. Enrichment lookups were limited to 1 IP per report (`INTAKE_MAX_NEW_IPS_PER_REPORT=1`): the sandbox has no outbound network, and waiting on DNS is not CPU.
 
-First message through a fresh isolate (hosted defaults: 2,000 records / 1 MiB decompressed / 2 MiB raw):
+First message through a fresh isolate, re-measured on 2026-11-14 after the three-tier change with a counted Google report (the heaviest tier; unknown and unauthenticated reports are capped lower and skip IP lookups) (hosted defaults: 2,000 records / 1 MiB decompressed / 2 MiB raw):
 
 | Case | Raw message | CPU per message | Peak RSS over idle (first message) |
 |------|------------:|----------------:|------------------------------------:|
-| small: 1 record | 1 KB | 0.03-0.05 s | +3 MB |
-| typical: 200 records, Google-like gzip | 3 KB | 0.10 s (then ~0.07) | +10 MB |
-| 2,000 records (the cap) | 20 KB | 0.37 s | +44 MB |
-| decompressed cap: 1 MiB of XML, incompressible | 0.24 MiB | 0.44 s | +71 MB |
-| raw cap: a 2 MiB message holding a small report | 2 MiB | 0.11 s | +17 MB |
-| **worst case: records, 1 MiB incompressible XML and 2 MiB raw together** | 2 MiB | 0.44 s | **+77 MB** |
-| self-host defaults (2,500 / 1.25 MiB / 2 MiB), worst case | 2 MiB | 0.50 s | +84 MB |
+| small: 1 record | 1 KB | 0.04 s | +3 MB |
+| typical: 200 records, Google-like gzip | 3 KB | 0.11 s (then ~0.08) | +10 MB |
+| 2,000 records (the cap) | 20 KB | 0.40 s | +45 MB |
+| decompressed cap: 1 MiB of XML, incompressible | 0.24 MiB | 0.45 s | +67 MB |
+| raw cap: a 2 MiB message holding a small report | 2 MiB | 0.11 s (not re-run after the tier change; the report path is unchanged) | +17 MB |
+| **worst case: records, 1 MiB incompressible XML and 2 MiB raw together** | 2 MiB | 0.46 s | **+73 MB** |
+| self-host defaults (2,500 / 1.25 MiB / 2 MiB), worst case | 2 MiB | 0.50 s | +84 MB (measured before the tier change) |
 
 Later messages in the same isolate show higher resident sizes (+100 to +190 MB after five worst-case messages): the heap is not returned to the OS and nothing forces collection locally. Production enforces the 128 MB limit with garbage collection, so this overstates the live set, but it is the reason the defaults aim for a first-message worst case of about 80 MB rather than for 128. The first defaults I measured (5,000 records / 3 MiB / 10 MiB) peaked at **+165 MB** on one message and were **not** honest for a 128 MB isolate; they were lowered until the worst case fell under ~90 MB.
 
