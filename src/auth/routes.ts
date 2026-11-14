@@ -19,7 +19,7 @@ import { verifyTurnstile } from './turnstile';
 import { hostedSignupClosed, SIGNUP_CLOSED_MESSAGE, turnstileSecret, turnstileSiteKey } from './bot-protection';
 import { clearSigninFailures, completeWelcome, legacyVerifyLinkPage, readVerificationToken, recordSigninFailure, signinWait, welcomeAttemptAllowed } from './welcome';
 import { cleanName } from './names';
-import { deviceCookie, knownDevice } from './device';
+import { deviceCookie, knownDevice, rotateDeviceEpoch } from './device';
 import { helpUrl } from '../funnel/config';
 import { emailCheckAvailable } from '../hosted/config';
 import { hostedServiceUrl } from '../hosted-service';
@@ -509,7 +509,12 @@ export async function handleAuthRoute(
       try { parsed = JSON.parse(body as string); } catch { return err('Invalid JSON body', 400); }
       body = JSON.stringify({ ...parsed, revokeOtherSessions: true });
     }
+    // "Sign out everywhere": whoever it is must be known before their sessions go.
+    const everywhere = method === 'POST' && (rel === '/revoke-sessions' || rel === '/revoke-other-sessions');
+    const caller = everywhere ? await currentUser(request, env, ctx).catch(() => null) : null;
     const res = await auth.handler(new Request(request.url, { method, headers, body }));
+    // It also ends this account's device cookies' skip of the per-address sign-in lock (a password change does by itself).
+    if (everywhere && caller && res.ok) await rotateDeviceEpoch(env, caller.id);
     if (fromBrowser(request) && res.headers.has('set-auth-token')) {
       // Same rule as sessionResponse: a browser holds its session in the cookie only.
       const clean = new Response(res.body, res);
