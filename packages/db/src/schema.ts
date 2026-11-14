@@ -763,6 +763,10 @@ export const domainClaims = sqliteTable(
 		created_at: integer('created_at').notNull().default(now),
 		last_checked_at: integer('last_checked_at'),
 		last_error: text('last_error'),
+		/** Unix seconds the claim became a domain; NULL while it is open. A settled row is hidden from every reader and purged after a day. */
+		settled_at: integer('settled_at'),
+		/** The `domains.id` the claim became (no foreign key: removing the domain leaves the row). */
+		settled_domain_id: integer('settled_domain_id'),
 	},
 	(t) => [
 		unique().on(t.workspace_id, t.domain),

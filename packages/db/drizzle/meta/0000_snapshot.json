@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7acba50c-27ff-4c98-aa05-28e3e0b36099",
+  "id": "43257d4c-2bdd-4b15-a1b8-305cdfe4b06e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -1544,6 +1544,20 @@
         "last_error": {
           "name": "last_error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "settled_domain_id": {
+          "name": "settled_domain_id",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

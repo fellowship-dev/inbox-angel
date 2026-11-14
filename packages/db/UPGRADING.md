@@ -10,9 +10,13 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## Settled claims
+
+Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.
+
 ## Intake hardening (0011)
 
-Migration `0011_intake_hardening.sql` is additive: three nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`), the tables `intake_quota`, `workspace_storage` and `intake_failures`, and indexes. Apply it before serving the new Worker (the schema guard requires it; migrations `0009`/`0010` from other changes are applied first, in name order). Existing reports keep working. **Behaviour change:** on `MODE=saas` only reports whose sender was proven (`reporter_auth = 'pass'`) feed the numbers (`REPORT_COUNTING=proven`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
+Migration `0011_intake_hardening.sql` is additive: three nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`), the tables `intake_quota`, `workspace_storage` and `intake_failures`, and indexes. Apply it before serving the new Worker (the schema guard requires it; `0009` and any other lower-numbered migration are applied first, in name order; a gap in the numbering (`0010` is reserved) is harmless). Existing reports keep working. **Behaviour change:** on `MODE=saas` only reports whose sender was proven (`reporter_auth = 'pass'`) feed the numbers (`REPORT_COUNTING=proven`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
 
 ## DNS check time
 

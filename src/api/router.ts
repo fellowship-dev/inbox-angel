@@ -119,7 +119,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, sharedWildcardRecord } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
@@ -748,12 +748,13 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
-      // Already added (a second tab, a double click, two requests at once): say so, whatever the cap and whatever DNS says now.
+      // Already added (a second tab, a double click, two requests at once, a retry after a settled claim): say so, whatever the cap and whatever DNS says now.
       const added = await resumeExistingDomain(tenant, claim.domain);
       if (added) {
-        await tenant.scope.claims.delete(claim.id); // a claim for a domain the workspace has is a leftover
+        await tenant.scope.claims.settle(claim.domain, added.domain.id); // a claim for a domain the workspace has is settled, never left open
         return json(added, 200);
       }
+      if (claim.settled_at !== null) return err('claim not found', 404); // it became a domain that has since been removed
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
@@ -765,14 +766,14 @@ async function _handleApi(
     const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);
     if (claimPreviewMatch && method === 'GET') {
       const claim = await tenant.scope.claims.getById(parseInt(claimPreviewMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       return await claimPreviewResponse(tenant, claim, { userId: workspace.userId });
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
     if (claimDeleteMatch && method === 'DELETE') {
       const claim = await tenant.scope.claims.getById(parseInt(claimDeleteMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       await tenant.scope.claims.delete(claim.id);
       return json({ ok: true });
     }
@@ -1013,19 +1014,11 @@ async function _handleApi(
               return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const, wildcard: false };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
-          // DoH fallback
-          const answers = await Promise.all(DKIM_SELECTORS.map(async sel => {
-            const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
-            if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
-            return { name: `${sel}._domainkey.${domain.domain}`, records: t.records };
-          }));
-          // Every name answering with one identical record is a wildcard: it says nothing about which selectors exist.
-          const wildcardRecord = sharedWildcardRecord(answers.filter(a => a !== null).map(a => a!.records));
-          if (wildcardRecord !== null) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: wildcardRecord };
-          const hits = answers.flatMap(a => {
-            const record = a?.records.find(isDkimRecord);
-            return a && record ? [{ name: a.name, record }] : [];
-          });
+          // DoH fallback: the shared scan, so the wildcard rule (identical answers, confirmed by a random name) is the same everywhere.
+          const scan = await scanDkimSelectors(dnsResolver, domain.domain, DKIM_SELECTORS);
+          for (const e of scan.errors) dns_errors.push(`dkim ${e.selector}: ${e.error}`);
+          if (scan.wildcard) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: scan.wildcardRecord };
+          const hits = scan.found.map(f => ({ name: f.name, record: f.txt.find(isDkimRecord)! }));
           return { selectors: hits, source: 'doh' as const, wildcard: false };
         })(),
 

@@ -52,10 +52,24 @@ describe('0008 dns_checked_at', () => {
 	});
 });
 
+describe('0009 claim_settled', () => {
+	it('adds two nullable columns: existing claims stay open', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
+		d.sqlite.prepare("INSERT INTO workspaces (id, name) VALUES ('ws_x', 'X')").run();
+		d.sqlite.prepare("INSERT INTO domain_claims (workspace_id, domain, token) VALUES ('ws_x', 'acme.com', 't')").run();
+		expect(applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' })).toEqual(['0009_claim_settled.sql']);
+		expect(d.sqlite.prepare('SELECT domain, status, settled_at, settled_domain_id FROM domain_claims').all()).toEqual([{ domain: 'acme.com', status: 'pending', settled_at: null, settled_domain_id: null }]);
+		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domain_claims') WHERE name IN ('settled_at', 'settled_domain_id')").all() as any[];
+		expect(cols.map((c) => c.name).sort()).toEqual(['settled_at', 'settled_domain_id']);
+		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
+	});
+});
+
 describe('0011 intake hardening', () => {
 	it('is additive: existing reports keep their rows, new columns are NULL, new tables are empty', () => {
 		const d = createTestD1();
-		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
+		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
 		d.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'r@x')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, reporter_auth) VALUES (1, 'google.com', 'r1', 1, 2, 5, 5, 'pass')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count) VALUES (1, 'old.example', 'r2', 1, 2, 5, 5)").run();

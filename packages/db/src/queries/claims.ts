@@ -2,7 +2,7 @@
  * Domain ownership claims. A claim is a workspace saying "this domain is ours" before proving it; `domains` only ever
  * holds verified domains, so several workspaces can have a pending claim on the same name while at most one can own it.
  */
-import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { getDb, type Db, type DbLike } from '../client';
 import { domainClaims, domains, intakeTokens } from '../schema';
 
@@ -10,35 +10,42 @@ export type DomainClaimRow = typeof domainClaims.$inferSelect;
 
 export function claimQueries(db: Db, workspaceId: string) {
 	const mine = eq(domainClaims.workspace_id, workspaceId);
+	/** Open claims only: a settled claim (it became a domain) is kept for a repeat verify and is invisible to everything else. */
+	const open = and(mine, isNull(domainClaims.settled_at));
 	return {
 		list() {
-			return db.select().from(domainClaims).where(mine).orderBy(asc(domainClaims.id)).all();
+			return db.select().from(domainClaims).where(open).orderBy(asc(domainClaims.id)).all();
 		},
 		count(): Promise<number> {
-			return db.select({ n: sql<number>`count(*)` }).from(domainClaims).where(mine).get().then((r) => r?.n ?? 0);
+			return db.select({ n: sql<number>`count(*)` }).from(domainClaims).where(open).get().then((r) => r?.n ?? 0);
 		},
 		get(domain: string) {
-			return db.select().from(domainClaims).where(and(mine, eq(domainClaims.domain, domain))).get().then((r) => r ?? null);
+			return db.select().from(domainClaims).where(and(open, eq(domainClaims.domain, domain))).get().then((r) => r ?? null);
 		},
+		/** By id, settled or not: the verify route answers a repeat verify of a settled claim. Check `settled_at`. */
 		getById(id: number) {
 			return db.select().from(domainClaims).where(and(mine, eq(domainClaims.id, id))).get().then((r) => r ?? null);
 		},
 		/** Create the claim, or return the existing one (the token never changes, so published TXT instructions stay valid). */
 		async upsert(domain: string, token: string): Promise<DomainClaimRow> {
+			// The domain was removed since a claim of it settled: that row would block the (workspace, domain) key and is no use now.
+			await db.delete(domainClaims).where(and(mine, eq(domainClaims.domain, domain), isNotNull(domainClaims.settled_at))).run();
 			await db.insert(domainClaims).values({ workspace_id: workspaceId, domain, token }).onConflictDoNothing().run();
 			return (await db.select().from(domainClaims).where(and(mine, eq(domainClaims.domain, domain))).get())!;
 		},
 		markLost(id: number) {
-			return db.update(domainClaims).set({ status: 'lost' }).where(and(mine, eq(domainClaims.id, id))).run();
+			return db.update(domainClaims).set({ status: 'lost' }).where(and(open, eq(domainClaims.id, id))).run();
+		},
+		/** The claim became this domain: keep the row, hidden, so a repeat verify finds the domain. Idempotent: the first settle's time stands. */
+		settle(domain: string, domainId: number) {
+			return db.update(domainClaims).set({ settled_at: sql`coalesce(${domainClaims.settled_at}, unixepoch())` as any, settled_domain_id: domainId })
+				.where(and(mine, eq(domainClaims.domain, domain))).run();
 		},
 		recordCheck(id: number, error: string | null) {
 			return db.update(domainClaims).set({ last_checked_at: sql`unixepoch()` as any, last_error: error }).where(and(mine, eq(domainClaims.id, id))).run();
 		},
 		delete(id: number) {
 			return db.delete(domainClaims).where(and(mine, eq(domainClaims.id, id))).run();
-		},
-		deleteByDomain(domain: string) {
-			return db.delete(domainClaims).where(and(mine, eq(domainClaims.domain, domain))).run();
 		},
 	};
 }
@@ -73,7 +80,7 @@ export function claimLookups(dbLike: DbLike) {
 		/** A workspace verified `domain`: every other workspace's pending claim on it is now lost. */
 		markLost(domain: string, winnerWorkspaceId: string) {
 			return db.update(domainClaims /* workspace-scope-exempt: other workspaces' claims on a name someone else just verified */).set({ status: 'lost' })
-				.where(and(eq(domainClaims.domain, domain), ne(domainClaims.workspace_id, winnerWorkspaceId))).run();
+				.where(and(eq(domainClaims.domain, domain), ne(domainClaims.workspace_id, winnerWorkspaceId), isNull(domainClaims.settled_at))).run();
 		},
 	};
 }

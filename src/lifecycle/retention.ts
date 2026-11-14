@@ -41,6 +41,8 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     ['password_reset_tokens', () => q.purgeResetTokens(now, limits)],
     ['invites', () => q.purgeInvites(ago(p.invitesDays), limits)],
     ['evicted_domains', () => q.purgeEvictedDomains(ago(p.evictedDays), limits)],
+    // A settled claim is kept one day, only so a repeat verify of it answers 200.
+    ['settled_claims', () => q.purgeSettledClaims(ago(1), limits)],
     ['audit_log', () => q.purgeAudit(ago(p.auditDays), limits)],
     // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
     ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
