@@ -1,0 +1,10 @@
+Ready Set Mail
+Copyright (c) 2026 InboxAngel (the holder line of LICENSE, which only the owner changes). MIT licence (LICENSE).
+
+Test fixtures under test/fixtures/third-party/ are copied from other projects and keep their own licences:
+
+  mox (https://github.com/mjl-/mox)                       Copyright 2021 Mechiel Lukkien. MIT.
+  dmarc-report-aggregator (freitagsrunde)                 Copyright (c) 2023 Maximilian Haye. MIT.
+  parsedmarc (https://github.com/domainaware/parsedmarc)  Apache License 2.0.
+
+See test/fixtures/THIRD_PARTY.md for files, upstream commits and what was read but not copied.

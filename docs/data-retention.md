@@ -15,6 +15,10 @@ Defaults apply when the variable is unset. Values are whole days; a value that i
 | Raw report XML (and the raw JSON of TLS-RPT reports) | **30 days** self-hosted; **not stored** in hosted mode | `RAW_XML_RETENTION_DAYS` | `0` = never store. The parsed rows above are what the raw payload contained. After the window only the raw payload is removed. Hosted mode defaults to `0`. |
 | IP enrichment cache (`ip_info`: reverse DNS, ASN, organisation, country) | **30 days** | `RETENTION_IP_INFO_DAYS` | A global cache, not per workspace. |
 | Free-check results (`check_results`) | **30 days** | `RETENTION_CHECK_RESULTS_DAYS` | |
+| Intake counters (`intake_usage`, `intake_quota`: messages and records per address, workspace and day) | **8 days** | `RETENTION_INTAKE_COUNTERS_DAYS` | Counters, no report content. |
+| "Reports we could not store" markers (`intake_failures`: a count per domain, day and reason) | **90 days** | `RETENTION_INTAKE_FAILURES_DAYS` | A counter, no report content. |
+| Aggregate reports that are stored but never counted (`reporter_tier` `unknown` or `unauthenticated`) | **30 days** | `RETENTION_UNCOUNTED_REPORTS_DAYS` (the earlier name `RETENTION_UNAUTHENTICATED_REPORTS_DAYS` is still honoured when it is unset) | Stored but never counted. Not applied when `REPORT_COUNTING=all`, where they are the numbers. A reporter an owner later promotes becomes `counted` and keeps the normal window. |
+| Authenticated senders not in the known-reporter registry (`reporter_candidate_days`: DKIM organisation, From domain, report email, counts per day) | **90 days** | | Instance-wide, no report content, no customer or address. |
 | Sessions | until they expire (sessions last 30 days) | | Includes the IP address and user agent stored with the session. |
 | Email-verification and password-reset tokens | until they expire | | |
 | Invites | **30 days after they expire** (used or not) | `RETENTION_INVITES_DAYS` | |
@@ -35,6 +39,7 @@ records the privacy policy describes for the website and for sales prospecting.
 * Deletes in bounded batches (500 rows per statement; at most 1,000 `report_records` per statement) and issues at most **300 statements per run in total**, so D1's per-invocation query limit holds.
   A large backlog is cleared over several days. A sweep that was not finished says `<table>_truncated` in the log line.
 * Report windows count from when the report ended **or** when it was received, whichever is earlier, so a report cannot extend its own life by claiming a future end date.
+* After the report sweep it keeps `workspace_storage` (the records a workspace holds, which the storage cap compares against) in step with what it deleted, and recounts a few workspaces (5 per run) to repair drift.
 * Idempotent: running it again deletes nothing more. Safe to re-run by hand or after a failure.
 * A failing step is logged and the other steps still run.
 * Logs one line per run with the counts: `[retention] {"aggregate_reports":12,"sessions":4,…,"failed":0}`.

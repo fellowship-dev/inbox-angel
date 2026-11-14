@@ -56,6 +56,12 @@ CREATE TABLE `aggregate_reports` (
 	`workspace_id` text DEFAULT 'ws_default' NOT NULL,
 	`reporter_auth` text,
 	`reporter_auth_domain` text,
+	`reporter_auth_reason` text,
+	`reporter_tier` text,
+	`reporter_known_as` text,
+	`reporter_identity` text,
+	`ingest_token` text,
+	`record_count` integer,
 	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
@@ -65,6 +71,7 @@ CREATE INDEX `idx_agg_reports_workspace` ON `aggregate_reports` (`workspace_id`,
 CREATE INDEX `idx_agg_reports_date_end` ON `aggregate_reports` (`date_end`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_created` ON `aggregate_reports` (`created_at`);--> statement-breakpoint
 CREATE INDEX `idx_agg_reports_raw_xml` ON `aggregate_reports` (`created_at`) WHERE "aggregate_reports"."raw_xml" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_agg_reports_tier` ON `aggregate_reports` (`workspace_id`,`reporter_tier`,`date_begin`);--> statement-breakpoint
 CREATE UNIQUE INDEX `aggregate_reports_domain_id_report_id_unique` ON `aggregate_reports` (`domain_id`,`report_id`);--> statement-breakpoint
 CREATE TABLE `api_keys` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -307,6 +314,42 @@ CREATE TABLE `hosted_zones` (
 	`checked_at` integer
 );
 --> statement-breakpoint
+CREATE TABLE `intake_drops` (
+	`domain_id` integer NOT NULL,
+	`reporter` text NOT NULL,
+	`workspace_id` text NOT NULL,
+	`label` text NOT NULL,
+	`first_at` integer NOT NULL,
+	`last_at` integer NOT NULL,
+	`messages` integer DEFAULT 0 NOT NULL,
+	PRIMARY KEY(`domain_id`, `reporter`),
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `intake_failures` (
+	`domain_id` integer NOT NULL,
+	`workspace_id` text NOT NULL,
+	`day` text NOT NULL,
+	`reason` text NOT NULL,
+	`messages` integer DEFAULT 0 NOT NULL,
+	`last_at` integer NOT NULL,
+	PRIMARY KEY(`domain_id`, `day`, `reason`),
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_intake_failures_day` ON `intake_failures` (`day`);--> statement-breakpoint
+CREATE TABLE `intake_quota` (
+	`scope` text NOT NULL,
+	`day` text NOT NULL,
+	`messages` integer DEFAULT 0 NOT NULL,
+	`records` integer DEFAULT 0 NOT NULL,
+	`bytes` integer DEFAULT 0 NOT NULL,
+	PRIMARY KEY(`scope`, `day`)
+);
+--> statement-breakpoint
+CREATE INDEX `idx_intake_quota_day` ON `intake_quota` (`day`);--> statement-breakpoint
 CREATE TABLE `intake_tokens` (
 	`domain_id` integer PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -334,6 +377,7 @@ CREATE TABLE `intake_usage` (
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `idx_intake_usage_day` ON `intake_usage` (`day`);--> statement-breakpoint
 CREATE TABLE `invites` (
 	`token` text PRIMARY KEY NOT NULL,
 	`email` text NOT NULL,
@@ -492,6 +536,18 @@ CREATE TABLE `report_records` (
 CREATE INDEX `idx_records_report` ON `report_records` (`report_id`);--> statement-breakpoint
 CREATE INDEX `idx_records_ip` ON `report_records` (`source_ip`);--> statement-breakpoint
 CREATE INDEX `idx_records_workspace` ON `report_records` (`workspace_id`);--> statement-breakpoint
+CREATE TABLE `reporter_candidate_days` (
+	`dkim_org` text NOT NULL,
+	`from_address` text NOT NULL,
+	`report_email` text NOT NULL,
+	`workspace_id` text NOT NULL,
+	`day` text NOT NULL,
+	`reports` integer DEFAULT 0 NOT NULL,
+	`org_name` text,
+	PRIMARY KEY(`dkim_org`, `from_address`, `report_email`, `workspace_id`, `day`)
+);
+--> statement-breakpoint
+CREATE INDEX `idx_reporter_candidate_days_day` ON `reporter_candidate_days` (`day`);--> statement-breakpoint
 CREATE TABLE `revocation_tombstones` (
 	`id` text PRIMARY KEY NOT NULL,
 	`deleted_workspace_id` text NOT NULL,
@@ -601,6 +657,16 @@ CREATE TABLE `verifications` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_verifications_identifier` ON `verifications` (`identifier`);--> statement-breakpoint
+CREATE TABLE `workspace_storage` (
+	`workspace_id` text PRIMARY KEY NOT NULL,
+	`reports` integer DEFAULT 0 NOT NULL,
+	`records` integer DEFAULT 0 NOT NULL,
+	`uncounted_reports` integer DEFAULT 0 NOT NULL,
+	`uncounted_records` integer DEFAULT 0 NOT NULL,
+	`reconciled_at` integer,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `workspaces` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,

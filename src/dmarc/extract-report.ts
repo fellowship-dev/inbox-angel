@@ -21,7 +21,7 @@ function startsWith(bytes: Uint8Array, magic: Uint8Array): boolean {
   return true;
 }
 
-const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: false });
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 
 /**
  * Extracts XML text from a .zip, .gz, raw XML, or base64-encoded version of any of the above.
@@ -47,8 +47,12 @@ function tooLarge(max: number, produced: number): ParserError {
   return e;
 }
 
-/** Compressed bytes fed per step. At worst deflate expands ~1000:1, so a step yields about 1 MB. */
-const SLICE = 1024;
+/**
+ * Compressed bytes fed per step. At worst deflate expands ~1032:1, so a step can yield up to ~4 MB before the cap is noticed. A smaller step
+ * bounds that overshoot tighter but makes fflate allocate more per input byte: 1 KiB steps cost ~50 MB more resident memory than 16 KiB ones on a
+ * 0.8 MB incompressible report (measured under workerd), so this is the middle.
+ */
+const SLICE = 4 * 1024;
 
 /** Feed `bytes` to a streaming inflater in small slices, checking the running output after every one. */
 function drain(bytes: Uint8Array, maxBytes: number | undefined, make: (ondata: (chunk: Uint8Array) => void) => { push(c: Uint8Array, final?: boolean): void }): Uint8Array {
@@ -67,7 +71,30 @@ function drain(bytes: Uint8Array, maxBytes: number | undefined, make: (ondata: (
   return out;
 }
 
-const gunzip = (bytes: Uint8Array, maxBytes?: number) => drain(bytes, maxBytes, ondata => new Gunzip(ondata));
+/**
+ * A report's gzip header is a few bytes (a file name at most). fflate's streaming Gunzip re-copies a header it has not finished on every
+ * push, so a multi-megabyte FCOMMENT/FEXTRA costs time quadratic in its size (measured: 2 MB of comment = 6 s in Node, a 7 MB one = ~88 s of CPU
+ * in workerd). Refuse such a header before inflating anything.
+ */
+const MAX_GZIP_HEADER = 1024;
+
+function checkGzipHeader(b: Uint8Array): void {
+  const tooLong = () => new ParserError(`gzip header is longer than ${MAX_GZIP_HEADER} bytes`);
+  const flags = b[3] ?? 0;
+  let pos = 10;
+  if (flags & 0x04) pos += 2 + ((b[pos] ?? 0) | ((b[pos + 1] ?? 0) << 8)); // FEXTRA
+  for (const bit of [0x08, 0x10]) { // FNAME, FCOMMENT: zero-terminated
+    if (!(flags & bit)) continue;
+    if (pos > MAX_GZIP_HEADER) throw tooLong();
+    const end = b.subarray(pos, MAX_GZIP_HEADER + 1).indexOf(0);
+    if (end < 0) throw tooLong();
+    pos += end + 1;
+  }
+  if (flags & 0x02) pos += 2; // FHCRC
+  if (pos > MAX_GZIP_HEADER) throw tooLong();
+}
+
+const gunzip = (bytes: Uint8Array, maxBytes?: number) => { checkGzipHeader(bytes); return drain(bytes, maxBytes, ondata => new Gunzip(ondata)); };
 
 /** Most entries a hosted-intake zip may hold: a report, plus at most one stray file. */
 const MAX_ZIP_ENTRIES = 2;
@@ -150,4 +177,13 @@ export function extractReport(content: Uint8Array | ArrayBuffer | string, opts: 
     if (e instanceof ParserError) throw e;
     throw new ParserError(`Invalid archive file: ${e}`);
   }
+}
+
+/**
+ * Decompress and read a report with a HARD cap on what is produced (not on what the archive claims): throws `ReportTooLargeError` past `limit`
+ * bytes. Callers pick the limit by carrier class (src/dmarc/reporter-auth.ts): `intakeLimits(env).maxDecompressedBytes` for a registry sender,
+ * `nonRegistryDecompressedBytes` for anyone else. Also refuses an oversized gzip header, nested archives and archives with more than 2 entries.
+ */
+export function extractReportCapped(content: Uint8Array | ArrayBuffer | string, limit: number): string {
+  return extractReport(content, { maxBytes: limit });
 }

@@ -7,10 +7,11 @@ import type { BoundEnv } from '../index';
 import { mcpInstallation } from '../mcp/discovery';
 import { getMode } from '../tenancy/mode';
 import { bookingUrl, helpUrl, sequenceEnabled } from '../funnel/config';
+import { intakeSetupFindings } from '../reports/auth-status';
 
 export interface PreflightItem {
   /** Stable id for tests and the UI key. */
-  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits' | 'intake';
   /** `action`: something does not work until it is fixed. `note`: works, but worth knowing. */
   severity: 'action' | 'note';
   /** The setting(s) to change, by name. */
@@ -110,6 +111,9 @@ export async function instancePreflight(env: BoundEnv, requestOrigin: string): P
       });
     }
   }
+
+  // Report intake: authentication settings and caps hit recently (src/reports/auth-status.ts).
+  items.push(...await intakeSetupFindings(env));
 
   // Booking link: the day-14 follow-up email offers a call through it, and hosted dashboards show it as "Talk to Max".
   // Hosted uses the same https-only rule as the dashboard link (helpUrl), so this check and the link always agree.

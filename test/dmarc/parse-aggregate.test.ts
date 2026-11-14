@@ -91,30 +91,29 @@ describe('parseAggregateReportXml', () => {
       await expect(parseAggregateReportXml(xml, OFFLINE)).rejects.toThrow(InvalidAggregateReport);
     });
 
-    it('does not expand entity declarations that reference other entities (billion laughs)', async () => {
+    // A DMARC report has no DOCTYPE. Declaring one is refused before the parser runs, so no library default (or a library upgrade that
+    // changes one) can expand anything: the only entities left are the five standard escapes tested above.
+    const REFUSED = { name: 'ReportRejected', code: 'xml_invalid' };
+
+    it('refuses entity declarations that reference other entities (billion laughs) without expanding them', async () => {
       const doctype = '<!DOCTYPE feedback ['
         + '<!ENTITY a "aaaaaaaaaa">'
         + '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
         + '<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">'
         + '<!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">'
         + ']>';
-      const report = await parseAggregateReportXml(
-        withOrg('&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;', doctype), OFFLINE);
-      // Full expansion would be 10^5 characters.
-      expect(report.report_metadata.org_name.length).toBeLessThan(1000);
-      expect(report.report_metadata.org_name).not.toContain('aaaaaaaaaa');
+      await expect(parseAggregateReportXml(withOrg('&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;', doctype), OFFLINE)).rejects.toMatchObject(REFUSED);
     });
 
-    it('rejects a report whose flat entity expansion exceeds the parser limit', async () => {
+    it('refuses a flat entity declaration however small', async () => {
       const doctype = `<!DOCTYPE feedback [<!ENTITY big "${'a'.repeat(9000)}">]>`;
-      const xml = withOrg('&big;'.repeat(20), doctype); // 180k characters > 100k default limit
-      await expect(parseAggregateReportXml(xml, OFFLINE)).rejects.toThrow(InvalidAggregateReport);
+      await expect(parseAggregateReportXml(withOrg('&big;'.repeat(20), doctype), OFFLINE)).rejects.toMatchObject(REFUSED);
+      await expect(parseAggregateReportXml(withOrg('&org;', '<!DOCTYPE feedback [<!ENTITY org "example.org">]>'), OFFLINE)).rejects.toMatchObject(REFUSED);
     });
 
-    it('still expands a small internal entity declaration', async () => {
-      const report = await parseAggregateReportXml(
-        withOrg('&org;', '<!DOCTYPE feedback [<!ENTITY org "example.org">]>'), OFFLINE);
-      expect(report.report_metadata.org_name).toBe('example.org');
+    it('refuses a bare DOCTYPE and an ENTITY outside one', async () => {
+      await expect(parseAggregateReportXml(withOrg('x', '<!DOCTYPE feedback>'), OFFLINE)).rejects.toMatchObject(REFUSED);
+      await expect(parseAggregateReportXml(withOrg('x', '<!ENTITY e "x">'), OFFLINE)).rejects.toMatchObject(REFUSED);
     });
   });
 });

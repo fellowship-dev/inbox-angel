@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff50f0cf-668a-449f-b568-c6cfbb84397f",
+  "id": "2bc0044e-8161-4ecf-8b58-1a0213aa72f7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -426,6 +426,48 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "reporter_auth_reason": {
+          "name": "reporter_auth_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_tier": {
+          "name": "reporter_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_known_as": {
+          "name": "reporter_known_as",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_identity": {
+          "name": "reporter_identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ingest_token": {
+          "name": "ingest_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "record_count": {
+          "name": "record_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -472,6 +514,15 @@
           ],
           "isUnique": false,
           "where": "\"aggregate_reports\".\"raw_xml\" IS NOT NULL"
+        },
+        "idx_agg_reports_tier": {
+          "name": "idx_agg_reports_tier",
+          "columns": [
+            "workspace_id",
+            "reporter_tier",
+            "date_begin"
+          ],
+          "isUnique": false
         },
         "aggregate_reports_domain_id_report_id_unique": {
           "name": "aggregate_reports_domain_id_report_id_unique",
@@ -2173,6 +2224,262 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "intake_drops": {
+      "name": "intake_drops",
+      "columns": {
+        "domain_id": {
+          "name": "domain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reporter": {
+          "name": "reporter",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_at": {
+          "name": "first_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_at": {
+          "name": "last_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "messages": {
+          "name": "messages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "intake_drops_domain_id_domains_id_fk": {
+          "name": "intake_drops_domain_id_domains_id_fk",
+          "tableFrom": "intake_drops",
+          "tableTo": "domains",
+          "columnsFrom": [
+            "domain_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "intake_drops_workspace_id_workspaces_id_fk": {
+          "name": "intake_drops_workspace_id_workspaces_id_fk",
+          "tableFrom": "intake_drops",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "intake_drops_domain_id_reporter_pk": {
+          "columns": [
+            "domain_id",
+            "reporter"
+          ],
+          "name": "intake_drops_domain_id_reporter_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "intake_failures": {
+      "name": "intake_failures",
+      "columns": {
+        "domain_id": {
+          "name": "domain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "messages": {
+          "name": "messages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_at": {
+          "name": "last_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_intake_failures_day": {
+          "name": "idx_intake_failures_day",
+          "columns": [
+            "day"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "intake_failures_domain_id_domains_id_fk": {
+          "name": "intake_failures_domain_id_domains_id_fk",
+          "tableFrom": "intake_failures",
+          "tableTo": "domains",
+          "columnsFrom": [
+            "domain_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "intake_failures_workspace_id_workspaces_id_fk": {
+          "name": "intake_failures_workspace_id_workspaces_id_fk",
+          "tableFrom": "intake_failures",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "intake_failures_domain_id_day_reason_pk": {
+          "columns": [
+            "domain_id",
+            "day",
+            "reason"
+          ],
+          "name": "intake_failures_domain_id_day_reason_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "intake_quota": {
+      "name": "intake_quota",
+      "columns": {
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "messages": {
+          "name": "messages",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "records": {
+          "name": "records",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "idx_intake_quota_day": {
+          "name": "idx_intake_quota_day",
+          "columns": [
+            "day"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "intake_quota_scope_day_pk": {
+          "columns": [
+            "scope",
+            "day"
+          ],
+          "name": "intake_quota_scope_day_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "intake_tokens": {
       "name": "intake_tokens",
       "columns": {
@@ -2331,7 +2638,15 @@
           "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_intake_usage_day": {
+          "name": "idx_intake_usage_day",
+          "columns": [
+            "day"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "intake_usage_domain_id_domains_id_fk": {
           "name": "intake_usage_domain_id_domains_id_fk",
@@ -3479,6 +3794,85 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "reporter_candidate_days": {
+      "name": "reporter_candidate_days",
+      "columns": {
+        "dkim_org": {
+          "name": "dkim_org",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "report_email": {
+          "name": "report_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reports": {
+          "name": "reports",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "org_name": {
+          "name": "org_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_reporter_candidate_days_day": {
+          "name": "idx_reporter_candidate_days_day",
+          "columns": [
+            "day"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "reporter_candidate_days_dkim_org_from_address_report_email_workspace_id_day_pk": {
+          "columns": [
+            "dkim_org",
+            "from_address",
+            "report_email",
+            "workspace_id",
+            "day"
+          ],
+          "name": "reporter_candidate_days_dkim_org_from_address_report_email_workspace_id_day_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "revocation_tombstones": {
       "name": "revocation_tombstones",
       "columns": {
@@ -4212,6 +4606,76 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workspace_storage": {
+      "name": "workspace_storage",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reports": {
+          "name": "reports",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "records": {
+          "name": "records",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "uncounted_reports": {
+          "name": "uncounted_reports",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "uncounted_records": {
+          "name": "uncounted_records",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "reconciled_at": {
+          "name": "reconciled_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "workspace_storage_workspace_id_workspaces_id_fk": {
+          "name": "workspace_storage_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_storage",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

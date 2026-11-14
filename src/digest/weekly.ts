@@ -12,6 +12,7 @@ import { buildWeeklyDigestHtml } from '../email/html-templates';
 import { sendNonTransactional } from '../mail/compliance';
 import { ownerMailer } from '../mail/mailer';
 import { version } from '../../package.json';
+import { uncountedNotice } from '../reports/visibility';
 
 const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/ready-set-mail/main/package.json';
 const RELEASE_URL = 'https://github.com/fellowship-dev/ready-set-mail/releases/latest';
@@ -50,14 +51,19 @@ function formatDomainSection(
   lines.push(`DMARC policy: ${policyBadge(stat.dmarc_policy)}`);
 
   if (stat.total_messages === 0) {
-    lines.push('No reports received this week.');
-    lines.push(`Check that rua=mailto:${ruaAddress} is in your DMARC record.`);
+    // Never "no reports" when reports arrived and were left out of the numbers.
+    if (stat.uncounted_reports > 0) lines.push(`No counted reports this week. ${uncountedNotice(stat.uncounted_reports)}`);
+    else {
+      lines.push('No reports received this week.');
+      lines.push(`Check that rua=mailto:${ruaAddress} is in your DMARC record.`);
+    }
     return lines.join('\n');
   }
 
   lines.push(`Messages this week: ${stat.total_messages.toLocaleString()}`);
   lines.push(`  ✅ Passed: ${stat.pass_messages.toLocaleString()} (${pct(stat.pass_messages, stat.total_messages)})`);
   lines.push(`  ❌ Failed: ${stat.fail_messages.toLocaleString()} (${pct(stat.fail_messages, stat.total_messages)})`);
+  if (stat.uncounted_reports > 0) lines.push(`  ${uncountedNotice(stat.uncounted_reports)}`);
 
   if (sources.length > 0) {
     lines.push('');

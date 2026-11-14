@@ -7,8 +7,10 @@
 
 import { lifecycleQueries, sweepLimits, type SweepResult } from '@ready-set-mail/db';
 import { retentionPolicy, type RetentionEnv } from './config';
+import { reportCounting } from '../dmarc/counting';
 
 const DAY = 86400;
+const dayOf = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 
 export interface RetentionOptions {
   /** The clock, in ms. Default Date.now. */
@@ -25,10 +27,13 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
   const q = lifecycleQueries(env.DB);
   const limits = sweepLimits(opts.limits);
   const ago = (d: number) => now - d * DAY;
+  // Uncounted-tier reports (unknown or unauthenticated) are short-lived only where they never feed the numbers. With REPORT_COUNTING=all (the self-host
+  // default) they ARE the numbers (a server with AUTHSERV_* unset stores every report as unauthenticated), so they keep the normal window.
+  const unauthCutoff = reportCounting(env) === 'all' ? undefined : ago(p.uncountedReportsDays);
 
   const report: RetentionReport = {};
   const sweeps: Array<[string, () => Promise<SweepResult>]> = [
-    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits)],
+    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits, unauthCutoff)],
     ['tls_reports', () => q.purgeTlsReports(ago(p.tlsDays), limits)],
     // 0 days: raw XML is never stored, so clear anything still there
     ['raw_xml_cleared', () => q.clearRawXml(ago(p.rawDays), limits)],
@@ -43,6 +48,13 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     // A settled claim is kept one day, only so a repeat verify of it answers 200.
     ['settled_claims', () => q.purgeSettledClaims(ago(1), limits)],
     ['audit_log', () => q.purgeAudit(ago(p.auditDays), limits)],
+    // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
+    ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
+    ['intake_failures', () => q.purgeIntakeFailures(dayOf(ago(p.intakeFailureDays)), limits)],
+    ['intake_drops', () => q.purgeIntakeDrops(ago(p.intakeFailureDays), limits)],
+    ['reporter_candidates', () => q.purgeReporterCandidates(dayOf(ago(p.intakeFailureDays)), limits)],
+    // Last: recount a few workspaces' stored records (repairs drift, counts data stored before the counters existed).
+    ['storage_reconciled', () => q.reconcileStorage(limits)],
   ];
   let failed = 0;
   for (const [name, sweep] of sweeps) {

@@ -27,7 +27,7 @@ export async function seedDomainReports(db: any, workspaceId: string, domainId: 
     const total = todays.reduce((s, e) => s + e.count, 0);
     const pass = todays.filter((e) => e.pass).reduce((s, e) => s + e.count, 0);
     const begin = Math.floor((now - ago * DAY) / DAY) * DAY;
-    const rep = await q.reports.insertAggregate({ domain_id: domainId, org_name: 'google.com', report_id: `r-${domainId}-${ago}`, date_begin: begin, date_end: begin + DAY - 1, total_count: total, pass_count: pass, fail_count: total - pass, raw_xml: null });
+    const rep = await q.reports.insertAggregate({ domain_id: domainId, org_name: 'google.com', report_id: `r-${domainId}-${ago}`, date_begin: begin, date_end: begin + DAY - 1, total_count: total, pass_count: pass, fail_count: total - pass, raw_xml: null, reporter_auth: 'pass', reporter_tier: 'counted' });
     await q.reports.insertRecords(todays.map((e) => ({
       report_id: Number(rep.meta.last_row_id), source_ip: e.ip, count: e.count, disposition: e.pass ? 'none' : 'quarantine',
       spf_result: e.spf === null ? null : (e.spf?.[0] ?? 'pass'), spf_domain: e.spf === null ? null : (e.spf?.[1] ?? header),

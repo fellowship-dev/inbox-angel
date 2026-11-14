@@ -49,6 +49,12 @@ export interface ReadinessInput {
   windowDays: number;
   fixes: Fix[];
   newSenders: number;
+  /**
+   * false: counted data does not include a report from Google or Microsoft (the receivers that see most of the mail). "Safe to move on" is then never
+   * said: advice rests on counted data from a major reporter, never on uncounted data or on small reporters alone. undefined: not applied (a server
+   * that counts every report).
+   */
+  majorReporter?: boolean;
   /** A subdomain with no record of its own: it follows its parent, so "no record" is not a gap here. */
   inherits?: boolean;
 }
@@ -114,6 +120,9 @@ export function assessReadiness(i: ReadinessInput): Readiness {
     else reasons.push({ level: 'ok', text: plan.note });
   }
 
+  if (i.majorReporter === false && i.messages > 0) {
+    return done('insufficient_data', 'No counted report from Google or Microsoft yet', [{ level: 'block', text: 'Advice to move to a stricter policy needs counted reports from at least one major receiver (Google or Microsoft). Reports from other senders are shown but are not enough to judge from.' }], null);
+  }
   if (i.messages < MIN_MESSAGES || i.daysWithReports < MIN_DAYS_WITH_REPORTS) {
     const have = `${i.messages.toLocaleString('en-US')} messages over ${i.daysWithReports} day${i.daysWithReports === 1 ? '' : 's'} with reports`;
     return done('insufficient_data', 'Not enough data to judge yet',

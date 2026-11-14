@@ -3,7 +3,7 @@ import { gzipSync, zipSync, strToU8 } from 'fflate';
 
 export const dmarcXml = (domain: string, reportId = 'rep-1', org = 'google.com') => `<?xml version="1.0"?>
 <feedback>
-  <report_metadata><org_name>${org}</org_name><email>noreply@${org}</email><report_id>${reportId}</report_id>
+  <report_metadata><org_name>${org}</org_name><email>noreply-dmarc-support@${org}</email><report_id>${reportId}</report_id>
     <date_range><begin>1529366400</begin><end>1529452799</end></date_range></report_metadata>
   <policy_published><domain>${domain}</domain><adkim>r</adkim><aspf>r</aspf><p>none</p><pct>100</pct></policy_published>
   <record>

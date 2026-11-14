@@ -4,8 +4,11 @@
  * IP cache. Anything here must not return or modify tenant data.
  */
 import { and, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm';
-import { getDb, type DbLike } from '../client';
+import { batchStatements, getDb, type DbLike } from '../client';
+import { chunkJson, JSON_PARAM_MAX_BYTES } from './report-store';
 import { workspaces, authAccounts, authRateLimits, sessions, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
+
+export interface IpInfoRow { ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null; fetched_at: number }
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
@@ -177,7 +180,73 @@ export function globalQueries(dbLike: DbLike) {
 			purgeExpired: (nowSeconds: number) => db.delete(canaryTokens).where(lt(canaryTokens.expires_at, nowSeconds - 86400)).run(),
 		},
 
+		/**
+		 * Authenticated senders that are not in the registry, for the instance owner (candidates to add by hand; never promoted automatically).
+		 * One row per (DKIM organisation, From, report email, workspace, day): no report content, no customer address.
+		 */
+		reporterCandidates: {
+			note: (c: { dkimOrg: string; from: string; reportEmail: string; orgName: string | null; workspaceId: string; day: string }) =>
+				db.run(sql`INSERT INTO reporter_candidate_days (dkim_org, from_address, report_email, workspace_id, day, reports, org_name)
+					VALUES (${c.dkimOrg}, ${c.from}, ${c.reportEmail}, ${c.workspaceId}, ${c.day}, 1, ${c.orgName})
+					ON CONFLICT(dkim_org, from_address, report_email, workspace_id, day) DO UPDATE SET reports = reports + 1, org_name = excluded.org_name`),
+			list: (limit = 200) =>
+				db.all<{ dkim_org: string; from_address: string; report_email: string; org_name: string | null; reports: number; workspaces: number; days_seen: number; first_seen: string; last_seen: string }>(sql`
+					SELECT dkim_org, from_address, report_email, MAX(org_name) AS org_name, SUM(reports) AS reports, COUNT(DISTINCT workspace_id) AS workspaces,
+					       COUNT(DISTINCT day) AS days_seen, MIN(day) AS first_seen, MAX(day) AS last_seen
+					FROM reporter_candidate_days GROUP BY dkim_org, from_address, report_email ORDER BY workspaces DESC, days_seen DESC, last_seen DESC LIMIT ${limit}`),
+			purge: (cutoffDay: string) => db.run(sql`DELETE FROM reporter_candidate_days WHERE day < ${cutoffDay}`),
+		},
+
+		/**
+		 * Known reporters whose COUNTED reports were dropped for want of storage (intake_drops), across the instance, for the owner's setup check:
+		 * per reporter the FIRST drop time and how many addresses are affected. Only drops seen at or after `sinceSeconds`.
+		 */
+		drops: {
+			since: (sinceSeconds: number) =>
+				db.all<{ reporter: string; label: string; first_at: number; domains: number; messages: number }>(sql`
+					SELECT reporter, MAX(label) AS label, MIN(first_at) AS first_at, COUNT(*) AS domains, SUM(messages) AS messages
+					FROM intake_drops WHERE last_at >= ${sinceSeconds} GROUP BY reporter ORDER BY first_at, reporter`),
+		},
+
+		/**
+		 * What inbound report mail carried, instance-wide, per day: a counter per kind in intake_quota (scope 'auth:<kind>'), no address.
+		 * Kinds: present (an authentication header of the trusted kind), absent (none), foreign (a header, another authserv-id), ok (authenticated).
+		 */
+		authObservations: {
+			note: (kind: 'present' | 'absent' | 'foreign' | 'ok' | 'unconfigured', day: string) =>
+				db.run(sql`INSERT INTO intake_quota (scope, day, messages) VALUES (${'auth:' + kind}, ${day}, 1) ON CONFLICT(scope, day) DO UPDATE SET messages = messages + 1`),
+			since: (sinceDay: string) =>
+				db.all<{ scope: string; messages: number }>(sql`SELECT scope, SUM(messages) AS messages FROM intake_quota WHERE scope LIKE 'auth:%' AND day >= ${sinceDay} GROUP BY scope`),
+		},
+
+		/**
+		 * Instance-wide counters of the storage and daily caps that stopped mail (reason codes such as `cap_instance_day`), one row per reason and day
+		 * in `intake_quota` (scope `cap:<reason>`): no address, no customer. Read by the owner's setup check.
+		 */
+		capObservations: {
+			note: (reason: string, day: string) =>
+				db.run(sql`INSERT INTO intake_quota (scope, day, messages) VALUES (${'cap:' + reason}, ${day}, 1) ON CONFLICT(scope, day) DO UPDATE SET messages = messages + 1`),
+			since: (sinceDay: string) =>
+				db.all<{ scope: string; messages: number }>(sql`SELECT scope, SUM(messages) AS messages FROM intake_quota WHERE scope LIKE 'cap:%' AND day >= ${sinceDay} GROUP BY scope`),
+		},
+
 		ipInfo: {
+			/** Cached rows for many IPs in ONE D1 query (chunks of json_each, in one batch), whatever their age. */
+			getMany: async (ips: readonly string[]): Promise<Map<string, IpInfoRow>> => {
+				const out = new Map<string, IpInfoRow>();
+				if (!ips.length) return out;
+				const stmts = chunkJson(ips, JSON_PARAM_MAX_BYTES).map((c) => sql`SELECT ip, reverse_dns, base_domain, country_code, org, asn, fetched_at FROM ip_info WHERE ip IN (SELECT value FROM json_each(${c}))`);
+				for (const r of await batchStatements(db, stmts)) for (const row of (r.results ?? []) as IpInfoRow[]) out.set(row.ip, row);
+				return out;
+			},
+			/** Upsert many rows in ONE D1 query. */
+			putMany: async (rows: ReadonlyArray<{ ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null }>): Promise<void> => {
+				if (!rows.length) return;
+				const stmts = chunkJson(rows.map((r) => [r.ip, r.reverse_dns, r.base_domain, r.country_code, r.org, r.asn])).map((c) => sql`INSERT INTO ip_info (ip, reverse_dns, base_domain, country_code, org, asn, fetched_at)
+					SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), unixepoch() FROM json_each(${c}) WHERE true
+					ON CONFLICT(ip) DO UPDATE SET reverse_dns = excluded.reverse_dns, base_domain = excluded.base_domain, country_code = excluded.country_code, org = excluded.org, asn = excluded.asn, fetched_at = excluded.fetched_at`);
+				await batchStatements(db, stmts);
+			},
 			get: (ip: string) => db.select().from(ipInfo).where(eq(ipInfo.ip, ip)).get().then((r) => r ?? null),
 			upsert: (i: { ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null }) =>
 				db

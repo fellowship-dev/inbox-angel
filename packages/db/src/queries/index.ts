@@ -16,10 +16,12 @@ import { heartbeatStats } from './heartbeat';
 import { hostedQueries, intakeQueries } from './intake';
 import { monitorQueries } from './monitor';
 import { reportQueries } from './reports';
+import type { CountingMode } from './counting';
 import { settingsQueries } from './settings';
 import { teamQueries } from './team';
 
 export * from './reports';
+export { counted, type CountingMode } from './counting';
 export type { DomainClaimRow } from './claims';
 export { claimLookups } from './claims';
 export type { SenderRow, TrendRow } from './analytics';
@@ -31,10 +33,11 @@ export type { CfConnectionInfo, CfConnectionZone } from './connections';
 export { authLookups } from './auth';
 export { PlanLimitError } from './plan-limit';
 export { workspaceLifecycle, type WorkspaceSummary } from './workspaces';
-export { intakeLookups, TOKEN_ROTATION_GRACE_SECONDS, type IntakeTarget, type HostedDomainRow, type PointerStatus } from './intake';
+export { intakeLookups, STORED_ROW, UNCOUNTED_ROW, isUncountedTier, type DropRow, TOKEN_ROTATION_GRACE_SECONDS, type QuotaLimits, type QuotaResult, type QuotaScope, type FailureRow, type IntakeTarget, type HostedDomainRow, type PointerStatus } from './intake';
 export * from './heartbeat';
 export type { MtaStsMode } from './domain-config';
-export { globalQueries } from './global';
+export { globalQueries, type IpInfoRow } from './global';
+export { byteLength, chunkJson, storeStatements, JSON_PARAM_MAX_BYTES, SQL_MAX_BYTES, type RecordTuple, type StoreReportInput } from './report-store';
 export { lifecycleQueries, sweepLimits, DEFAULT_STATEMENT_BUDGET, type SweepLimits, type SweepResult, type Tombstone } from './global-lifecycle';
 export { exportQueries, EXPORT_COLUMNS, EXPORT_EXCLUDED, EXPORT_SETTING_KEYS } from './export';
 export { funnelQueries, hashEmail, type LeadRow } from './funnel';
@@ -46,16 +49,23 @@ export { funnelQueries, hashEmail, type LeadRow } from './funnel';
  *   const q = forWorkspace(env.DB, workspaceId);
  *   const domains = await q.domains.list();
  */
-export function forWorkspace(db: DbLike, workspaceId: string) {
+export interface ScopeOptions {
+	/** Which stored reports feed the numbers. Default `registry`: a caller that does not say counts only registry reporters. */
+	counting?: CountingMode;
+}
+
+export function forWorkspace(db: DbLike, workspaceId: string, opts: ScopeOptions = {}) {
 	const d = getDb(db);
+	const counting = opts.counting ?? 'registry';
 	return {
 		workspaceId,
 		metrics: metricQueries(d, workspaceId),
 		access: accessQueries(d, workspaceId),
 		domains: domainQueries(d, workspaceId),
 		claims: claimQueries(d, workspaceId),
-		reports: reportQueries(d, workspaceId),
-		analytics: analyticsQueries(d, workspaceId),
+		reports: reportQueries(d, workspaceId, counting),
+		analytics: analyticsQueries(d, workspaceId, counting),
+		counting,
 		monitor: monitorQueries(d, workspaceId),
 		settings: settingsQueries(d, workspaceId),
 		baseDomain: baseDomainQueries(d, workspaceId),
