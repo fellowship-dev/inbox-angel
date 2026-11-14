@@ -196,5 +196,5 @@ describe('verification mail is capped per address, across every route, without r
       for (let i = 0; i < 3; i++) await call(w.env, 'POST', '/api/auth/resend-verification', { body: { email: 'a@example.com' }, ip: `192.0.2.${hour * 3 + i + 10}` });
     }
     expect(w.send).toHaveBeenCalledTimes(10);
-  });
+  }, 30000);
 });

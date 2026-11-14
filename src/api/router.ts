@@ -167,7 +167,8 @@ const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 
 function withSecurityHeaders(response: Response, saas = false): Response {
   const headers = new Headers(response.headers);
-  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+  // A page that set its own Referrer-Policy (the old-style verification link's page: no-referrer) keeps it.
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) if (!(k === 'Referrer-Policy' && headers.has(k))) headers.set(k, v);
   if (saas) headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
