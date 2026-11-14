@@ -163,7 +163,7 @@ function ExistingUser({ info, token, description, signOut }: { info: InviteInfo;
 				</>
 			) : (
 				<>
-					<p className="text-sm text-ink-2">{info.email} already has an Ready Set Mail login. Sign in with it to accept; this adds the workspace to your account.</p>
+					<p className="text-sm text-ink-2">{info.email} already has a Ready Set Mail login. Sign in with it to accept; this adds the workspace to your account.</p>
 					<InlineSignIn email={info.email} token={token} />
 				</>
 			)}
