@@ -22,7 +22,7 @@ describe('extractReportCapped', () => {
 
 describe('authenticateCarrier', () => {
   it('classifies a raw message stream from its topmost authentication header', async () => {
-    const raw = 'Authentication-Results: mx.cloudflare.net; dkim=pass header.d=google.com\r\nFrom: noreply-dmarc-support@google.com\r\n\r\nbody';
+    const raw = 'Authentication-Results: mx.cloudflare.net; dkim=pass header.d=google.com\r\nDKIM-Signature: v=1; d=google.com; s=s; bh=x; b=x\r\nFrom: noreply-dmarc-support@google.com\r\n\r\nbody';
     const { carrier } = await authenticateCarrier(stream(raw), env);
     expect(carrier).toMatchObject({ class: 'registry', authenticated: true, dkimOrg: 'google.com' });
     expect((await authenticateCarrier(stream('From: a@b.example\r\n\r\nx'), env)).carrier).toMatchObject({ class: 'unauthenticated', reason: 'no_authentication_results' });

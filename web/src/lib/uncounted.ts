@@ -23,7 +23,8 @@ export interface UncountedInfo {
 	latest_at: number | null;
 	unknown?: number;
 	unauthenticated?: number;
-	by_reporter: Array<{ reporter: string; reports: number }>;
+	/** An unauthenticated sender is `unverified: true` with the org name it wrote only in `claims`. */
+	by_reporter: Array<{ reporter: string; reports: number; unverified?: boolean; claims?: string | null }>;
 }
 
 export interface ReportersInfo {
@@ -81,10 +82,15 @@ export function unrecognisedCountedNotice(v: ReportVisibilityFields | null | und
 	return n === 1 ? '1 report is from a sender we do not recognise; it is counted because this server counts every report.' : `${n} reports are from senders we do not recognise; they are counted because this server counts every report.`;
 }
 
-/** The reporters behind the uncounted reports, e.g. "From evil.example (2), other.example (1)". Null when there are none. */
+/**
+ * The reporters behind the uncounted reports, e.g. "From evil.example (2), an unverified sender (claims to be google.com) (1)". A sender that
+ * was not authenticated is never named by what it wrote: it is an unverified sender, and the name it gave is only what it claims. Null when none.
+ */
 export function uncountedReporters(v: ReportVisibilityFields | null | undefined): string | null {
 	const rows = v?.uncounted?.by_reporter ?? [];
-	return rows.length ? `From ${rows.map((r) => `${r.reporter} (${r.reports})`).join(', ')}` : null;
+	const label = (r: (typeof rows)[number]) =>
+		r.unverified ? `an unverified sender${r.claims ? ` (claims to be ${r.claims})` : ''} (${r.reports})` : `${r.reporter} (${r.reports})`;
+	return rows.length ? `From ${rows.map(label).join(', ')}` : null;
 }
 
 /** A time the server sent as ISO 8601, in the user's locale and time zone (both default to the browser's). */

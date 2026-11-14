@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ConnectReports } from '../src/components/reports/ConnectReports';
 import { READ_ONLY_REASON } from '../src/lib/session';
 import { fail, renderApp } from './render';
+import { uncountedReporters } from '../src/lib/uncounted';
 import { ownRecordFromInherited } from '@ready-set-mail/dns-checks/dmarc-rua';
 import { inheritedCoverage, offerEnforcement, recordFor } from '../src/lib/dmarc-coverage';
 
@@ -296,6 +297,17 @@ describe('Connect reports', () => {
 		show({ 'GET /api/domains/1/report-address': inherited({ parent_record: 'v=DMARC1; p=reject', policy: 'reject', policy_tag: 'p' }, null) });
 		expect(await screen.findByText(/It keeps p=reject/)).toBeInTheDocument();
 		expect(screen.queryByText(/failure-report settings/)).not.toBeInTheDocument();
+	});
+
+	it('an unverified sender is never named by what it wrote: "an unverified sender (claims to be …)"', async () => {
+		expect(uncountedReporters({ uncounted: { reports: 3, messages: 3, latest_at: null, by_reporter: [{ reporter: 'unverified sender', reports: 2, unverified: true, claims: 'google.com' }, { reporter: 'evil.example', reports: 1 }] } })).toBe(
+			'From an unverified sender (claims to be google.com) (2), evil.example (1)',
+		);
+		const pub = { kind: 'published', name: '_dmarc.example.com', record: `v=DMARC1; p=reject; rua=mailto:${ADDR}` };
+		const visibility = { report_counting: 'registry', counting_note: null, uncounted: { reports: 1, messages: 1, latest_at: NOW, unknown: 0, unauthenticated: 1, by_reporter: [{ reporter: 'unverified sender', reports: 1, unverified: true, claims: 'google.com' }] } };
+		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'waiting', reports_since_connect: 1, visibility }) });
+		expect(await screen.findByText('From an unverified sender (claims to be google.com) (1)')).toBeInTheDocument();
+		expect(screen.queryByText(/From google\.com/)).not.toBeInTheDocument();
 	});
 });
 

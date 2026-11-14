@@ -60,10 +60,10 @@ describe('1. a stranger cannot use up the unattributed budget for everyone', () 
     expect(w.rows('SELECT reporter_tier FROM aggregate_reports')).toEqual([{ reporter_tier: 'unknown' }]);
   });
 
-  it('pure volume: past the per-minute peek ceiling non-registry mail is deferred (thrown, retried), registry mail still goes through', async () => {
+  it('pure volume: past the per-minute peek ceiling non-registry mail is held back (unauthenticated refused, see final-points.test.ts), registry mail still goes through', async () => {
     const w = await world({ INTAKE_MAX_FIXED_PEEKS_PER_MINUTE: '3' });
     for (let i = 0; i < 3; i++) await w.send(`victim${i}.example`, `p${i}`);
-    await expect(w.send('a-corp.com', 'deferred')).rejects.toThrow(/busy/);
+    expect((await w.send('a-corp.com', 'held')).setReject).toHaveBeenCalledWith('The service is not accepting reports from unauthenticated senders right now');
     const google = await w.send('a-corp.com', 'google-ok', { envelope: 'noreply-dmarc-support@google.com', ar: `${ID}; dkim=pass header.d=google.com` });
     expect(google.setReject).not.toHaveBeenCalled();
     expect(w.rows("SELECT reporter_tier FROM aggregate_reports")).toEqual([{ reporter_tier: 'counted' }]);

@@ -187,8 +187,8 @@ describe('sender proof (unit)', () => {
 
   it('reads the topmost Authentication-Results and ARC-Authentication-Results from the raw header block, unfolding, ignoring the body', async () => {
     const h = await readAuthHeaders(stream('Authentication-Results: mx.a;\r\n dkim=pass header.d=a.com\r\nARC-Authentication-Results: i=1; mx.a; dkim=pass\r\nARC-Authentication-Results: i=2; evil; dkim=pass\r\nAuthentication-Results: x; dkim=pass header.d=b.com\r\n\r\nAuthentication-Results: y; in-body'));
-    expect(h).toEqual({ ar: 'mx.a; dkim=pass header.d=a.com', arc: 'i=1; mx.a; dkim=pass', from: null });
-    expect(await readAuthHeaders(stream('Subject: x\r\n\r\nbody'))).toEqual({ ar: null, arc: null, from: null });
+    expect(h).toEqual({ ar: 'mx.a; dkim=pass header.d=a.com', arc: 'i=1; mx.a; dkim=pass', from: null, dkimSignatures: 0 });
+    expect(await readAuthHeaders(stream('Subject: x\r\n\r\nbody'))).toEqual({ ar: null, arc: null, from: null, dkimSignatures: 0 });
     expect(await readAuthHeaders(null)).toEqual({ ar: null, arc: null });
   });
 

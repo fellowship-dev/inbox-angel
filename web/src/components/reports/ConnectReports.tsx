@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { errorMessage } from '../../lib/api';
-import { countingBasisNote, emptyReportsState, storageDropNotices, uncountedNotice } from '../../lib/uncounted';
+import { countingBasisNote, emptyReportsState, storageDropNotices, uncountedNotice, uncountedReporters } from '../../lib/uncounted';
 import { formatDateTime, timeAgo } from '../../lib/format';
 import {
 	useReportAddress,
@@ -152,6 +152,7 @@ function StateLine({ s }: { s: ReportAddressView }) {
 	const notes = [
 		...storageDropNotices(v),
 		uncountedNotice(v),
+		uncountedReporters(v),
 		empty === 'not_processed' || empty === 'limited' ? v?.intake?.notice ?? null : null,
 		empty === 'blocked' ? v?.counting_note ?? null : null,
 	].filter((x): x is string => !!x);

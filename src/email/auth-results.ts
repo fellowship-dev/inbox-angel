@@ -23,7 +23,8 @@
 //     the receiver whose semantics we verified. (Method versions, "dkim/1=pass", are accepted when numeric; they do not change the result.)
 //   - "none" in place of the results (no-result) yields no methods.
 //   - A property that appears twice inside one resinfo fails closed (which one the receiver meant is unknowable).
-//   - PROPERTY VALUES are checked (see below): a value a property cannot have drops that whole resinfo.
+//   - PROPERTY VALUES are checked (see below): a value a property cannot have drops that whole resinfo, and so does a non-ASCII
+//     character in a property value (a Unicode-form IDN): only that result is lost, never the whole header.
 //   - TOLERANCE. A bare "word=value" inside a resinfo (a receiver's extension such as "action=none", which RFC 8601 does not define) is
 //     not refused: it and the rest of THAT resinfo, up to the next top-level ";" (quotes and comments respected), are skipped, and the
 //     method's result and the properties read before it are kept. Skipping can lose a pass (a header.d after the extension is dropped)
@@ -243,7 +244,11 @@ export function tokenizeAuthResults(header: string): AuthResultsParse {
         cfws(comments);
         if (at() !== 0x3d) stop('"=" expected after the property');
         i++; cfws(comments);
+        // A non-ASCII character in a property value (a Unicode-form IDN in header.d or smtp.mailfrom, written by a receiver that does not
+        // convert it to A-labels) is not a value this grammar has: that whole result is dropped, the rest of the header still counts.
+        if (at() > 0x7f) { skipRest('a dropped result'); dropped = true; break; }
         const v = value();
+        if (at() > 0x7f) { skipRest('a dropped result'); dropped = true; break; }
         const key = `${word}.${property}`;
         if (key in info.props) stop(`duplicate property ${key.slice(0, 40)}`);
         if (++props > MAX_PROPS) stop('too many properties');
