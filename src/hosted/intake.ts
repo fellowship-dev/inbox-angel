@@ -126,7 +126,7 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   // The sending organisation's own allowance: a registry reporter by its id, an authenticated unknown by its DKIM organisation, an
   // unauthenticated sender by the (forgeable) envelope-sender domain it claims.
   const claimed = '~' + (message.from?.split('@').pop()?.trim().toLowerCase() || '');
-  const bucket = carrier.class === 'registry' ? registryId! : carrier.class === 'authenticated' ? carrier.dkimOrg! : claimed;
+  const bucket = carrier.class === 'registry' ? registryId! : carrier.class === 'authenticated' ? (carrier.dkimOrg ?? carrier.fromOrg!) : claimed;
   const perReports = carrier.class === 'registry' ? limits.reportsPerDay : carrier.class === 'authenticated' ? limits.unknownReportsPerReporterPerDay : limits.unauthReportsPerDay;
   const perBytes = carrier.class === 'unauthenticated' ? limits.unauthBytesPerDay : limits.bytesPerDay;
   const ok = await q.consumeReporter(target.domain_id, day, bucket, message.rawSize, perReports, perBytes);

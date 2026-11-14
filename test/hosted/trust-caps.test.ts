@@ -14,7 +14,7 @@ import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
 import { enableHosted } from '../../src/hosted/service';
 import { intakeLimits, DEFAULT_MAX_REPORTS_PER_DAY, DEFAULT_MAX_RECORDS_PER_REPORT, DEFAULT_MAX_BYTES_PER_DAY } from '../../src/hosted/config';
-import { reporterAuth } from '../../src/dmarc/reporter-auth';
+import { carrierFromHeaders, decideTier } from '../../src/dmarc/reporter-auth';
 import { makeEnv } from '../auth/helpers';
 import { makeTenant } from '../helpers/tenant';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
@@ -35,11 +35,30 @@ const send = async (w: Awaited<ReturnType<typeof twoWorkspaces>>, xml: string, o
   return m;
 };
 
-function manyRecords(domain: string, reportId: string, n: number): string {
+type W = Awaited<ReturnType<typeof twoWorkspaces>>;
+const dkimHdr = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+const asFrom = (mime: string, from: string) => mime.replace('From: noreply-dmarc-support@google.com', `From: ${from}`);
+/** A message from an authenticated sender that is NOT in the registry: From, DKIM d= and the report's own email all at `org`. */
+const sendUnknownXml = async (w: W, org: string, xml: string, o: Parameters<typeof fakeMessage>[2] = {}) => {
+  const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, asFrom(gzipReportMime(xml), `noreply-dmarc-support@${org}`), { ...dkimHdr(org), from: `noreply-dmarc-support@${org}`, ...o });
+  await handleHostedEmail(m, w.env);
+  return m;
+};
+const sendUnknown = (w: W, org: string, id: string, o: Parameters<typeof fakeMessage>[2] = {}) => sendUnknownXml(w, org, dmarcXml('a-corp.com', id, org), o);
+/** Microsoft's registry entry: From and report email dmarcreport@microsoft.com, DKIM d=microsoft.com. */
+const sendMs = async (w: W, id: string) => {
+  const xml = dmarcXml('a-corp.com', id, 'microsoft.com').replace('noreply-dmarc-support@microsoft.com', 'dmarcreport@microsoft.com');
+  const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, asFrom(gzipReportMime(xml), 'dmarcreport@microsoft.com'), { ...dkimHdr('microsoft.com'), from: 'dmarcreport@microsoft.com' });
+  await handleHostedEmail(m, w.env);
+  return m;
+};
+const dropped = (w: W) => w.rows("SELECT reason, messages FROM intake_failures WHERE reason = 'over_cap_accepted_dropped'");
+
+function manyRecords(domain: string, reportId: string, n: number, org = 'google.com'): string {
   const rec = (i: number) => `<record><row><source_ip>198.51.${Math.floor(i / 250)}.${i % 250 + 1}</source_ip><count>1</count>
     <policy_evaluated><disposition>none</disposition><dkim>pass</dkim><spf>pass</spf></policy_evaluated></row>
     <identifiers><header_from>${domain}</header_from></identifiers></record>`;
-  const base = dmarcXml(domain, reportId);
+  const base = dmarcXml(domain, reportId, org);
   return base.replace(/<record>[\s\S]*<\/record>/, Array.from({ length: n }, (_, i) => rec(i)).join('\n'));
 }
 
@@ -50,19 +69,20 @@ describe('defaults and env overrides', () => {
   });
 });
 
-describe('per-token caps', () => {
-  it('reports per day: the next one is rejected, stores nothing, and the other workspace is unaffected', async () => {
+describe('per-token caps (a counted registry reporter over a cap is accepted and dropped, never answered with a 5xx)', () => {
+  it('reports per day: the next one is accepted but not stored, counted for the owner, and the other workspace is unaffected', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTS_PER_DAY: '2' });
     for (const id of ['r1', 'r2']) expect((await send(w, dmarcXml('a-corp.com', id), GOOGLE)).setReject).not.toHaveBeenCalled();
     const over = await send(w, dmarcXml('a-corp.com', 'r3'), GOOGLE);
-    expect(over.setReject).toHaveBeenCalledOnce();
-    expect(over.setReject.mock.calls[0][0]).toMatch(/Daily intake limit/);
+    expect(over.setReject).not.toHaveBeenCalled();
+    expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 1 }]);
     expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['r1', 'r2']);
-    expect(w.rows('SELECT domain_id, workspace_id, reporter, reports FROM intake_usage')).toEqual([{ domain_id: 1, workspace_id: 'ws_a', reporter: 'google.com', reports: 2 }]);
+    expect(w.rows('SELECT domain_id, workspace_id, reporter, reports FROM intake_usage')).toEqual([{ domain_id: 1, workspace_id: 'ws_a', reporter: 'google', reports: 2 }]);
 
     const b = fakeMessage(`rua+${w.tokenB}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'rb')), GOOGLE);
     await handleHostedEmail(b, w.env);
     expect(b.setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT report_id FROM aggregate_reports WHERE domain_id = 2')).toEqual([{ report_id: 'rb' }]);
   });
 
   it('a new UTC day starts a new allowance', async () => {
@@ -71,20 +91,20 @@ describe('per-token caps', () => {
     try {
       vi.setSystemTime(new Date('2030-01-01T23:00:00Z'));
       expect((await send(w, dmarcXml('a-corp.com', 'd1'), GOOGLE)).setReject).not.toHaveBeenCalled();
-      expect((await send(w, dmarcXml('a-corp.com', 'd1b'), GOOGLE)).setReject).toHaveBeenCalledOnce();
+      expect((await send(w, dmarcXml('a-corp.com', 'd1b'), GOOGLE)).setReject).not.toHaveBeenCalled(); // dropped
+      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['d1']);
       vi.setSystemTime(new Date('2030-01-02T00:01:00Z'));
       expect((await send(w, dmarcXml('a-corp.com', 'd2'), GOOGLE)).setReject).not.toHaveBeenCalled();
+      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['d1', 'd2']);
     } finally { vi.useRealTimers(); }
   });
 
-  it('bytes per day: counted from the raw message size, refused when they would exceed the cap', async () => {
+  it('bytes per day: counted from the raw message size, dropped when they would exceed the cap', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_BYTES_PER_DAY: '1000' });
-    expect((await send(w, dmarcXml('a-corp.com', 'b1'), { ...GOOGLE, rawSize: 600 })).setReject).not.toHaveBeenCalled();
-    expect((await send(w, dmarcXml('a-corp.com', 'b2'), { ...GOOGLE, rawSize: 600 })).setReject).toHaveBeenCalledOnce();
-    expect((await send(w, dmarcXml('a-corp.com', 'b3'), { ...GOOGLE, rawSize: 400 })).setReject).not.toHaveBeenCalled(); // exactly the cap
-    expect((await send(w, dmarcXml('a-corp.com', 'b4'), { ...GOOGLE, rawSize: 1 })).setReject).toHaveBeenCalledOnce();
-    expect(w.rows('SELECT reports, bytes FROM intake_usage')).toEqual([{ reports: 2, bytes: 1000 }]);
+    for (const [id, rawSize] of [['b1', 600], ['b2', 600], ['b3', 400], ['b4', 1]] as const) expect((await send(w, dmarcXml('a-corp.com', id), { ...GOOGLE, rawSize })).setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT reports, bytes FROM intake_usage')).toEqual([{ reports: 2, bytes: 1000 }]); // b3 fits exactly
     expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['b1', 'b3']);
+    expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 2 }]);
   });
 
   it('records per report: refused before any IP enrichment fetch; nothing stored', async () => {
@@ -97,7 +117,7 @@ describe('per-token caps', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
 
-    expect((await send(w, manyRecords('a-corp.com', 'ok', 5))).setReject).not.toHaveBeenCalled();
+    expect((await send(w, manyRecords('a-corp.com', 'ok', 5), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT COUNT(*) AS n FROM report_records')[0].n).toBe(5);
   });
 
@@ -106,7 +126,7 @@ describe('per-token caps', () => {
       const w = await twoWorkspaces({ INTAKE_MAX_NEW_IPS_PER_REPORT: cap });
       const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ Status: 3 })));
       vi.stubGlobal('fetch', fetchSpy);
-      expect((await send(w, manyRecords('a-corp.com', 'ips', 6))).setReject).not.toHaveBeenCalled();
+      expect((await send(w, manyRecords('a-corp.com', 'ips', 6), GOOGLE)).setReject).not.toHaveBeenCalled();
       expect(w.rows('SELECT COUNT(*) AS n FROM report_records')[0].n).toBe(6);
       return fetchSpy.mock.calls.length;
     };
@@ -117,12 +137,48 @@ describe('per-token caps', () => {
   });
 });
 
-describe('the intake allowance: junk cannot exhaust genuine reports', () => {
-  const MS = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=microsoft.com header.s=s1' } };
-  const GRPT = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, o: Parameters<typeof fakeMessage>[2] = GOOGLE) => send(w, dmarcXml('a-corp.com', id), o);
-  const usage = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows("SELECT reporter, reports FROM intake_usage WHERE reporter <> '*' ORDER BY reporter");
+describe('caps by carrier class: records per report and IP enrichment', () => {
+  it('an authenticated unknown reporter has its own lower records cap: refused before anything is stored', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNKNOWN_RECORDS_PER_REPORT: '3' });
+    expect((await sendUnknown(w, 'stranger.example', 'u1')).setReject).not.toHaveBeenCalled();
+    const m = await sendUnknownXml(w, 'stranger.example', manyRecords('a-corp.com', 'u4', 4, 'stranger.example'));
+    expect(m.setReject).toHaveBeenCalledOnce();
+    expect(m.setReject.mock.calls[0][0]).toMatch(/4 records; the limit is 3/);
+    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'stranger.example|u1' }]);
+  });
 
-  it('junk fills its own bucket (reports), then a proven google.com report is still stored', async () => {
+  it('an unauthenticated report has the lowest records cap', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT: '2' });
+    const m = await send(w, manyRecords('a-corp.com', 'un3', 3));
+    expect(m.setReject).toHaveBeenCalledOnce();
+    expect(m.setReject.mock.calls[0][0]).toMatch(/3 records; the limit is 2/);
+    expect((await send(w, manyRecords('a-corp.com', 'un2', 2))).setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT COUNT(*) AS n FROM report_records')[0].n).toBe(2);
+  });
+
+  it('IP enrichment: a counted reporter gets the normal budget, an unknown one a smaller budget, an unauthenticated report none', async () => {
+    const lookups = async (kind: 'counted' | 'unknown' | 'unauth') => {
+      const w = await twoWorkspaces({ INTAKE_MAX_NEW_IPS_PER_REPORT: '4', INTAKE_MAX_UNKNOWN_NEW_IPS_PER_REPORT: '2' });
+      const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ Status: 3 })));
+      vi.stubGlobal('fetch', fetchSpy);
+      if (kind === 'counted') await send(w, manyRecords('a-corp.com', 'e', 6), GOOGLE);
+      else if (kind === 'unauth') await send(w, manyRecords('a-corp.com', 'e', 6));
+      else await sendUnknownXml(w, 'stranger.example', manyRecords('a-corp.com', 'e', 6, 'stranger.example'));
+      expect(w.rows('SELECT COUNT(*) AS n FROM report_records')[0].n).toBe(6);
+      return fetchSpy.mock.calls.length;
+    };
+    const counted = await lookups('counted'), unknown = await lookups('unknown'), unauth = await lookups('unauth');
+    expect(unauth).toBe(0);
+    expect(unknown).toBeGreaterThan(0);
+    expect(counted).toBe(unknown * 2);
+  });
+});
+
+describe('the intake allowance: junk cannot exhaust genuine reports', () => {
+  const GRPT = (w: W, id: string, o: Parameters<typeof fakeMessage>[2] = GOOGLE) => send(w, dmarcXml('a-corp.com', id), o);
+  const usage = (w: W) => w.rows('SELECT reporter, reports FROM intake_usage ORDER BY reporter');
+
+  it('junk fills its own bucket (reports), then a counted google report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' });
     for (let i = 0; i < 3; i++) expect((await send(w, dmarcXml('a-corp.com', 'junk' + i), { from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
     const over = await send(w, dmarcXml('a-corp.com', 'junk-over'), { from: 'x@spam.example' });
@@ -130,112 +186,134 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect(over.setReject.mock.calls[0][0]).toMatch(/Daily intake limit/);
     const g = await GRPT(w, 'genuine');
     expect(g.setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT report_id, reporter_auth, reporter_auth_domain FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ report_id: 'genuine', reporter_auth: 'pass', reporter_auth_domain: 'google.com' }]);
-    expect(usage(w)).toEqual([{ reporter: 'google.com', reports: 1 }, { reporter: '~spam.example', reports: 3 }]);
+    expect(w.rows("SELECT report_id, reporter_auth, reporter_auth_domain, reporter_tier FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ report_id: 'genuine', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_tier: 'counted' }]);
+    expect(usage(w)).toEqual([{ reporter: 'google', reports: 1 }, { reporter: '~spam.example', reports: 3 }]);
   });
 
-  it('junk fills its bucket by bytes, then a proven google.com report is still stored', async () => {
+  it('junk fills its bucket by bytes, then a counted google report is still stored', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_BYTES_PER_DAY: '1000' });
     expect((await send(w, dmarcXml('a-corp.com', 'j1'), { rawSize: 900, from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'j2'), { rawSize: 200, from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
     expect((await GRPT(w, 'genuine', { ...GOOGLE, rawSize: 1_500_000 })).setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['j1', 'genuine']);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['~unauth|j1', 'genuine']);
   });
 
-  it('a reporter at its own cap does not block another proven reporter', async () => {
+  it('a registry reporter at its own cap does not block another registry reporter', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTS_PER_DAY: '2' });
-    for (const id of ['g1', 'g2']) expect((await GRPT(w, id)).setReject).not.toHaveBeenCalled();
-    expect((await GRPT(w, 'g3')).setReject).toHaveBeenCalledOnce();
-    expect((await GRPT(w, 'm1', MS)).setReject).not.toHaveBeenCalled();
-    expect(usage(w)).toEqual([{ reporter: 'google.com', reports: 2 }, { reporter: 'microsoft.com', reports: 1 }]);
+    for (const id of ['g1', 'g2', 'g3']) expect((await GRPT(w, id)).setReject).not.toHaveBeenCalled(); // g3 accepted and dropped
+    expect((await sendMs(w, 'm1')).setReject).not.toHaveBeenCalled();
+    expect(usage(w)).toEqual([{ reporter: 'google', reports: 2 }, { reporter: 'microsoft', reports: 1 }]);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['g1', 'g2', 'm1']);
+    expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 1 }]);
   });
 
-  it('slots for unknown proven reporters: when full, the least-used one makes room instead of a new one being refused', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '2' });
-    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
-    const org = (d: string, id: string) => send(w, dmarcXml('a-corp.com', id, d), dkim(d));
-    await org('busy.example', 'b1'); await org('busy.example', 'b2'); await org('busy.example', 'b3');
-    await org('quiet.example', 'q1');
-    expect((await org('newcomer.example', 'n1')).setReject).not.toHaveBeenCalled(); // not refused
-    expect(usage(w)).toEqual([{ reporter: 'busy.example', reports: 3 }, { reporter: 'newcomer.example', reports: 1 }]); // quiet.example (least used) made room
+  it('unknown authenticated reporters: each has a small allowance of its own (refused beyond it) and they share one total per address', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY: '2', INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY: '3' });
+    expect((await sendUnknown(w, 'busy.example', 'b1')).setReject).not.toHaveBeenCalled();
+    expect((await sendUnknown(w, 'busy.example', 'b2')).setReject).not.toHaveBeenCalled();
+    const own = await sendUnknown(w, 'busy.example', 'b3');
+    expect(own.setReject).toHaveBeenCalledOnce();
+    expect(own.setReject.mock.calls[0][0]).toMatch(/Daily intake limit for this sender/);
+    expect((await sendUnknown(w, 'quiet.example', 'q1')).setReject).not.toHaveBeenCalled(); // 3rd of the total (b3 gave its place back)
+    const total = await sendUnknown(w, 'newcomer.example', 'n1');
+    expect(total.setReject).toHaveBeenCalledOnce();
+    expect(total.setReject.mock.calls[0][0]).toMatch(/senders this service does not know/);
+    expect(usage(w)).toEqual([{ reporter: 'busy.example', reports: 2 }, { reporter: 'quiet.example', reports: 1 }]);
   });
 
-  it('well-known reporters are never refused for want of a slot, and do not use one', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '1' });
-    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
-    await send(w, dmarcXml('a-corp.com', 'u1', 'cheap1.example'), dkim('cheap1.example'));
-    for (const d of ['google.com', 'apple.com', 'microsoft.com', 'linkedin.com']) expect((await send(w, dmarcXml('a-corp.com', 'k-' + d, d), dkim(d))).setReject, d).not.toHaveBeenCalled();
-    expect(usage(w).map(r => r.reporter)).toEqual(['apple.com', 'cheap1.example', 'google.com', 'linkedin.com', 'microsoft.com']);
+  it('an attacker with many cheap DKIM-signing domains cannot lock registry reporters out (they are outside the unknown total)', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY: '3' });
+    for (let i = 0; i < 12; i++) await sendUnknown(w, `cheap${i}.example`, 'junk' + i);
+    expect(w.rows("SELECT COUNT(*) AS n FROM aggregate_reports WHERE reporter_tier = 'unknown'")).toEqual([{ n: 3 }]);
+    expect((await GRPT(w, 'g1')).setReject).not.toHaveBeenCalled();
+    expect((await sendMs(w, 'm1')).setReject).not.toHaveBeenCalled();
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted' ORDER BY id")).toEqual([{ report_id: 'g1' }, { report_id: 'm1' }]);
   });
 
-  it('an attacker with many cheap DKIM-signing domains cannot lock genuine reporters out', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '3' });
-    const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
-    for (let i = 0; i < 12; i++) await send(w, dmarcXml('a-corp.com', 'junk' + i, `cheap${i}.example`), dkim(`cheap${i}.example`));
-    expect((await send(w, dmarcXml('a-corp.com', 'g1', 'google.com'), dkim('google.com'))).setReject).not.toHaveBeenCalled(); // well known
-    expect((await send(w, dmarcXml('a-corp.com', 'small1', 'smallorg.example'), dkim('smallorg.example'))).setReject).not.toHaveBeenCalled(); // unknown but genuine
-    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE report_id IN ('g1', 'small1') ORDER BY id").length).toBe(2);
+  it('unauthenticated senders share one total per address: past it the next is refused, whoever it claims to be', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY: '2' });
+    const refused: boolean[] = [];
+    for (const [i, from] of ['a@one.example', 'b@two.example', 'c@three.example'].entries()) refused.push((await send(w, dmarcXml('a-corp.com', 'o' + i), { from })).setReject.mock.calls.length > 0);
+    expect(refused).toEqual([false, false, true]);
+    expect(usage(w)).toEqual([{ reporter: '~one.example', reports: 1 }, { reporter: '~two.example', reports: 1 }]);
+    expect((await GRPT(w, 'genuine')).setReject).not.toHaveBeenCalled();
   });
 
-  it('unproven senders past the slot limit share one overflow bucket instead of being refused', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_SENDERS_PER_DAY: '1' });
-    for (const [i, from] of ['a@one.example', 'b@two.example', 'c@three.example'].entries()) expect((await send(w, dmarcXml('a-corp.com', 'o' + i), { from })).setReject).not.toHaveBeenCalled();
-    expect(usage(w)).toEqual([{ reporter: '~', reports: 2 }, { reporter: '~one.example', reports: 1 }]);
-  });
-
-  it('defaults: tight for unproven mail (10 reports, 25 MiB, 5 claimed senders, 25 in total), unchanged for proven reporters', () => {
-    expect(intakeLimits({ MODE: 'saas' })).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 100, unauthReportsPerDay: 10, unauthBytesPerDay: 26_214_400, unauthSendersPerDay: 5, unauthTotalReportsPerDay: 25, unauthRecordsPerReport: 1000 });
+  it('defaults: tight for unauthenticated mail, small for unknown reporters, unchanged for registry reporters', () => {
+    expect(intakeLimits({ MODE: 'saas' })).toMatchObject({
+      reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024,
+      unknownReportsPerReporterPerDay: 5, unknownReportsPerDay: 20, unknownRecordsPerReport: 1000, unknownNewIpsPerReport: 10,
+      unauthReportsPerDay: 5, unauthBytesPerDay: 10 * 1024 * 1024, unauthTotalReportsPerDay: 10, unauthRecordsPerReport: 200,
+      nonRegistryDecompressedBytes: 1024 * 1024,
+    });
   });
 });
 
-describe('AUTHSERV_* not set yet: nothing is proven, nothing is starved', () => {
-  it('every report is accepted, flagged "none" and charged to its claimed sender; one spoofed sender cannot take another’s bucket on its first messages', async () => {
+describe('AUTHSERV_* not set yet: nothing is authenticated, nothing is starved', () => {
+  it('every report is accepted and stored uncounted, flagged "none" and charged to its claimed sender', async () => {
     const w = await twoWorkspaces({ AUTHSERV_ID: undefined, AUTHSERV_HEADER: undefined } as any);
     expect((await send(w, dmarcXml('a-corp.com', 'u1'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'u2'), { from: 'noreply@microsoft.com' })).setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT reporter_auth FROM aggregate_reports ORDER BY id')).toEqual([{ reporter_auth: 'none' }, { reporter_auth: 'none' }]);
+    expect(w.rows('SELECT report_id, reporter_auth, reporter_tier FROM aggregate_reports ORDER BY id')).toEqual([
+      { report_id: '~unauth|u1', reporter_auth: 'none', reporter_tier: 'unauthenticated' },
+      { report_id: '~unauth|u2', reporter_auth: 'none', reporter_tier: 'unauthenticated' },
+    ]);
     expect(w.rows("SELECT reporter FROM intake_usage WHERE reporter <> '*' ORDER BY reporter")).toEqual([{ reporter: '~google.com' }, { reporter: '~microsoft.com' }]);
   });
 
-  it('junk claiming to be one sender (200 messages needed at the default) leaves other senders’ genuine reports alone', async () => {
+  it('junk claiming to be one sender leaves other senders’ reports alone', async () => {
     const w = await twoWorkspaces({ AUTHSERV_ID: undefined, AUTHSERV_HEADER: undefined, INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '3' } as any);
     for (let i = 0; i < 3; i++) await send(w, dmarcXml('a-corp.com', 'junk' + i), { from: 'x@spam.example' });
     expect((await send(w, dmarcXml('a-corp.com', 'junk-over'), { from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
     const g = await send(w, dmarcXml('a-corp.com', 'genuine'), GOOGLE);
     expect(g.setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT reporter_auth FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ reporter_auth: 'none' }]);
+    expect(w.rows("SELECT reporter_auth FROM aggregate_reports WHERE report_id = '~unauth|genuine'")).toEqual([{ reporter_auth: 'none' }]);
   });
 });
 
 describe('forged Authentication-Results cannot make a report look authenticated', () => {
   const FORGED = 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1';
-  const own = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string, rawHeaderLines: string[]) => send(w, dmarcXml('a-corp.com', id), { rawHeaderLines });
-  const stored = (w: Awaited<ReturnType<typeof twoWorkspaces>>, id: string) => w.rows('SELECT reporter_auth FROM aggregate_reports WHERE report_id = ?', id);
+  const own = (w: W, id: string, rawHeaderLines: string[]) => send(w, dmarcXml('a-corp.com', id), { rawHeaderLines });
+  const stored = (w: W, id: string) => w.rows('SELECT reporter_auth, reporter_tier FROM aggregate_reports WHERE report_id = ?', '~unauth|' + id);
 
   it('the receiver’s topmost header decides: a forged "pass" injected BELOW the receiver’s "fail" is ignored', async () => {
     const w = await twoWorkspaces();
     await own(w, 'inj', ['Authentication-Results: mx.cloudflare.net; dkim=fail header.d=google.com', 'Authentication-Results: ' + FORGED]);
-    expect(stored(w, 'inj')).toEqual([{ reporter_auth: 'fail' }]);
+    expect(stored(w, 'inj')).toEqual([{ reporter_auth: 'fail', reporter_tier: 'unauthenticated' }]);
     expect(w.rows('SELECT reporter FROM intake_usage')).toEqual([{ reporter: '~google.com' }]);
   });
 
   it('a header naming another authserv-id (the sender wrote it, the receiver did not) proves nothing, wherever it sits', async () => {
     const w = await twoWorkspaces();
     await own(w, 'other', ['Authentication-Results: attacker.example; dkim=pass header.d=google.com']);
-    expect(stored(w, 'other')).toEqual([{ reporter_auth: 'fail' }]);
+    expect(stored(w, 'other')).toEqual([{ reporter_auth: 'fail', reporter_tier: 'unauthenticated' }]);
   });
 
-  it('a forged header with the right authserv-id and a pass for an unrelated domain does not prove the claimed organisation', async () => {
+  it('a forged header with the right authserv-id and a pass for an unrelated domain does not authenticate the From organisation', async () => {
     const w = await twoWorkspaces();
     await own(w, 'wrongdom', ['Authentication-Results: mx.cloudflare.net; dkim=pass header.d=evil.example']);
-    expect(stored(w, 'wrongdom')).toEqual([{ reporter_auth: 'fail' }]);
+    expect(stored(w, 'wrongdom')).toEqual([{ reporter_auth: 'fail', reporter_tier: 'unauthenticated' }]);
   });
 
-  it('junk with forged results cannot use up google.com’s proven allowance: the forged header is not on top', async () => {
+  it('junk with forged results cannot use up google’s counted allowance: the forged header is not on top', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTS_PER_DAY: '2' });
     for (let i = 0; i < 5; i++) await send(w, dmarcXml('a-corp.com', 'forged' + i), { rawHeaderLines: ['Authentication-Results: mx.cloudflare.net; dkim=none', 'Authentication-Results: ' + FORGED] });
     expect((await send(w, dmarcXml('a-corp.com', 'genuine'), GOOGLE)).setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = 'google.com'")).toEqual([{ reports: 1 }]);
+    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = 'google'")).toEqual([{ reports: 1 }]);
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'genuine' }]);
+  });
+
+  it('an uncounted report neither squats nor displaces a real reporter’s report id', async () => {
+    const w = await twoWorkspaces();
+    const forged = { rawHeaderLines: ['Authentication-Results: attacker.example; dkim=pass header.d=google.com'] };
+    // forged first: google's report with the same id is still stored, and replaces the uncounted one
+    await send(w, dmarcXml('a-corp.com', 'same-id'), forged);
+    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports')).toEqual([{ report_id: '~unauth|same-id', reporter_tier: 'unauthenticated' }]);
+    expect((await send(w, dmarcXml('a-corp.com', 'same-id'), GOOGLE)).setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports')).toEqual([{ report_id: 'same-id', reporter_tier: 'counted' }]);
+    // google first: a later uncounted report with that id is a duplicate (not stored), the counted one is untouched
+    await send(w, dmarcXml('a-corp.com', 'same-id'), forged);
+    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports ORDER BY id')).toEqual([{ report_id: 'same-id', reporter_tier: 'counted' }]);
   });
 });
 
@@ -245,36 +323,36 @@ describe('policy_published must be the token’s domain or a subdomain', () => {
   it('rejects another domain of the same workspace, a parent, a look-alike suffix and another workspace’s domain', async () => {
     const w = await twoWorkspaces();
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'other-a.com', 'x')").run();
-    for (const d of ['other-a.com', 'corp.com', 'evila-corp.com', 'a-corp.com.evil.io', 'b-corp.org']) expect((await send(w, dmarcXml(d, 'x-' + d))).setReject, d).toHaveBeenCalledOnce();
+    for (const d of ['other-a.com', 'corp.com', 'evila-corp.com', 'a-corp.com.evil.io', 'b-corp.org']) expect((await send(w, dmarcXml(d, 'x-' + d), GOOGLE)).setReject, d).toHaveBeenCalledOnce();
     expect(filed(w)).toEqual([]);
   });
 
   it('files a subdomain under the token’s domain', async () => {
     const w = await twoWorkspaces();
-    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-1'))).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-1'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(filed(w)).toEqual([{ domain_id: 1, report_id: 'sub-1' }]);
   });
 
   it('files a subdomain under its own row when it is a verified domain of the same workspace', async () => {
     const w = await twoWorkspaces();
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x')").run();
-    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-2'))).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-2'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(filed(w)).toEqual([{ domain_id: 3, report_id: 'sub-2' }]);
   });
 
   it('does not use a subdomain verified in a different workspace', async () => {
     const w = await twoWorkspaces();
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_b', 'mail.a-corp.com', 'x')").run();
-    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-3'))).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-3'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT a.domain_id, d.workspace_id FROM aggregate_reports a JOIN domains d ON d.id = a.domain_id')).toEqual([{ domain_id: 1, workspace_id: 'ws_a' }]);
   });
 });
 
-describe('reporter_auth', () => {
+describe('reporter_auth, reporter_tier and the tier decision', () => {
   const AR = (s: string) => ({ headers: { 'authentication-results': s } });
-  const stored = (w: Awaited<ReturnType<typeof twoWorkspaces>>) => w.rows('SELECT reporter_auth, reporter_auth_domain FROM aggregate_reports ORDER BY id');
+  const stored = (w: W) => w.rows('SELECT report_id, reporter_auth, reporter_auth_domain, reporter_auth_reason, reporter_tier FROM aggregate_reports ORDER BY id');
 
-  it('pass on an aligned DKIM or DMARC pass from the receiver; fail otherwise (SPF alone proves nothing); none without a header', async () => {
+  it('an aligned DKIM pass for a registry reporter counts; a DMARC pass alone is authenticated but unknown; SPF alone proves nothing; no header is "none"', async () => {
     const w = await twoWorkspaces();
     await send(w, dmarcXml('a-corp.com', 'k'), AR('mx.cloudflare.net; dkim=pass header.d=mail.google.com header.s=s1'));
     await send(w, dmarcXml('a-corp.com', 's'), AR('mx.cloudflare.net; dkim=fail header.d=google.com; spf=pass smtp.mailfrom=bounce@google.com'));
@@ -283,13 +361,20 @@ describe('reporter_auth', () => {
     await send(w, dmarcXml('a-corp.com', 'd'), AR('mx.cloudflare.net; dmarc=pass header.from=google.com'));
     await send(w, dmarcXml('a-corp.com', 'n'));
     expect(stored(w)).toEqual([
-      { reporter_auth: 'pass', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'fail', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'pass', reporter_auth_domain: 'google.com' },
-      { reporter_auth: 'none', reporter_auth_domain: 'google.com' },
+      { report_id: 'k', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_auth_reason: null, reporter_tier: 'counted' },
+      { report_id: '~unauth|s', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
+      { report_id: '~unauth|f1', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
+      { report_id: '~unauth|f2', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
+      { report_id: 'google.com|d', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_auth_reason: 'not_in_registry', reporter_tier: 'unknown' },
+      { report_id: '~unauth|n', reporter_auth: 'none', reporter_auth_domain: null, reporter_auth_reason: 'no_authentication_results', reporter_tier: 'unauthenticated' },
     ]);
+  });
+
+  it('a registry carrier whose report email is not an accepted one is stored as unknown, never counted (a changed identity is not silently trusted)', async () => {
+    const w = await twoWorkspaces();
+    const xml = dmarcXml('a-corp.com', 'drift').replace('noreply-dmarc-support@google.com', 'someone-else@google.com');
+    expect((await send(w, xml, AR('mx.cloudflare.net; dkim=pass header.d=google.com'))).setReject).not.toHaveBeenCalled();
+    expect(stored(w)).toEqual([{ report_id: 'google|drift', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_auth_reason: 'registry_email_not_accepted', reporter_tier: 'unknown' }]);
   });
 
   it('is exposed by the reports queries (so the list/detail API carries it)', async () => {
@@ -300,17 +385,29 @@ describe('reporter_auth', () => {
     expect(await forWorkspace(w.env.DB, 'ws_a').reports.getWithDomain(1)).toMatchObject({ reporter_auth: 'pass' });
   });
 
-  it('uses the org name when the email is absent, and fails when the org is unknowable', () => {
-    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=example.org', arc: null };
+  it('decideTier: the report email decides, org_name never does; unknown needs a self-consistent identity, else unauthenticated', () => {
     const env = { AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' };
-    expect(reporterAuth(h, { org_email: '', org_name: 'Example.org' }, env)).toEqual({ result: 'pass', domain: 'example.org', reason: null });
-    expect(reporterAuth(h, { org_email: '', org_name: 'Some Org Inc' }, env)).toEqual({ result: 'fail', domain: null, reason: 'no_reporter_domain' });
+    const carrier = (ar: string, from = 'noreply-dmarc-support@google.com') => carrierFromHeaders({ ar, arc: null, from }, env);
+    const google = carrier('mx.cloudflare.net; dkim=pass header.d=google.com');
+    expect(google.class).toBe('registry');
+    expect(decideTier(google, { email: 'noreply-dmarc-support@google.com' })).toMatchObject({ tier: 'counted', identity: 'google', knownAs: 'Google', auth: 'pass' });
+    expect(decideTier(google, { email: '' })).toMatchObject({ tier: 'unknown', identity: 'google', reason: 'registry_email_not_accepted' });
+    const stranger = carrier('mx.cloudflare.net; dkim=pass header.d=example.org', 'a@example.org');
+    expect(stranger.class).toBe('authenticated');
+    expect(decideTier(stranger, { email: 'a@example.org' })).toMatchObject({ tier: 'unknown', identity: 'example.org', reason: 'not_in_registry' });
+    expect(decideTier(stranger, { email: null })).toMatchObject({ tier: 'unauthenticated', identity: '~unauth', reason: 'inconsistent_identity' });
+    expect(decideTier(stranger, { email: 'a@someone-else.net' })).toMatchObject({ tier: 'unauthenticated', reason: 'inconsistent_identity' });
   });
 
-  it('fails closed without AUTHSERV_ID / AUTHSERV_HEADER: always "none"', () => {
-    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null };
-    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, {})).toEqual({ result: 'none', domain: 'yahoo.com', reason: 'authserv_not_configured' });
-    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, { AUTHSERV_ID: 'mx.cloudflare.net' })).toEqual({ result: 'none', domain: 'yahoo.com', reason: 'authserv_not_configured' });
+  it('fails closed without AUTHSERV_ID / AUTHSERV_HEADER: unauthenticated, auth "none"', () => {
+    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null, from: 'noreply@dmarc.yahoo.com' };
+    for (const env of [{}, { AUTHSERV_ID: 'mx.cloudflare.net' }]) {
+      const c = carrierFromHeaders(h, env);
+      expect(c).toMatchObject({ class: 'unauthenticated', authenticated: false, reason: 'authserv_unconfigured', presence: 'unconfigured' });
+      expect(decideTier(c, { email: 'dmarchelp@yahooinc.com' })).toMatchObject({ tier: 'unauthenticated', auth: 'none' });
+    }
+    // with both set, the same headers are the registry's Yahoo (relaxed alignment: From noreply@dmarc.yahoo.com, d=yahoo.com)
+    expect(carrierFromHeaders(h, { AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }).class).toBe('registry');
   });
 });
 
@@ -361,42 +458,43 @@ describe('self-host decompression bombs', () => {
     const m = fakeMessage('rua@reports.acme.com', zipReportMime(dmarcXml('acme.com', 'ok-1')));
     await worker.email(m, s.env, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
-    expect(s.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'ok-1' }]);
+    expect(s.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: '~unauth|ok-1' }]); // self-host has no AUTHSERV_*: stored uncounted
   });
 });
 
-describe('a token’s daily total survives reporters coming and going', () => {
-  const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
+describe('a token’s daily totals survive reporters coming and going', () => {
+  const quota = (w: W, scope: string) => w.rows('SELECT messages, bytes FROM intake_quota WHERE scope = ?', scope);
 
-  it('evicting a reporter from its slot frees the slot only: its use still counts, so many cheap domains cannot each bring a fresh allowance', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '2', INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '5', INTAKE_MAX_REPORTS_PER_DAY: '10' });
-    const sendFrom = (d: string, id: string) => send(w, dmarcXml('a-corp.com', id, d), dkim(d));
+  it('many cheap authenticated domains cannot each bring a fresh allowance: the address’s unknown total holds', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY: '5', INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY: '10' });
     const accepted: string[] = [];
     for (let i = 0; i < 12; i++) {
-      const m = await sendFrom(`cheap${i % 4}.example`, `r${i}`);
+      const m = await sendUnknown(w, `cheap${i % 4}.example`, `r${i}`);
       if (!m.setReject.mock.calls.length) accepted.push(`r${i}`);
     }
     expect(accepted).toHaveLength(5); // the total, not 12 messages × fresh allowances
-    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 5 }]);
+    expect(quota(w, 'k:1')).toEqual([expect.objectContaining({ messages: 5 })]);
     expect(w.rows('SELECT COUNT(*) n FROM aggregate_reports')).toEqual([{ n: 5 }]);
   });
 
-  it('the total is by bytes too, and a rejected message gives back what it counted for its reporter', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_BYTES_PER_DAY: '1000' });
-    expect((await send(w, dmarcXml('a-corp.com', 'b1', 'one.example'), { ...dkim('one.example'), rawSize: 800 })).setReject).not.toHaveBeenCalled();
-    expect((await send(w, dmarcXml('a-corp.com', 'b2', 'two.example'), { ...dkim('two.example'), rawSize: 800 })).setReject).toHaveBeenCalledOnce();
-    expect(w.rows("SELECT reporter, reports, bytes FROM intake_usage WHERE reporter = 'two.example'")).toEqual([{ reporter: 'two.example', reports: 0, bytes: 0 }]);
-    expect(w.rows("SELECT bytes FROM intake_usage WHERE reporter = '*'")).toEqual([{ bytes: 800 }]);
+  it('bytes are counted per reporter, and a refused message gives back what it counted in the address totals', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_BYTES_PER_DAY: '1000' });
+    expect((await sendUnknown(w, 'one.example', 'b1', { rawSize: 800 })).setReject).not.toHaveBeenCalled();
+    expect((await sendUnknown(w, 'one.example', 'b2', { rawSize: 800 })).setReject).toHaveBeenCalledOnce();
+    expect(w.rows("SELECT reporter, reports, bytes FROM intake_usage WHERE reporter = 'one.example'")).toEqual([{ reporter: 'one.example', reports: 1, bytes: 800 }]);
+    expect(quota(w, 'k:1')).toEqual([{ messages: 1, bytes: 800 }]);
+    expect(quota(w, 'a:1')).toEqual([{ messages: 1, bytes: 800 }]);
   });
 
-  it('well-known reporters are outside the total: junk reporters exhausting it cannot block google.com', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_TOTAL_REPORTS_PER_DAY: '2' });
-    for (let i = 0; i < 4; i++) await send(w, dmarcXml('a-corp.com', 'j' + i, `cheap${i}.example`), dkim(`cheap${i}.example`));
-    expect((await send(w, dmarcXml('a-corp.com', 'g1', 'google.com'), dkim('google.com'))).setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = '*'")).toEqual([{ reports: 2 }]);
+  it('registry reporters are outside the unknown total: junk reporters exhausting it cannot block google', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY: '2' });
+    for (let i = 0; i < 4; i++) await sendUnknown(w, `cheap${i}.example`, 'j' + i);
+    expect((await send(w, dmarcXml('a-corp.com', 'g1'), dkimHdr('google.com'))).setReject).not.toHaveBeenCalled();
+    expect(quota(w, 'k:1')).toEqual([expect.objectContaining({ messages: 2 })]);
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'g1' }]);
   });
 
   it('defaults', () => {
-    expect(intakeLimits({})).toMatchObject({ totalReportsPerDay: 1000, totalBytesPerDay: 1024 * 1024 * 1024 });
+    expect(intakeLimits({})).toMatchObject({ addressMessagesPerDay: 500, workspaceMessagesPerDay: 2000, instanceMessagesPerDay: 50_000, unknownReportsPerDay: 20, unauthTotalReportsPerDay: 10 });
   });
 });
