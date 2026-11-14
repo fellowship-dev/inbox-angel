@@ -33,6 +33,20 @@ export const replyTo = (env: FunnelEnv): string | null => env.MAIL_REPLY_TO?.tri
 export const postalAddress = (env: FunnelEnv): string | null => env.POSTAL_ADDRESS?.trim() || null;
 export const bookingUrl = (env: FunnelEnv): string | null => (/^https?:\/\//i.test(env.BOOKING_URL?.trim() ?? '') ? env.BOOKING_URL!.trim() : null);
 
+/**
+ * The dashboard's "Talk to Max" link: the same BOOKING_URL, but https only and a parseable URL, because it is
+ * rendered as a link on every hosted screen. Null when unset or anything else: the dashboard then shows no link.
+ */
+export function helpUrl(env: Pick<FunnelEnv, 'BOOKING_URL'>): string | null {
+  const raw = env.BOOKING_URL?.trim() ?? '';
+  if (!/^https:\/\/[^\s/]+/i.test(raw) || /\s/.test(raw)) return null;
+  try {
+    return new URL(raw).protocol === 'https:' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ServicePrices { fix?: string; keepFixed?: string; bimi?: string }
 
 /** The offer prices, as configured. Nothing is hardcoded: an unset or malformed value means "no prices yet". */

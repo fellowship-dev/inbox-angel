@@ -208,7 +208,12 @@ export function dkimAdvice(result: string | null): string {
 	return "DKIM failed. The signature didn't match — check your private key is correctly configured in your mail provider.";
 }
 
-export function dmarcAdvice(result: string | null, policy: string | null, record: string | null): string {
+/**
+ * `hosted`: the hosted service has no `reports.<your domain>` address to send reports to, so the example record
+ * there carries no rua= (self-host keeps its reports-subdomain example).
+ */
+export function dmarcAdvice(result: string | null, policy: string | null, record: string | null, opts: { hosted?: boolean } = {}): string {
+	if (!record && opts.hosted) return 'No DMARC record found. Add a TXT record at _dmarc.yourdomain.com: "v=DMARC1; p=none" monitors without blocking any mail.';
 	if (!record) return 'No DMARC record found. Add: _dmarc.yourdomain.com TXT "v=DMARC1; p=none; rua=mailto:rua@reports.yourdomain.com"';
 	if (!result || result === 'none') return "DMARC record exists but couldn't evaluate alignment. Check SPF and DKIM are passing first.";
 	if (result === 'pass' && policy === 'reject') return 'DMARC passed with p=reject — maximum protection enabled.';

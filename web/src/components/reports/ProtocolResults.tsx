@@ -1,6 +1,7 @@
 import { Badge, CheckResult, CheckResultList } from '@inbox-angel/ui';
 import { AlertTriangle, Check, Minus, ShieldCheck, X, XCircle } from 'lucide-react';
 import { dkimAdvice, dmarcAdvice, overallMeta, protocolStatus, spfAdvice, spfStatus } from '../../lib/reports';
+import { useHosted } from '../../lib/session';
 import type { CheckResult as CheckResultRow } from '../../lib/types';
 
 const Record = ({ value }: { value: string }) => (
@@ -17,6 +18,7 @@ function Meta({ label, value }: { label: string; value: string }) {
 
 /** SPF, DKIM and DMARC for one received test email. */
 export function ProtocolResults({ result: r }: { result: CheckResultRow }) {
+	const hosted = useHosted();
 	const lookups = r.spf_lookup_count;
 	return (
 		<CheckResultList aria-label={`Results for ${r.from_domain}`}>
@@ -34,7 +36,7 @@ export function ProtocolResults({ result: r }: { result: CheckResultRow }) {
 			<CheckResult title="DKIM" status={protocolStatus(r.dkim_result)} summary={dkimAdvice(r.dkim_result)}>
 				{r.dkim_domain ? <Meta label="domain" value={r.dkim_domain} /> : null}
 			</CheckResult>
-			<CheckResult title="DMARC" status={protocolStatus(r.dmarc_result)} summary={dmarcAdvice(r.dmarc_result, r.dmarc_policy, r.dmarc_record)}>
+			<CheckResult title="DMARC" status={protocolStatus(r.dmarc_result)} summary={dmarcAdvice(r.dmarc_result, r.dmarc_policy, r.dmarc_record, { hosted })}>
 				{r.dmarc_record ? <Record value={r.dmarc_record} /> : null}
 			</CheckResult>
 		</CheckResultList>
