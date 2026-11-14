@@ -102,3 +102,19 @@ export class InvalidAggregateReport extends Error {
     this.name = 'InvalidAggregateReport';
   }
 }
+
+/** A report refused for a specific, reportable reason (src/hosted/reasons.ts): the sender is told which, and it is never retried. */
+export class ReportRejected extends InvalidAggregateReport {
+  constructor(readonly code: 'xml_invalid' | 'too_many_records' | 'field_too_long' | 'date_range_invalid', message: string) {
+    super(message);
+    this.name = 'ReportRejected';
+  }
+}
+
+/** Thrown from the parse gate to end processing of a report that is understood but must not be stored (a duplicate, an over-cap report). */
+export class ParseStop extends Error {
+  constructor(readonly outcome: 'duplicate' | 'refused', readonly code: string, message = code) {
+    super(message);
+    this.name = 'ParseStop';
+  }
+}

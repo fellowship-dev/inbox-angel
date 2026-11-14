@@ -31,7 +31,7 @@ vi.mock('../../src/dmarc/store-report', () => ({
   storeReport: vi.fn(),
 }));
 
-import { handleDmarcReport } from '../../src/email/dmarc-report';
+import { handleDmarcReport, StorageFailure } from '../../src/email/dmarc-report';
 import * as mimeExtract from '../../src/email/mime-extract';
 import * as resolveDomainMod from '../../src/email/resolve-domain';
 import * as parseEmailMod from '../../src/dmarc/parse-email';
@@ -93,7 +93,11 @@ function makeMessage(overrides: Partial<{
 }
 
 function makeEnv() {
-  return makeTenant({ db: {} });
+  const tenant = makeTenant({ db: {} });
+  // the gate asks D1 whether the report is already stored, and a storage failure is counted for the owner: stub both
+  tenant.scope.reports.findReportId = vi.fn().mockResolvedValue(null);
+  tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(1);
+  return tenant;
 }
 
 // ── Test setup ────────────────────────────────────────────────
@@ -102,7 +106,11 @@ beforeEach(() => {
   // Happy-path defaults — individual tests override as needed
   vi.mocked(mimeExtract.extractAttachmentBytes).mockResolvedValue(new Uint8Array([0x1f, 0x8b]));
   vi.mocked(resolveDomainMod.resolveDomain).mockResolvedValue(DOMAIN);
-  vi.mocked(parseEmailMod.parseDmarcEmail).mockResolvedValue(REPORT);
+  // the real parser calls the gate once the report's header is known; the mock does the same
+  vi.mocked(parseEmailMod.parseDmarcEmail).mockImplementation(async (_bytes, _offline, _db, opts) => {
+    await (opts as { gate?: (i: unknown) => Promise<void> }).gate?.({ report_id: REPORT.report_metadata.report_id, policy_domain: REPORT.policy_published.domain, org_name: REPORT.report_metadata.org_name, record_count: REPORT.records.length });
+    return REPORT;
+  });
   vi.mocked(storeReportMod.storeReport).mockResolvedValue({ stored: true, reportId: 42 });
 });
 
@@ -134,7 +142,7 @@ describe('handleDmarcReport — happy path', () => {
     await handleDmarcReport(makeMessage(), makeEnv());
 
     // parseDmarcEmail now takes (bytes, offline, db)
-    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), { maxBytes: 25 * 1024 * 1024 });
+    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), expect.objectContaining({ maxBytes: 25 * 1024 * 1024, maxRecords: 20_000, maxNewIps: 200, gate: expect.any(Function) })); // self-host: generous but bounded
   });
 
   it('calls storeReport with correct domain id', async () => {
@@ -257,17 +265,32 @@ describe('handleDmarcReport — error paths', () => {
     );
   });
 
-  it('does not call setReject when storeReport throws (storage failure is non-fatal)', async () => {
+  it('a storage failure is never accepted-and-dropped: it throws (the sender retries) and is counted for the owner', async () => {
     vi.mocked(storeReportMod.storeReport).mockRejectedValue(new Error('D1 unavailable'));
     const message = makeMessage();
-    await handleDmarcReport(message, makeEnv());
-
+    const tenant = makeEnv();
+    await expect(handleDmarcReport(message, tenant)).rejects.toBeInstanceOf(StorageFailure);
     expect(message.setReject).not.toHaveBeenCalled();
+    expect(tenant.scope.intake.markFailure).toHaveBeenCalledWith(1, expect.stringMatching(/^\d{4}-\d\d-\d\d$/), 'storage_failed', expect.any(Number));
   });
 
-  it('resolves without throwing when storeReport fails', async () => {
+  it('refuses for good once the same domain has failed too often today, so a stuck failure is not retried for days', async () => {
     vi.mocked(storeReportMod.storeReport).mockRejectedValue(new Error('D1 unavailable'));
-    const result = await handleDmarcReport(makeMessage(), makeEnv());
-    expect(result).toHaveProperty('failure_count');
+    const tenant = makeEnv();
+    tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(21);
+    const message = makeMessage();
+    const result = await handleDmarcReport(message, tenant);
+    expect(result).toMatchObject({ outcome: 'refused', reason: 'storage_failed_repeatedly' });
+    expect(message.setReject).toHaveBeenCalledWith('Report could not be stored after repeated attempts');
+  });
+
+  it('a report already stored is a duplicate: accepted, not stored again, nothing enriched', async () => {
+    const tenant = makeEnv();
+    tenant.scope.reports.findReportId = vi.fn().mockResolvedValue(7);
+    const message = makeMessage();
+    const result = await handleDmarcReport(message, tenant);
+    expect(result).toMatchObject({ outcome: 'duplicate', reason: 'duplicate' });
+    expect(storeReportMod.storeReport).not.toHaveBeenCalled();
+    expect(message.setReject).not.toHaveBeenCalled();
   });
 });

@@ -21,7 +21,7 @@ function startsWith(bytes: Uint8Array, magic: Uint8Array): boolean {
   return true;
 }
 
-const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: false });
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 
 /**
  * Extracts XML text from a .zip, .gz, raw XML, or base64-encoded version of any of the above.

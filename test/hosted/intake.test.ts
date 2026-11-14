@@ -78,7 +78,8 @@ describe('DMARC aggregate reports', () => {
     expect(spoof.setReject).toHaveBeenCalledOnce();
     expect(spoof.setReject.mock.calls[0][0]).toMatch(/Unknown domain b-corp\.org/);
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
-    expect(console.warn).toHaveBeenCalledWith('[intake] rejected', expect.stringContaining('"workspace":"ws_a"'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"reason":"domain_not_owned"'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"ws":"ws_a"'));
   });
 
   it('an unknown token is rejected with a logged reason, and never touches the database', async () => {
@@ -86,7 +87,7 @@ describe('DMARC aggregate reports', () => {
     const m = fakeMessage(`rua+${generateToken()}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).toHaveBeenCalledWith('Unknown intake token');
-    expect(console.warn).toHaveBeenCalledWith('[intake] rejected', expect.stringContaining('Unknown intake token'));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"reason":"unknown_token"'));
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
   });
 
@@ -114,13 +115,13 @@ describe('DMARC aggregate reports', () => {
   });
 
   it('caps reports at 25 MiB: a small gzip that inflates past it, and an oversized message, are rejected', async () => {
-    const w = await twoWorkspaces();
+    const w = await twoWorkspaces({ INTAKE_MAX_DECOMPRESSED_BYTES: String(25 * 1024 * 1024) }); // the 25 MiB ceiling
     const bomb = '<?xml version="1.0"?><feedback>' + ' '.repeat(26 * 1024 * 1024) + '</feedback>';
     const compressed = gzipSync(strToU8(bomb));
     expect(compressed.length).toBeLessThan(200_000);
     const m1 = fakeMessage(`rua+${w.tokenA}@${RUA}`, mimeWithAttachment(compressed, 'r.xml.gz', 'application/gzip'));
     await handleHostedEmail(m1, w.env);
-    expect(m1.setReject.mock.calls[0][0]).toMatch(/larger than/);
+    expect(m1.setReject.mock.calls[0][0]).toMatch(/too large once decompressed/);
 
     const m2 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')), { rawSize: 26 * 1024 * 1024 });
     await handleHostedEmail(m2, w.env);
@@ -128,8 +129,8 @@ describe('DMARC aggregate reports', () => {
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
   }, BIG_REPORT_TIMEOUT);
 
-  it('accepts a report just under the cap', async () => {
-    const w = await twoWorkspaces();
+  it('accepts a report just under the 25 MiB ceiling when the operator raises the decompressed cap to it', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_DECOMPRESSED_BYTES: String(25 * 1024 * 1024) });
     const big = dmarcXml('a-corp.com', 'big').replace('</feedback>', '<!--' + 'x'.repeat(20 * 1024 * 1024) + '--></feedback>');
     const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, mimeWithAttachment(gzipSync(strToU8(big)), 'r.xml.gz', 'application/gzip'));
     await handleHostedEmail(m, w.env);

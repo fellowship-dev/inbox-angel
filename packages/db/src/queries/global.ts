@@ -4,8 +4,11 @@
  * IP cache. Anything here must not return or modify tenant data.
  */
 import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
-import { getDb, type DbLike } from '../client';
+import { batchStatements, getDb, type DbLike } from '../client';
+import { chunkJson, JSON_PARAM_MAX_BYTES } from './report-store';
 import { workspaces, authAccounts, authRateLimits, sessions, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
+
+export interface IpInfoRow { ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null; fetched_at: number }
 
 type NewCheckResult = Omit<typeof checkResults.$inferInsert, 'id' | 'created_at'>;
 
@@ -146,6 +149,22 @@ export function globalQueries(dbLike: DbLike) {
 		},
 
 		ipInfo: {
+			/** Cached rows for many IPs in ONE D1 query (chunks of json_each, in one batch), whatever their age. */
+			getMany: async (ips: readonly string[]): Promise<Map<string, IpInfoRow>> => {
+				const out = new Map<string, IpInfoRow>();
+				if (!ips.length) return out;
+				const stmts = chunkJson(ips, JSON_PARAM_MAX_BYTES).map((c) => sql`SELECT ip, reverse_dns, base_domain, country_code, org, asn, fetched_at FROM ip_info WHERE ip IN (SELECT value FROM json_each(${c}))`);
+				for (const r of await batchStatements(db, stmts)) for (const row of (r.results ?? []) as IpInfoRow[]) out.set(row.ip, row);
+				return out;
+			},
+			/** Upsert many rows in ONE D1 query. */
+			putMany: async (rows: ReadonlyArray<{ ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null }>): Promise<void> => {
+				if (!rows.length) return;
+				const stmts = chunkJson(rows.map((r) => [r.ip, r.reverse_dns, r.base_domain, r.country_code, r.org, r.asn])).map((c) => sql`INSERT INTO ip_info (ip, reverse_dns, base_domain, country_code, org, asn, fetched_at)
+					SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'), unixepoch() FROM json_each(${c}) WHERE true
+					ON CONFLICT(ip) DO UPDATE SET reverse_dns = excluded.reverse_dns, base_domain = excluded.base_domain, country_code = excluded.country_code, org = excluded.org, asn = excluded.asn, fetched_at = excluded.fetched_at`);
+				await batchStatements(db, stmts);
+			},
 			get: (ip: string) => db.select().from(ipInfo).where(eq(ipInfo.ip, ip)).get().then((r) => r ?? null),
 			upsert: (i: { ip: string; reverse_dns: string | null; base_domain: string | null; country_code: string | null; org: string | null; asn: string | null }) =>
 				db

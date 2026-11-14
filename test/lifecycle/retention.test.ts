@@ -6,6 +6,7 @@ import { runRetention } from '../../src/lifecycle/retention';
 import { LIFECYCLE_CRON, runCronForWorkspaces, runDataLifecycle } from '../../src/cron';
 import { storeReport } from '../../src/dmarc/store-report';
 import { makeTenant } from '../helpers/tenant';
+import { countingD1 } from '../helpers/counting-d1';
 
 const DAY = 86400;
 const NOW = Date.UTC(2026, 9, 23, 8, 0, 0) / 1000; // 2026-10-23 08:00 UTC
@@ -103,10 +104,10 @@ describe('runRetention (self-host defaults)', () => {
     const { db, s, n } = seed();
     const rep = s.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'g', ?, ?, ?)");
     for (let i = 0; i < 10; i++) rep.run(`bulk-${i}`, ago(500), ago(499));
-    const first = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 4 } });
+    const first = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 5 } });
     expect(first).toMatchObject({ aggregate_reports: 6, aggregate_reports_truncated: true });
     expect(n("SELECT COUNT(*) n FROM aggregate_reports WHERE report_id LIKE 'bulk-%'")).toBe(5);
-    const second = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 4 } });
+    const second = await runRetention({ DB: db as any }, { now: clock, limits: { batch: 3, statements: 5 } });
     expect(second.aggregate_reports).toBe(5); // the rest of the bulk rows
     expect(second.aggregate_reports_truncated).toBeUndefined();
     expect(n("SELECT COUNT(*) n FROM aggregate_reports WHERE report_id LIKE 'bulk-%'")).toBe(0);
@@ -132,7 +133,7 @@ describe('runRetention (self-host defaults)', () => {
 
 describe('windows from the environment', () => {
   it('defaults are the published ones', () => {
-    expect(retentionPolicy({})).toEqual({ reportsDays: 395, tlsDays: 395, rawDays: 30, ipInfoDays: 30, checkResultsDays: 30, invitesDays: 30, auditDays: 365, evictedDays: 30 });
+    expect(retentionPolicy({})).toEqual({ reportsDays: 395, tlsDays: 395, rawDays: 30, ipInfoDays: 30, checkResultsDays: 30, invitesDays: 30, auditDays: 365, evictedDays: 30, intakeCounterDays: 8, intakeFailureDays: 90 });
   });
 
   it('overrides apply; garbage falls back to the default instead of disabling a window', () => {
@@ -183,18 +184,19 @@ describe('statement budget, big reports, far-future dates', () => {
     const { db, s } = seed();
     const rep = s.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end) VALUES (1, 'g', ?, ?, ?)");
     for (let i = 0; i < 40; i++) rep.run(`bulk-${i}`, ago(500), ago(499));
-    let statements = 0;
-    const counted = new Proxy(db as any, { get: (t, k) => (k === 'prepare' ? (sql: string) => { statements++; return t.prepare(sql); } : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
+    // D1 queries as Cloudflare counts them: one per run/all/first/raw, and one per batch() however many statements it holds
+    const c = countingD1(db as any, 1_000_000);
+    const counted = c.db as any;
     const report = await runRetention({ DB: counted }, { now: clock, limits: { batch: 5, statements: 6 } });
-    expect(statements).toBeLessThanOrEqual(6);
+    expect(c.count).toBeLessThanOrEqual(6);
     expect(report.aggregate_reports_truncated).toBe(true);
     expect(report.statements_left).toBe(0);
     // later sweeps got nothing this run (the budget is shared), so they are reported unfinished too
     expect(report.audit_log_truncated).toBe(true);
     // the default budget is 300
-    statements = 0;
+    c.reset(1_000_000);
     await runRetention({ DB: counted }, { now: clock });
-    expect(statements).toBeLessThanOrEqual(300);
+    expect(c.count).toBeLessThanOrEqual(300);
   });
 
   it('a report with many records is purged a bounded number of records per statement', async () => {
@@ -202,7 +204,7 @@ describe('statement budget, big reports, far-future dates', () => {
     const ins = s.prepare("INSERT INTO report_records (report_id, source_ip, disposition) VALUES (1, ?, 'none')");
     for (let i = 0; i < 25; i++) ins.run(`10.0.0.${i}`);
     // 27 records on report 1, 10 per statement: three statements empty it, and the report itself waits for the next run
-    const first = await runRetention({ DB: db as any }, { now: clock, limits: { recordBatch: 10, statements: 3 } });
+    const first = await runRetention({ DB: db as any }, { now: clock, limits: { recordBatch: 10, statements: 4 } });
     expect(first.aggregate_reports_truncated).toBe(true);
     expect(n('SELECT COUNT(*) n FROM report_records WHERE report_id = 1')).toBe(0);
     expect(n('SELECT COUNT(*) n FROM aggregate_reports WHERE id = 1')).toBe(1); // records first, then the report

@@ -45,8 +45,8 @@ function manyRecords(domain: string, reportId: string, n: number): string {
 
 describe('defaults and env overrides', () => {
   it('have sane defaults; bad values fall back', () => {
-    expect(intakeLimits({})).toMatchObject({ reportsPerDay: DEFAULT_MAX_REPORTS_PER_DAY, recordsPerReport: DEFAULT_MAX_RECORDS_PER_REPORT, bytesPerDay: DEFAULT_MAX_BYTES_PER_DAY });
-    expect(intakeLimits({ INTAKE_MAX_REPORTS_PER_DAY: '7', INTAKE_MAX_RECORDS_PER_REPORT: 'x', INTAKE_MAX_BYTES_PER_DAY: '-1' })).toMatchObject({ reportsPerDay: 7, recordsPerReport: DEFAULT_MAX_RECORDS_PER_REPORT, bytesPerDay: DEFAULT_MAX_BYTES_PER_DAY });
+    expect(intakeLimits({ MODE: 'saas' })).toMatchObject({ reportsPerDay: DEFAULT_MAX_REPORTS_PER_DAY, recordsPerReport: DEFAULT_MAX_RECORDS_PER_REPORT, bytesPerDay: DEFAULT_MAX_BYTES_PER_DAY });
+    expect(intakeLimits({ MODE: 'saas', INTAKE_MAX_REPORTS_PER_DAY: '7', INTAKE_MAX_RECORDS_PER_REPORT: 'x', INTAKE_MAX_BYTES_PER_DAY: '-1' })).toMatchObject({ reportsPerDay: 7, recordsPerReport: DEFAULT_MAX_RECORDS_PER_REPORT, bytesPerDay: DEFAULT_MAX_BYTES_PER_DAY });
   });
 });
 
@@ -164,8 +164,8 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     const w = await twoWorkspaces({ INTAKE_MAX_REPORTERS_PER_DAY: '1' });
     const dkim = (d: string) => ({ headers: { 'authentication-results': `mx.cloudflare.net; dkim=pass header.d=${d} header.s=s1` } });
     await send(w, dmarcXml('a-corp.com', 'u1', 'cheap1.example'), dkim('cheap1.example'));
-    for (const d of ['google.com', 'yahoo.com', 'microsoft.com', 'outlook.com']) expect((await send(w, dmarcXml('a-corp.com', 'k-' + d, d), dkim(d))).setReject, d).not.toHaveBeenCalled();
-    expect(usage(w).map(r => r.reporter)).toEqual(['cheap1.example', 'google.com', 'microsoft.com', 'outlook.com', 'yahoo.com']);
+    for (const d of ['google.com', 'apple.com', 'microsoft.com', 'linkedin.com']) expect((await send(w, dmarcXml('a-corp.com', 'k-' + d, d), dkim(d))).setReject, d).not.toHaveBeenCalled();
+    expect(usage(w).map(r => r.reporter)).toEqual(['apple.com', 'cheap1.example', 'google.com', 'linkedin.com', 'microsoft.com']);
   });
 
   it('an attacker with many cheap DKIM-signing domains cannot lock genuine reporters out', async () => {
@@ -183,8 +183,8 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect(usage(w)).toEqual([{ reporter: '~', reports: 2 }, { reporter: '~one.example', reports: 1 }]);
   });
 
-  it('defaults are generous for unproven senders (per claimed sender domain), tight for nobody who is proven', () => {
-    expect(intakeLimits({})).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 100, unauthReportsPerDay: 200, unauthBytesPerDay: 1024 * 1024 * 1024, unauthSendersPerDay: 50 });
+  it('defaults: tight for unproven mail (10 reports, 25 MiB, 5 claimed senders, 25 in total), unchanged for proven reporters', () => {
+    expect(intakeLimits({ MODE: 'saas' })).toMatchObject({ reportsPerDay: 50, bytesPerDay: 50 * 1024 * 1024, reportersPerDay: 100, unauthReportsPerDay: 10, unauthBytesPerDay: 26_214_400, unauthSendersPerDay: 5, unauthTotalReportsPerDay: 25, unauthRecordsPerReport: 1000 });
   });
 });
 
@@ -301,16 +301,16 @@ describe('reporter_auth', () => {
   });
 
   it('uses the org name when the email is absent, and fails when the org is unknowable', () => {
-    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null };
+    const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=example.org', arc: null };
     const env = { AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' };
-    expect(reporterAuth(h, { org_email: '', org_name: 'Yahoo.com' }, env)).toEqual({ result: 'pass', domain: 'yahoo.com' });
-    expect(reporterAuth(h, { org_email: '', org_name: 'Some Org Inc' }, env)).toEqual({ result: 'fail', domain: null });
+    expect(reporterAuth(h, { org_email: '', org_name: 'Example.org' }, env)).toEqual({ result: 'pass', domain: 'example.org', reason: null });
+    expect(reporterAuth(h, { org_email: '', org_name: 'Some Org Inc' }, env)).toEqual({ result: 'fail', domain: null, reason: 'no_reporter_domain' });
   });
 
   it('fails closed without AUTHSERV_ID / AUTHSERV_HEADER: always "none"', () => {
     const h = { ar: 'mx.cloudflare.net; dkim=pass header.d=yahoo.com', arc: null };
-    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, {})).toEqual({ result: 'none', domain: 'yahoo.com' });
-    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, { AUTHSERV_ID: 'mx.cloudflare.net' })).toEqual({ result: 'none', domain: 'yahoo.com' });
+    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, {})).toEqual({ result: 'none', domain: 'yahoo.com', reason: 'authserv_not_configured' });
+    expect(reporterAuth(h, { org_email: 'a@yahoo.com', org_name: 'Yahoo' }, { AUTHSERV_ID: 'mx.cloudflare.net' })).toEqual({ result: 'none', domain: 'yahoo.com', reason: 'authserv_not_configured' });
   });
 });
 
@@ -352,7 +352,7 @@ describe('self-host decompression bombs', () => {
     expect(m.rawSize).toBeLessThan(200_000);
     await worker.email(m, s.env, ctx);
     expect(m.setReject).toHaveBeenCalledOnce();
-    expect(m.setReject.mock.calls[0][0]).toMatch(/Invalid DMARC report/);
+    expect(m.setReject.mock.calls[0][0]).toBe('Report is too large once decompressed');
     expect(s.rows('SELECT * FROM aggregate_reports')).toEqual([]);
   });
 

@@ -24,6 +24,18 @@ export interface AuthHeaders {
   ar: string | null;
   /** Value of the topmost ARC-Authentication-Results header, unfolded (starts with `i=N;`). */
   arc: string | null;
+  /** The From header's single address, lowercased; null when the message has no From, more than one, or an address list. */
+  from?: string | null;
+}
+
+/** The one address in a From header value (`Name <a@b.c>` or `a@b.c`), lowercased, or null when it is not exactly one address. */
+export function singleAddress(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const bare = value.replace(/"(?:\\.|[^"\\])*"/g, '').replace(/\([^)]*\)/g, '');
+  const angle = [...bare.matchAll(/<([^<>]*)>/g)];
+  if (angle.length > 1 || bare.includes(',') || bare.includes(';')) return null;
+  const addr = (angle.length === 1 ? angle[0][1] : bare).trim().toLowerCase();
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(addr) ? addr : null;
 }
 
 /** The topmost Authentication-Results and ARC-Authentication-Results of a raw message. Nulls if absent or unreadable. */
@@ -50,13 +62,17 @@ export async function readAuthHeaders(raw: ReadableStream<Uint8Array> | null | u
     reader.cancel().catch(() => {});
   }
   const block = text.split(/\r?\n\r?\n/)[0].replace(/\r?\n[ \t]+/g, ' ');
-  const out: AuthHeaders = { ar: null, arc: null };
+  const out: AuthHeaders = { ar: null, arc: null, from: null };
+  let froms = 0;
   for (const line of block.split(/\r?\n/)) {
+    const from = line.match(/^from:\s*(.*)$/i);
+    if (from && ++froms === 1) out.from = singleAddress(from[1]);
     const ar = line.match(/^authentication-results:\s*(.*)$/i);
     if (ar && out.ar === null) out.ar = ar[1];
     const arc = line.match(/^arc-authentication-results:\s*(.*)$/i);
     if (arc && out.arc === null) out.arc = arc[1];
   }
+  if (froms > 1) out.from = null; // two From headers: the one DMARC judged is not knowable
   return out;
 }
 

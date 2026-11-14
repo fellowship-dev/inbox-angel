@@ -6,11 +6,36 @@
  */
 import { and, count, eq, isNull, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
-import { getDb, type DbLike } from '../client';
+import { batchStatements, getDb, type DbLike } from '../client';
 import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
+
+/** Scope and day of the instance-wide count of stored records (intake_quota): `day` is not a date, so no daily sweep matches it. */
+export const STORED_ROW = { scope: '*', day: 'total' } as const;
+
+export interface QuotaLimits {
+	/** Messages per UTC day to one report address (domain). */
+	address: number;
+	/** Messages per UTC day to one workspace. */
+	workspace: number;
+	/** Messages per UTC day to the whole instance. */
+	instance: number;
+	/** Unproven messages per UTC day to one address, over every claimed sender. */
+	unauthTotal: number;
+}
+export type QuotaScope = 'address' | 'unauth' | 'workspace' | 'instance';
+export interface QuotaResult {
+	ok: boolean;
+	/** The first cap that refused the message (nothing was counted then). */
+	refusedBy?: QuotaScope;
+	/** Stored records counted so far today for this address, for this workspace, and for the instance (live rows, not per day). */
+	addressRecordsToday: number;
+	workspaceRecords: number;
+	instanceRecords: number;
+}
+export interface FailureRow { reason: string; messages: number; last_at: number }
 
 /** The usage row that totals, per token and day, what reporters with no standing (not well known) have used. */
 export const TOTAL_ROW = '*';
@@ -108,6 +133,69 @@ export function intakeQueries(db: Db, workspaceId: string) {
 				}
 			}
 			return true;
+		},
+
+		/**
+		 * Count one message against the address, workspace and instance daily caps (and, when it is unproven, the address's unproven
+		 * total) in ONE batch: each is a conditional upsert that counts nothing once its cap is reached. When any refuses, the ones that
+		 * counted are given back (a second batch). Also returns the stored-records figures the post-parse checks need.
+		 */
+		async consumeQuota(domainId: number, day: string, bytes: number, unproven: boolean, lim: QuotaLimits): Promise<QuotaResult> {
+			const scopes: Array<[QuotaScope, string, number]> = [['address', `a:${domainId}`, lim.address], ['workspace', `w:${workspaceId}`, lim.workspace], ['instance', '*', lim.instance]];
+			if (unproven) scopes.splice(1, 0, ['unauth', `u:${domainId}`, lim.unauthTotal]);
+			const up = (scope: string, max: number) => sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, ${bytes})
+				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1, bytes = intake_quota.bytes + excluded.bytes WHERE intake_quota.messages < ${max}`;
+			const res = await batchStatements(db, [
+				...scopes.map(([, scope, max]) => up(scope, max)),
+				sql`SELECT records FROM intake_quota WHERE scope = ${'a:' + domainId} AND day = ${day}`,
+				sql`SELECT records FROM workspace_storage WHERE workspace_id = ${workspaceId}`,
+				sql`SELECT records FROM intake_quota WHERE scope = ${STORED_ROW.scope} AND day = ${STORED_ROW.day}`,
+			]);
+			const n = scopes.length;
+			const counted = scopes.map((_, i) => (res[i]?.meta?.changes ?? 0) > 0);
+			const rec = (i: number) => Number(((res[n + i]?.results ?? []) as Array<{ records: number }>)[0]?.records ?? 0);
+			const figures = { addressRecordsToday: rec(0), workspaceRecords: rec(1), instanceRecords: rec(2) };
+			const refused = counted.findIndex((c) => !c);
+			if (refused < 0) return { ok: true, ...figures };
+			await this.releaseQuota(domainId, day, bytes, scopes.filter((_, i) => counted[i]).map(([, scope]) => scope));
+			return { ok: false, refusedBy: scopes[refused][0], ...figures };
+		},
+
+		/** Give back what consumeQuota counted for a message that was then refused by a later check. `scopes` default: all four. */
+		async releaseQuota(domainId: number, day: string, bytes: number, scopes: string[] = [`a:${domainId}`, `u:${domainId}`, `w:${workspaceId}`, '*']): Promise<void> {
+			if (!scopes.length) return;
+			await batchStatements(db, scopes.map((scope) => sql`UPDATE intake_quota SET messages = MAX(0, messages - 1), bytes = MAX(0, bytes - ${bytes}) WHERE scope = ${scope} AND day = ${day}`));
+		},
+
+		/** Count one message that reached this address and was not stored (visible to the owner). Returns today's count for the reason. */
+		async markFailure(domainId: number, day: string, reason: string, nowSeconds: number): Promise<number> {
+			const rows = await db.all<{ messages: number }>(sql`INSERT INTO intake_failures (domain_id, workspace_id, day, reason, messages, last_at)
+				VALUES (${domainId}, ${workspaceId}, ${day}, ${reason}, 1, ${nowSeconds})
+				ON CONFLICT(domain_id, day, reason) DO UPDATE SET messages = intake_failures.messages + 1, last_at = excluded.last_at WHERE intake_failures.workspace_id = ${workspaceId}
+				RETURNING messages`);
+			return rows[0]?.messages ?? 0;
+		},
+
+		/** Messages that reached this address since `sinceDay` (YYYY-MM-DD) and were not stored, per reason. */
+		failures(domainId: number, sinceDay: string): Promise<FailureRow[]> {
+			return db.all<FailureRow>(sql`SELECT reason, SUM(messages) AS messages, MAX(last_at) AS last_at FROM intake_failures
+				WHERE workspace_id = ${workspaceId} AND domain_id = ${domainId} AND day >= ${sinceDay} GROUP BY reason ORDER BY last_at DESC`);
+		},
+
+		/** Today's counters for an address and its workspace, and the stored records, for the owner-visible state. */
+		async usage(domainId: number, day: string) {
+			const [q, st, inst] = await Promise.all([
+				db.all<{ scope: string; messages: number; records: number }>(sql`SELECT scope, messages, records FROM intake_quota WHERE day = ${day} AND scope IN (${'a:' + domainId}, ${'w:' + workspaceId})`),
+				db.all<{ records: number }>(sql`SELECT records FROM workspace_storage WHERE workspace_id = ${workspaceId}`),
+				db.all<{ records: number }>(sql`SELECT records FROM intake_quota WHERE scope = ${STORED_ROW.scope} AND day = ${STORED_ROW.day}`),
+			]);
+			const by = (scope: string) => q.find((r) => r.scope === scope);
+			return {
+				addressMessagesToday: by(`a:${domainId}`)?.messages ?? 0,
+				workspaceMessagesToday: by(`w:${workspaceId}`)?.messages ?? 0,
+				workspaceRecords: st[0]?.records ?? 0,
+				instanceRecords: inst[0]?.records ?? 0,
+			};
 		},
 
 		delete(domainId: number) {

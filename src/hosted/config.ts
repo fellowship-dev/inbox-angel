@@ -21,6 +21,18 @@ export interface HostedEnv {
   INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string;
   INTAKE_MAX_TOTAL_REPORTS_PER_DAY?: string;
   INTAKE_MAX_TOTAL_BYTES_PER_DAY?: string;
+  INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY?: string;
+  INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT?: string;
+  INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY?: string;
+  INTAKE_MAX_ADDRESS_RECORDS_PER_DAY?: string;
+  INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY?: string;
+  INTAKE_MAX_WORKSPACE_RECORDS?: string;
+  INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY?: string;
+  INTAKE_MAX_INSTANCE_RECORDS?: string;
+  INTAKE_MAX_DECOMPRESSED_BYTES?: string;
+  INTAKE_MAX_STORAGE_RETRIES_PER_DAY?: string;
+  INTAKE_TRUSTED_REPORTER_ADDRESSES?: string;
+  REPORT_COUNTING?: string;
   AUTHSERV_ID?: string;
   AUTHSERV_HEADER?: string;
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string;
@@ -63,9 +75,13 @@ export function hostedApex(cfg: HostedConfig): string | undefined {
 /** Defaults for the per-token intake caps and the per-workspace hosted-domain cap (each overridable by env). */
 /** Per authenticated reporter domain, per intake token, per UTC day. */
 export const DEFAULT_MAX_REPORTS_PER_DAY = 50;
-export const DEFAULT_MAX_RECORDS_PER_REPORT = 20_000;
+/** Records in one aggregate report. Measured (docs/hosted.md, "Measured limits"): parse + store of 5,000 records stays well inside the 128 MB isolate. */
+export const DEFAULT_MAX_RECORDS_PER_REPORT = 5_000;
 export const DEFAULT_MAX_BYTES_PER_DAY = 50 * 1024 * 1024;
 export const DEFAULT_MAX_NEW_IPS_PER_REPORT = 50;
+/** Self-host (one tenant, a private address, no daily caps): generous but bounded. Records and the decompressed size are limits there too. */
+export const SELFHOST_MAX_RECORDS_PER_REPORT = 20_000;
+export const SELFHOST_MAX_NEW_IPS_PER_REPORT = 200;
 /** Distinct authenticated reporter domains accepted per token per day. */
 export const DEFAULT_MAX_REPORTERS_PER_DAY = 100;
 
@@ -81,9 +97,27 @@ export const WELL_KNOWN_REPORTERS: readonly string[] = [
   'proofpoint.com', 'mimecast.com', 'cisco.com', 'barracuda.com', 'protonmail.com', 'proton.me',
 ];
 /** The one shared bucket for messages without an aligned authentication pass; never touches authenticated allowance. */
-export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 200;
-export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 1024 * 1024 * 1024;
-export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 50;
+export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 10;
+export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 25 * 1024 * 1024;
+export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 5;
+/** All unproven mail to one address per UTC day, over every claimed sender (a forger can claim any sender domain). */
+export const DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY = 25;
+/** Records in one report whose sender the receiver did not prove. */
+export const DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT = 1_000;
+/** Messages per UTC day to one report address (token), proven or not. */
+export const DEFAULT_MAX_ADDRESS_MESSAGES_PER_DAY = 500;
+/** Records stored per UTC day for one report address. */
+export const DEFAULT_MAX_ADDRESS_RECORDS_PER_DAY = 200_000;
+export const DEFAULT_MAX_WORKSPACE_MESSAGES_PER_DAY = 2_000;
+/** Report records a workspace may hold at any time (13 months of data). */
+export const DEFAULT_MAX_WORKSPACE_RECORDS = 1_000_000;
+export const DEFAULT_MAX_INSTANCE_MESSAGES_PER_DAY = 50_000;
+/** Report records the whole instance may hold: sized so the tables and their indexes stay far below D1's 10 GB database limit. */
+export const DEFAULT_MAX_INSTANCE_RECORDS = 10_000_000;
+/** Decompressed report size (the raw message may still be 25 MiB, a gzip of it far smaller). */
+export const DEFAULT_MAX_DECOMPRESSED_BYTES = 8 * 1024 * 1024;
+/** Storage failures per domain and UTC day after which a failing message is refused for good instead of being retried. */
+export const DEFAULT_MAX_STORAGE_RETRIES_PER_DAY = 20;
 /** Per token and day, across every proven reporter that is not well known (slots coming and going do not reset it). */
 export const DEFAULT_MAX_TOTAL_REPORTS_PER_DAY = 1000;
 export const DEFAULT_MAX_TOTAL_BYTES_PER_DAY = 1024 * 1024 * 1024;
@@ -106,20 +140,41 @@ export interface IntakeLimits {
   unauthSendersPerDay: number;
   totalReportsPerDay: number;
   totalBytesPerDay: number;
+  unauthTotalReportsPerDay: number;
+  unauthRecordsPerReport: number;
+  addressMessagesPerDay: number;
+  addressRecordsPerDay: number;
+  workspaceMessagesPerDay: number;
+  workspaceRecords: number;
+  instanceMessagesPerDay: number;
+  instanceRecords: number;
+  maxDecompressedBytes: number;
+  storageRetriesPerDay: number;
 }
 
 export function intakeLimits(env: HostedEnv): IntakeLimits {
+  const saas = getMode(env) === 'saas';
   return {
     reportsPerDay: positive(env.INTAKE_MAX_REPORTS_PER_DAY, DEFAULT_MAX_REPORTS_PER_DAY),
-    recordsPerReport: positive(env.INTAKE_MAX_RECORDS_PER_REPORT, DEFAULT_MAX_RECORDS_PER_REPORT),
+    recordsPerReport: positive(env.INTAKE_MAX_RECORDS_PER_REPORT, saas ? DEFAULT_MAX_RECORDS_PER_REPORT : SELFHOST_MAX_RECORDS_PER_REPORT),
     bytesPerDay: positive(env.INTAKE_MAX_BYTES_PER_DAY, DEFAULT_MAX_BYTES_PER_DAY),
-    newIpsPerReport: positive(env.INTAKE_MAX_NEW_IPS_PER_REPORT, DEFAULT_MAX_NEW_IPS_PER_REPORT),
+    newIpsPerReport: positive(env.INTAKE_MAX_NEW_IPS_PER_REPORT, saas ? DEFAULT_MAX_NEW_IPS_PER_REPORT : SELFHOST_MAX_NEW_IPS_PER_REPORT),
     reportersPerDay: positive(env.INTAKE_MAX_REPORTERS_PER_DAY, DEFAULT_MAX_REPORTERS_PER_DAY),
     unauthReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY),
     unauthBytesPerDay: positive(env.INTAKE_MAX_UNAUTH_BYTES_PER_DAY, DEFAULT_MAX_UNAUTH_BYTES_PER_DAY),
     unauthSendersPerDay: positive(env.INTAKE_MAX_UNAUTH_SENDERS_PER_DAY, DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY),
     totalReportsPerDay: positive(env.INTAKE_MAX_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_TOTAL_REPORTS_PER_DAY),
     totalBytesPerDay: positive(env.INTAKE_MAX_TOTAL_BYTES_PER_DAY, DEFAULT_MAX_TOTAL_BYTES_PER_DAY),
+    unauthTotalReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY),
+    unauthRecordsPerReport: positive(env.INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT, DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT),
+    addressMessagesPerDay: positive(env.INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY, DEFAULT_MAX_ADDRESS_MESSAGES_PER_DAY),
+    addressRecordsPerDay: positive(env.INTAKE_MAX_ADDRESS_RECORDS_PER_DAY, DEFAULT_MAX_ADDRESS_RECORDS_PER_DAY),
+    workspaceMessagesPerDay: positive(env.INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY, DEFAULT_MAX_WORKSPACE_MESSAGES_PER_DAY),
+    workspaceRecords: positive(env.INTAKE_MAX_WORKSPACE_RECORDS, DEFAULT_MAX_WORKSPACE_RECORDS),
+    instanceMessagesPerDay: positive(env.INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY, DEFAULT_MAX_INSTANCE_MESSAGES_PER_DAY),
+    instanceRecords: positive(env.INTAKE_MAX_INSTANCE_RECORDS, DEFAULT_MAX_INSTANCE_RECORDS),
+    maxDecompressedBytes: Math.min(positive(env.INTAKE_MAX_DECOMPRESSED_BYTES, saas ? DEFAULT_MAX_DECOMPRESSED_BYTES : MAX_REPORT_BYTES), MAX_REPORT_BYTES),
+    storageRetriesPerDay: positive(env.INTAKE_MAX_STORAGE_RETRIES_PER_DAY, DEFAULT_MAX_STORAGE_RETRIES_PER_DAY),
   };
 }
 

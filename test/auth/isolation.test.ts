@@ -44,11 +44,11 @@ async function world() {
   // B's data, in every workspace-owned table.
   const b = B.workspaceId;
   db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, is_default, verified_via) VALUES (2, 'b-secret.example.com', 'b-rua-secret@reports.b.test', ?, 1, 'txt')").run(b);
-  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?)").run(b);
+  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth) VALUES (10, 2, 'B-Org-Secret', 'r-b', 1700000000, 1700086400, 5, 3, 2, ?, 'pass')").run(b);
   db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (100, 10, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
   // A recent report too: the analytics endpoints only look back 180 days, and these must be able to leak if they ever scope wrongly.
   const recent = Math.floor(Date.now() / 1000) - 2 * 86400;
-  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (11, 2, 'B-Org-Secret', 'r-b-recent', ?, ?, 5, 0, 5, ?)").run(recent, recent + 86399, b);
+  db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth) VALUES (11, 2, 'B-Org-Secret', 'r-b-recent', ?, ?, 5, 0, 5, ?, 'pass')").run(recent, recent + 86399, b);
   db.sqlite.prepare("INSERT INTO report_records (id, report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (101, 11, '198.51.100.77', 5, 'none', 'fail', 'fail', 'b-secret.example.com', ?)").run(b);
   db.sqlite.prepare("INSERT INTO tls_reports (id, domain_id, org_name, date_begin, date_end, workspace_id) VALUES (20, 2, 'B-Org-Secret', 1700000000, 1700086400, ?)").run(b);
   db.sqlite.prepare("INSERT INTO spf_flatten_config (domain_id, canonical_record, flattened_record, workspace_id) VALUES (2, 'v=spf1 include:B-Spf-Secret ~all', 'v=spf1 ip4:198.51.100.77 ~all', ?)").run(b);

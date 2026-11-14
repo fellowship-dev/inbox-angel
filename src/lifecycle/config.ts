@@ -15,6 +15,10 @@ export interface RetentionEnv {
   RETENTION_INVITES_DAYS?: string;
   RETENTION_AUDIT_DAYS?: string;
   RETENTION_EVICTED_DAYS?: string;
+  /** Daily intake counters (usage, quota). Default 8: caps only need today and yesterday. */
+  RETENTION_INTAKE_COUNTERS_DAYS?: string;
+  /** "Reports we could not store" markers the owner reads. Default 90. */
+  RETENTION_INTAKE_FAILURES_DAYS?: string;
 }
 
 export interface RetentionPolicy {
@@ -27,6 +31,8 @@ export interface RetentionPolicy {
   auditDays: number;
   /** How long a domain evicted from its unproven holder keeps its report history (for export). */
   evictedDays: number;
+  intakeCounterDays: number;
+  intakeFailureDays: number;
 }
 
 /** 13 months, as days (365 + 30). */
@@ -54,5 +60,7 @@ export function retentionPolicy(env: RetentionEnv): RetentionPolicy {
     invitesDays: days(env.RETENTION_INVITES_DAYS, 30),
     auditDays: days(env.RETENTION_AUDIT_DAYS, 365),
     evictedDays: days(env.RETENTION_EVICTED_DAYS, 30),
+    intakeCounterDays: days(env.RETENTION_INTAKE_COUNTERS_DAYS, 8),
+    intakeFailureDays: days(env.RETENTION_INTAKE_FAILURES_DAYS, 90),
   };
 }

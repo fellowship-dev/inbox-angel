@@ -9,6 +9,7 @@ import { lifecycleQueries, sweepLimits, type SweepResult } from '@inbox-angel/db
 import { retentionPolicy, type RetentionEnv } from './config';
 
 const DAY = 86400;
+const dayOf = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 
 export interface RetentionOptions {
   /** The clock, in ms. Default Date.now. */
@@ -41,6 +42,11 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     ['invites', () => q.purgeInvites(ago(p.invitesDays), limits)],
     ['evicted_domains', () => q.purgeEvictedDomains(ago(p.evictedDays), limits)],
     ['audit_log', () => q.purgeAudit(ago(p.auditDays), limits)],
+    // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
+    ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
+    ['intake_failures', () => q.purgeIntakeFailures(dayOf(ago(p.intakeFailureDays)), limits)],
+    // Last: recount a few workspaces' stored records (repairs drift, counts data stored before the counters existed).
+    ['storage_reconciled', () => q.reconcileStorage(limits)],
   ];
   let failed = 0;
   for (const [name, sweep] of sweeps) {

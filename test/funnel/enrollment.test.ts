@@ -187,9 +187,19 @@ describe('sender proof (unit)', () => {
 
   it('reads the topmost Authentication-Results and ARC-Authentication-Results from the raw header block, unfolding, ignoring the body', async () => {
     const h = await readAuthHeaders(stream('Authentication-Results: mx.a;\r\n dkim=pass header.d=a.com\r\nARC-Authentication-Results: i=1; mx.a; dkim=pass\r\nARC-Authentication-Results: i=2; evil; dkim=pass\r\nAuthentication-Results: x; dkim=pass header.d=b.com\r\n\r\nAuthentication-Results: y; in-body'));
-    expect(h).toEqual({ ar: 'mx.a; dkim=pass header.d=a.com', arc: 'i=1; mx.a; dkim=pass' });
-    expect(await readAuthHeaders(stream('Subject: x\r\n\r\nbody'))).toEqual({ ar: null, arc: null });
+    expect(h).toEqual({ ar: 'mx.a; dkim=pass header.d=a.com', arc: 'i=1; mx.a; dkim=pass', from: null });
+    expect(await readAuthHeaders(stream('Subject: x\r\n\r\nbody'))).toEqual({ ar: null, arc: null, from: null });
     expect(await readAuthHeaders(null)).toEqual({ ar: null, arc: null });
+  });
+
+  it('reads the From address only when there is exactly one address in exactly one From header', async () => {
+    const from = async (raw: string) => (await readAuthHeaders(stream(raw + '\r\n\r\nbody'))).from;
+    expect(await from('From: "DMARC Reports" <Noreply-DMARC@Dmarc.Yahoo.com>')).toBe('noreply-dmarc@dmarc.yahoo.com');
+    expect(await from('From: a@b.example')).toBe('a@b.example');
+    expect(await from('From: a@b.example, c@d.example')).toBeNull();
+    expect(await from('From: a@b.example\r\nFrom: c@d.example')).toBeNull();
+    expect(await from('From: "a@evil.example" <x@b.example>')).toBe('x@b.example');
+    expect(await from('Subject: none')).toBeNull();
   });
 
   it('accepts an aligned DKIM pass or a DMARC pass for the address domain, and nothing weaker', () => {
