@@ -12,7 +12,7 @@ import { CopyField } from './CopyField';
 export const LOST_EXPLANATION = 'Another workspace verified this domain first, so it cannot be added to this one.';
 
 /** The record is not visible in public DNS yet: nothing is wrong, DNS takes a while. */
-export const NOT_VISIBLE_YET = "We don't see the record yet. DNS changes can take a few minutes to show up. Check again in a minute.";
+export const NOT_VISIBLE_YET = "We don't see the record yet. DNS changes can take a few minutes to show up. Verify again in a minute.";
 
 /** The server's 422 says the record is simply not visible yet (as opposed to a lookup that failed or another refusal). */
 const notVisibleYet = (e: unknown): boolean => e instanceof ApiError && e.status === 422 && (e.body as { code?: string } | undefined)?.code === 'not_found_yet';
@@ -104,7 +104,7 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, previ
 			<div className="flex flex-wrap gap-2">
 				{!lost ? (
 					<Button loading={verify.isPending} disabled={!canWrite} onClick={() => { setError(''); setLimit(null); verify.mutate(); }}>
-						{waiting ? 'Check again' : 'Verify'}
+						{waiting ? 'Verify again' : 'Verify'}
 					</Button>
 				) : null}
 				<Button variant="secondary" loading={remove.isPending} disabled={!canWrite} aria-label={`Remove ${claim.domain}`} onClick={() => { setError(''); remove.mutate(); }}>

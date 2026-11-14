@@ -143,11 +143,11 @@ describe('7. Verify before the record is visible', () => {
 		const user = userEvent.setup();
 		await user.click(await screen.findByRole('button', { name: 'Verify' }));
 		expect(await screen.findByRole('alert')).toHaveTextContent(NOT_VISIBLE_YET);
-		expect(NOT_VISIBLE_YET).toBe("We don't see the record yet. DNS changes can take a few minutes to show up. Check again in a minute.");
-		const again = screen.getByRole('button', { name: 'Check again' });
+		expect(NOT_VISIBLE_YET).toBe("We don't see the record yet. DNS changes can take a few minutes to show up. Verify again in a minute.");
+		const again = screen.getByRole('button', { name: 'Verify again' });
 		expect(again).toBeEnabled();
 		await user.click(again);
-		await waitFor(() => expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled());
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Verify again' })).toBeEnabled());
 	});
 
 	it('the last check, on a later visit, is a sentence, not the raw record', async () => {
