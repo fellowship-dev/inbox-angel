@@ -180,6 +180,55 @@ describe('real Workers OAuth contract',()=>{
   expect(back.searchParams.get('iss')).toBe(origin);
   expect((await db.prepare('SELECT COUNT(*) n FROM access_principals').first() as any).n).toBe(before);
  });
+ it('consent POST: the page keeps the real Origin on its own form (Referrer-Policy same-origin); foreign, null and missing origins are refused; Allow and Don\'t allow both work',async()=>{
+  const db=await runtime.getD1Database('DB');
+  await db.prepare("INSERT INTO domains(workspace_id,domain,rua_address) VALUES ('ws_default','shapes-consent-walk.com','rua@reports.example.com')").run();
+  const open=async(state:string)=>{
+   const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state,code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
+   expect(page.status).toBe(200);
+   // no-referrer made Chromium send `Origin: null` on this form's POST; same-origin keeps the real Origin there and sends nothing to other sites
+   expect(page.headers.get('referrer-policy')).toBe('same-origin');
+   const html=await page.text();
+   return {handle:html.match(/name="handle" value="([^"]+)"/)![1],cookies:cookie+'; '+cookieOf(page as unknown as Response),referer:origin+'/oauth/authorize?'+query};
+  };
+  const post=(c:{handle:string;cookies:string},headers:Record<string,string>,decision='allow')=>fetch('/oauth/authorize',{method:'POST',headers:{cookie:c.cookies,'content-type':'application/x-www-form-urlencoded',...headers},body:new URLSearchParams({handle:c.handle,decision,actions:'reports:read',selection:JSON.stringify({workspaceId:'ws_default',domain:'shapes-consent-walk.com'}),days:'7'}).toString()});
+  const c=await open('state-shapes');
+  // refused shapes leave the handle unused and nothing created
+  const before=(await db.prepare('SELECT COUNT(*) n FROM access_principals').first() as any).n;
+  const refused:Array<[string,Record<string,string>]>=[
+   ['foreign Origin',{origin:'https://evil.example','sec-fetch-site':'cross-site'}],
+   ['Origin null (what no-referrer produced)',{origin:'null','sec-fetch-site':'same-origin',referer:c.referer}],
+   ['no Origin, same-origin Referer',{referer:c.referer}],
+   ['no Origin, no Referer',{}],
+  ];
+  for(const [name,headers] of refused){
+   const r=await post(c,headers);
+   expect(r.status,name).toBe(403);
+   expect(await r.json(),name).toEqual({error:'cross-origin request rejected'});
+  }
+  expect((await db.prepare('SELECT COUNT(*) n FROM access_principals').first() as any).n).toBe(before);
+  // Chromium and Firefox: Origin + Sec-Fetch-Site + Referer; Safari before 16.4: Origin and Referer only
+  const accepted:Array<[string,Record<string,string>]>=[
+   ['Chromium/Firefox shape',{origin,'sec-fetch-site':'same-origin','sec-fetch-mode':'navigate',referer:c.referer}],
+   ['Safari shape',{origin,referer:c.referer}],
+  ];
+  for(const [name,headers] of accepted){
+   const fresh=name.startsWith('Chromium')?c:await open('state-safari');
+   const r=await post(fresh,headers);
+   expect(r.status,name+': '+await r.clone().text()).toBe(302);
+   const back=new URL(r.headers.get('location')!);
+   expect(back.origin+back.pathname,name).toBe('https://client.example/callback');
+   expect(back.searchParams.get('code'),name).toBeTruthy();
+  }
+  const d=await open('state-deny');
+  expect((await post(d,{origin:'null',referer:d.referer},'deny')).status).toBe(403);
+  const denied=await post(d,{origin,'sec-fetch-site':'same-origin',referer:d.referer},'deny');
+  expect(denied.status).toBe(302);
+  const back=new URL(denied.headers.get('location')!);
+  expect(back.searchParams.get('error')).toBe('access_denied');
+  expect(back.searchParams.get('state')).toBe('state-deny');
+ },30000);
  it('a consent form without a permission gets a plain page, not a connection',async()=>{
   const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});

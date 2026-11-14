@@ -32,6 +32,13 @@ export function req(method: string, path: string, opts: { key?: string; body?: u
 
 export const call = (env: Env, ...args: Parameters<typeof req>) => handleApi(req(...args), env, ctx);
 
+/** The verification token in an emailed link (`<origin>/#/welcome/<token>`: the token travels in the fragment). */
+export const welcomeTokenIn = (text: string): string => decodeURIComponent(text.match(/\/#\/welcome\/([^\s]+)/)![1]!);
+
+/** The welcome page's POST: confirm the address and choose the password, in one step. */
+export const completeWelcome = (env: Env, token: string, password: string, opts: { ip?: string; headers?: Record<string, string> } = {}) =>
+  call(env, 'POST', '/api/auth/welcome', { body: { token, password }, ...opts });
+
 export async function setupOwner(env: Env, email = 'owner@example.com', password = 'correct-horse-battery') {
   const res = await call(env, 'POST', '/api/auth/setup', { body: { email, password } });
   if (res.status !== 201) throw new Error(`setup failed: ${res.status} ${await res.text()}`);

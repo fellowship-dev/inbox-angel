@@ -19,7 +19,7 @@ export interface ClaimPreview {
   /** `error`: the lookup failed, so nothing is known. `missing`: DNS answered that there is no record. */
   spf: { status: 'found' | 'missing' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean };
   /** The policy that applies to the domain (inherited from the organizational domain when it has no record of its own); `issue`: a record exists but gives no policy. */
-  dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null };
+  dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null; /** pct= of the record that applies (100 when absent); null without a usable record. */ pct: number | null };
   /** `not_found` means none of the `scanned` common selectors: not that the domain has no DKIM. `wildcard`: every name answered with the same TXT record, so nothing can be said about which selectors exist. */
   dkim: { status: 'found' | 'not_found' | 'wildcard' | 'error'; selectors: string[]; scanned: number; failed: number };
   mx: { status: 'found' | 'none' | 'error' };
@@ -63,6 +63,12 @@ export function hasFreshPreview(domain: string, now = Date.now()): boolean {
   return !!hit && now - hit.at < PREVIEW_TTL_MS;
 }
 
+/** The cached view of this domain when it is still fresh (no DNS), else null: lets the moment of proof reuse what the preview read. */
+export function cachedPreview(domain: string, now = Date.now()): ClaimPreview | null {
+  const hit = cache.get(normalizeName(domain));
+  return hit && now - hit.at < PREVIEW_TTL_MS ? hit.view : null;
+}
+
 /** Same lookups as the dashboard's checks; never throws: a lookup that throws is an error. */
 async function settle<T>(run: () => Promise<T>): Promise<T | null> {
   try { return await run(); } catch { return null; }
@@ -101,6 +107,7 @@ async function lookup(domain: string, base: Resolver, checkedAt: string): Promis
     issue: facts?.issue ?? null,
     inherited_from: facts?.inherited_from ?? null,
     record: rawLookup && dmarcFactsFromLookup(rawLookup) ? (rawLookup.record?.raw ?? rawLookup.rawRecords?.join(' | ') ?? null) : null,
+    pct: facts?.pct ?? null,
   };
 
   let dkim: ClaimPreview['dkim'] = { status: 'error', selectors: [], scanned: 0, failed: 0 };

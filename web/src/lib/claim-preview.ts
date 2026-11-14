@@ -8,7 +8,8 @@ export interface ClaimPreviewData {
 	cached: boolean;
 	nxdomain: boolean;
 	spf: { status: 'found' | 'missing' | 'error'; record: string | null; lookup_count: number | null; over_limit: boolean };
-	dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null };
+	/** `pct`: pct= of the record that applies (100 when absent), null without a usable record; absent from older servers. */
+	dmarc: { status: 'found' | 'missing' | 'error'; policy: string | null; issue: 'multiple' | 'invalid' | null; inherited_from: string | null; record: string | null; pct?: number | null };
 	dkim: { status: 'found' | 'not_found' | 'wildcard' | 'error'; selectors: string[]; scanned: number; failed: number };
 	mx: { status: 'found' | 'none' | 'error' };
 	lookup_failed: string[];
@@ -26,6 +27,9 @@ export function previewAssessment(p: ClaimPreviewData): LevelAssessment | null {
 		dmarc_policy: p.dmarc.policy,
 		dmarc_issue: p.dmarc.issue,
 		dmarc_inherited_from: p.dmarc.inherited_from,
+		// The same SPF lookup and pct= judgments as the overview, from the same read.
+		spf_lookup_count: p.spf.lookup_count,
+		dmarc_pct: p.dmarc.pct,
 		dns_checked_at: Math.floor(Date.parse(p.checked_at) / 1000),
 		dkim_total: 0,
 		dkim_pass: 0,

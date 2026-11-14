@@ -13,6 +13,7 @@ import { baseUrl, isSaas, oauthProviders, trustedOrigins, type AuthEnv } from '.
 import { sendPasswordResetEmail, sendVerificationEmail } from './mail';
 import { d1RateLimitStorage } from './rate-limit';
 import { authSecret } from './secret';
+import { VERIFICATION_LINK_SECONDS, verificationMailAllowed, welcomeLink } from './welcome';
 import { assertMaySignUp, provisionUser, type SignupIntent } from './signup-policy';
 
 export const AUTH_BASE_PATH = '/api/auth';
@@ -61,13 +62,18 @@ export async function createAuth(
     emailVerification: {
       sendOnSignUp: saas,
       sendOnSignIn: saas,
-      // Verifying never signs anyone in: whoever typed the password at sign-up is not necessarily the mailbox owner, so
-      // verification becomes a set-password step (see the /verify-email route in routes.ts).
+      // Opening the link never verifies or signs in anyone: the emailed link is the welcome page (token in the fragment), and
+      // its POST verifies the address and sets the password in one step (src/auth/welcome.ts).
       autoSignInAfterVerification: false,
       afterEmailVerification: async (user) => { opts.onEmailVerified?.({ id: user.id, email: user.email }); },
-      expiresIn: 24 * 3600,
-      sendVerificationEmail: async ({ user, url }) => {
-        await sendVerificationEmail(env, user, url);
+      expiresIn: VERIFICATION_LINK_SECONDS,
+      sendVerificationEmail: async ({ user, token }) => {
+        // Every route that sends this mail comes through here, so the per-address cap counts them all.
+        if (!(await verificationMailAllowed(env, user.email))) {
+          console.warn('[auth] verification email not sent: per-address limit reached');
+          return;
+        }
+        await sendVerificationEmail(env, user, welcomeLink(origin, token));
       },
     },
 

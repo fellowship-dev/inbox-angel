@@ -33,8 +33,9 @@ describe('email verification', () => {
 		const user = userEvent.setup();
 		await user.click(await screen.findByRole('button', { name: 'Create an account' }));
 		await user.type(screen.getByLabelText('Email'), 'new@example.com');
-		await user.type(screen.getByLabelText('Password'), 'long-enough-1');
-		await user.type(screen.getByLabelText('Confirm password'), 'long-enough-1');
+		// Hosted sign-up asks for the email only: the password is chosen once, on the page the emailed link opens.
+		expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+		expect(screen.queryByLabelText('Confirm password')).not.toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Create account' }));
 		return user;
 	}

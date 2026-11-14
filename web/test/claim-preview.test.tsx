@@ -92,11 +92,12 @@ describe('ClaimPreview', () => {
 		expect(screen.getByRole('list', { name: 'Findings' })).toHaveTextContent('DMARC record is invalid');
 	});
 
-	it('over 10 lookups gets its own warning row', async () => {
-		show(view({ spf: { status: 'found', record: 'v=spf1 include:a ~all', lookup_count: 12, over_limit: true } }));
+	it('over 10 lookups is a broken SPF record: a failed finding and Level 0, said once (no second row)', async () => {
+		show(view({ spf: { status: 'found', record: 'v=spf1 include:a ~all', lookup_count: 12, over_limit: true }, dmarc: { status: 'found', policy: 'reject', issue: null, inherited_from: null, record: 'v=DMARC1; p=reject', pct: 100 } }));
 		await loaded();
-		expect(within(row('SPF')).getByText('Over 10 lookups')).toBeInTheDocument();
-		expect(within(row('SPF')).getByText('Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs 12.')).toBeInTheDocument();
+		expect(screen.getByRole('group', { name: /Level 0/ })).toBeInTheDocument();
+		expect(screen.getByRole('list', { name: 'Findings' })).toHaveTextContent('SPF over the lookup limit: 12 of 10 DNS lookups');
+		expect(screen.queryByText('Over 10 lookups')).toBeNull();
 	});
 
 	it('a domain that does not exist: no level, no findings, one "Does not resolve" row', async () => {

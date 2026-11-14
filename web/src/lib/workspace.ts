@@ -6,8 +6,8 @@
  */
 export const LAST_WORKSPACE_KEY = 'ia_workspace';
 
-/** Pages that exist before (or outside) any workspace: invite and password-reset links, and the sign-up screen the website links to. */
-const PUBLIC_PREFIXES = ['/invite/', '/reset/', '/forgot', '/signup'];
+/** Pages that exist before (or outside) any workspace: invite, password-reset and choose-your-password links, and the sign-up screen the website links to. */
+const PUBLIC_PREFIXES = ['/invite/', '/reset/', '/welcome/', '/forgot', '/signup'];
 
 export interface ParsedHash {
 	/** The workspace in the URL, if any. */

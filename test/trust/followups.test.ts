@@ -1,8 +1,7 @@
 // Follow-ups: evicting a legacy domain holder safely, and invitees who sign up through an invite.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createMigratedD1 } from '@ready-set-mail/db/testing';
-import { call, makeEnv, signupVerified, ctx } from '../auth/helpers';
-import { handleApi } from '../../src/api/router';
+import { call, makeEnv, signupVerified, completeWelcome, welcomeTokenIn } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from '../hosted/world';
 import { runRetention } from '../../src/lifecycle/retention';
@@ -105,9 +104,7 @@ describe('signing up through an invite (hosted)', () => {
     expect((await call(w.env, 'POST', `/api/invites/${inv.token}`, { body: { name: 'Friend', password: 'password-123' } })).status).toBe(201);
     expect(w.rows('SELECT COUNT(*) n FROM workspaces')[0].n).toBe(before); // no new workspace
     // verify (as the emailed link would), choose a password, sign in
-    const link = new URL(((w.send.mock.calls.at(-1) as any)[0].text as string).match(/https?:\/\/\S+verify-email\S+/)![0]);
-    const verified = await handleApi(new Request(`https://ia.example.com${link.pathname}${link.search}`), w.env, ctx);
-    const reset = await call(w.env, 'POST', '/api/auth/reset', { body: { token: verified.headers.get('location')!.split('/').pop(), password: 'chosen-password-1' } });
+    const reset = await completeWelcome(w.env, welcomeTokenIn((w.send.mock.calls.at(-1) as any)[0].text), 'chosen-password-1');
     const session = (await json(reset)).token as string;
     const me = await call(w.env, 'GET', '/api/me', { key: session });
     expect(me.status).toBe(200);
@@ -195,9 +192,7 @@ describe('a login with no workspace can start its own', () => {
     const w = await world();
     const inv = await json(await call(w.env, 'POST', '/api/team/invite', { key: w.A.token, body: { email: 'friend@example.com' } }));
     await call(w.env, 'POST', `/api/invites/${inv.token}`, { body: { name: 'Friend', password: 'password-123' } });
-    const link = new URL(((w.send.mock.calls.at(-1) as any)[0].text as string).match(/https?:\/\/\S+verify-email\S+/)![0]);
-    const verified = await handleApi(new Request(`https://ia.example.com${link.pathname}${link.search}`), w.env, ctx);
-    const session = (await json(await call(w.env, 'POST', '/api/auth/reset', { body: { token: verified.headers.get('location')!.split('/').pop(), password: 'chosen-password-1' } }))).token as string;
+    const session = (await json(await completeWelcome(w.env, welcomeTokenIn((w.send.mock.calls.at(-1) as any)[0].text), 'chosen-password-1'))).token as string;
     // the owner revokes the invite
     const id = (await json(await call(w.env, 'GET', '/api/team/invites', { key: w.A.token }))).invites[0].id;
     expect((await call(w.env, 'DELETE', `/api/team/invites/${id}`, { key: w.A.token })).status).toBe(200);

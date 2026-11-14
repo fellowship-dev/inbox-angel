@@ -90,7 +90,7 @@ a{color:var(--brand-ink);text-underline-offset:4px}
 // LogoMark from packages/ui/src/components/logo.tsx (same geometry); decorative beside the product name.
 const LOGO = '<svg viewBox="0 0 100 100" aria-hidden="true" focusable="false"><rect width="100" height="100" fill="#0b1f3a"/><ellipse cx="50" cy="23" rx="19" ry="5.5" fill="none" stroke="#fad172" stroke-width="4.5"/><rect x="20" y="38" width="60" height="40" rx="5" fill="#fad172"/><path d="M24 42 50 61 76 42" fill="none" stroke="#0b1f3a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-/** Security headers for every page rendered here: no scripts, no framing, styles and the font from this origin only. */
+/** Security headers for every page rendered here: no scripts, no framing, styles and the font from this origin only, no Referer to other sites. */
 export const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'";
 export function pageHeaders(base?: HeadersInit): Headers {
  const headers = new Headers(base);
@@ -99,7 +99,10 @@ export function pageHeaders(base?: HeadersInit): Headers {
  headers.set('Content-Security-Policy', PAGE_CSP);
  headers.set('X-Content-Type-Options', 'nosniff');
  headers.set('X-Frame-Options', 'DENY');
- headers.set('Referrer-Policy', 'no-referrer');
+ // same-origin, not no-referrer: under no-referrer a browser sends `Origin: null` on the consent form's own POST, and the
+ // strict same-origin check refuses it (connections.ts). same-origin keeps the real Origin on that POST while still sending
+ // nothing to any other site: the redirect to the app, and anything the page links to, get no Referer.
+ headers.set('Referrer-Policy', 'same-origin');
  return headers;
 }
 

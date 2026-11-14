@@ -5,6 +5,7 @@ import { admitDomain, claimView, settleClaims, type VerifiedVia } from './owners
 import { logAudit } from '../audit/log';
 import { track } from '../telemetry';
 import { lookupSpf, lookupDmarc } from '../email/dns-check';
+import { isClaimProof, recordFirstDnsCheck } from './first-check';
 import { planLimitBody, planLimits } from '../hosted/plan-limits';
 import { INVALID_DOMAIN_MESSAGE, normalizeDomainName, specialUseMessage, type DomainNameResult } from '@ready-set-mail/dns-checks';
 
@@ -168,8 +169,11 @@ export async function commitVerifiedDomain(tenant: TenantContext, domain: string
     }).catch(e => console.warn('[domain.add] monitor sub insert failed (non-fatal):', e));
   }
 
+  // A claim just proven: store its first DNS read now (one snapshot at most, which also counts the SPF lookups), so the overview
+  // shows its real level at once instead of "not checked yet".
+  if (isClaimProof(via)) await recordFirstDnsCheck(tenant, domainId, domain);
   // Background SPF lookup — fire-and-forget, doesn't block response
-  if (ctx) {
+  else if (ctx) {
     ctx.waitUntil(
       lookupSpf(domain)
         .then(spf => {

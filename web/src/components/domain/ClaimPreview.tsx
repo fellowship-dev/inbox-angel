@@ -71,7 +71,8 @@ function Result({ data, retry }: { data: ClaimPreviewData; retry: () => void }) 
 				</CheckResultList>
 			)}
 			<CheckResultList>
-				{spf.over_limit ? (
+				{/* With a level, the SPF finding above already says it (from the same lookup count); without one, say it here. */}
+				{spf.over_limit && !a ? (
 					<CheckResult status="warn" title="SPF" statusLabel="Over 10 lookups" summary={`Receivers may reject mail when SPF needs more than 10 DNS lookups. This record needs ${spf.lookup_count}.`} />
 				) : null}
 				<DkimRow dkim={data.dkim} domain={domain} retry={retry} />
