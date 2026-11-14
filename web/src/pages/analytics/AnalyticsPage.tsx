@@ -87,13 +87,13 @@ function Body({ data, days }: { data: Data; days: number }) {
 	);
 }
 
-function Frame({ q, days, setDays, title, description, eyebrow, actions, reportsOff, domainName }: { q: { isPending: boolean; isError: boolean; error: unknown; data: Data | undefined; refetch: () => unknown }; days: WindowDays; setDays: (d: WindowDays) => void; title: string; description: string; eyebrow?: React.ReactNode; actions?: React.ReactNode; reportsOff?: boolean; domainName?: string }) {
+function Frame({ q, days, setDays, title, description, eyebrow, actions, reportsOff, domainName, domainId }: { q: { isPending: boolean; isError: boolean; error: unknown; data: Data | undefined; refetch: () => unknown }; days: WindowDays; setDays: (d: WindowDays) => void; title: string; description: string; eyebrow?: React.ReactNode; actions?: React.ReactNode; reportsOff?: boolean; domainName?: string; domainId?: number }) {
 	// Hosted, before report intake: every number here comes from reports, so say why there are none instead of zeros.
 	if (reportsOff) {
 		return (
 			<div className="space-y-6">
 				<PageHeader eyebrow={eyebrow} title={title} description={description} />
-				<ReportsNotConnected domain={domainName} />
+				<ReportsNotConnected domain={domainName} domainId={domainId} />
 			</div>
 		);
 	}
@@ -127,6 +127,7 @@ export function DomainAnalyticsPage() {
 			q={q}
 			reportsOff={reportsOff}
 			domainName={domain?.domain}
+			domainId={domain?.id}
 			days={days}
 			setDays={setDays}
 			title={`Analytics: ${name}`}

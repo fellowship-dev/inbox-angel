@@ -5,7 +5,7 @@
  */
 
 /** The newest migration this build of the code depends on. Bump with every new migration. */
-export const REQUIRED_MIGRATION = '0010_reports_connected_at.sql';
+export const REQUIRED_MIGRATION = '0011_reports_connected_at.sql';
 
 export class SchemaNotReadyError extends Error {
 	constructor(detail: string) {

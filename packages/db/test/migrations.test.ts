@@ -66,12 +66,13 @@ describe('0009 claim_settled', () => {
 	});
 });
 
-describe('0010 reports_connected_at', () => {
+describe('0011 reports_connected_at', () => {
 	it('adds one nullable column: existing domains stay not connected', () => {
 		const d = createTestD1();
 		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
 		d.sqlite.prepare("INSERT INTO domains (domain, rua_address) VALUES ('acme.com', '')").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0010_reports_connected_at.sql']);
+		// Whatever lands between 0009 and this one (0010 is the intake-hardening migration), 0011 is applied last.
+		expect(applyMigrations(d.sqlite).at(-1)).toBe('0011_reports_connected_at.sql');
 		expect(d.sqlite.prepare('SELECT domain, reports_connected_at FROM domains').all()).toEqual([{ domain: 'acme.com', reports_connected_at: null }]);
 		const cols = d.sqlite.prepare("SELECT \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name = 'reports_connected_at'").all() as any[];
 		expect(cols).toEqual([{ nn: 0, dv: null }]);
