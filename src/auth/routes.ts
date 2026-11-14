@@ -16,6 +16,7 @@ import type { SignupIntent } from './signup-policy';
 import { currentUser, passesCsrfCheck } from './session';
 import { verifyBootstrapProof } from './bootstrap';
 import { verifyTurnstile } from './turnstile';
+import { hostedServiceUrl } from '../hosted-service';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number, code?: string) => json({ error: message, ...(code ? { code } : {}) }, status);
@@ -120,13 +121,19 @@ async function limited(env: Env, request: Request): Promise<boolean> {
   return !success;
 }
 
+/** The Turnstile secret in force: hosted env var, else the platform setting. Used by the bot check and by the status route, so both agree. */
+const turnstileSecret = async (env: Env) => (isSaas(env) ? env.TURNSTILE_SECRET_KEY : undefined) || (await platform(env).settings.get('turnstile_secret_key'))?.value || undefined;
+
+/** The public site key the page renders the widget with. */
+const turnstileSiteKey = async (env: Env) => (isSaas(env) && env.TURNSTILE_SITE_KEY ? env.TURNSTILE_SITE_KEY : (await platform(env).settings.get('turnstile_site_key'))?.value) || null;
+
 /**
  * Bot check. A configured Turnstile secret (hosted: TURNSTILE_SECRET_KEY; else the platform setting) requires a valid
  * token. Hosted fails closed: without a secret nobody can sign up, so a misconfiguration cannot turn InboxAngel into
  * an open mail relay. Returns the refusal, or null to carry on.
  */
 async function botCheck(env: Env, request: Request, token: string | undefined): Promise<Response | null> {
-  const secret = (isSaas(env) ? env.TURNSTILE_SECRET_KEY : undefined) || (await platform(env).settings.get('turnstile_secret_key'))?.value;
+  const secret = await turnstileSecret(env);
   if (!secret) return isSaas(env) ? err('sign-up is unavailable: bot protection is not configured on this service', 503) : null;
   if (!token || !(await verifyTurnstile(token, secret, request.headers.get('CF-Connecting-IP') ?? ''))) return err('Bot check failed', 403);
   return null;
@@ -171,21 +178,29 @@ export async function handleAuthRoute(
     // when they are signed in; an anonymous visitor gets the self-host instance's, or nothing in saas.
     const t = await tenantFor();
     const mine = !saas || !!t.userId ? t : null;
-    const [tsKeyRow, customDomainRow, telemetryRow] = await Promise.all([
-      isSaas(env) && env.TURNSTILE_SITE_KEY ? Promise.resolve({ value: env.TURNSTILE_SITE_KEY }) : platform(env).settings.get('turnstile_site_key'),
+    const [siteKey, secret, customDomainRow, telemetryRow] = await Promise.all([
+      turnstileSiteKey(env),
+      saas ? turnstileSecret(env) : null,
       mine?.scope.settings.get('custom_domain') ?? null,
       mine?.scope.settings.get('telemetry_opted_in') ?? null,
     ]);
     const existingDomains = mine ? await mine.scope.domains.list() : [];
     const baseDomain = mine?.settings.baseDomain;
+    // Hosted without bot protection: sign-up and login both fail closed (503, see botCheck: a login of an unverified address sends mail),
+    // and the page cannot render the widget without the site key. Say so, so the page does not offer a form that cannot work.
+    const noBotProtection = saas && (!secret || !siteKey);
     return json({
       configured,
       mode: saas ? 'saas' : 'self-host',
-      signup_open: saas,
+      // Self-host only, and only when HOSTED_SERVICE_URL is set: the installer-proof screen mentions it once.
+      ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
+      signup_open: saas && !noBotProtection,
+      signin_available: !noBotProtection,
+      ...(noBotProtection ? { signup_unavailable_reason: 'bot_protection_not_configured' } : {}),
       oauth_providers: enabledOAuthProviders(env),
       prefill: { name: '', email: '' },
       telemetry_default: telemetryRow?.value === 'true',
-      turnstile_site_key: tsKeyRow?.value ?? null,
+      turnstile_site_key: siteKey,
       custom_domain: customDomainRow?.value ?? null,
       base_domain: baseDomain ?? null,
       has_domain: existingDomains.length > 0 || !!baseDomain,

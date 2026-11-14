@@ -2,11 +2,12 @@ import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
-import { readSignupDomain } from '../../lib/signup-intent';
+import { bindSignupDomainToEmail, readSignupDomain } from '../../lib/signup-intent';
 import { useSession } from '../../lib/session';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
+import { HostedAlternative } from '../../components/HostedAlternative';
 
 const PROVIDER_LABELS: Record<string, string> = { github: 'GitHub', google: 'Google' };
 
@@ -34,6 +35,10 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
+	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either.
+	if (status.signin_available === false && status.signup_unavailable_reason === 'bot_protection_not_configured') {
+		return <AuthLayout title="Inbox Angel"><Alert variant="warning">Sign-up and sign-in are not available on this instance yet: bot protection is not configured.</Alert></AuthLayout>;
+	}
 	const mode: Mode = !status.configured ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
 	const registering = mode !== 'signin';
 	const providers = status.oauth_providers.filter((p) => p in PROVIDER_LABELS);
@@ -52,6 +57,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			const turnstile = cf ? { cf_turnstile_token: cf } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
+			if (mode === 'signup') bindSignupDomainToEmail(email);
 			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Inbox-Angel-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
 			if (res.verification_required) {
@@ -128,6 +134,8 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 					{mode === 'signin' ? 'Sign in' : 'Create account'}
 				</Button>
 			</form>
+
+			{mode === 'setup' ? <HostedAlternative url={status.hosted_service_url} /> : null}
 
 			{mode === 'signin' ? (
 				<p className="text-center text-sm">

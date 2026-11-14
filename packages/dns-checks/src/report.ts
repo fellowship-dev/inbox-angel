@@ -53,6 +53,8 @@ export interface CheckDomainOptions extends ResolverOptions {
   resolver?: Resolver;
   /** DKIM selectors to probe. Default: COMMON_DKIM_SELECTORS */
   dkimSelectors?: readonly string[];
+  /** Names the random wildcard probe (16 hex digits); injectable for tests. */
+  dkimProbeHex?: () => string;
 }
 
 const LABELS: Record<Level, string> = { 0: 'Unprotected', 1: 'Monitoring', 2: 'Enforced', 3: 'Hardened' };
@@ -102,7 +104,7 @@ export function gradeReport(r: Omit<DomainReport, 'grade' | 'errors' | 'provider
     const checks: [boolean, string, string][] = [
       [dmarcGrade === 'strict', 'DMARC is not p=reject', 'Move DMARC to p=reject.'],
       [spfFirm, 'SPF is not -all/~all', 'End SPF with -all or ~all.'],
-      [keyFound, r.dkim.errors.length ? 'No DKIM key found among probed selectors (some lookups failed)' : 'No DKIM key found among common selectors', 'Publish DKIM keys and confirm them in DMARC reports.'],
+      [keyFound, r.dkim.wildcard ? "DKIM can't be checked: every name under the domain answers with the same TXT record" : r.dkim.errors.length ? 'No DKIM key found among probed selectors (some lookups failed)' : 'No DKIM key found among common selectors', r.dkim.wildcard ? 'Confirm your DKIM signing in DMARC reports: public DNS cannot show which selectors exist.' : 'Publish DKIM keys and confirm them in DMARC reports.'],
       [mtaEnforce, r.mtaSts.status === 'error' ? 'MTA-STS could not be checked' : 'MTA-STS is not in enforce mode', 'Publish an MTA-STS policy and move it to mode: enforce.'],
     ];
     const missing = checks.filter(c => !c[0]);
@@ -125,7 +127,7 @@ export async function checkDomain(domain: string, options: CheckDomainOptions = 
     lookupMx(resolver, name),
     analyzeSpf(name, resolver),
     lookupDmarc(resolver, name),
-    scanDkimSelectors(resolver, name, options.dkimSelectors ?? COMMON_DKIM_SELECTORS),
+    scanDkimSelectors(resolver, name, options.dkimSelectors ?? COMMON_DKIM_SELECTORS, { randomHex: options.dkimProbeHex }),
     lookupMtaSts(resolver, name),
     lookupBimi(resolver, name),
     lookupNs(resolver, name),

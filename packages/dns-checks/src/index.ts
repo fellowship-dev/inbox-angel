@@ -3,6 +3,7 @@ export * from './org-domain';
 export * from './spf';
 export * from './dmarc';
 export * from './dkim';
+export * from './domain-name';
 export * from './mx';
 export * from './mta-sts';
 export * from './bimi';

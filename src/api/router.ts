@@ -74,6 +74,7 @@
 import type { BoundEnv as Env } from '../index';
 import { AuthError } from './auth';
 import { version } from '../../package.json';
+import { hostedServiceUrl } from '../hosted-service';
 import { globals } from '../db/scope';
 import { handleAuthRoute } from '../auth/routes';
 import { handleAccessRoutes } from '../access/routes';
@@ -101,10 +102,10 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { DomainServiceError, assertDomainRoom, domainCap, enrollDomain, commitVerifiedDomain } from '../domains/service';
+import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
-import { claimPreviewResponse } from '../domains/claim-preview';
+import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -117,7 +118,7 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDmarcRecord, isSpfRecord } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
 import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
 import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
@@ -468,6 +469,8 @@ async function _handleApi(
       latest,
       update_available: latest !== null && latest !== version,
       release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
+      // Only when HOSTED_SERVICE_URL is set on a self-hosted installation (src/hosted-service.ts).
+      ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
     });
   }
 
@@ -619,6 +622,7 @@ async function _handleApi(
   if (path === '/api/me' && method === 'GET') {
     return json({
       instance_owner: instanceOwner,
+      ...(instanceOwner && getMode(env) === 'saas' ? { dns_preview_limiter: dnsPreviewLimiter(env) } : {}),
       user: userBySession,
       role: workspace.role ?? 'member',
       workspace_id: tenant.workspaceId,
@@ -635,8 +639,9 @@ async function _handleApi(
       const body = await parseBody<{ domain?: string }>(request);
       if (!body.domain || typeof body.domain !== 'string') return err('domain is required', 400);
 
-      const domain = body.domain.toLowerCase().trim();
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return err('invalid domain format', 400);
+      const named = normalizeDomainName(body.domain);
+      if (!named.ok) return json(domainRefusal(named), 400);
+      const domain = named.domain;
 
       // Hosted plan cap, advisory: no claim for a domain that can never be added (the insert below enforces it exactly).
       if (!(await tenant.scope.domains.getByName(domain))) await assertDomainRoom(tenant);
@@ -735,6 +740,13 @@ async function _handleApi(
     if (claimVerifyMatch && method === 'POST') {
       const claim = await tenant.scope.claims.getById(parseInt(claimVerifyMatch[1], 10));
       if (!claim) return err('claim not found', 404);
+      // Already added (a second tab, a double click, two requests at once, a retry after a settled claim): say so, whatever the cap and whatever DNS says now.
+      const added = await resumeExistingDomain(tenant, claim.domain);
+      if (added) {
+        await tenant.scope.claims.settle(claim.domain, added.domain.id); // a claim for a domain the workspace has is settled, never left open
+        return json(added, 200);
+      }
+      if (claim.settled_at !== null) return err('claim not found', 404); // it became a domain that has since been removed
       await assertDomainRoom(tenant); // at the hosted cap: nothing is verified (or evicted from anyone) for a domain that cannot be added; the claim stays pending
       const outcome = await verifyClaim(tenant, claim);
       if (outcome.kind === 'taken') return json({ error: 'another workspace has already verified this domain', code: 'domain_taken', claim: claimView({ ...claim, status: 'lost' }) }, 409);
@@ -746,14 +758,14 @@ async function _handleApi(
     const claimPreviewMatch = path.match(/^\/api\/domains\/claims\/(\d+)\/preview$/);
     if (claimPreviewMatch && method === 'GET') {
       const claim = await tenant.scope.claims.getById(parseInt(claimPreviewMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       return await claimPreviewResponse(tenant, claim, { userId: workspace.userId });
     }
     // DELETE /api/domains/claims/:id — give up a pending claim
     const claimDeleteMatch = path.match(/^\/api\/domains\/claims\/(\d+)$/);
     if (claimDeleteMatch && method === 'DELETE') {
       const claim = await tenant.scope.claims.getById(parseInt(claimDeleteMatch[1], 10));
-      if (!claim) return err('claim not found', 404);
+      if (!claim || claim.settled_at !== null) return err('claim not found', 404);
       await tenant.scope.claims.delete(claim.id);
       return json({ ok: true });
     }
@@ -985,18 +997,21 @@ async function _handleApi(
                 cf.listDnsRecords(zone.id, { type: 'TXT', per_page: 100 }),
                 cf.listDnsRecords(zone.id, { type: 'CNAME', per_page: 100 }),
               ]);
-              const found = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
-              return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const };
+              // A TXT record under _domainkey counts only if it is DKIM-shaped; a CNAME is a named selector as it stands. A zone wildcard
+              // (`*._domainkey`) answers every selector alike, so it names none.
+              const here = [...txtRecords, ...cnameRecords].filter(r => r.name.includes('_domainkey'));
+              const wild = here.find(r => r.name.startsWith('*.') && r.type === 'TXT' && isDkimRecord(decodeTxtData(r.content)));
+              if (wild) return { selectors: [] as { name: string; record: string }[], source: 'cf' as const, wildcard: true, wildcard_record: decodeTxtData(wild.content) };
+              const found = here.filter(r => !r.name.startsWith('*.') && (r.type !== 'TXT' || isDkimRecord(decodeTxtData(r.content))));
+              return { selectors: found.map(r => ({ name: r.name, record: decodeTxtData(r.content) })), source: 'cf' as const, wildcard: false };
             } catch { /* no usable zone or API access: fall back to DNS */ }
           }
-          // DoH fallback
-          const hits = await Promise.all(DKIM_SELECTORS.map(async sel => {
-            const t = await dnsResolver.txt(`${sel}._domainkey.${domain.domain}`);
-            if (t.status === 'error') { dns_errors.push(`dkim ${sel}: ${t.error}`); return null; }
-            if (t.records.length > 0) return { name: `${sel}._domainkey.${domain.domain}`, record: t.records[0] };
-            return null;
-          }));
-          return { selectors: hits.filter(Boolean) as { name: string; record: string }[], source: 'doh' as const };
+          // DoH fallback: the shared scan, so the wildcard rule (identical answers, confirmed by a random name) is the same everywhere.
+          const scan = await scanDkimSelectors(dnsResolver, domain.domain, DKIM_SELECTORS);
+          for (const e of scan.errors) dns_errors.push(`dkim ${e.selector}: ${e.error}`);
+          if (scan.wildcard) return { selectors: [] as { name: string; record: string }[], source: 'doh' as const, wildcard: true, wildcard_record: scan.wildcardRecord };
+          const hits = scan.found.map(f => ({ name: f.name, record: f.txt.find(isDkimRecord)! }));
+          return { selectors: hits, source: 'doh' as const, wildcard: false };
         })(),
 
         // Null-sender protection: check SPF + DMARC on reports subdomain
@@ -1910,9 +1925,11 @@ async function _handleApi(
     // GET /api/domains/ct-discover?domain= — admin-only: enumerate subdomains via crt.sh
     if (path === '/api/domains/ct-discover' && method === 'GET') {
       if (!isAdmin) return err('admin required', 403);
-      const rootDomain = url.searchParams.get('domain')?.toLowerCase().trim();
-      if (!rootDomain) return err('domain query param is required', 400);
-      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(rootDomain)) return err('invalid domain format', 400);
+      const typedRoot = url.searchParams.get('domain')?.trim();
+      if (!typedRoot) return err('domain query param is required', 400);
+      const namedRoot = normalizeDomainName(typedRoot);
+      if (!namedRoot.ok) return json(domainRefusal(namedRoot), 400);
+      const rootDomain = namedRoot.domain;
       try {
         const subdomains = await fetchSubdomains(rootDomain);
         return json({ domain: rootDomain, subdomains });

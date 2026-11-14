@@ -259,6 +259,50 @@ describe('previewClaimDns mapping', () => {
     expect(partial.lookup_failed).toContain('dkim');
   });
 
+  describe('DKIM when every name answers with the same TXT record (gov.uk answers each with its DMARC record)', () => {
+    const DMARC = 'v=DMARC1; p=reject; sp=reject; rua=mailto:dmarc@acme.com';
+    /** Every common selector answers `record`; the random probe name answers per `probe`: alike (a true wildcard), with a failure, or not at all. */
+    const RANDOM = /^TXT ia-wc-[0-9a-f]{16}\._domainkey\.acme\.com$/;
+    const wildcard = (record: string, probe: 'same' | 'SERVFAIL' | 'none' = 'same'): Zone => {
+      const z: Zone = { ...published, 'TXT _dmarc.acme.com': [DMARC], ...Object.fromEntries(COMMON_DKIM_SELECTORS.map(s => [`TXT ${s}._domainkey.acme.com`, [record]])) };
+      return new Proxy(z, { get: (t, k) => (typeof k === 'string' && RANDOM.test(k) ? (probe === 'same' ? [record] : probe === 'none' ? undefined : 'SERVFAIL') : t[k]) });
+    };
+
+    it('is "wildcard", not "found": no selectors are listed', async () => {
+      const v = await run(wildcard(DMARC));
+      expect(v.dkim).toEqual({ status: 'wildcard', selectors: [], scanned: COMMON_DKIM_SELECTORS.length, failed: 0 });
+      expect(v.lookup_failed).not.toContain('dkim');
+    });
+
+    it('an identical DKIM key everywhere is a wildcard too', async () => {
+      const v = await run(wildcard('v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A'));
+      expect(v.dkim).toMatchObject({ status: 'wildcard', selectors: [] });
+    });
+
+    const KEY = 'v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A';
+
+    it('the same real key at every selector, with nothing at a random name, is found, not a wildcard', async () => {
+      const v = await run(wildcard(KEY, 'none'));
+      expect(v.dkim).toMatchObject({ status: 'found', failed: 0 });
+      expect(v.dkim.selectors).toHaveLength(COMMON_DKIM_SELECTORS.length);
+    });
+
+    it('a failed random probe is "error" (not found, not missing, not wildcard)', async () => {
+      const v = await run(wildcard(KEY, 'SERVFAIL'));
+      expect(v.dkim).toMatchObject({ status: 'error', selectors: [], failed: 1 });
+      expect(v.lookup_failed).toContain('dkim');
+    });
+
+    it('through the API for a pending claim', async () => {
+      const w = await world();
+      vi.stubGlobal('fetch', dohFetch(wildcard(DMARC), dnsCalls));
+      const { id } = await w.claim(w.A, 'acme.com');
+      const body = await json(await w.preview(w.A, id));
+      expect(body.dkim).toMatchObject({ status: 'wildcard', selectors: [] });
+      expect(JSON.stringify(body.dkim)).not.toContain('_domainkey');
+    });
+  });
+
   it('caches per domain for 60 s, keeps checked_at, and evicts the oldest past 500', async () => {
     const calls: string[] = [];
     const resolver = fakeResolver(published, calls);
