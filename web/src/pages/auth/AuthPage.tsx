@@ -35,6 +35,10 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
+	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either.
+	if (status.signin_available === false && status.signup_unavailable_reason === 'bot_protection_not_configured') {
+		return <AuthLayout title="Inbox Angel"><Alert variant="warning">Sign-up and sign-in are not available on this instance yet: bot protection is not configured.</Alert></AuthLayout>;
+	}
 	const mode: Mode = !status.configured ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
 	const registering = mode !== 'signin';
 	const providers = status.oauth_providers.filter((p) => p in PROVIDER_LABELS);
