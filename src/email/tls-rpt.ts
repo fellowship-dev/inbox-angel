@@ -15,6 +15,8 @@ import { extractAttachmentBytes, extractTextBody, readStream } from './mime-extr
 import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { extractReport, ReportTooLargeError } from '../dmarc/extract-report';
 import { rawXmlRetentionDays } from '../lifecycle/config';
+import { StorageFailure, type ReportResult } from './dmarc-report';
+import { REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
 
 /** The raw report JSON to keep, or null when RAW_XML_RETENTION_DAYS=0 (raw payloads are not stored). */
 const rawJson = (tenant: TenantContext, raw: string): string | null => (rawXmlRetentionDays(tenant.env) > 0 ? raw.slice(0, 65536) : null);
@@ -82,16 +84,16 @@ async function readReport(message: ForwardableEmailMessage, opts: TlsRptOptions)
 /** Hosted: every policy is for the token's domain or a subdomain, so they file as one row under the token's domain. */
 async function storeHostedTlsRpt(
   report: TlsRptReport, raw: string, orgName: string, dateBegin: number, dateEnd: number, tenant: TenantContext, token: TokenDomain,
-): Promise<{ failure_count: number }> {
+): Promise<ReportResult> {
   const domain = await tenant.scope.domains.getById(token.id);
-  if (!domain) return { failure_count: 0 };
+  if (!domain) return { failure_count: 0, outcome: 'refused', reason: 'domain_not_owned', records: null, reporter: null, tier: null };
   let success = 0;
   let failure = 0;
   const details: unknown[] = [];
   for (const policy of report.policies) {
     success += policy.summary?.['total-successful-session-count'] ?? 0;
     failure += policy.summary?.['total-failure-session-count'] ?? 0;
-    details.push(...(policy['failure-details'] ?? []));
+    if (details.length < MAX_FAILURE_DETAILS) details.push(...(policy['failure-details'] ?? []).slice(0, MAX_FAILURE_DETAILS - details.length));
   }
   try {
     await tenant.scope.reports.insertTls({
@@ -101,27 +103,38 @@ async function storeHostedTlsRpt(
       raw_json: rawJson(tenant, raw),
     });
   } catch (e) {
-    console.error(`[tls-rpt] insert failed for ${domain.domain}:`, e);
+    console.error('[tls-rpt] insert failed for domain', domain.id, e instanceof Error ? e.message : e);
+    // A valid report that could not be stored is never accepted-and-dropped: count it for the owner and fail the delivery.
+    try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* a courtesy */ }
+    throw new StorageFailure({ failure_count: failure }, e);
   }
-  console.log(`[tls-rpt] stored report from ${orgName} for ${domain.domain}`);
-  return { failure_count: failure };
+  return { failure_count: failure, outcome: 'accepted', reason: 'ok', records: null, reporter: null, tier: null };
 }
+
+/** Failure details kept per report: a hostile report can list thousands, and a stored cell may not exceed 2,000,000 bytes. */
+const MAX_FAILURE_DETAILS = 100;
+const MAX_ORG_NAME = 256;
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 export async function handleTlsRptReport(
   message: ForwardableEmailMessage,
   tenant: TenantContext,
   opts: TlsRptOptions = {},
-): Promise<{ failure_count: number }> {
+): Promise<ReportResult> {
+  const result = (outcome: Outcome, reason: ReasonCode, failure_count = 0): ReportResult => ({ failure_count, outcome, reason, records: null, reporter: null, tier: null });
+  const refuse = (reason: ReasonCode, text: string = REASONS[reason]): ReportResult => { message.setReject(text); return result('refused', reason); };
 
   // Extract the JSON (a plain body; hosted intake also accepts compressed attachments)
   let raw: string;
   try {
     raw = await readReport(message, opts);
   } catch (e) {
-    console.error('[tls-rpt] failed to extract email body:', e);
-    message.setReject(e instanceof ReportTooLargeError ? 'TLS-RPT report is too large' : 'Could not read TLS-RPT report email body');
-    return { failure_count: 0 };
+    return e instanceof ReportTooLargeError ? refuse('decompressed_too_large', 'TLS-RPT report is too large') : refuse('no_attachment', 'Could not read TLS-RPT report email body');
   }
+
+  // A DMARC aggregate report (XML) sent to the TLS-RPT address: say so.
+  if (/<feedback[\s>]/i.test(raw.slice(0, 8192)) && !/"policies"/.test(raw)) return refuse('kind_mismatch_rua_to_tlsrpt');
 
   // Parse JSON — find the JSON blob (may be after headers/preamble)
   let report: TlsRptReport;
@@ -132,27 +145,23 @@ export async function handleTlsRptReport(
     if (start === -1 || end === -1) throw new Error('no JSON object found');
     report = JSON.parse(raw.slice(start, end + 1));
   } catch (e) {
-    console.error('[tls-rpt] JSON parse failed:', e);
-    message.setReject('Invalid TLS-RPT report JSON');
-    return { failure_count: 0 };
+    return refuse('json_invalid');
   }
 
-  const orgName = report['organization-name'] ?? 'Unknown';
+  const orgName = String(report['organization-name'] ?? 'Unknown');
+  if (orgName.length > MAX_ORG_NAME) return refuse('field_too_long');
   const dateBegin = parseIsoDate(report['date-range']?.['start-datetime']);
   const dateEnd   = parseIsoDate(report['date-range']?.['end-datetime']);
 
   // Hosted: a report naming a domain this workspace doesn't own is spoofed or misrouted. Reject it whole, store nothing.
   if (opts.hosted) {
     if (!Array.isArray(report.policies) || report.policies.length === 0) {
-      message.setReject('Invalid TLS-RPT report: no policies');
-      return { failure_count: 0 };
+      return refuse('json_invalid', 'Invalid TLS-RPT report: no policies');
     }
     for (const policy of report.policies ?? []) {
       const policyDomain = policy.policy?.['policy-domain'];
       if (!policyDomain || !coversDomain(opts.hosted.token.domain, policyDomain)) {
-        console.warn(`[tls-rpt] policy-domain ${policyDomain ?? '(none)'} is outside the token's domain`);
-        message.setReject(`Unknown domain ${policyDomain ?? '(none)'} — not a registered Ready Set Mail inbox`);
-        return { failure_count: 0 };
+        return refuse('domain_not_owned'); // hosted: the sender's text is not echoed back (see dmarc-report.ts)
       }
     }
     return storeHostedTlsRpt(report, raw, orgName, dateBegin, dateEnd, tenant, opts.hosted.token);
@@ -166,7 +175,6 @@ export async function handleTlsRptReport(
 
     const domain = await tenant.scope.domains.getByName(opts.hosted ? policyDomain.toLowerCase() : policyDomain);
     if (!domain) {
-      console.warn(`[tls-rpt] unknown domain ${policyDomain} — skipping policy`);
       continue;
     }
 
@@ -190,10 +198,11 @@ export async function handleTlsRptReport(
       });
       stored++;
     } catch (e) {
-      console.error(`[tls-rpt] insert failed for ${policyDomain}:`, e);
+      console.error('[tls-rpt] insert failed for domain', domain.id, e instanceof Error ? e.message : e);
+      try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* a courtesy */ }
+      throw new StorageFailure({ failure_count: totalFailureCount }, e);
     }
   }
 
-  console.log(`[tls-rpt] stored ${stored} policy report(s) from ${orgName}`);
-  return { failure_count: totalFailureCount };
+  return result('accepted', 'ok', totalFailureCount);
 }

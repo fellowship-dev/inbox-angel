@@ -80,9 +80,9 @@ describe('pending domain claims', () => {
 	});
 });
 
-describe('reporter_auth badge', () => {
+describe('reporter tier badge', () => {
 	const report = (id: number, extra = {}) => ({ id, domain: 'example.com', org_name: `Org${id}`, report_id: `r${id}`, date_begin: 1760000000, date_end: 1760086400, total_count: 10, pass_count: 10, fail_count: 0, ...extra });
-	it('flags fail/none only', async () => {
+	it('flags unknown and unauthenticated senders, and says which reports are not counted', async () => {
 		renderApp(
 			<Routes>
 				<Route path="/domains/:id/reports" element={<ReportBrowserPage />} />
@@ -91,13 +91,16 @@ describe('reporter_auth badge', () => {
 				route: '/domains/1/reports',
 				routes: {
 					'GET /api/domains': { domains: [{ id: 1, domain: 'example.com' }] },
-					'GET /api/reports?limit=200': { reports: [report(1, { reporter_auth: 'pass' }), report(2, { reporter_auth: 'fail' }), report(3, { reporter_auth: 'none' }), report(4, { reporter_auth: null })] },
+					'GET /api/reports?limit=200': { reports: [report(1, { reporter_tier: 'counted', counted: true }), report(2, { reporter_tier: 'unknown', counted: false }), report(3, { reporter_tier: 'unauthenticated', counted: false }), report(4, { reporter_tier: null, counted: false })] },
 				},
 			},
 		);
 		await screen.findByText(/Org1/);
-		expect(screen.getAllByText(/unauthenticated sender/)).toHaveLength(2);
-		expect(screen.getAllByTitle(/did not pass DMARC-aligned authentication/)).toHaveLength(2);
+		expect(screen.getAllByText(/sender not recognised/)).toHaveLength(1);
+		expect(screen.getAllByText(/unauthenticated sender/)).toHaveLength(1);
+		expect(screen.getAllByTitle(/not on the list of known reporters/)).toHaveLength(1);
+		expect(screen.getAllByTitle(/could not be authenticated/)).toHaveLength(1);
+		expect(screen.getAllByText(/not counted in your numbers/)).toHaveLength(3);
 	});
 });
 

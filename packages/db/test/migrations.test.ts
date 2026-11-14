@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { REQUIRED_MIGRATION } from '../src/ready';
+import { REQUIRED_MIGRATIONS, assertSchemaReady, resetSchemaReadyCache, SchemaNotReadyError } from '../src/ready';
 import { createTestD1, applyMigrations, appliedMigrations, migrationFiles } from '../src/testing';
 import { IMPLICIT_WORKSPACE_ID } from '../src/schema';
 import { freshDb } from './helpers';
@@ -31,8 +31,45 @@ describe('migrations', () => {
 		]);
 	});
 
-	it('the runtime schema guard names the newest migration', () => {
-		expect(REQUIRED_MIGRATION).toBe(migrationFiles().at(-1));
+	it('the runtime schema guard names only migrations that exist, and the newest one', () => {
+		for (const m of REQUIRED_MIGRATIONS) expect(migrationFiles()).toContain(m);
+		expect(REQUIRED_MIGRATIONS.at(-1)).toBe(migrationFiles().at(-1));
+	});
+});
+
+describe('the runtime schema guard requires every migration this code needs', () => {
+	const drop = (d: ReturnType<typeof createTestD1>, name: string) => d.sqlite.prepare('DELETE FROM d1_migrations WHERE name = ?').run(name);
+	const ready = async (d: ReturnType<typeof createTestD1>) => { resetSchemaReadyCache(); return assertSchemaReady(d as unknown as D1Database); };
+
+	it('requires both 0010_intake_hardening and 0012_dmarc_enforcement', () => {
+		expect(REQUIRED_MIGRATIONS).toEqual(['0010_intake_hardening.sql', '0012_dmarc_enforcement.sql']);
+	});
+
+	it('a fully migrated database is ready', async () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite);
+		await expect(ready(d)).resolves.toBeUndefined();
+	});
+
+	it('a later migration from another branch (0011, 0013) changes nothing', async () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite);
+		for (const n of ['0011_other.sql', '0013_other.sql']) d.sqlite.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(n);
+		await expect(ready(d)).resolves.toBeUndefined();
+	});
+
+	for (const missing of REQUIRED_MIGRATIONS) {
+		it(`refuses when only ${missing} is missing, naming the required migrations`, async () => {
+			const d = createTestD1();
+			applyMigrations(d.sqlite);
+			drop(d, missing);
+			await expect(ready(d)).rejects.toBeInstanceOf(SchemaNotReadyError);
+			await expect(ready(d)).rejects.toThrow(missing);
+		});
+	}
+
+	it('no migration history at all is refused with the same error', async () => {
+		await expect(ready(createTestD1())).rejects.toBeInstanceOf(SchemaNotReadyError);
 	});
 });
 
@@ -66,10 +103,26 @@ describe('0009 claim_settled', () => {
 	});
 });
 
+describe('0010 intake hardening', () => {
+	it('is additive: existing reports keep their rows, new columns are NULL, new tables are empty', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
+		d.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'r@x')").run();
+		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, reporter_auth) VALUES (1, 'google.com', 'r1', 1, 2, 5, 5, 'pass')").run();
+		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count) VALUES (1, 'old.example', 'r2', 1, 2, 5, 5)").run();
+		expect(applyMigrations(d.sqlite, { through: '0010_intake_hardening.sql' })).toEqual(['0010_intake_hardening.sql']);
+		expect(d.sqlite.prepare('SELECT report_id, reporter_auth, reporter_auth_reason, ingest_token, record_count FROM aggregate_reports ORDER BY report_id').all()).toEqual([
+			{ report_id: 'r1', reporter_auth: 'pass', reporter_auth_reason: null, ingest_token: null, record_count: null },
+			{ report_id: 'r2', reporter_auth: null, reporter_auth_reason: null, ingest_token: null, record_count: null },
+		]);
+		for (const t of ['intake_quota', 'workspace_storage', 'intake_failures']) expect(d.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get()).toEqual({ n: 0 });
+	});
+});
+
 describe('0012 dmarc_enforcement', () => {
 	it('adds a nullable dmarc_sp column and leaves existing domains unread', () => {
 		const d = createTestD1();
-		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
+		applyMigrations(d.sqlite, { through: '0010_intake_hardening.sql' });
 		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, dmarc_policy) VALUES ('acme.com', 'r@x', 'reject')").run();
 		expect(applyMigrations(d.sqlite, { through: '0012_dmarc_enforcement.sql' })).toEqual(['0012_dmarc_enforcement.sql']);
 		expect(d.sqlite.prepare('SELECT dmarc_policy, dmarc_pct, dmarc_sp FROM domains').all()).toEqual([{ dmarc_policy: 'reject', dmarc_pct: null, dmarc_sp: null }]);

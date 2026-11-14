@@ -32,7 +32,7 @@ describe('evicting a legacy holder', () => {
   async function evicted() {
     const w = await world();
     const ins = w.db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, verified_via, dns_record_id) VALUES (50, 'acme.com', 'x', ?, 'legacy', 'rec-auth')").run(w.A.ws);
-    w.db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, workspace_id) VALUES (500, 50, 'Google', 'r1', unixepoch() - 86400, unixepoch(), ?)").run(w.A.ws);
+    w.db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, workspace_id, reporter_auth, reporter_tier) VALUES (500, 50, 'Google', 'r1', unixepoch() - 86400, unixepoch(), ?, 'pass', 'counted')").run(w.A.ws);
     w.db.sqlite.prepare("INSERT INTO report_records (report_id, source_ip, count, disposition, workspace_id) VALUES (500, '1.2.3.4', 5, 'none', ?)").run(w.A.ws);
     w.db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, workspace_id, token_hash) VALUES (50, ?, 'h')").run(w.A.ws);
     w.db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key, dmarc_record_id) VALUES (50, ?, 'hid', 'z1', 'rec-dmarc')").run(w.A.ws);
@@ -131,7 +131,7 @@ describe('detached (evicted) domains are invisible everywhere except export', ()
     ins.run(60, 'live.com', 'x', w.A.ws, 'txt', null, null);
     ins.run(61, 'evicted-61.invalid', 'x', w.A.ws, 'legacy', 1700000000, 'gone.com');
     for (const [rid, did, rep] of [[600, 60, 'live-r'], [601, 61, 'gone-r']] as const) {
-      w.db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id) VALUES (?, ?, 'Google', ?, unixepoch() - 86400, unixepoch(), 10, 5, 5, ?)").run(rid, did, rep, w.A.ws);
+      w.db.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth, reporter_tier) VALUES (?, ?, 'Google', ?, unixepoch() - 86400, unixepoch(), 10, 5, 5, ?, 'pass', 'counted')").run(rid, did, rep, w.A.ws);
       w.db.sqlite.prepare("INSERT INTO report_records (report_id, source_ip, count, disposition, dkim_result, spf_result, header_from, workspace_id) VALUES (?, ?, 10, 'none', 'fail', 'fail', 'x', ?)").run(rid, did === 60 ? '198.51.100.1' : '198.51.100.99', w.A.ws);
     }
     return { w, q: forWorkspace(w.env.DB, w.A.ws) };

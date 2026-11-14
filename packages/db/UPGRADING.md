@@ -18,6 +18,10 @@ Migration `0012_dmarc_enforcement.sql` is additive: one nullable `domains.dmarc_
 
 Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.
 
+## Intake hardening (0010)
+
+Migration `0010_intake_hardening.sql` is additive: nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`, `reporter_tier`, `reporter_known_as`, `reporter_identity`), the tables `intake_quota`, `workspace_storage` (separate counted and uncounted record counters), `intake_failures`, `intake_drops` and `reporter_candidate_days`, and indexes. Apply it before serving the new Worker (the schema guard requires it; `0009` and any other lower-numbered migration are applied first, in name order). Existing reports keep working. **Behaviour change:** report ids are stored as `<reporter identity>|<id>` for every new report; older plain ids are still recognised as duplicates. Rows stored before this migration have `reporter_tier` NULL and **stop counting in `registry` mode** (no hosted report exists yet, so nothing is lost there; self-host keeps `REPORT_COUNTING=all`). Also: on `MODE=saas` only reports from a known reporter whose email authenticated (`reporter_tier = 'counted'`) feed the numbers (`REPORT_COUNTING=registry`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
+
 ## DNS check time
 
 Migration `0008_dns_checked_at.sql` is additive: one nullable `domains.dns_checked_at` column. Apply it before serving the new Worker (the schema guard requires it). Existing domains stay NULL ("Not checked yet" on the overview) until the next daily cron or a visit to the domain's setup page reads their DNS.

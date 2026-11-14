@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
+import { gzipSync, strToU8 } from 'fflate';
 import { extractReport, ParserError } from '../../src/dmarc/extract-report';
 
 const fixture = (name: string) => readFileSync(join(__dirname, '../fixtures', name));
@@ -70,5 +71,32 @@ describe('extractReport', () => {
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const result = extractReport(ab);
     expect(result).toContain('<feedback>');
+  });
+});
+
+describe('gzip header guard (quadratic work in a huge FCOMMENT/FEXTRA)', () => {
+  const withHeader = (flagBit: number, junk: Uint8Array) => {
+    const g = gzipSync(strToU8('<?xml version="1.0"?><feedback/>'));
+    const out = new Uint8Array(g.length + junk.length);
+    out.set(g.subarray(0, 10)); out.set(junk, 10); out.set(g.subarray(10), 10 + junk.length);
+    out[3] |= flagBit;
+    return out;
+  };
+  const comment = (n: number) => { const c = new Uint8Array(n).fill(0x61); c[n - 1] = 0; return c; };
+
+  it('a multi-megabyte comment is refused at once, not inflated', () => {
+    const t = Date.now();
+    expect(() => extractReport(withHeader(0x10, comment(3_000_000)), { maxBytes: 1_000_000 })).toThrow(/gzip header is longer than 1024 bytes/);
+    expect(Date.now() - t).toBeLessThan(200);
+  });
+  it('same for FNAME, an unterminated name and a huge FEXTRA', () => {
+    expect(() => extractReport(withHeader(0x08, comment(5000)), { maxBytes: 1_000_000 })).toThrow(/gzip header/);
+    expect(() => extractReport(withHeader(0x08, new Uint8Array(5000).fill(0x61)), { maxBytes: 1_000_000 })).toThrow(/gzip header/);
+    const extra = new Uint8Array(2 + 60_000); extra[0] = 60_000 & 255; extra[1] = 60_000 >> 8;
+    expect(() => extractReport(withHeader(0x04, extra), { maxBytes: 1_000_000 })).toThrow(/gzip header/);
+  });
+  it('an ordinary header (a file name, a short comment) still works', () => {
+    expect(extractReport(withHeader(0x08, new Uint8Array([...strToU8('report.xml'), 0])), { maxBytes: 1_000_000 })).toContain('<feedback/>');
+    expect(extractReport(withHeader(0x10, comment(200)), { maxBytes: 1_000_000 })).toContain('<feedback/>');
   });
 });

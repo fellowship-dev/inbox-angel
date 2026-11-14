@@ -164,3 +164,37 @@ export async function cacheIpInfo(db: D1Database, info: IpInfo & { asn?: string 
     asn: info.asn ?? null,
   });
 }
+
+/** Look-ups in flight at once while enriching a report's uncached IPs. */
+const ENRICH_CONCURRENCY = 5;
+
+/**
+ * Enrichment for every distinct IP of a report with a fixed number of D1 queries, whatever the report's size: ONE query reads the
+ * cache for all of them (json_each in a batch), at most `maxNew` uncached IPs (busiest first, `weight` = messages) are looked up over
+ * DNS-over-HTTPS, and ONE query writes the new rows back. Cache trouble never fails a report: an unreadable cache is an empty one.
+ */
+export async function enrichIps(db: D1Database | undefined, ips: readonly string[], maxNew: number | undefined, weight: (ip: string) => number = () => 0): Promise<Map<string, IpInfo>> {
+  const out = new Map<string, IpInfo>();
+  const g = db ? globals(db) : null;
+  let cached = new Map<string, import('@ready-set-mail/db').IpInfoRow>();
+  if (g) {
+    try { cached = await g.ipInfo.getMany(ips); } catch (e) { console.warn('ip-info: cache read failed, enriching without it:', e instanceof Error ? e.message : e); }
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const todo: string[] = [];
+  for (const ip of ips) {
+    const row = cached.get(ip);
+    if (row && now - row.fetched_at <= CACHE_TTL_DAYS * 86400) {
+      out.set(ip, { ip, reverse_dns: row.reverse_dns, base_domain: row.base_domain, country_code: row.country_code, country_name: null, subdivision: null, city: null, org: row.org, asn: row.asn });
+    } else todo.push(ip);
+  }
+  todo.sort((a, b) => weight(b) - weight(a));
+  const fresh: IpInfo[] = [];
+  const lookups = todo.slice(0, maxNew ?? todo.length);
+  for (let i = 0; i < lookups.length; i += ENRICH_CONCURRENCY) {
+    fresh.push(...await Promise.all(lookups.slice(i, i + ENRICH_CONCURRENCY).map((ip) => getIpInfo(ip))));
+  }
+  for (const info of fresh) out.set(info.ip, info);
+  if (g && fresh.length) await g.ipInfo.putMany(fresh.map((i) => ({ ip: i.ip, reverse_dns: i.reverse_dns, base_domain: i.base_domain, country_code: i.country_code, org: i.org, asn: i.asn }))).catch(() => {}); // best effort
+  return out;
+}

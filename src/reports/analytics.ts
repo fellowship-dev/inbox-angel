@@ -13,6 +13,7 @@ import type { TenantContext } from '../tenancy/context';
 import { buildFixes, fixScore, type Fix } from '../analytics/fixes';
 import { assessReadiness, type PolicyState, type Readiness } from '../analytics/readiness';
 import { buildSenders, pct, type AlignModes } from '../analytics/senders';
+import { reportVisibility, reporterMix } from './visibility';
 
 const ADVICE_DAYS = 30;
 const MAX_SENDERS = 200;
@@ -67,11 +68,12 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     if (!domain) throw Object.assign(new Error('domain not found'), { status: 404 });
 
     // One pass over the rows and one over the trend serve both the requested window and the 30-day advice window.
-    const [allRows, allTrend, earliest, live] = await Promise.all([
+    const [allRows, allTrend, earliest, live, visibility] = await Promise.all([
       q.senderRows(id, since, adviceSince, now),
       q.trend(id, Math.min(since, adviceSince), now),
       q.earliestReport(id, now),
       (options.lookupDmarc ?? liveDmarc)(domain.domain),
+      reportVisibility(tenant, id, since, now),
     ]);
     // Strict alignment only when the published record says so; otherwise relaxed, and the response says which.
     const tags = typeof live === 'string' ? parseDmarcTags(live) : null;
@@ -87,20 +89,23 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     const readiness = assessReadiness({
       state, messages: advice.messages, passed: advice.passed, daysWithReports: advice.days_with_reports, windowDays: ADVICE_DAYS,
       fixes, newSenders: adviceSenders.filter((s) => s.is_new).length, inherits: domain.parent_id !== null,
+      majorReporter: tenant.scope.counting === 'registry' ? visibility.reporters.major : undefined,
     });
 
     return {
-      days, domain: { id, domain: domain.domain }, totals: sum(trend), trend,
+      days, domain: { id, domain: domain.domain }, totals: sum(trend), trend, ...visibility,
       alignment: { spf: align.spf === 's' ? 'strict' : 'relaxed', dkim: align.dkim === 's' ? 'strict' : 'relaxed', basis: tags ? 'dns' : 'assumed', estimated: true },
       senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes, readiness: { ...readiness, policy_source: live === undefined ? 'stored' : 'dns' },
     };
   }
 
-  const [allRows, allTrend, earliest, totals] = await Promise.all([
+  const [allRows, allTrend, earliest, totals, unrecognised, uncounted] = await Promise.all([
     q.senderRows(null, since, adviceSince, now),
     q.trend(null, Math.min(since, adviceSince), now),
     q.earliestReport(null, now),
     q.domainTotals(adviceSince, now),
+    tenant.scope.reports.unrecognised(null, since),
+    tenant.scope.reports.uncounted(null, since),
   ]);
   const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest });
   const adviceRows = inWindow(allRows, 'advice_messages');
@@ -120,7 +125,9 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
   const fixes: Fix[] = perDomain.flatMap((p) => p.fixes).sort((a, b) => fixScore(b) - fixScore(a) || a.id.localeCompare(b.id)).slice(0, MAX_WORKSPACE_FIXES);
 
   return {
-    days, totals: sum(trend), trend, alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },
+    days, totals: sum(trend), trend,
+    report_counting: tenant.scope.counting, unrecognised, uncounted, reporters: reporterMix(await tenant.scope.reports.counted(null, since)),
+    alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },
     senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes,
     domains: perDomain.map(({ d, readiness }) => ({
       domain_id: d.domain_id, domain: d.domain, dmarc_policy: d.dmarc_policy, messages: d.total, pass_rate: d.total > 0 ? pct(d.passed, d.total) : null,

@@ -1,6 +1,9 @@
 import { and, desc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../client';
 import { aggregateReports, domains, reportRecords, tlsReports } from '../schema';
+import { counted, type CountingMode } from './counting';
+import { batchStatements } from '../client';
+import { storeStatements, type StoreReportInput } from './report-store';
 
 export interface DomainWeeklyStat {
 	domain_id: number;
@@ -10,6 +13,8 @@ export interface DomainWeeklyStat {
 	pass_messages: number;
 	fail_messages: number;
 	report_count: number;
+	/** Reports in the window that are stored but left out of the numbers above (only when counting is `proven`). */
+	uncounted_reports: number;
 }
 
 export interface FailingSource {
@@ -73,6 +78,8 @@ export interface ExportRow {
 	dkim_domain: string | null;
 	record_count: number | null;
 	disposition: string | null;
+	/** 1: the report counts toward the numbers; 0: it was stored but is not counted (unproven sender). */
+	counted: number;
 }
 
 export interface DomainCheckSummary {
@@ -102,6 +109,17 @@ export interface DomainCheckSummary {
 	dmarc_sp: string | null;
 }
 
+export interface UncountedSummary {
+	reports: number;
+	messages: number;
+	latest_at: number | null;
+	/** Of `reports`: authenticated but not in the registry (tier unknown), and not authenticated (tier unauthenticated). */
+	unknown: number;
+	unauthenticated: number;
+	/** The reporters that account for most of them (at most 5), by the domain the report named. */
+	by_reporter: Array<{ reporter: string; reports: number }>;
+}
+
 type NewReport = Omit<typeof aggregateReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
 type NewRecord = Omit<typeof reportRecords.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
 type NewTlsReport = Omit<typeof tlsReports.$inferInsert, 'id' | 'created_at' | 'workspace_id'>;
@@ -128,7 +146,7 @@ interface EvidenceSummaryRow {
  * Stored DNS facts plus report totals for the window. Report totals and record counts are summed in separate subqueries:
  * joining report_records straight onto aggregate_reports repeats each report once per record, which multiplied the totals.
  */
-function summarySql(A: SQL, since: number, where: SQL, tail: SQL): SQL {
+function summarySql(A: SQL, counts: (alias: string) => SQL, since: number, where: SQL, tail: SQL): SQL {
 	return sql`
 		SELECT
 			d.id            AS domain_id,
@@ -156,8 +174,8 @@ function summarySql(A: SQL, since: number, where: SQL, tail: SQL): SQL {
 		FROM domains d
 		LEFT JOIN (
 			SELECT domain_id, SUM(total_count) AS total, SUM(pass_count) AS pass, SUM(fail_count) AS fail
-			FROM aggregate_reports
-			WHERE workspace_id = ${A} AND date_begin >= ${since}
+			FROM aggregate_reports a
+			WHERE a.workspace_id = ${A} AND a.date_begin >= ${since} AND ${counts('a')}
 			GROUP BY domain_id
 		) ar ON ar.domain_id = d.id
 		LEFT JOIN (
@@ -167,7 +185,7 @@ function summarySql(A: SQL, since: number, where: SQL, tail: SQL): SQL {
 				SUM(CASE WHEN r.spf_result  = 'pass' THEN r.count ELSE 0 END) AS spf_pass
 			FROM report_records r
 			JOIN aggregate_reports a ON a.id = r.report_id AND a.workspace_id = ${A}
-			WHERE r.workspace_id = ${A} AND a.date_begin >= ${since}
+			WHERE r.workspace_id = ${A} AND a.date_begin >= ${since} AND ${counts('a')}
 			GROUP BY a.domain_id
 		) rr ON rr.domain_id = d.id
 		LEFT JOIN mta_sts_config m ON m.domain_id = d.id AND m.workspace_id = ${A}
@@ -176,13 +194,96 @@ function summarySql(A: SQL, since: number, where: SQL, tail: SQL): SQL {
 	`;
 }
 
-export function reportQueries(db: Db, workspaceId: string) {
+export function reportQueries(db: Db, workspaceId: string, counting: CountingMode = 'registry') {
 	const A = sql`${workspaceId}`;
+	/** The statement counts this report (see counting.ts). */
+	const C = (alias: string) => counted(alias, counting);
+
+	const summarise = async (domainId: number | null, since: number, excluded: ReturnType<typeof sql>): Promise<UncountedSummary> => {
+		const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
+		const [tot, by] = await Promise.all([
+			db.all<{ reports: number; messages: number; latest_at: number | null; unknown: number | null; unauthenticated: number | null }>(sql`
+				SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at,
+					SUM(CASE WHEN aggregate_reports.reporter_tier = 'unknown' THEN 1 ELSE 0 END) AS unknown, SUM(CASE WHEN aggregate_reports.reporter_tier = 'unauthenticated' THEN 1 ELSE 0 END) AS unauthenticated
+				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND aggregate_reports.date_begin >= ${since} AND ${excluded}`),
+			db.all<{ reporter: string; reports: number }>(sql`
+				SELECT COALESCE(aggregate_reports.reporter_auth_domain, aggregate_reports.org_name) AS reporter, COUNT(*) AS reports
+				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND aggregate_reports.date_begin >= ${since} AND ${excluded}
+				GROUP BY reporter ORDER BY reports DESC, reporter LIMIT 5`),
+		]);
+		return { reports: tot[0]?.reports ?? 0, messages: tot[0]?.messages ?? 0, latest_at: tot[0]?.latest_at ?? null, unknown: tot[0]?.unknown ?? 0, unauthenticated: tot[0]?.unauthenticated ?? 0, by_reporter: by };
+	};
 
 	return {
 		insertAggregate(r: NewReport) {
 			// Re-delivered reports (same domain_id + report_id) are ignored.
 			return db.insert(aggregateReports).values({ ...r, workspace_id: workspaceId }).onConflictDoNothing().run();
+		},
+
+		/**
+		 * Store one report and all its records in ONE db.batch() (one D1 query, one transaction: all or nothing). `stored` is false when
+		 * the (domain, report id) already existed: nothing was written then, records and counters included.
+		 */
+		async storeAtomic(input: Omit<StoreReportInput, 'workspaceId'>): Promise<{ stored: boolean; reportId: number; statements: number; superseded: number }> {
+			const stmts = storeStatements({ ...input, workspaceId });
+			const res = await batchStatements(db, stmts);
+			const at = input.supersedeXmlId !== undefined ? 3 : 0; // the supersede statements come first
+			const first = res[at]?.meta;
+			const stored = (first?.changes ?? 0) > 0;
+			return { stored, reportId: stored ? Number(first?.last_row_id ?? 0) : 0, statements: stmts.length, superseded: stored && at ? Number(res[2]?.meta?.changes ?? 0) : 0 };
+		},
+
+		/**
+		 * Is this report already stored? Keyed on (domain, reporter identity, report id) and checked AFTER the sender is classified. Every report with
+		 * an identity is stored as '<identity>|<id>' (the registry id for a counted report), so two known reporters may reuse one report id.
+		 *   - the same identity's report with that id is a duplicate (redelivery);
+		 *   - a LEGACY row, stored under the plain report id (before 0010 or by a build that kept counted reports plain), is a duplicate when its
+		 *     identity is unknown (NULL) or the same: it cannot be told apart from this reporter's own report;
+		 *   - an UNCOUNTED report is also a duplicate of any counted report or plain-id row with that id (a forgery never displaces or doubles a counted report).
+		 */
+		async isDuplicate(domainId: number, identity: string, xmlId: string, counted: boolean): Promise<boolean> {
+			const mine = sql`report_id = ${identity + '|' + xmlId}`;
+			const legacy = counted ? sql`(report_id = ${xmlId} AND (reporter_identity IS NULL OR reporter_identity = ${identity}))` : sql`report_id = ${xmlId}`;
+			const countedElsewhere = counted ? sql`` : sql` OR (reporter_tier = 'counted' AND substr(report_id, instr(report_id, '|') + 1) = ${xmlId})`;
+			const rows = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId}
+				AND (${mine} OR ${legacy}${countedElsewhere})`);
+			return (rows[0]?.n ?? 0) > 0;
+		},
+
+		/** The id of an already stored report with this (domain, report id), or null. */
+		async findReportId(domainId: number, reportId: string): Promise<number | null> {
+			const row = await db.select({ id: aggregateReports.id }).from(aggregateReports)
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId), eq(aggregateReports.report_id, reportId))).get();
+			return row?.id ?? null;
+		},
+
+		/**
+		 * Who the COUNTED numbers in the window come from: counted reports per reporter (identity, label, reports, messages). Every percentage
+		 * shown can name them; advice needs a major reporter (google, microsoft) here.
+		 */
+		counted(domainId: number | null, since: number): Promise<Array<{ reporter: string; label: string; reports: number; messages: number }>> {
+			const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
+			return db.all(sql`SELECT COALESCE(aggregate_reports.reporter_identity, aggregate_reports.reporter_auth_domain, aggregate_reports.org_name) AS reporter,
+					COALESCE(MAX(aggregate_reports.reporter_known_as), MAX(aggregate_reports.org_name)) AS label, COUNT(*) AS reports, COALESCE(SUM(aggregate_reports.total_count), 0) AS messages
+				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND aggregate_reports.date_begin >= ${since} AND ${C('aggregate_reports')}
+				GROUP BY reporter ORDER BY messages DESC LIMIT 20`);
+		},
+
+		/**
+		 * Reports in the window that are stored but NOT counted in this workspace's counting mode (empty in `all` mode), with the
+		 * authenticated reporter domains behind them. `domainId` null: the whole workspace.
+		 */
+		async uncounted(domainId: number | null, since: number): Promise<UncountedSummary> {
+			if (counting === 'all') return { reports: 0, messages: 0, latest_at: null, unknown: 0, unauthenticated: 0, by_reporter: [] };
+			return summarise(domainId, since, sql`NOT (${C('aggregate_reports')})`);
+		},
+
+		/**
+		 * Reports in the window from senders we do not recognise (the intake did not class them 'counted'), whatever the counting mode:
+		 * in `all` mode they are counted, and this is how a dashboard can still say so.
+		 */
+		unrecognised(domainId: number | null, since: number): Promise<UncountedSummary> {
+			return summarise(domainId, since, sql`aggregate_reports.reporter_tier IS NOT 'counted'`);
 		},
 
 		insertRecords(records: NewRecord[]) {
@@ -196,8 +297,9 @@ export function reportQueries(db: Db, workspaceId: string) {
 				.select({ r: aggregateReports, domain: domains.domain })
 				.from(aggregateReports)
 				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at)))
+				// Reports that do not count never push ones that do out of "latest N".
 				.where(eq(aggregateReports.workspace_id, workspaceId))
-				.orderBy(desc(aggregateReports.date_begin))
+				.orderBy(...(counting === 'all' ? [] : [sql`(${C('aggregate_reports')}) DESC`]), desc(aggregateReports.date_begin))
 				.limit(limit)
 				.all()
 				.then((rows) => rows.map((x) => ({ ...x.r, domain: x.domain })));
@@ -227,7 +329,8 @@ export function reportQueries(db: Db, workspaceId: string) {
 			return db
 				.select({ cnt: sql<number>`COUNT(*)` })
 				.from(aggregateReports)
-				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId)))
+				/* the first-report notice is about a report that counts */
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId), C('aggregate_reports')))
 				.get()
 				.then((r) => r?.cnt ?? 0);
 		},
@@ -243,9 +346,12 @@ export function reportQueries(db: Db, workspaceId: string) {
 					COALESCE(SUM(r.total_count), 0) AS total_messages,
 					COALESCE(SUM(r.pass_count),  0) AS pass_messages,
 					COALESCE(SUM(r.fail_count),  0) AS fail_messages,
-					COUNT(r.id) AS report_count
+					COUNT(r.id) AS report_count,
+					${counting !== 'all'
+						? sql`(SELECT COUNT(*) FROM aggregate_reports u WHERE u.workspace_id = ${A} AND u.domain_id = d.id AND u.date_begin >= ${since} AND NOT (${C('u')}))`
+						: sql`0`} AS uncounted_reports
 				FROM domains d
-				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since}
+				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND ${C('r')}
 				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL
 				GROUP BY d.id, d.domain, d.dmarc_policy
 				ORDER BY d.domain
@@ -258,7 +364,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 				       MAX(rr.base_domain) AS base_domain, MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A} AND ${C('ar')}
 				  AND ar.domain_id = ${domainId} AND ar.date_begin >= ${since}
 				  AND (rr.dkim_result = 'fail' OR rr.spf_result = 'fail')
 				GROUP BY rr.source_ip
@@ -283,7 +389,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A} AND ${C('ar')}
 				  AND ar.domain_id = ${domainId}
 				  AND ar.date_begin >= ${since}
 				  AND (rr.spf_result != 'pass' OR rr.dkim_result != 'pass')
@@ -308,7 +414,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					MAX(rr.org) AS org
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A} AND ${C('ar')}
 				  AND ar.domain_id = ${domainId}
 				  AND ar.date_begin >= ${since}
 				GROUP BY rr.source_ip, rr.header_from, rr.spf_domain, rr.dkim_domain
@@ -324,7 +430,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					SUM(pass_count)  AS passed,
 					SUM(fail_count)  AS failed
 				FROM aggregate_reports
-				WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since}
+				WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND ${C('aggregate_reports')}
 				GROUP BY day
 				ORDER BY day ASC
 			`);
@@ -344,7 +450,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					GROUP_CONCAT(DISTINCT ar.org_name) AS reporters
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
-				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A} AND ${C('ar')}
 				  AND ar.domain_id = ${domainId}
 				  AND date(datetime(ar.date_begin, 'unixepoch')) = ${date}
 				GROUP BY rr.source_ip, rr.header_from, rr.spf_domain, rr.dkim_domain, rr.disposition
@@ -360,7 +466,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 					COALESCE(SUM(fail_count),  0) AS failed
 				FROM aggregate_reports
 				WHERE workspace_id = ${A}
-				  AND domain_id = ${domainId}
+				  AND domain_id = ${domainId} AND ${C('aggregate_reports')}
 				  AND date(datetime(date_begin, 'unixepoch')) = ${date}
 			`);
 			return rows[0] ?? null;
@@ -381,7 +487,8 @@ export function reportQueries(db: Db, workspaceId: string) {
 					rr.dkim_result,
 					rr.dkim_domain,
 					rr.count AS record_count,
-					rr.disposition
+					rr.disposition,
+					CASE WHEN ${C('ar')} THEN 1 ELSE 0 END AS counted
 				FROM aggregate_reports ar
 				LEFT JOIN report_records rr ON rr.report_id = ar.id AND rr.workspace_id = ${A}
 				WHERE ar.workspace_id = ${A} AND ar.domain_id = ${domainId}
@@ -390,7 +497,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 		},
 
 		async checkSummary(domainId: number, since: number): Promise<DomainCheckSummary | null> {
-			const rows = await db.all<DomainCheckSummary>(summarySql(A, since, sql`AND d.id = ${domainId}`, sql``));
+			const rows = await db.all<DomainCheckSummary>(summarySql(A, C, since, sql`AND d.id = ${domainId}`, sql``));
 			return rows[0] ?? null;
 		},
 
@@ -399,7 +506,7 @@ export function reportQueries(db: Db, workspaceId: string) {
 		 * page). One query for the overview instead of one request per domain.
 		 */
 		async checkSummaries(since: number, page: { afterId?: number; limit: number }): Promise<DomainCheckSummary[]> {
-			return db.all<DomainCheckSummary>(summarySql(A, since, sql`AND d.evicted_at IS NULL AND d.id > ${page.afterId ?? 0}`, sql`ORDER BY d.id LIMIT ${page.limit}`));
+			return db.all<DomainCheckSummary>(summarySql(A, C, since, sql`AND d.evicted_at IS NULL AND d.id > ${page.afterId ?? 0}`, sql`ORDER BY d.id LIMIT ${page.limit}`));
 		},
 
 		// ── TLS-RPT ───────────────────────────────────────────────
@@ -423,11 +530,11 @@ export function reportQueries(db: Db, workspaceId: string) {
     /** Bounded source references; summary and observed dates cover the entire selected range. */
     async evidence(domainId: number, since: number, until: number) {
       const [dmarc, tls, dmarcSummary, tlsSummary, dmarcDates, tlsDates] = await Promise.all([
-        db.all<ReportEvidenceRow>(sql`SELECT id, report_id AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_count, pass_count, fail_count FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY date_begin DESC, id DESC LIMIT 201`),
+        db.all<ReportEvidenceRow>(sql`SELECT id, CASE WHEN reporter_identity IS NOT NULL AND substr(report_id, 1, length(reporter_identity) + 1) = reporter_identity || '|' THEN substr(report_id, length(reporter_identity) + 2) ELSE report_id END AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_count, pass_count, fail_count FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')} ORDER BY date_begin DESC, id DESC LIMIT 201`),
         db.all<ReportEvidenceRow>(sql`SELECT id, NULL AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_success + total_failure AS total_count, total_success AS pass_count, total_failure AS fail_count FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY date_begin DESC, id DESC LIMIT 201`),
-        db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until}`),
+        db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')}`),
         db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until}`),
-        db.all<{ day: string }>(sql`SELECT DISTINCT date(date_begin, 'unixepoch') AS day FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY day`),
+        db.all<{ day: string }>(sql`SELECT DISTINCT date(date_begin, 'unixepoch') AS day FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')} ORDER BY day`),
         db.all<{ day: string }>(sql`SELECT DISTINCT date(date_begin, 'unixepoch') AS day FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY day`),
       ]);
       const source = (rows: ReportEvidenceRow[], summary: EvidenceSummaryRow[], dates: { day: string }[]) => ({

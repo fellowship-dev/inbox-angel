@@ -103,6 +103,16 @@
 	//   MAX_DOMAINS_PER_WORKSPACE  domains one workspace may hold (default 10)
 	// A refused request answers 403 with code "plan_limit"; BOOKING_URL (https only) is offered as the way to ask for more.
 
+	// Hosted intake: three tiers (docs/hosted.md). A report is COUNTED only when the receiving mail server authenticated the sender (AUTHSERV_ID +
+	// AUTHSERV_HEADER; nothing is authenticated until both are set, and the Worker logs the authserv-id it sees: {"evt":"intake_authserv"}) AND the sender is in
+	// the known-reporter registry (src/dmarc/known-reporters.ts; extend with INTAKE_KNOWN_REPORTERS, switch entries off with INTAKE_KNOWN_REPORTERS_DISABLE).
+	// Authenticated senders not in the registry, and unauthenticated mail, are stored with tight caps and never counted. REPORT_COUNTING
+	// (registry | authenticated | all; hosted default registry, self-host all). Caps: INTAKE_MAX_* (per address / workspace / instance, INTAKE_MAX_UNKNOWN_*,
+	// INTAKE_MAX_UNAUTH_*, INTAKE_MAX_NONREGISTRY_DECOMPRESSED_BYTES, INTAKE_MAX_RECORDS_PER_REPORT 2000, INTAKE_MAX_DECOMPRESSED_BYTES 1 MiB,
+	// INTAKE_MAX_RAW_BYTES 2 MiB: measured under wrangler dev). RETENTION_UNCOUNTED_REPORTS_DAYS (default 30; unknown and unauthenticated reports) is swept by the one daily cron. Uncounted reports have their own, much smaller storage budgets (INTAKE_MAX_UNCOUNTED_*), so strangers cannot use up room a known reporter needs. Expected AUTHSERV_ID=mx.cloudflare.net, AUTHSERV_HEADER=ar per Cloudflare's documentation: confirm on a message you sent yourself.
+	// CPU: the worst measured report (docs/hosted.md, "Measured limits") takes ~0.5 s of CPU and ~77 MB of memory. Recommended: "limits": { "cpu_ms": 5000 }
+	// (ten times the worst case; the Workers Paid default is 30000). Hosted intake needs Workers Paid: the Free plan's 10 ms CPU and 50 D1 queries cannot take a report.
+
 	// Environment variables
 	"vars": {
 		"WORKER_NAME": "ready-set-mail-worker"
