@@ -4,11 +4,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import type { Domain, DomainClaim } from '../../lib/types';
+import { HELP_PRIORITY, TalkToMax } from '../TalkToMax';
 import { PlanLimitNotice, planLimitOf, type PlanLimit } from '../PlanLimitNotice';
 import { ClaimPreview } from './ClaimPreview';
 import { CopyField } from './CopyField';
 
-export const LOST_EXPLANATION = 'Another workspace verified this domain first. If it is yours, contact support.';
+export const LOST_EXPLANATION = 'Another workspace verified this domain first, so it cannot be added to this one.';
 
 /** What the server said when the TXT record was not (yet) found: its reason, else the claim's last error. */
 function verifyFailure(e: unknown): string {
@@ -23,24 +24,28 @@ function verifyFailure(e: unknown): string {
  * A domain that is not ours to monitor yet: add this TXT record to prove ownership, then Verify.
  * `pending` has no reports, stats or DNS: only the claim exists. `lost` can only be removed.
  */
-export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, preview }: { claim: DomainClaim; onVerified?: (domain: Domain) => void; onRemoved?: () => void; canWrite?: boolean; /** Show what public DNS says about the domain: `true` loads it now, `'lazy'` waits for a click. */ preview?: boolean | 'lazy' }) {
+export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, preview }: { claim: DomainClaim; onVerified?: (domain: Domain, info: { resumed: boolean }) => void; onRemoved?: () => void; canWrite?: boolean; /** Show what public DNS says about the domain: `true` loads it now, `'lazy'` waits for a click. */ preview?: boolean | 'lazy' }) {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const [error, setError] = useState('');
+	/** Failed Verify presses on this card: after two, a person is offered. */
+	const [failures, setFailures] = useState(0);
 	const [limit, setLimit] = useState<PlanLimit | null>(null);
 	const refresh = () => qc.invalidateQueries({ queryKey: ['domains'] });
 
 	const verify = useMutation({
-		mutationFn: () => api<{ domain: Domain }>(`/api/domains/claims/${claim.id}/verify`, { method: 'POST' }),
+		mutationFn: () => api<{ domain: Domain; resumed?: boolean }>(`/api/domains/claims/${claim.id}/verify`, { method: 'POST' }),
 		onSuccess: async (res) => {
 			await refresh();
-			if (onVerified) onVerified(res.domain);
+			// `resumed`: the workspace already had the domain, so this press verified nothing new.
+			if (onVerified) onVerified(res.domain, { resumed: res.resumed === true });
 			else navigate(`/domains/${res.domain.id}`);
 		},
 		onError: (e) => {
 			const atLimit = planLimitOf(e);
 			if (atLimit) return setLimit(atLimit);
 			setError(verifyFailure(e));
+			setFailures((n) => n + 1);
 			if (e instanceof ApiError && e.status === 409) void refresh();
 		},
 	});
@@ -61,7 +66,10 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, previ
 				<Badge variant={lost ? 'danger' : 'warning'}>{lost ? 'Claimed elsewhere' : 'Waiting for verification'}</Badge>
 			</div>
 			{lost ? (
-				<Alert variant="warning">{LOST_EXPLANATION}</Alert>
+				<>
+					<Alert variant="warning">{LOST_EXPLANATION}</Alert>
+					<TalkToMax priority={HELP_PRIORITY.claimStuck} lead="Is it yours?" about="about getting access to it" />
+				</>
 			) : (
 				<>
 					{preview ? <ClaimPreview claimId={claim.id} domain={claim.domain} lazy={preview === 'lazy'} /> : null}
@@ -73,15 +81,16 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, previ
 						<CopyField label="Name" value={claim.txt_name} />
 						<CopyField label="Value" value={claim.txt_value} />
 					</div>
-					{claim.last_error && !error ? <p className="text-sm text-ink-2">Last check: {claim.last_error}</p> : null}
+					{claim.last_error && !error ? <p className="text-sm text-ink-2 [overflow-wrap:anywhere]">Last check: {claim.last_error}</p> : null}
 				</>
 			)}
 			{limit ? <PlanLimitNotice limit={limit} /> : null}
 			{error ? (
 				<Alert variant="warning" role="alert">
-					{error}
+					<span className="[overflow-wrap:anywhere]">{error}</span>
 				</Alert>
 			) : null}
+			{!lost && failures >= 2 ? <TalkToMax priority={HELP_PRIORITY.claimStuck} lead="Added the record and it still does not verify?" about={`about ${claim.domain}`} /> : null}
 			<div className="flex flex-wrap gap-2">
 				{!lost ? (
 					<Button loading={verify.isPending} disabled={!canWrite} onClick={() => { setError(''); setLimit(null); verify.mutate(); }}>

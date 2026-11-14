@@ -1,4 +1,6 @@
-import { Button, toast } from '@ready-set-mail/ui';
+import { Button, CheckResult, CheckResultList, toast } from '@inbox-angel/ui';
+import { StepCard } from '../../components/wizard/StepCard';
+import { StepFooter } from '../../components/wizard/StepNav';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
@@ -7,15 +9,17 @@ import { WizardProgress } from '../../components/wizard/WizardProgress';
 import { api } from '../../lib/api';
 import { wizardProgress } from '../../lib/dmarc';
 import { keys, useDomains } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
+import { HELP_PRIORITY, TalkToMax } from '../../components/TalkToMax';
 import type { WizardState, WizardStepState } from '../../lib/types';
 import { DkimStep } from './setup/DkimStep';
 import { DmarcStep } from './setup/DmarcStep';
 import { DomainStep } from './setup/DomainStep';
 import { setupKeys, useOnboardingStatus, useWizardState } from './setup/hooks';
+import { ReportsStep } from './setup/ReportsStep';
 import { RoutingStep } from './setup/RoutingStep';
 import { SpfStep } from './setup/SpfStep';
-import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, STEP_LABELS, parseStep, resolveStep } from './setup/steps';
+import { DEFAULT_WIZARD, STEP_COUNT, STEP_KEYS, parseStep, resolveStep, stepLabels } from './setup/steps';
 
 /**
  * `#/setup` (no domain yet) and `#/domains/:id/setup[/:step]`. The step lives in the URL, 1-indexed, so
@@ -28,6 +32,7 @@ export function SetupWizardPage() {
 }
 
 function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: ReactNode; subtitle: string; skipTo: string; wizard: WizardState; current: number; children: ReactNode }) {
+	const hosted = useHosted();
 	return (
 		<div className="space-y-6">
 			<header className="space-y-3">
@@ -40,14 +45,20 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 						<Link to={skipTo}>Skip setup</Link>
 					</Button>
 				</div>
-				<WizardProgress
-					label="Setup progress"
-					current={current}
-					steps={STEP_LABELS.map((label, i) => ({
-						label,
-						state: wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
-					}))}
-				/>
+				{/* Hosted counts four steps (the Reports page only says reports are not connected), so the progress line
+				    and the "n of 4 steps complete" header use the same count; the Reports page shows no step marker. */}
+				{hosted && current >= 4 ? null : (
+					<WizardProgress
+						label="Setup progress"
+						current={current}
+						steps={stepLabels(hosted)
+							.slice(0, hosted ? 4 : undefined)
+							.map((label, i) => ({
+								label,
+								state: wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
+							}))}
+					/>
+				)}
 			</header>
 			<ReadOnlyNotice />
 			{children}
@@ -57,6 +68,7 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 
 /** No domain id in the URL: if a domain exists, continue with the first one; if not, this is a fresh instance. */
 function EntryFlow() {
+	const hosted = useHosted();
 	const domains = useDomains();
 	const qc = useQueryClient();
 	const navigate = useNavigate();
@@ -67,7 +79,7 @@ function EntryFlow() {
 	if (first) return <Navigate to={`/domains/${first.id}/setup/1`} replace />;
 
 	return (
-		<Frame title="Let's set up Ready Set Mail" subtitle="0 of 5 steps complete" skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
+		<Frame title="Let's set up Inbox Angel" subtitle={`0 of ${hosted ? 4 : 5} steps complete`} skipTo="/" wizard={DEFAULT_WIZARD} current={0}>
 			<DomainStep
 				onDomainSet={(newId) => {
 					void qc.invalidateQueries({ queryKey: keys.domains });
@@ -83,6 +95,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const { canWrite } = useSession();
+	const hosted = useHosted();
 	const statusQ = useOnboardingStatus(domainId);
 	const wizardQ = useWizardState(domainId);
 	const domainMarked = useRef(false);
@@ -115,7 +128,7 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 
 	const index = resolved - 1;
 	const done = () => navigate(`/domains/${domainId}`);
-	const progress = wizardProgress(wizard);
+	const progress = wizardProgress(wizard, { hosted });
 
 	function finish(state: WizardStepState) {
 		const key = STEP_KEYS[index];
@@ -151,10 +164,37 @@ function DomainSetup({ domainId, urlStep }: { domainId: number; urlStep: number 
 			wizard={wizard}
 			current={index}
 		>
-			{index === 1 ? <SpfStep {...props} /> : null}
-			{index === 2 ? <DkimStep {...props} /> : null}
-			{index === 3 ? <DmarcStep {...props} /> : null}
-			{index === 4 ? <RoutingStep {...props} /> : null}
+			{/* DNS says the name does not exist: there is nothing to check or publish, the same verdict as the domain page. */}
+			{status.nxdomain && index >= 1 && index <= 3 ? <DoesNotResolveStep domain={status.domain} onDone={done} onRetry={props.onRetry} /> : null}
+			{index === 1 && !status.nxdomain ? <SpfStep {...props} /> : null}
+			{index === 2 && !status.nxdomain ? <DkimStep {...props} /> : null}
+			{index === 3 && !status.nxdomain ? <DmarcStep {...props} /> : null}
+			{/* Hosted: leaving the Reports step saves nothing, because there is nothing to complete there yet. */}
+			{index === 4 ? (hosted ? <ReportsStep {...props} onNext={done} /> : <RoutingStep {...props} />) : null}
+			{(status.dns_errors?.length ?? 0) > 0 ? <TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="DNS lookups still failing after a retry?" about={`about ${status.domain}`} /> : null}
 		</Frame>
+	);
+}
+
+/** Steps 2 to 4 for a name DNS says does not exist: no records to read, nothing offered, and the one person to ask. */
+function DoesNotResolveStep({ domain, onDone, onRetry }: { domain: string; onDone: () => void; onRetry: () => void }) {
+	return (
+		<StepCard title="This domain does not resolve">
+			<CheckResultList>
+				<CheckResult
+					status="missing"
+					statusLabel="Does not resolve"
+					title={domain}
+					summary="DNS says this name does not exist, so there are no SPF, DKIM or DMARC records to check or publish. Check the spelling, or register the domain."
+					onRetry={onRetry}
+				/>
+			</CheckResultList>
+			<TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="Sure this is the right name?" about={`about ${domain}`} />
+			<StepFooter
+				end={
+					<Button onClick={onDone}>Go to domain</Button>
+				}
+			/>
+		</StepCard>
 	);
 }

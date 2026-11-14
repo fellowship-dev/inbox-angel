@@ -1,13 +1,15 @@
-import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ready-set-mail/ui';
+import { FieldError, FieldHint, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@inbox-angel/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useState, type FormEvent } from 'react';
 import { ClaimCard } from '../../../components/domain/ClaimCard';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepFooter } from '../../../components/wizard/StepNav';
 import { WriteButton } from '../../../components/states';
+import { DomainRefusalHelp } from '../../../components/TalkToMax';
 import { PlanLimitNotice, planLimitOf } from '../../../components/PlanLimitNotice';
 import { api, errorMessage } from '../../../lib/api';
 import { normalizeDomainInput } from '../../../lib/domain-input';
+import { useHosted } from '../../../lib/session';
 import { clearSignupDomainIf, readSignupDomain } from '../../../lib/signup-intent';
 import type { DomainClaim } from '../../../lib/types';
 
@@ -38,6 +40,7 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	const [manual, setManual] = useState(false);
 	const [validation, setValidation] = useState('');
 	const [claim, setClaim] = useState<DomainClaim | null>(null);
+	const hosted = useHosted();
 
 	// A failed zone lookup (no Cloudflare token, API down) just means typing the domain by hand.
 	const zones = useQuery({ queryKey: ['zones'], queryFn: () => api<{ zones: Zone[] }>('/api/zones').then((r) => r.zones), retry: false });
@@ -76,14 +79,21 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 	const atLimit = save.isError ? planLimitOf(save.error) : null;
 	const error = validation || (save.isError && !atLimit ? errorMessage(save.error) : '');
 	return (
-		<StepCard title="What's your main domain?" focusHeading={false}>
+		<StepCard title={hosted ? 'Which domain do you send email from?' : "What's your main domain?"} focusHeading={false}>
 			<form onSubmit={submit} className="space-y-4" noValidate>
-				<p className="text-sm text-ink-2">
-					Pick the domain you want as your Ready Set Mail home base. We create a <code className="font-mono text-ink-1">reports</code> subdomain here to receive email
-					authentication reports, and every domain you add later sends its reports there too.
-				</p>
+				{hosted ? (
+					<p className="text-sm text-ink-2">
+						Start with one domain; you can add more later. You prove it is yours with one DNS record, then we check its SPF, DKIM and DMARC from live DNS and show
+						you what to fix.
+					</p>
+				) : (
+					<p className="text-sm text-ink-2">
+						Pick the domain you want as your Inbox Angel home base. We create a <code className="font-mono text-ink-1">reports</code> subdomain here to receive email
+						authentication reports, and every domain you add later sends its reports there too.
+					</p>
+				)}
 				<div className="space-y-1.5">
-					<Label htmlFor={fieldId}>Main domain</Label>
+					<Label htmlFor={fieldId}>{hosted ? 'Domain' : 'Main domain'}</Label>
 					{showSelect ? (
 						<Select value={domain} onValueChange={setDomain}>
 							<SelectTrigger id={fieldId} aria-describedby={hintId} aria-invalid={error ? true : undefined}>
@@ -133,6 +143,7 @@ export function DomainStep({ onDomainSet }: { onDomainSet: (domainId: number) =>
 						)}
 					</FieldHint>
 					{error ? <FieldError>{error}</FieldError> : null}
+					{save.isError && !atLimit ? <DomainRefusalHelp error={save.error} /> : null}
 					{atLimit ? <PlanLimitNotice limit={atLimit} /> : null}
 				</div>
 				<StepFooter

@@ -1,8 +1,9 @@
-import { IconButton, LogoMark } from '@ready-set-mail/ui';
+import { IconButton, LogoMark } from '@inbox-angel/ui';
 import { Moon, Sun, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useTheme } from '../lib/theme';
+import { TalkToMaxLink, TalkToMaxScope } from './TalkToMax';
 
 /** Full-screen chrome for wizards: no sidebar, a way out, room to focus. */
 export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { children: ReactNode; exitTo?: string; exitLabel?: string }) {
@@ -12,9 +13,11 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 			<header className="flex h-16 items-center justify-between border-b border-line bg-surface-1 px-4 sm:px-6">
 				<Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
 					<LogoMark className="size-7 rounded-md" aria-hidden />
-					Ready Set Mail
+					{/* On phones the mark carries the name, so the top bar keeps room for Talk to Max, the theme toggle and Exit. */}
+					<span className="sr-only sm:not-sr-only">Inbox Angel</span>
 				</Link>
-				<div className="flex items-center gap-2">
+				<div className="flex items-center gap-1 sm:gap-2">
+					<TalkToMaxLink />
 					<IconButton label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggle}>
 						{theme === 'dark' ? <Sun aria-hidden /> : <Moon aria-hidden />}
 					</IconButton>
@@ -25,7 +28,7 @@ export function FocusLayout({ children, exitTo = '/', exitLabel = 'Exit' }: { ch
 				</div>
 			</header>
 			<main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-6">
-				{children}
+				<TalkToMaxScope>{children}</TalkToMaxScope>
 			</main>
 		</div>
 	);

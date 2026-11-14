@@ -1,4 +1,4 @@
-// REST API router for Ready Set Mail Worker.
+// REST API router for InboxAngel Worker.
 // All /api/* routes require authentication: the WorkspaceResolver (default: sessionWorkspaceResolver,
 // src/auth/resolver.ts) turns the deprecated API_KEY, a per-user API key or a Better Auth session
 // into {workspace, user, role}, and the request acts on that workspace only. Members are read-only.
@@ -23,6 +23,8 @@
 //   POST /api/invites/:token                  — accept invite + create user
 //
 // Authenticated:
+//   GET    /api/agents/status                 — can agents connect here, and the MCP server URL
+//   GET    /api/instance/preflight            — configuration check by setting name (instance owner only; src/setup/preflight.ts)
 //   GET    /api/domains                       — list domains
 //   POST   /api/domains                       — add a domain
 //   DELETE /api/domains/:id                   — remove a domain
@@ -92,9 +94,10 @@ import { openHostedZone } from '../hosted/records';
 import { issueCanary } from '../hosted/canary';
 import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
+import { agentAvailability, instancePreflight } from '../setup/preflight';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@ready-set-mail/db';
+import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@inbox-angel/db';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
@@ -103,9 +106,9 @@ import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../d
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
-import { PlanLimitError } from '@ready-set-mail/db';
+import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
-import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
+import { claimPreviewResponse } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -118,10 +121,10 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@ready-set-mail/dns-checks';
-import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
-import { getAllDkimSelectors } from '@ready-set-mail/dns-checks/email-service-providers';
-import { decodeTxtData } from '@ready-set-mail/dns-checks/txt';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
+import { dmarcFactsFromLookup, dmarcLookupFor, spfFromTxt } from '../email/dns-snapshot';
+import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
+import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
 import {
   provisionMtaSts,
   updateMtaStsTxtRecord,
@@ -445,7 +448,7 @@ async function _handleApi(
   // GET /api/version — compares running version against latest GitHub release
   // Cached for 24h per-instance via CF Cache API — one GitHub request per day max
   if (path === '/api/version' && method === 'GET') {
-    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/ready-set-mail/main/package.json';
+    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
     const cacheKey = new Request(GH_RAW);
     let latest: string | null = null;
     try {
@@ -468,7 +471,7 @@ async function _handleApi(
       current: version,
       latest,
       update_available: latest !== null && latest !== version,
-      release_url: 'https://github.com/fellowship-dev/ready-set-mail/releases/latest',
+      release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
       // Only when HOSTED_SERVICE_URL is set on a self-hosted installation (src/hosted-service.ts).
       ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
     });
@@ -504,6 +507,8 @@ async function _handleApi(
       const canary = await issueCanary(env);
       return json(canary, 201);
     }
+    // Hosted without a canary domain: no address can receive the test email, so say so instead of a 500.
+    if (getMode(env) === 'saas') return err('The email check is not available here: no address is set up to receive the test email.', 503);
     // Self-host: the same expiring, single-use check+<token>@<reports domain> address. Mail to any other local part is dropped.
     const tenant = await tenantFor();
     const rd = tenant.settings.reportsDomain;
@@ -622,12 +627,22 @@ async function _handleApi(
   if (path === '/api/me' && method === 'GET') {
     return json({
       instance_owner: instanceOwner,
-      ...(instanceOwner && getMode(env) === 'saas' ? { dns_preview_limiter: dnsPreviewLimiter(env) } : {}),
       user: userBySession,
       role: workspace.role ?? 'member',
       workspace_id: tenant.workspaceId,
       kind: (workspace as AuthedWorkspace).kind ?? 'session',
     });
+  }
+
+  // GET /api/agents/status — can agents connect to this instance, and at which server URL (any signed-in role)
+  if (path === '/api/agents/status' && method === 'GET') {
+    return json(agentAvailability(env));
+  }
+
+  // GET /api/instance/preflight — configuration problems by setting name, never a value (instance owner only)
+  if (path === '/api/instance/preflight' && method === 'GET') {
+    if (!instanceOwner) return err('only the person who runs this instance can see its configuration check', 403);
+    return json(await instancePreflight(env, url.origin));
   }
 
   const leadResponse = await handleLeadRoutes(request, env, instanceOwner);
@@ -652,16 +667,19 @@ async function _handleApi(
       if (admission.kind === 'limit') return err('too many unverified domains — verify or remove some first', 429);
       if (admission.kind === 'pending') return json({ ok: false, pending: true, claim: claimView(admission.claim), domain }, 202);
 
-      // Persist base domain + derived values to D1
-      const rd = `reports.${domain}`;
-      const fe = `noreply@${rd}`;
-      const ruaAddress = `rua@${rd}`;
+      // Persist base domain + derived values to D1.
+      // Hosted: nothing is derived. Report intake is not connected, so there is no reports.<domain>, no rua@ address and
+      // no base_domain setting (from which loadTenant would derive reports.<domain> again).
+      const hostedMode = getMode(env) === 'saas';
+      const rd = hostedMode ? null : `reports.${domain}`;
+      const fe = rd ? `noreply@${rd}` : null;
+      const ruaAddress = rd ? `rua@${rd}` : '';
 
       // Inbound mail is routed by reports domain and a hostname is monitored by one workspace only:
       // refuse what another workspace already owns before anything is written.
       const lifecycle = workspaceLifecycle(env.DB as D1Database);
       const hostOwner = await lifecycle.byDomain(domain);
-      const reportsOwner = await lifecycle.byReportsDomain(rd);
+      const reportsOwner = rd ? await lifecycle.byReportsDomain(rd) : null;
       if ((hostOwner && hostOwner !== tenant.workspaceId) || (reportsOwner && reportsOwner !== tenant.workspaceId)) {
         return err('this domain is already registered in another workspace', 409);
       }
@@ -672,7 +690,11 @@ async function _handleApi(
       let domainId: number | undefined;
       let created: number | null;
       try {
-        created = await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, verified_via: admission.via, settings: { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } }, { maxDomains: domainCap(tenant) });
+        const settings: Record<string, string> = rd && fe ? { base_domain: domain, reports_domain: rd, from_email: fe, ...forgetZone } : {};
+        // Hosted with the domain already in the workspace: there is nothing to write (no settings, no row).
+        created = hostedMode && (await tenant.scope.domains.getByName(domain))
+          ? null
+          : await tenant.scope.baseDomain.apply({ domain, rua_address: ruaAddress, verified_via: admission.via, settings }, { maxDomains: domainCap(tenant) });
       } catch (e: any) {
         if (e instanceof PlanLimitError) return planLimitResponse(env, 'domains_per_workspace', e.max);
         if (e?.message?.includes('UNIQUE')) return err('this domain is already registered in another workspace', 409);
@@ -918,6 +940,7 @@ async function _handleApi(
       const dns_errors: string[] = [];
       // What this read resolved, stored below. A key stays unset when its lookup failed (unknown is never stored as absent).
       const resolved: { spf_record?: string | null; dmarc?: DmarcFacts; nxdomain?: boolean } = {};
+      let inheritedRecord: string | null = null;
 
       const [spfLiveData, dmarcData, routingData, dkimData, nullSenderData, authRecordData] = await Promise.all([
         // SPF: TXT lookup for {domain} → find v=spf1
@@ -935,7 +958,10 @@ async function _handleApi(
             return { found: false, has_our_rua: false, current_record: null as string | null, error: t.error };
           }
           // The effective policy (RFC 7489): the parent's is read only when this domain has no record of its own (1 extra subrequest).
-          resolved.dmarc = await dmarcFactsFor(dnsResolver, domain.domain, t).catch(() => undefined);
+          const lookup = await dmarcLookupFor(dnsResolver, domain.domain, t).catch(() => undefined);
+          resolved.dmarc = lookup ? dmarcFactsFromLookup(lookup) : undefined;
+          // The inherited record itself, so the dashboard can say how much mail its policy covers (pct=).
+          inheritedRecord = lookup?.inherited ? (lookup.record?.raw ?? null) : null;
           return { found: t.records.length > 0, has_our_rua: !!domain.rua_address?.trim() && t.records.some(r => r.toLowerCase().includes(domain.rua_address.trim().toLowerCase())), current_record: t.records[0] ?? null };
         }),
 
@@ -1056,7 +1082,11 @@ async function _handleApi(
         domain: domain.domain,
         rua_address: domain.rua_address,
         cf_available: tenant.hasCloudflare(),
-        dmarc: { ...dmarcData, auth_record: authRecordData },
+        // `effective`: the policy that applies (RFC 7489), own or inherited from the organizational domain; null when DNS
+        // could not say. The dashboard never offers a record weaker than this.
+        dmarc: { ...dmarcData, auth_record: authRecordData, effective: resolved.dmarc ? { policy: resolved.dmarc.policy, inherited_from: resolved.dmarc.inherited_from, issue: resolved.dmarc.issue, record: inheritedRecord } : null },
+        // DNS said the name itself does not exist.
+        nxdomain: resolved.nxdomain === true,
         spf: { record: spfLiveData ?? domain.spf_record ?? null, lookup_count: domain.spf_lookup_count ?? null, flattening_active: !!(spfFlatConfig?.enabled) },
         dkim: dkimData,
         routing: { ...routingData, reports_domain: rd ?? null, null_sender_spf: nullSenderData.spf, null_sender_dmarc: nullSenderData.dmarc },
@@ -1227,14 +1257,14 @@ async function _handleApi(
       return json({ ok: true, record: body.record, created: !existingId });
     }
 
-    // POST /api/setup/custom-domain — register ready-set-mail.{BASE_DOMAIN} as CF Custom Domain
+    // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
       if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
       const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
       const workerName = tenant.workerName;
-      const hostname = `ready-set-mail.${bd}`;
+      const hostname = `inbox-angel.${bd}`;
 
       // The hostname is on the base domain's zone.
       let cf: Awaited<ReturnType<typeof tenant.cfFor>>;
@@ -1912,7 +1942,7 @@ async function _handleApi(
       const list = parseDomainList(body.domains);
       if (list.length === 0) return err('no valid domains provided', 400);
       if (list.length > 50) return err('too many domains: limit is 50 per request', 400);
-      if (!tenant.settings.reportsDomain) return err(REPORTS_DOMAIN_MISSING, 400);
+      if (tenant.mode !== 'saas' && !tenant.settings.reportsDomain) return err(REPORTS_DOMAIN_MISSING, 400);
       const results = await bulkInsertDomains(
         tenant,
         list,

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { workspaceStore } from '../../lib/workspace';
+import { TalkToMax } from '../../components/TalkToMax';
 import { AuthLayout } from './AuthLayout';
 
 /**
@@ -71,6 +72,7 @@ export function NoWorkspacePage() {
 			<Button variant="secondary" className="w-full" onClick={() => void signOut()}>
 				Sign out
 			</Button>
+			<TalkToMax className="text-center" lead="Expected to see a workspace here?" about="about your account" />
 		</AuthLayout>
 	);
 }

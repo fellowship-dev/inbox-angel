@@ -54,6 +54,8 @@ export interface AddDomainResult {
   manual_dns?: boolean;
   dns_instructions?: string;
   parent_context?: ParentContext;
+  /** The workspace already had the domain (a repeat verify or add): nothing new was verified. */
+  resumed?: boolean;
 }
 
 export interface FailingSource {
@@ -204,7 +206,14 @@ export interface OnboardingStatus {
       found: boolean;
       record_name: string | null;
     };
+    /**
+     * The policy that applies (RFC 7489): the domain's own record, else its organizational domain's (`inherited_from`).
+     * Null when DNS could not say; absent from older servers. Never offer a record weaker than this policy.
+     */
+    effective?: { policy: string | null; inherited_from: string | null; issue: string | null; /** The inherited record's text (its pct= matters), null when not inherited. */ record?: string | null } | null;
   };
+  /** DNS said the name itself does not exist (NXDOMAIN). */
+  nxdomain?: boolean;
   spf: {
     record: string | null;
     lookup_count: number | null;
@@ -271,8 +280,6 @@ export type Role = 'owner' | 'admin' | 'member';
 
 /** GET /api/me */
 export interface Me {
-  /** Hosted instance owner only: which limiter answers the claim DNS preview. `fallback` means the DNS_PREVIEW_LIMITER binding is missing. */
-  dns_preview_limiter?: 'binding' | 'fallback';
   user: { id: string; email: string; name: string } | null;
   /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
   role: Role | null;
@@ -323,6 +330,10 @@ export interface AuthStatus {
   custom_domain: string | null;
   base_domain: string | null;
   has_domain: boolean;
+  /** Hosted only: the https booking link behind "Talk to Max". Null (or absent) = show no link anywhere. */
+  help_url?: string | null;
+  /** False when the free email check cannot work here (hosted without a canary domain): its menu item is hidden. */
+  email_check?: boolean;
 }
 
 /** GET /api/keys: prefixes only, never the secret. */
@@ -335,4 +346,23 @@ export interface ApiKey {
   last_used_at: number | null;
   expires_at: number | null;
   revoked_at: number | null;
+}
+
+/** GET /api/agents/status: can agents connect to this instance, and at which MCP server URL. */
+export interface AgentStatus {
+  available: boolean;
+  server_url: string | null;
+}
+
+/** GET /api/instance/preflight (instance owner only): configuration problems by setting name, never a value. */
+export interface PreflightItem {
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
+  severity: 'action' | 'note';
+  setting: string;
+  message: string;
+}
+export interface Preflight {
+  mode: 'self-host' | 'saas';
+  agents: AgentStatus;
+  items: PreflightItem[];
 }

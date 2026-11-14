@@ -1,4 +1,5 @@
-import { EmptyState, PageHeader } from '@ready-set-mail/ui';
+import { EmptyState, PageHeader } from '@inbox-angel/ui';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
@@ -13,6 +14,8 @@ export function AnomaliesPage() {
 	const id = useRouteDomainId();
 	const { domain } = useDomain(id);
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
+	// Hosted, before report intake: "no anomalies" would be a pass nobody measured.
+	const reportsOff = useReportsNotConnected(domain);
 
 	const q = useQuery({
 		queryKey: ['anomalies', id, days],
@@ -31,7 +34,9 @@ export function AnomaliesPage() {
 				actions={<WindowPills value={days} onChange={setDays} />}
 			/>
 
-			{q.isPending ? (
+			{reportsOff ? (
+				<ReportsNotConnected domain={domain?.domain} />
+			) : q.isPending ? (
 				<ListSkeleton rows={3} label="Loading anomalies" />
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load anomalies" />

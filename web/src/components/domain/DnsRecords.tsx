@@ -1,13 +1,16 @@
-import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@ready-set-mail/ui';
+import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@inbox-angel/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { isRevokedDkimKey } from '../../lib/dkim';
 import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../lib/dkim-wildcard';
-import { buildRecommendedRecord, hasReportAddress } from '../../lib/dmarc-record';
+import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
+import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement, recordFor } from '../../lib/dmarc-coverage';
 import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '../../lib/domain-queries';
+import { useHosted } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 import { Section, WriteButton } from '../states';
+import { HELP_PRIORITY, TalkToMax } from '../TalkToMax';
 import { ConfirmDialog } from './ConfirmDialog';
 
 const SPF_LOOKUP_LIMIT = 10;
@@ -38,7 +41,14 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	const current = dns.data?.current_record ?? null;
 	const policy = current?.match(/\bp=([a-z]+)/)?.[1] ?? 'none';
 	const ruaReady = hasReportAddress(domain.rua_address);
-	const recommended = buildRecommendedRecord(current, policy, domain.rua_address);
+	// Hosted, before report intake: no report address exists, but a missing record still gets a plain p=none to publish.
+	const hostedNoReports = useHosted() && !ruaReady;
+	// No record of its own: a new one replaces what the name inherits, so it starts at the inherited policy when that
+	// enforces, and nothing is offered while the policy that applies is unknown. Never weaker than the effective policy.
+	const coverage = dmarcCoverage(onboarding.data ?? null, onboarding.isError || (onboarding.data?.dns_errors ?? []).some((e) => e.startsWith('dmarc:')));
+	// With a record: keep its policy and add our address. Without: exactly the enforcement in force (policy and pct).
+	const floor = current ? null : offerEnforcement(coverage);
+	const recommended = current ? buildRecommendedRecord(current, policy, domain.rua_address) : recordFor(floor ?? { policy: 'none', pct: 100 }, domain.rua_address);
 	const dmarcName = `_dmarc.${domain.domain}`;
 	const cfAvailable = !!(dns.data?.cf_managed || onboarding.data?.cf_available);
 
@@ -51,27 +61,89 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 		},
 	});
 
+	/**
+	 * Hosted, before report intake: no report address, so the row judges what DNS shows. A p=none record is offered only
+	 * when no policy applies at all; an inherited policy is explained, never undercut by a weaker record of its own.
+	 */
+	function hostedDmarcRow() {
+		if (current) {
+			const p = parseDmarcPolicy(current);
+			const enforcing = p === 'quarantine' || p === 'reject';
+			return (
+				<CheckResult
+					status={enforcing ? 'pass' : 'warn'}
+					statusLabel={enforcing ? 'Published' : 'Worth fixing'}
+					title="DMARC record"
+					summary={
+						enforcing
+							? 'Published, read from public DNS. Reports are not connected yet, so it sends no reports to Inbox Angel.'
+							: `Published, read from public DNS. ${p === 'none' ? 'p=none only monitors: mail that fails SPF and DKIM is still delivered.' : 'It has no valid p= policy, so receivers ignore it.'} Reports are not connected yet, so it sends no reports to Inbox Angel.`
+					}
+				>
+					<RecordBlock title="Current record" record={{ type: 'TXT', name: dmarcName, value: current }} />
+				</CheckResult>
+			);
+		}
+		if (onboarding.isPending) return <RowSkeleton label="DMARC" />;
+		if (coverage.kind === 'inherited') {
+			const enforcing = coverage.policy === 'quarantine' || coverage.policy === 'reject';
+			return (
+				<CheckResult
+					status={enforcing ? 'pass' : 'warn'}
+					statusLabel={coverage.policy ? `Inherited (p=${coverage.policy})` : 'Inherited, no policy'}
+					title="DMARC record"
+					summary={inheritedSentence(domain.domain, coverage)}
+				/>
+			);
+		}
+		if (coverage.kind === 'none') {
+			return (
+				<CheckResult status="missing" title="DMARC record" summary={`No DMARC policy applies to ${domain.domain}: there is no record at ${dmarcName} and none to inherit. Publish this record: p=none only monitors, so no mail is blocked or redirected.`}>
+					<div className="space-y-3">
+						<RecordBlock title="Add this record" record={{ type: 'TXT', name: dmarcName, value: buildRecommendedRecord(null, 'none', null), ttl: 3600 }} />
+						<p className="text-ink-2">Add this record at your DNS provider.</p>
+					</div>
+				</CheckResult>
+			);
+		}
+		return (
+			<CheckResult
+				status="error"
+				title="DMARC record"
+				summary={`There is no record at ${dmarcName}, and we could not tell whether a parent domain's policy covers this name, so no record is offered.`}
+				onRetry={() => void onboarding.refetch()}
+			/>
+		);
+	}
+
 	const dmarcRow = (() => {
 		if (dns.isPending) return <RowSkeleton label="DMARC" />;
 		if (dns.isError || dns.data.error) {
 			return <CheckResult status="error" title="DMARC record" summary={dns.isError ? errorMessage(dns.error) : 'The DNS lookup did not complete.'} onRetry={() => void dns.refetch()} />;
 		}
 		const { found } = dns.data;
+		if (hostedNoReports) return hostedDmarcRow();
+		if (!found && ruaReady && onboarding.isPending) return <RowSkeleton label="DMARC" />;
 		// Without a report address of our own, no record can send reports here, whatever the lookup matched.
 		const has_rua = dns.data.has_rua && ruaReady;
-		const status: CheckStatus = found && has_rua ? 'pass' : found ? 'warn' : 'missing';
-		const upToDate = !ruaReady || (found && has_rua && current === recommended);
+		const status: CheckStatus = found && has_rua ? 'pass' : found ? 'warn' : !found && coverage.kind === 'inherited' && (coverage.policy === 'quarantine' || coverage.policy === 'reject') ? 'warn' : 'missing';
+		const offerBlocked = !found && !floor;
+		const upToDate = !ruaReady || offerBlocked || (found && has_rua && current === recommended);
 		return (
 			<CheckResult
 				status={status}
 				title="DMARC record"
 				summary={
 					!ruaReady
-						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Ready Set Mail report address yet, so there is no record to suggest.`
-						: !found
+						? `${found ? 'Published' : `No TXT record at ${dmarcName}`}. This domain has no Inbox Angel report address yet, so there is no record to suggest.`
+						: !found && offerBlocked
+							? `No TXT record at ${dmarcName}, and we could not tell whether a parent domain's policy covers this name, so no record is offered.`
+							: !found && coverage.kind === 'inherited'
+								? `${inheritedSentence(domain.domain, coverage)} To receive reports here, publish the record below: it keeps ${floor ? keptEnforcement(coverage, floor) : ''} and adds Inbox Angel's report address.`
+							: !found
 							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
 							: has_rua
-								? 'Published, and aggregate reports are sent to Ready Set Mail.'
+								? 'Published, and aggregate reports are sent to Inbox Angel.'
 								: `Published, but it does not send reports to ${domain.rua_address}. Update it with the record below.`
 				}
 			>
@@ -85,7 +157,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 									Apply to Cloudflare
 								</WriteButton>
 							) : (
-								<p className="text-ink-2">Add this record at your DNS provider. Ready Set Mail cannot change DNS for this domain.</p>
+								<p className="text-ink-2">Add this record at your DNS provider. Inbox Angel cannot change DNS for this domain.</p>
 							)}
 						</>
 					) : null}
@@ -163,9 +235,24 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	return (
 		<Section title="DNS records" description="Read live from DNS. A lookup that fails is shown as such and never counted as a missing record.">
 			<CheckResultList aria-label="DNS records">
-				{dmarcRow}
-				{spfRow}
-				{dkimRow}
+				{onboarding.data?.nxdomain ? (
+					// DNS says the name does not exist: the same verdict as the overview card, not three "not found" rows.
+					<CheckResult
+						status="missing"
+						statusLabel="Does not resolve"
+						title="This domain does not resolve"
+						summary="DNS says this name does not exist, so there are no SPF, DKIM or DMARC records to check. Check the spelling, or register the domain."
+						onRetry={retryOnboarding}
+					>
+						<TalkToMax priority={HELP_PRIORITY.dnsFailing} lead="Sure this is the right name?" about={`about ${domain.domain}`} />
+					</CheckResult>
+				) : (
+					<>
+						{dmarcRow}
+						{spfRow}
+						{dkimRow}
+					</>
+				)}
 			</CheckResultList>
 			<ConfirmDialog
 				open={confirmOpen}

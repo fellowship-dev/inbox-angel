@@ -7,7 +7,7 @@ export const metricsInput = reportInput.extend({ source: z.enum(['dmarc', 'tls',
 export const outputSchema = z.object({
  schema: z.literal('ready-set-mail-tool/v1'), summary: z.string(),
  data: z.record(z.string(), z.unknown()), evidence: z.array(z.object({ href: z.string(), label: z.string() })),
- error: z.object({ code: z.enum(['forbidden', 'invalid_input', 'not_found', 'unavailable']), message: z.string() }).optional(),
+ error: z.object({ code: z.enum(['forbidden', 'invalid_input', 'not_found', 'unavailable', 'rate_limited']), message: z.string(), retryAfterSeconds: z.number().int().positive().optional() }).optional(),
 });
 export type DomainInput = z.infer<typeof reportInput>;
 // Named result fields are stable; nested shared report fields remain additive across catalog releases.

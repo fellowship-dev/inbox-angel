@@ -11,6 +11,7 @@ import { DangerZone } from './DangerZone';
 import { WorkspaceSection } from './WorkspaceSection';
 import { AgentConnectionsSection } from './AgentConnectionsSection';
 import { MetricConnectionsSection } from './MetricConnectionsSection';
+import { SetupCheck } from '../../components/SetupCheck';
 
 interface VersionInfo {
 	current: string;
@@ -84,6 +85,7 @@ export function SettingsPage() {
 			</Section>
 
 			<Section title="Instance">
+				<SetupCheck />
 				<Card>
 					<CardContent className="py-2">
 						<dl className="divide-y divide-line">

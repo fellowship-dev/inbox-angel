@@ -1,5 +1,6 @@
 import { Alert } from '@ready-set-mail/ui';
 import { ApiError } from '../lib/api';
+import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
 
 export interface PlanLimit {
 	kind: 'workspaces_per_user' | 'domains_per_workspace';
@@ -21,7 +22,8 @@ export function planLimitOf(err: unknown): PlanLimit | null {
 	};
 }
 
-const MORE = { domains_per_workspace: 'Managing more domains? ', workspaces_per_user: 'Need more workspaces? ' } as const;
+const MORE = { domains_per_workspace: 'Managing more domains?', workspaces_per_user: 'Need more workspaces?' } as const;
+const ABOUT = { domains_per_workspace: 'about your domains', workspaces_per_user: 'about your workspaces' } as const;
 const FREE_UP = {
 	domains_per_workspace: 'Remove a domain you no longer need to add another.',
 	workspaces_per_user: 'Delete a workspace you no longer use to make room for a new one.',
@@ -29,22 +31,13 @@ const FREE_UP = {
 
 /** A plan limit is information, not a failure: the person did nothing wrong. */
 export function PlanLimitNotice({ limit, className }: { limit: PlanLimit; className?: string }) {
-	// Re-checked here: only an https URL ever becomes a link.
+	// The response's link (https only; the server builds it with the same helpUrl()) becomes the shared Talk to Max line,
+	// the one contextual link on the screen. Without one, say how to make room.
 	const href = limit.help_url?.startsWith('https://') ? limit.help_url : null;
 	return (
 		<Alert variant="info" className={className}>
 			<p>{limit.message}</p>
-			{href ? (
-				<p>
-					{MORE[limit.kind]}
-					{/* TODO: use the shared TalkToMax component once the help-link PR lands. */}
-					<a href={href} target="_blank" rel="noopener noreferrer">
-						Talk to Max
-					</a>
-				</p>
-			) : (
-				<p>{FREE_UP[limit.kind]}</p>
-			)}
+			{href ? <TalkToMax href={href} priority={HELP_PRIORITY.planLimit} lead={MORE[limit.kind]} about={ABOUT[limit.kind]} /> : <p>{FREE_UP[limit.kind]}</p>}
 		</Alert>
 	);
 }

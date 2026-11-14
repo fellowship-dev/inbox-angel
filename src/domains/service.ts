@@ -108,7 +108,8 @@ export async function resumeExistingDomain(tenant: TenantContext, domain: string
 export async function commitVerifiedDomain(tenant: TenantContext, domain: string, via: VerifiedVia, userEmail?: string, ctx?: ExecutionContext, actorId?: string, options: EnrollmentOptions = {}) {
   await authorizeProductEnrollment(tenant, domain, options);
   await assertAgentEnrollmentSafe(tenant, domain);
-  const rdomain = tenant.settings.reportsDomain;
+  // Hosted: never a reports domain, so never an rua@reports.<domain> address (report intake is not connected).
+  const rdomain = tenant.mode === 'saas' ? undefined : tenant.settings.reportsDomain;
   const existing = await tenant.scope.domains.getByName(domain);
   if (existing) {
     await assertExistingProductMapping(tenant, existing, options);

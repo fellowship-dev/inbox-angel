@@ -125,3 +125,9 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
 
 export const maxHostedDomainsPerWorkspace = (env: HostedEnv): number =>
   positive(env.HOSTED_MAX_DOMAINS_PER_WORKSPACE, DEFAULT_MAX_HOSTED_DOMAINS_PER_WORKSPACE);
+
+/** The free email check works: always on self-host; hosted only with a canary domain to receive the test email. */
+export function emailCheckAvailable(env: HostedEnv): boolean {
+  if (getMode(env) !== 'saas') return true;
+  return hostedEnabled(env) && !!hostedConfig(env).canaryDomain;
+}

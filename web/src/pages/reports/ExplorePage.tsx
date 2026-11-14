@@ -1,4 +1,5 @@
-import { Badge, Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
+import { Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Inbox } from 'lucide-react';
 import { useState } from 'react';
@@ -16,6 +17,7 @@ export function ExplorePage() {
 	const { domain } = useDomain(id);
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
 	const [filter, setFilter] = useState<Filter>('all');
+	const reportsOff = useReportsNotConnected(domain);
 
 	const q = useQuery({
 		queryKey: ['explore', id, days],
@@ -58,7 +60,9 @@ export function ExplorePage() {
 				<WindowPills value={days} onChange={setDays} />
 			</div>
 
-			{q.isPending ? (
+			{reportsOff ? (
+				<ReportsNotConnected domain={domain?.domain} />
+			) : q.isPending ? (
 				<ListSkeleton rows={4} label="Loading sources" />
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load sources" />
@@ -78,7 +82,7 @@ export function ExplorePage() {
 					<EmptyState
 						icon={<Inbox />}
 						title={`No sources in the last ${days} days`}
-						description="No DMARC reports received yet. Reports arrive daily from mail providers once your DMARC record points to Ready Set Mail."
+						description="No DMARC reports received yet. Reports arrive daily from mail providers once your DMARC record points to Inbox Angel."
 						action={days < 90 ? <Button variant="secondary" onClick={() => setDays(90)}>Look back 90 days</Button> : undefined}
 					/>
 				)

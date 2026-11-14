@@ -5,6 +5,12 @@ import type { OnboardingStatus, WizardState } from '../../../lib/types';
 
 export const STEP_KEYS = ['domain', 'spf', 'dkim', 'dmarc', 'routing'] as const satisfies readonly (keyof WizardState)[];
 export const STEP_LABELS = ['Domain', 'SPF', 'DKIM', 'DMARC', 'Routing'] as const;
+/**
+ * Hosted: the fifth step reports on DMARC reports instead of setting up routing (Email Routing is self-host only,
+ * and the hosted service refuses those calls). It keeps the `routing` key so saved progress stays where it is.
+ */
+export const HOSTED_STEP_LABELS = ['Domain', 'SPF', 'DKIM', 'DMARC', 'Reports'] as const;
+export const stepLabels = (hosted: boolean): readonly string[] => (hosted ? HOSTED_STEP_LABELS : STEP_LABELS);
 export const STEP_COUNT = STEP_KEYS.length;
 
 export const DEFAULT_WIZARD: WizardState = { domain: 'not_started', spf: 'not_started', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' };

@@ -9,6 +9,7 @@ import { mcpInstallation } from '../discovery';
 import { freshSubject, resourceContext, type ToolContext } from '../context';
 import type { DomainInput } from '../schemas';
 import { ToolError } from '../errors';
+import { spendDnsCheck } from '../rate-limit';
 
 export function result(summary: string, data: Record<string, unknown>, evidence: { href: string; label: string }[] = []) {
  const structuredContent = { schema: 'ready-set-mail-tool/v1' as const, summary, data, evidence };
@@ -48,6 +49,8 @@ async function report(context: ToolContext, input: DomainInput, action: 'reports
  const resolved = await resourceContext(context, input, action);
  const domain = await resolved.tenant.scope.domains.getByName(input.domain);
  if (!domain) throw new ToolError('not_found', 'Domain not enrolled; call add_domain first');
+ // Every report runs the full live DNS check (two resolvers); see ../rate-limit.ts.
+ await spendDnsCheck(context.env, resolved.subject.principalId, resolved.tenant.workspaceId);
  const data = await getDomainReport(resolved.tenant, domain.id, { ...context.reportOptions, days: input.days ?? context.reportOptions?.days });
  const base = mcpInstallation(context.env).issuer;
  return { data, resource: resolved.resource, evidence: [{ href: `${base}/#/w/${encodeURIComponent(resolved.tenant.workspaceId)}/domains/${domain.id}`, label: 'Private domain evidence report (authorized browser access required)' }] };
@@ -65,7 +68,8 @@ export async function planRemediation(context: ToolContext, input: DomainInput) 
  return result(`${data.remediation.length} proposed fixes for ${input.domain}. Apply changes separately, then repeat inspection.`, { resource, domain: data.domain, coverage: data.coverage, fixes: data.remediation }, evidence);
 }
 export async function inspectDomain(context: ToolContext, input: DomainInput) {
- await resourceContext(context, input, 'diagnostics:run');
+ const { subject, tenant } = await resourceContext(context, input, 'diagnostics:run');
+ await spendDnsCheck(context.env, subject.principalId, tenant.workspaceId);
  const resolvers = context.reportOptions?.resolvers ?? (context.reportOptions?.resolver ? [context.reportOptions.resolver] : [createResolver(), createResolver({ endpoint: DOH_ENDPOINTS.google })]);
  const dns = buildReport({ runs: await Promise.all(resolvers.map(resolver => checkDomain(input.domain, { resolver }))), generatedAt: new Date((context.reportOptions?.now ?? Date.now()/1000)*1000).toISOString() });
  return result(`Public DNS inspection for ${input.domain}: ${dns.findings.length} findings. No changes applied.`, { dns });

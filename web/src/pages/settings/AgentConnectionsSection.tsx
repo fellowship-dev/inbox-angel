@@ -49,6 +49,7 @@ interface Connection {
     principalId: string;
     name: string;
     workspaceId: string;
+    workspaceName?: string | null;
     createdAt: number;
     expiresAt: number;
     lastUsedAt?: number | null;
@@ -84,11 +85,12 @@ export function AgentConnectionsSection() {
     } }
     return <Section title="Agents and product access" description="Connect interactive agents with browser consent, or issue a finite credential for an unattended product.">
   <Card><CardContent className="space-y-4 p-5 min-w-0">
+   <p className="text-sm text-ink-2">New to agents? <Link to="/agents" className="text-brand-ink underline underline-offset-4">Agents</Link> explains what they can do here and gives you a first question to ask.</p>
    <Field id="mcp-endpoint" label="This installation's MCP endpoint"><Input id="mcp-endpoint" readOnly value={endpoint}/></Field>
    <Button className="max-w-full h-auto min-h-10 whitespace-normal break-words py-2" variant="secondary" onClick={() => void copy(endpoint)}>Copy MCP endpoint</Button>
    <ol className="list-decimal pl-5 text-sm text-ink-2 space-y-1"><li>Install the Ready Set Mail plugin and set this HTTPS endpoint.</li><li>Reload your client so its MCP tools become available.</li><li>Sign in to this installation and approve exact resources, actions and expiry.</li><li>Call whoami, then request a domain health report. Installation alone does not establish a connection.</li></ol>
    <h3 className="font-semibold">Your browser-authorized agents</h3>
-   {connections.isPending ? <p>Loading connections…</p> : connections.isError ? <FieldError>{errorMessage(connections.error)}</FieldError> : !connections.data.connections.length ? <p className="text-sm text-ink-2">No authorized agents yet.</p> : connections.data.connections.map(c => <div key={c.principalId} className="border-t border-line pt-3 break-words"><p className="font-medium">{c.name}</p><p className="text-sm text-ink-2">Workspace {c.workspaceId} · Created {timestamp(c.createdAt)} · Expires {timestamp(c.expiresAt)} · Last used {c.lastUsedAt === undefined ? 'Not recorded' : timestamp(c.lastUsedAt)}</p>{c.revoked ? <p>Revoked</p> : <Button className="max-w-full h-auto min-h-10 whitespace-normal break-words py-2" size="sm" variant="danger" onClick={() => void revoke(c.principalId)}>Revoke {c.name}</Button>}</div>)}
+   {connections.isPending ? <p>Loading connections…</p> : connections.isError ? <FieldError>{errorMessage(connections.error)}</FieldError> : !connections.data.connections.length ? <p className="text-sm text-ink-2">No authorized agents yet.</p> : connections.data.connections.map(c => <div key={c.principalId} className="border-t border-line pt-3 break-words"><p className="font-medium">{c.name}</p><p className="text-sm text-ink-2">{c.workspaceName ? `Workspace ${c.workspaceName}` : 'Workspace'} · Created {timestamp(c.createdAt)} · Expires {timestamp(c.expiresAt)} · Last used {c.lastUsedAt === undefined ? 'Not recorded' : timestamp(c.lastUsedAt)}</p>{c.revoked ? <p>Revoked</p> : <Button className="max-w-full h-auto min-h-10 whitespace-normal break-words py-2" size="sm" variant="danger" onClick={() => void revoke(c.principalId)}>Revoke {c.name}</Button>}</div>)}
    {error && <FieldError>{error}</FieldError>}
   </CardContent></Card>
   {role === 'owner' ? <ProductAccess key={workspace}/> : <p className="text-sm text-ink-2">Only a workspace owner can manage products and service credentials.</p>}

@@ -128,7 +128,22 @@ Measured with `npx tsx scripts/measure-preview-subrequests.ts <domain>...` (the 
 | hubspot.com | 43 | SPF 4 lookups |
 | microsoft.com | 45 | SPF 6 lookups |
 
-**`DNS_PREVIEW_LIMITER` binding.** The preview is limited to 10 per person per minute (a cached answer does not count). The limit is a Workers ratelimit binding named `DNS_PREVIEW_LIMITER` (in `wrangler.jsonc`: `"type": "ratelimit"`, `"simple": { "limit": 10, "period": 60 }`), shared by every isolate. Without it the Worker falls back to a counter kept inside one isolate, which another isolate does not see, so the limit is not reliable at scale. A `MODE=saas` Worker without the binding logs one warning per isolate on first use (`[claim-preview] DNS_PREVIEW_LIMITER binding missing: …`), and `GET /api/me` shows the instance owner `dns_preview_limiter: "binding"` or `"fallback"` (nobody else sees the field).
+**`DNS_PREVIEW_LIMITER` binding.** The preview is limited to 10 per person per minute (a cached answer does not count). The limit is a Workers ratelimit binding named `DNS_PREVIEW_LIMITER` (in `wrangler.jsonc`: `"type": "ratelimit"`, `"simple": { "limit": 10, "period": 60 }`), shared by every isolate. Without it the Worker falls back to a counter kept inside one isolate, which another isolate does not see, so the limit is not reliable at scale. A `MODE=saas` Worker without the binding logs one warning per isolate on first use (`[claim-preview] DNS_PREVIEW_LIMITER binding missing: …`), and the instance owner's setup check (**Settings → Instance**, `GET /api/instance/preflight`) lists it as action needed, together with any other missing ratelimit binding (see [Ratelimit bindings](#ratelimit-bindings)). Nobody else sees the check, and on the hosted service nobody sees it at all unless `OWNER_EMAIL` is set to a verified account.
+
+### Ratelimit bindings
+
+A hosted Worker needs all six ratelimit bindings below. A missing one fails open (that limit does not apply), except that `/mcp` answers 503 without `MCP_LIMITER` and `API_LIMITER`; the owner's setup check lists every missing one. Each launch config (the three `wrangler` configs used to deploy an instance) needs exactly these entries under `"unsafe": { "bindings": [ … ] }`. `namespace_id` must be a positive integer unique within the Cloudflare account; the values below are the repository's and can be reused when each instance lives in its own account, otherwise give each instance its own numbers.
+
+```jsonc
+{ "name": "AUTH_LIMITER",        "type": "ratelimit", "namespace_id": "1001", "simple": { "limit": 10,  "period": 60 } }, // sign-in, sign-up; /oauth/register per IP (own key)
+{ "name": "API_LIMITER",         "type": "ratelimit", "namespace_id": "1002", "simple": { "limit": 200, "period": 60 } }, // /api per IP; agent requests per workspace
+{ "name": "DNS_PREVIEW_LIMITER", "type": "ratelimit", "namespace_id": "1003", "simple": { "limit": 10,  "period": 60 } }, // claim DNS preview per person
+{ "name": "MCP_LIMITER",         "type": "ratelimit", "namespace_id": "1004", "simple": { "limit": 100, "period": 60 } }, // agent requests per connection
+{ "name": "OAUTH_TOKEN_LIMITER", "type": "ratelimit", "namespace_id": "1005", "simple": { "limit": 600, "period": 60 } }, // /oauth/token per IP
+{ "name": "MCP_ANON_LIMITER",    "type": "ratelimit", "namespace_id": "1006", "simple": { "limit": 60,  "period": 60 } }  // /mcp without a token, per IP
+```
+
+`OAUTH_TOKEN_LIMITER`, `MCP_ANON_LIMITER` and `MCP_LIMITER` are new with the agent limits; launch configs derived before them have only the first three. See [agent limits](agent-operations.md#agents-page-limits-and-the-setup-check).
 
 **Plan caps.** Variables in `wrangler.jsonc` `vars`, hosted mode only (self-host has no caps):
 

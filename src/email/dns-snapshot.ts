@@ -50,8 +50,13 @@ export function observingResolver(base: Resolver, domain: string, known: Record<
 
 /** DMARC facts for a domain whose own `_dmarc.<domain>` answer was already fetched; the parent is looked up only when needed. */
 export function dmarcFactsFor(resolver: Resolver, domain: string, own: TxtResult): Promise<DmarcFacts | undefined> {
+  return dmarcLookupFor(resolver, domain, own).then(dmarcFactsFromLookup);
+}
+
+/** The full RFC 7489 lookup behind `dmarcFactsFor` (the record itself included), for callers that also show it. */
+export function dmarcLookupFor(resolver: Resolver, domain: string, own: TxtResult): Promise<DmarcLookup> {
   const seeded = observingResolver(resolver, domain, { [`_dmarc.${domain.toLowerCase()}`]: own });
-  return lookupDmarc(seeded, domain).then(dmarcFactsFromLookup);
+  return lookupDmarc(seeded, domain);
 }
 
 export interface DnsSnapshot {

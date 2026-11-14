@@ -24,6 +24,7 @@ describe('AddDomainPage', () => {
 				'GET /api/zones': fail(400),
 				'POST /api/domains': added,
 				'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false, error: 'dns lookup failed' },
+				'GET /api/domains/7/onboarding-status': { domain_id: 7, dmarc: { found: false, has_our_rua: false, current_record: null } },
 			},
 		});
 		await userEvent.type(await screen.findByLabelText('Your domain'), ' HTTPS://New.Example.org/ ');

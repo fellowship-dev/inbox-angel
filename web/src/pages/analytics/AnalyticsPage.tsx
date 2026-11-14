@@ -2,6 +2,7 @@ import { Button, PageHeader, Stat, StatGroup, TableBody, TableCell, TableHead, T
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { FixList } from '../../components/analytics/FixList';
+import { ReportsNotConnected, useReportsNotConnected, useWorkspaceReportsNotConnected } from '../../components/ReportsNotConnected';
 import { ScrollCueTable } from '../../components/ScrollCueTable';
 import { ReadinessCard } from '../../components/analytics/ReadinessCard';
 import { SenderInventory } from '../../components/analytics/SenderInventory';
@@ -86,7 +87,16 @@ function Body({ data, days }: { data: Data; days: number }) {
 	);
 }
 
-function Frame({ q, days, setDays, title, description, eyebrow, actions }: { q: { isPending: boolean; isError: boolean; error: unknown; data: Data | undefined; refetch: () => unknown }; days: WindowDays; setDays: (d: WindowDays) => void; title: string; description: string; eyebrow?: React.ReactNode; actions?: React.ReactNode }) {
+function Frame({ q, days, setDays, title, description, eyebrow, actions, reportsOff, domainName }: { q: { isPending: boolean; isError: boolean; error: unknown; data: Data | undefined; refetch: () => unknown }; days: WindowDays; setDays: (d: WindowDays) => void; title: string; description: string; eyebrow?: React.ReactNode; actions?: React.ReactNode; reportsOff?: boolean; domainName?: string }) {
+	// Hosted, before report intake: every number here comes from reports, so say why there are none instead of zeros.
+	if (reportsOff) {
+		return (
+			<div className="space-y-6">
+				<PageHeader eyebrow={eyebrow} title={title} description={description} />
+				<ReportsNotConnected domain={domainName} />
+			</div>
+		);
+	}
 	return (
 		<div className="space-y-6">
 			<PageHeader eyebrow={eyebrow} title={title} description={description} actions={actions} />
@@ -100,7 +110,8 @@ function Frame({ q, days, setDays, title, description, eyebrow, actions }: { q: 
 export function AnalyticsPage() {
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
 	const q = useWorkspaceAnalytics(days);
-	return <Frame q={q} days={days} setDays={setDays} title="Analytics" description="What is happening with your mail, across every domain." />;
+	const reportsOff = useWorkspaceReportsNotConnected();
+	return <Frame q={q} reportsOff={reportsOff} days={days} setDays={setDays} title="Analytics" description="What is happening with your mail, across every domain." />;
 }
 
 export function DomainAnalyticsPage() {
@@ -108,11 +119,14 @@ export function DomainAnalyticsPage() {
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
 	const { domain, isPending } = useDomain(id);
 	const q = useDomainAnalytics(id, days);
+	const reportsOff = useReportsNotConnected(domain);
 	if (isPending && !q.data) return <PageSkeleton label="Loading analytics" />;
 	const name = domain?.domain ?? q.data?.domain.domain ?? 'Domain';
 	return (
 		<Frame
 			q={q}
+			reportsOff={reportsOff}
+			domainName={domain?.domain}
 			days={days}
 			setDays={setDays}
 			title={`Analytics: ${name}`}

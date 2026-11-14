@@ -102,6 +102,20 @@ describe('first-run setup', () => {
 	});
 });
 
+describe('installer proof', () => {
+	it('says where the proof comes from, and explains a rejected one without saying whether one is set', async () => {
+		renderApp(<AuthPage />, { role: null, status: { configured: false, has_domain: false }, routes: { 'POST /api/auth/setup': fail(403, 'installer proof required') } });
+		const user = userEvent.setup();
+		expect(await screen.findByText(/The BOOTSTRAP_SECRET value set on the Worker before its first start/)).toBeInTheDocument();
+		await user.type(screen.getByLabelText('Email'), 'owner@example.com');
+		await user.type(screen.getByLabelText('Installer proof'), 'wrong-proof-0123456789012345678901234');
+		await user.type(screen.getByLabelText('Password'), 'long-enough-1');
+		await user.type(screen.getByLabelText('Confirm password'), 'long-enough-1');
+		await user.click(screen.getByRole('button', { name: 'Create account' }));
+		expect(await screen.findByText(/That installer proof was not accepted\. Paste the exact BOOTSTRAP_SECRET value/)).toBeInTheDocument();
+	});
+});
+
 describe('hosted sign-up', () => {
 	it('lets people create a workspace when sign-up is open, and switch back', async () => {
 		renderApp(<AuthPage />, { role: null, status: { mode: 'saas', signup_open: true } });

@@ -70,9 +70,11 @@ export async function bulkInsertDomains(
   domains: string[],
   audit: AuditOpts = {},
 ): Promise<BulkImportResult[]> {
-  const rdomain = tenant.settings.reportsDomain;
-  if (!rdomain) throw new Error(REPORTS_DOMAIN_MISSING);
-  const ruaAddress = `rua@${rdomain}`;
+  // Hosted: never a reports address, so no reports domain is needed and the domain gets no rua.
+  const hosted = tenant.mode === 'saas';
+  const rdomain = hosted ? undefined : tenant.settings.reportsDomain;
+  if (!hosted && !rdomain) throw new Error(REPORTS_DOMAIN_MISSING);
+  const ruaAddress = rdomain ? `rua@${rdomain}` : '';
   const batch = domains.slice(0, BATCH_LIMIT);
   const results: BulkImportResult[] = [];
   const cap = domainCap(tenant);

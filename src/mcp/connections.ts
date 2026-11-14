@@ -1,7 +1,7 @@
-import { consentPage, consentIdentity } from './consent';
+import { pageHeaders, renderConsentPage, renderConsentProblem, renderSignedOutPage, type ConsentModel } from './consent';
 import type { OAuthProviderOptions, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
-import { accessLookups, authLookups, forWorkspace } from '@ready-set-mail/db';
-import { normalizeDomainName } from '@ready-set-mail/dns-checks';
+import { accessLookups, authLookups, forWorkspace, workspaceLifecycle } from '@inbox-angel/db';
+import { normalizeDomainName } from '@inbox-angel/dns-checks';
 import type { BoundEnv } from '../index';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { ACCESS_ACTIONS, validActions } from '../access/grant';
@@ -10,16 +10,22 @@ import type { AccessSubject } from '../access/principal';
 import { isSaas } from '../auth/config';
 import { mcpInstallation } from './discovery';
 
-const escape = (v: unknown) => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const prefix = 'mcp_connection:';
 export interface AgentConnection { principalId: string; userId: string; workspaceId: string; clientId: string; name: string; createdAt: number; expiresAt: number; lastUsedAt?: number }
+/** As listed to its owner: the workspace by name, never only its id. */
+export type ListedConnection = AgentConnection & { revoked: boolean; workspaceName: string | null };
 
 /** Only the authenticated user's connection metadata; never grants or workspace contents. */
 export async function listAgentConnections(env: BoundEnv, userId: string) {
- const connections: Array<AgentConnection & { revoked: boolean }> = [];
+ const connections: ListedConnection[] = [];
+ const names = new Map<string, string | null>();
  for (const p of await accessLookups(env.DB).humanPrincipalsForUser(userId)) {
   const record = await forWorkspace(env.DB, p.workspace_id).settings.get(`${prefix}${p.id}`);
-  if (record) connections.push({ ...JSON.parse(record.value), revoked: p.disabled_at !== null });
+  if (!record) continue;
+  const connection = JSON.parse(record.value) as AgentConnection;
+  const workspaceId = connection.workspaceId ?? p.workspace_id;
+  if (!names.has(workspaceId)) names.set(workspaceId, (await workspaceLifecycle(env.DB).get(workspaceId))?.name ?? null);
+  connections.push({ ...connection, revoked: p.disabled_at !== null, workspaceName: names.get(workspaceId) ?? null });
  }
  return connections;
 }
@@ -45,7 +51,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  const api = getOAuthApi(options, env);
  const user = await currentUser(request, env, ctx);
  if (!user || (isSaas(env) && !user.emailVerified)) {
-  if (request.method === 'GET' && path === '/oauth/authorize') return new Response(`<!doctype html><title>Sign in to Ready Set Mail</title><p>Sign in to your Ready Set Mail dashboard, then return to this authorization link.</p><a href="/">Open dashboard</a>`, { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  if (request.method === 'GET' && path === '/oauth/authorize') return new Response(renderSignedOutPage(user ? 'unverified' : 'signed_out'), { status: 401, headers: pageHeaders() });
   return Response.json({ error: 'Sign in required' }, { status: 401 });
  }
  const memberships = await authLookups(env.DB).membershipsOf(user.id);
@@ -67,31 +73,45 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  try {
   if (request.method === 'GET') {
    const authRequest = await api.parseAuthRequest(request);
-   if (authRequest.scope.some(s => s !== 'ready-set-mail' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
+   if (authRequest.scope.some(s => s !== 'inbox-angel' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
    const description = await api.describeConsent(authRequest), consent = await api.beginConsent(authRequest);
-   const choices: string[] = [];
+   const named = new Map((await workspaceLifecycle(env.DB).listForUser(user.id)).map(w => [w.id, w.name]));
+   const workspaces: ConsentModel['workspaces'] = [];
    for (const m of memberships) {
     const scope = forWorkspace(env.DB, m.workspace_id);
     const products = await scope.access.products.list();
+    const choices: ConsentModel['workspaces'][number]['choices'] = [];
     for (const d of await scope.domains.list()) {
-     choices.push(choice({ workspaceId: m.workspace_id, domain: d.domain }, `${m.workspace_id} / ${d.domain}`));
-     for (const product of products) if ((await scope.access.products.mappings(product.id)).some(map => map.domain_id === d.id)) choices.push(choice({ workspaceId: m.workspace_id, productId: product.id, domain: d.domain }, `${m.workspace_id} / ${product.name} / ${d.domain}`));
+     choices.push({ value: JSON.stringify({ workspaceId: m.workspace_id, domain: d.domain }), domain: d.domain });
+     for (const product of products) if ((await scope.access.products.mappings(product.id)).some(map => map.domain_id === d.id)) choices.push({ value: JSON.stringify({ workspaceId: m.workspace_id, productId: product.id, domain: d.domain }), domain: d.domain, product: product.name });
     }
+    workspaces.push({ id: m.workspace_id, name: named.get(m.workspace_id) || 'Unnamed workspace', choices });
    }
-   const headers = new Headers(consent.headers); headers.set('Content-Type', 'text/html; charset=utf-8'); headers.set('Cache-Control', 'no-store');
-   return new Response(consentPage(`<h1>Authorize Ready Set Mail agent</h1>${consentIdentity(description, url.origin)}<form method="post"><input type="hidden" name="handle" value="${escape(consent.handle)}"><fieldset><legend>Select exact resources</legend>${choices.join('')}</fieldset><fieldset><legend>Or preauthorize one exact new domain for onboarding</legend><label>Workspace<select name="workspaceId"><option value="">None</option>${memberships.map(m => `<option>${escape(m.workspace_id)}</option>`).join('')}</select></label><label>Domain<input name="domain" placeholder="mail.example.com"></label></fieldset><fieldset><legend>Allowed actions</legend>${ACCESS_ACTIONS.filter(a => a !== 'access:manage').map(a => `<label><input type="checkbox" name="actions" value="${a}">${a}</label><br>`).join('')}</fieldset><label>Expires in days<input type="number" name="days" min="1" max="30" value="7"></label><button>Authorize selected access</button></form>`), { headers });
+   const html = renderConsentPage({
+    client: { name: description.clientName, publisher: description.clientDomain || undefined, redirectHost: description.redirectHost, loopback: !!description.redirectIsLoopback },
+    account: user.email, handle: consent.handle, workspaces, now: Math.floor(Date.now() / 1000),
+   });
+   return new Response(html, { headers: pageHeaders(consent.headers) });
   }
   if (request.method === 'POST') {
    if (!(request.headers.get('content-type') ?? '').startsWith('application/x-www-form-urlencoded')) return Response.json({ error: 'form required' }, { status: 415 });
    const form = await request.formData(), actions = form.getAll('actions');
-   if (!validActions(actions) || actions.includes('access:manage')) return Response.json({ error: 'Select allowed actions' }, { status: 400 });
+   if (form.get('decision') === 'deny') {
+    // Refusing consumes the handle and sends the client error=access_denied (with its state and iss). Nothing is created.
+    const denied = await api.denyConsent(request, String(form.get('handle') ?? ''), { description: 'The user did not allow access' });
+    const headers = new Headers(denied.headers); headers.set('Location', denied.redirectTo); headers.set('Cache-Control', 'no-store');
+    return new Response(null, { status: 302, headers });
+   }
+   if (!validActions(actions) || actions.includes('access:manage')) return problem('Choose at least one thing the app may do.', 400);
    const selections = form.getAll('selection').map(s => JSON.parse(String(s)) as { workspaceId: string; productId?: string; domain: string });
+   if (form.get('domain') && !form.get('workspaceId')) return problem('Choose the workspace for the new domain.', 400);
    if (form.get('domain')) selections.push({ workspaceId: String(form.get('workspaceId') ?? ''), domain: String(form.get('domain')).trim().toLowerCase() });
    const days = Number(form.get('days'));
-   if (!selections.length || selections.length > 100 || !Number.isInteger(days) || days < 1 || days > 30) return Response.json({ error: 'Select finite resources and expiry' }, { status: 400 });
+   if (!selections.length) return problem('Choose at least one domain the app may use.', 400);
+   if (selections.length > 100 || !Number.isInteger(days) || days < 1 || days > 30) return problem('Choose up to 100 domains and an end date between 1 and 30 days from now.', 400);
    // Validate every tuple/action using exactly the same live policy as REST/MCP.
    for (const s of selections) {
-    if (!s.domain || (n => !n.ok || n.domain !== s.domain)(normalizeDomainName(s.domain))) return Response.json({ error: 'Exact domain required' }, { status: 400 });
+    if (!s.domain || (n => !n.ok || n.domain !== s.domain)(normalizeDomainName(s.domain))) return problem('Enter the new domain as a plain name, like example.com, and choose its workspace.', 400);
     if (s.productId) {
      const scope = forWorkspace(env.DB, s.workspaceId);
      if (!await scope.access.products.get(s.productId)) return Response.json({ error: 'Product unavailable' }, { status: 403 });
@@ -100,7 +120,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     }
     for (const action of actions) await authorizeResource(env.DB, actor, action, s);
    }
-   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['ready-set-mail'] });
+   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['inbox-angel'] });
    const principalId = crypto.randomUUID(), workspaceId = selections[0]!.workspaceId, now = Math.floor(Date.now() / 1000), expiresAt = now + days * 86400;
    await forWorkspace(env.DB, workspaceId).access.principals.create({ id: principalId, name: `Agent ${approved.request.clientId}`.slice(0, 80), kind: 'human', user_id: user.id });
    try {
@@ -108,7 +128,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     const local = mcpInstallation(env);
     const record: AgentConnection = { principalId, userId: user.id, workspaceId, clientId: approved.request.clientId, name: `Agent ${approved.request.clientId}`.slice(0, 80), createdAt: now, expiresAt };
     await forWorkspace(env.DB, workspaceId).settings.set(`${prefix}${principalId}`, JSON.stringify(record));
-    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['ready-set-mail'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
+    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['inbox-angel'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
     const headers = new Headers(approved.headers); headers.set('Location', completed.redirectTo); headers.set('Cache-Control', 'no-store');
     return new Response(null, { status: 302, headers });
    } catch (error) {
@@ -122,4 +142,4 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
   return Response.json({ error: 'Authorization rejected' }, { status: 403 });
  }
 }
-function choice(value: unknown, label: string) { return `<label><input type="checkbox" name="selection" value="${escape(JSON.stringify(value))}">${escape(label)}</label><br>`; }
+function problem(message: string, status: number) { return new Response(renderConsentProblem(message), { status, headers: pageHeaders() }); }

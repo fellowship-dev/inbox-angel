@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { PlanLimitNotice } from '../PlanLimitNotice';
 import { ClaimCard } from './ClaimCard';
 import type { BulkImportItem, BulkImportResponse } from '../../lib/domain-queries';
+import { useHosted } from '../../lib/session';
 
 const STATUS = {
 	imported: { label: 'Imported', variant: 'success', Icon: CheckCircle2 },
@@ -13,9 +14,11 @@ const STATUS = {
 	pending: { label: 'Waiting for verification', variant: 'warning', Icon: Clock },
 } as const;
 
-function note(r: BulkImportItem): string {
+function note(r: BulkImportItem, hosted: boolean): string {
 	const parts: string[] = [];
-	if (r.status === 'imported') parts.push(r.manual_dns ? 'DNS provisioning: manual required' : 'DNS provisioned');
+	// Hosted has no report address, so there is no authorization record to create: say what does happen.
+	if (r.status === 'imported' && hosted) parts.push('Added. Its SPF, DKIM and DMARC records are checked from live DNS');
+	else if (r.status === 'imported') parts.push(r.manual_dns ? 'DNS provisioning: manual required' : 'DNS provisioned');
 	if (r.status === 'pending') parts.push('Add the TXT record below to prove ownership');
 	if (r.status === 'duplicate') parts.push('Already registered');
 	if (r.error) parts.push(r.error);
@@ -24,6 +27,7 @@ function note(r: BulkImportItem): string {
 
 /** Result of POST /api/domains/bulk-import: summary badge, per-domain table, link back to the list. */
 export function ImportResults({ result, showNotes = true }: { result: BulkImportResponse; showNotes?: boolean }) {
+	const hosted = useHosted();
 	// Once per import, above the rows: every row after the cap carries the same code.
 	const limitRow = result.results.find((r) => r.code === 'plan_limit');
 	return (
@@ -54,7 +58,7 @@ export function ImportResults({ result, showNotes = true }: { result: BulkImport
 										{label}
 									</Badge>
 								</TableCell>
-								{showNotes ? <TableCell className="text-ink-2">{note(r)}</TableCell> : null}
+								{showNotes ? <TableCell className="text-ink-2">{note(r, hosted)}</TableCell> : null}
 							</TableRow>
 						);
 					})}
