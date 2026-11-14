@@ -271,8 +271,6 @@ export type Role = 'owner' | 'admin' | 'member';
 
 /** GET /api/me */
 export interface Me {
-  /** Hosted instance owner only: which limiter answers the claim DNS preview. `fallback` means the DNS_PREVIEW_LIMITER binding is missing. */
-  dns_preview_limiter?: 'binding' | 'fallback';
   user: { id: string; email: string; name: string } | null;
   /** Null (with `workspace_id` null) for a verified login that belongs to no workspace yet. */
   role: Role | null;
@@ -335,4 +333,23 @@ export interface ApiKey {
   last_used_at: number | null;
   expires_at: number | null;
   revoked_at: number | null;
+}
+
+/** GET /api/agents/status: can agents connect to this instance, and at which MCP server URL. */
+export interface AgentStatus {
+  available: boolean;
+  server_url: string | null;
+}
+
+/** GET /api/instance/preflight (instance owner only): configuration problems by setting name, never a value. */
+export interface PreflightItem {
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
+  severity: 'action' | 'note';
+  setting: string;
+  message: string;
+}
+export interface Preflight {
+  mode: 'self-host' | 'saas';
+  agents: AgentStatus;
+  items: PreflightItem[];
 }

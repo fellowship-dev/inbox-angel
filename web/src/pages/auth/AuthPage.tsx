@@ -70,6 +70,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			else navigate('/', { replace: true });
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 403 && (err.body as { code?: string } | undefined)?.code === 'email_not_verified') setVerifyFor(email);
+			else if (mode === 'setup' && err instanceof ApiError && err.status === 403 && /installer proof/i.test(err.message)) setError('That installer proof was not accepted. Paste the exact BOOTSTRAP_SECRET value set on the Worker. If none was set yet, the person who deployed it needs to set one first.');
 			else setError(errorMessage(err));
 		} finally {
 			setBusy(false);
@@ -92,7 +93,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const requestedDomain = mode === 'signup' ? readSignupDomain() : null;
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
-		mode === 'setup' ? "Create this installation's owner using the single-use proof held by its installer. No shared default password is used." : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
+		mode === 'setup' ? 'This creates the account that owns this instance. It needs the installer proof, a secret only the person who deployed it holds. There is no default password.' : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
@@ -102,7 +103,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 				</p>
 			) : null}
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
-				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="Single-use secret supplied by the person who installed this instance. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
+				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="The BOOTSTRAP_SECRET value set on the Worker before its first start. The setup guide keeps it in a private file, such as ~/.config/inbox-angel/bootstrap-proof. It works once. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
 				{registering ? (
 					<Field id="name" label="Your name (optional)">
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />

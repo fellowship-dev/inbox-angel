@@ -23,6 +23,8 @@
 //   POST /api/invites/:token                  — accept invite + create user
 //
 // Authenticated:
+//   GET    /api/agents/status                 — can agents connect here, and the MCP server URL
+//   GET    /api/instance/preflight            — configuration check by setting name (instance owner only; src/setup/preflight.ts)
 //   GET    /api/domains                       — list domains
 //   POST   /api/domains                       — add a domain
 //   DELETE /api/domains/:id                   — remove a domain
@@ -93,6 +95,7 @@ import { openHostedZone } from '../hosted/records';
 import { issueCanary } from '../hosted/canary';
 import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
+import { agentAvailability, instancePreflight } from '../setup/preflight';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
 import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@inbox-angel/db';
@@ -106,7 +109,7 @@ import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '.
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
-import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
+import { claimPreviewResponse } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
 import { fetchSubdomains } from '../domains/ct';
 import { ensureEmailRouting, registerEmailRoutingDestination } from '../setup/email-routing';
@@ -625,12 +628,22 @@ async function _handleApi(
   if (path === '/api/me' && method === 'GET') {
     return json({
       instance_owner: instanceOwner,
-      ...(instanceOwner && getMode(env) === 'saas' ? { dns_preview_limiter: dnsPreviewLimiter(env) } : {}),
       user: userBySession,
       role: workspace.role ?? 'member',
       workspace_id: tenant.workspaceId,
       kind: (workspace as AuthedWorkspace).kind ?? 'session',
     });
+  }
+
+  // GET /api/agents/status — can agents connect to this instance, and at which server URL (any signed-in role)
+  if (path === '/api/agents/status' && method === 'GET') {
+    return json(agentAvailability(env));
+  }
+
+  // GET /api/instance/preflight — configuration problems by setting name, never a value (instance owner only)
+  if (path === '/api/instance/preflight' && method === 'GET') {
+    if (!instanceOwner) return err('only the person who runs this instance can see its configuration check', 403);
+    return json(await instancePreflight(env, url.origin));
   }
 
   const leadResponse = await handleLeadRoutes(request, env, instanceOwner);

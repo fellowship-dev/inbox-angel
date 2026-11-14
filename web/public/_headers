@@ -12,6 +12,11 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Fixed-name Geist files for the Worker's server-rendered agent pages (web/vite.config.ts). The name does not change
+# with the content, so no `immutable`; a Geist upgrade reaches browsers within 30 days.
+/fonts/*
+  Cache-Control: public, max-age=2592000, stale-while-revalidate=86400
+
 /index.html
   Cache-Control: no-cache
 

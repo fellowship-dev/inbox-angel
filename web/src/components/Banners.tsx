@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
+import { SetupCheck } from './SetupCheck';
 
 const DISMISS_KEY = 'ia_update_dismissed';
 
@@ -14,7 +15,10 @@ interface VersionInfo {
 	release_url: string;
 }
 
-/** "New version available" and "your dashboard is also at <custom domain>". Both are advisory: failures stay silent. */
+/**
+ * The instance owner's setup check (only while a setting needs action), "New version available" and
+ * "your dashboard is also at <custom domain>". All advisory: failures stay silent.
+ */
 export function Banners() {
 	const { status } = useSession();
 	const [dismissed, setDismissed] = useState(() => sessionStorage.getItem(DISMISS_KEY) === '1');
@@ -22,9 +26,9 @@ export function Banners() {
 	const custom = status?.custom_domain && window.location.hostname !== status.custom_domain ? status.custom_domain : null;
 	const update = version.data?.update_available && !dismissed ? version.data : null;
 
-	if (!update && !custom) return null;
 	return (
-		<div className="space-y-3">
+		<div className="space-y-3 empty:hidden">
+			<SetupCheck compact />
 			{custom ? (
 				<Alert variant="info" title="Your dashboard has its own address">
 					It is also available at{' '}
