@@ -179,13 +179,20 @@ the pointer instructions name `h.<zone>` from config, so they must read the doma
 
 ## Trust model: who can do what
 
-**Email verification.** A hosted account has no session until its email is verified, and delegated credentials of unverified human users are refused. Sign-up sends a
-link; login before verifying answers `403 email_not_verified` (and sends a fresh link). Verifying never signs anyone in: the password chosen
-before the address was proven is discarded, every session of that user ends, and the person who clicked the link sets their own password (so
-registering someone else's address gains nothing). An invite link alone does not grant membership: the invitee signs up (or in), verifies, and accepts while
-signed in as the invited address. First OAuth link ends the user's other sessions.
+**Email verification.** A hosted account has no session until its email is verified, and delegated credentials of unverified human users are refused. Sign-up
+asks for the email only (and the bot check) and sends a link; the account gets a random password nobody is told. The link opens
+`#/welcome/<token>` ("Choose your password"): the person chooses their password there, once, and is signed in. Verifying itself never
+signs anyone in: any password set before the address was proven (one an API client sent anyway) is discarded, every session of that user
+ends, and the person who clicked the link sets their own (so registering someone else's address gains nothing, and a forwarded link gives
+only what a password-reset link gives). Opening the link again after that changes nothing. A login with a password set before verifying
+answers `403 email_not_verified` (and sends a fresh link). An invite link alone does not grant membership: the invitee gives a name, verifies
+and chooses a password the same way, and accepts while signed in as the invited address. First OAuth link ends the user's other sessions.
 
-**Bot check (required).** Hosted sign-up fails closed (503) unless `TURNSTILE_SECRET_KEY` is set; `TURNSTILE_SITE_KEY` is the public key served to the sign-up page. OAuth logins link to an
+**Bot check (required).** Hosted sign-up fails closed (503) unless both `TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` (the public key served to the sign-up page) are set.
+While it is closed no route creates an account: the password sign-up and sign-in answer 503, `POST /api/auth/sign-in/social` answers 503 (so no
+OAuth flow starts, for new or existing users, matching `signin_available: false` in the status), and the user-creation hook refuses any account
+(an OAuth callback or an invite included). OAuth sign-in for an existing, linked user would be safe without the bot check (it sends no mail and
+creates nothing), but the closed status tells the page that signing in is unavailable, so the server refuses it too. OAuth logins link to an
 existing account only when both the local account's email and the provider's are verified, and an OAuth sign-up matches a
 pending invite only on a provider-verified email. Verification mail uses the platform sender (`from_email` setting of the
 default workspace) over `SEND_EMAIL`; without it nothing is sent and the Worker log records only a static reason (never the link or address). Self-host is unchanged: the owner
