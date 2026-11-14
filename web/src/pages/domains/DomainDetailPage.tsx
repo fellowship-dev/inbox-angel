@@ -50,8 +50,6 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
 	const { canWrite } = useSession();
-	// Hosted with report intake: the DMARC reports panel shows the address, so the self-host RUA section would repeat it.
-	const hostedReports = useReportIntakeEnabled();
 	if (!canWrite) return null; // read-only members cannot run the setup wizard
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
 	const { done, total, nextStep } = wizardProgress(q.data);
@@ -141,6 +139,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
 	const { canWrite } = useSession();
+	// Hosted with report intake: the DMARC reports panel shows the address, so the self-host RUA section would repeat it.
+	const hostedReports = useReportIntakeEnabled();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
@@ -245,7 +245,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
 			</Section>
 
-			{/* Hosted with report intake: issue the address and follow it to the first report. Nothing elsewhere. */}
+			{/* Hosted with report intake: connect reports and follow them to the first report. Renders nothing elsewhere. */}
 			<ConnectReports domain={domain} />
 			{hostedReports ? null : (
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
