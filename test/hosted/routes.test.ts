@@ -102,7 +102,7 @@ describe('GET /api/hosted/config', () => {
     const t = await setup();
     const r = await call(t.env, 'GET', '/api/hosted/config', { key: t.A.token });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ enabled: true });
+    expect(await r.json()).toEqual({ enabled: true, records: true });
     expect((await call(t.env, 'GET', '/api/hosted/config')).status).toBe(401);
   });
 
@@ -111,7 +111,14 @@ describe('GET /api/hosted/config', () => {
     const key = await setupOwner(env);
     const r = await call(env, 'GET', '/api/hosted/config', { key });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ enabled: false });
+    expect(await r.json()).toEqual({ enabled: false, records: false });
+  });
+
+  it('says hosted records are unavailable when no records zone is configured, so no dead "Enable" button is shown', async () => {
+    const env = makeEnv(createMigratedD1(), { ...HOSTED_ENV, HOSTED_RECORDS_ZONE: '' }) as any;
+    const token = await signupVerified(env, 'a@example.com');
+    const r = await call(env, 'GET', '/api/hosted/config', { key: token });
+    expect(await r.json()).toEqual({ enabled: true, records: false });
   });
 });
 

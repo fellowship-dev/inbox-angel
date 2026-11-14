@@ -13,8 +13,9 @@ import { DoThisNext } from '../../components/domain/DoThisNext';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { Rollout } from '../../components/domain/Rollout';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { Disclosure, ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
-import { actionsPending, domainActions, type SummaryState } from '../../lib/actions';
+import { actionsPending, domainActions } from '../../lib/actions';
 import { errorMessage } from '../../lib/api';
 import { useHostedInfo } from '../../lib/hosted';
 import { domainVerdict, totalsFromSummary, unavailableVerdict, type ReportTotals } from '../../lib/verdict';
@@ -24,7 +25,7 @@ import { domainKeys, useCheckSummary, useDnsCheck, useFailingSources, useMtaSts,
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
 import { hasReportAddress } from '../../lib/dmarc-record';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import type { Domain } from '../../lib/types';
 
 const WINDOWS = [7, 30, 60] as const;
@@ -43,9 +44,15 @@ function PolicyBadge({ policy }: { policy: Domain['dmarc_policy'] }) {
  */
 function LivePolicyBadge({ domain }: { domain: Domain }) {
 	const dns = useDnsCheck(domain.id);
+	const onboarding = useOnboardingStatus(domain.id); // same query as the DNS records card: nxdomain and the inherited policy
 	if (dns.isPending) return <Badge variant="outline">Checking DMARC policy…</Badge>;
+	if (onboarding.data?.nxdomain) return <Badge variant="outline">Does not resolve</Badge>;
 	const lastKnown = domain.dmarc_policy && domain.dmarc_policy !== 'none' ? ` (last known policy: p=${domain.dmarc_policy})` : '';
 	if (dns.isError || dns.data.error) return <Badge variant="outline">DMARC lookup failed{lastKnown}</Badge>;
+	const inherited = onboarding.data?.dmarc.effective;
+	if ((!dns.data.found || !dns.data.current_record) && inherited?.inherited_from && inherited.policy) {
+		return <Badge variant="outline">No record of its own: inherits p={inherited.policy} from {inherited.inherited_from}</Badge>;
+	}
 	if (!dns.data.found || !dns.data.current_record) return <Badge variant="outline">No DMARC record found{lastKnown}</Badge>;
 	const live = dns.data.current_record.match(/(^|;\s*)p=([a-z]+)/i)?.[2]?.toLowerCase();
 	return live ? <PolicyBadge policy={live as Domain['dmarc_policy']} /> : <Badge variant="outline">DMARC record has no p= tag</Badge>;
@@ -131,10 +138,11 @@ function WhereItStands({ domain }: { domain: Domain }) {
 	const hosted = useHostedInfo(domain.id);
 	const wizard = useWizardState(domain.id);
 	const { canWrite } = useSession();
+	const hostedMode = useHosted();
 	const headingId = useId();
 	// The same summary and 30-day totals the overview reads, so both pages say the same thing.
-	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted) : null;
-	const progress = canWrite && wizard.data ? wizardProgress(wizard.data) : null;
+	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted, undefined, { hostedMode }) : null;
+	const progress = canWrite && wizard.data ? wizardProgress(wizard.data, { hosted: hostedMode }) : null;
 	return (
 		<section aria-labelledby={headingId} className="space-y-3">
 			<h2 id={headingId} className="text-lg font-semibold tracking-tight">
@@ -189,6 +197,9 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const spfTool = useSpfFlatten(domain.id);
 	const mtaTool = useMtaSts(domain.id);
 	const { canWrite } = useSession();
+	// Hosted, before report intake: no reports can arrive (see ReportsNotConnected).
+	const reportsOff = useReportsNotConnected(domain);
+	const nxdomain = !!onboarding.data?.nxdomain;
 
 	// Reading DNS here also stores what it found (the overview's "checked when"), so refresh the stored summary after it.
 	const readAt = onboarding.dataUpdatedAt;
@@ -203,20 +214,11 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 		return { total: s.total, passed: s.passed, failed: s.failed, passRate: s.passRate, days: n };
 	};
 	const week7 = totals(week, 7);
-	// The stored summary is current only once it was fetched after this page's live read stored its facts.
-	const summaryState: SummaryState = summary.isError
-		? 'failed'
-		: !summary.data || (summary.isFetching && summary.dataUpdatedAt < onboarding.dataUpdatedAt)
-			? 'loading'
-			: onboarding.isSuccess && summary.dataUpdatedAt >= onboarding.dataUpdatedAt
-				? 'current'
-				: 'stale';
 	const actionInput = {
 		domain,
 		dns: dns.isPending ? undefined : dns.isError ? null : dns.data,
 		onboarding: onboarding.isPending ? undefined : onboarding.isError ? null : onboarding.data,
 		summary: summary.data ?? (summary.isError ? null : undefined),
-		summaryState,
 		reports: week7,
 		sources: sources.data ?? null,
 	};
@@ -269,7 +271,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			/>
 			<WhereItStands domain={domain} />
 
-			<HostedPanel key={domain.id} domainId={domain.id} />
+			{/* A name that does not resolve has nothing to host. */}
+			{nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
 
 			<div className="space-y-3">
 				<Disclosure
@@ -280,84 +283,89 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					<DnsRecords domain={domain} />
 				</Disclosure>
 
+				{/* Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros. */}
+				{reportsOff ? (
+					<ReportsNotConnected domain={domain.domain} />
+				) : (
 				<Disclosure
-					title="Reports"
-					summary={
-						week.isPending
-							? 'Loading report totals…'
-							: week.isError
-								? 'Report totals could not be loaded.'
-								: week7 && week7.total > 0
-									? `${week7.passRate}% of ${formatNumber(week7.total)} reported messages passed DMARC in the last 7 days.`
-									: 'No reports in the last 7 days.'
-					}
-				>
-					<div className="space-y-6">
-						<div className="flex flex-wrap items-center justify-between gap-3">
-							<p className="text-sm text-ink-1">
-								{stats.isPending
-									? 'Loading…'
-									: stats.isError
-										? null
-										: sums && sums.total > 0
-											? `Last ${days} days: ${sums.passRate}% passed. ${formatNumber(sums.passed)} of ${formatNumber(sums.total)} messages passed, ${formatNumber(sums.failed)} failed.`
-											: `No reports in the last ${days} days.`}
-							</p>
-							<Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
-								<TabsList aria-label="Time window">
-									{WINDOWS.map((w) => (
-										<TabsTrigger key={w} value={String(w)}>
-											{w}d<span className="sr-only"> window</span>
-										</TabsTrigger>
-									))}
-								</TabsList>
-							</Tabs>
+						title="Reports"
+						summary={
+							week.isPending
+								? 'Loading report totals…'
+								: week.isError
+									? 'Report totals could not be loaded.'
+									: week7 && week7.total > 0
+										? `${week7.passRate}% of ${formatNumber(week7.total)} reported messages passed DMARC in the last 7 days.`
+										: 'No reports in the last 7 days.'
+						}
+					>
+						<div className="space-y-6">
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<p className="text-sm text-ink-1">
+									{stats.isPending
+										? 'Loading…'
+										: stats.isError
+											? null
+											: sums && sums.total > 0
+												? `Last ${days} days: ${sums.passRate}% passed. ${formatNumber(sums.passed)} of ${formatNumber(sums.total)} messages passed, ${formatNumber(sums.failed)} failed.`
+												: `No reports in the last ${days} days.`}
+								</p>
+								<Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
+									<TabsList aria-label="Time window">
+										{WINDOWS.map((w) => (
+											<TabsTrigger key={w} value={String(w)}>
+												{w}d<span className="sr-only"> window</span>
+											</TabsTrigger>
+										))}
+									</TabsList>
+								</Tabs>
+							</div>
+							{stats.isError ? <LoadError error={stats.error} onRetry={() => void stats.refetch()} title="Could not load results" /> : null}
+							{guidance ? (
+								<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
+									<p>{guidance.body}</p>
+									{guidance.upgradeTo && canWrite ? (
+										<Button asChild size="sm" variant="secondary" className="mt-3">
+											<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
+										</Button>
+									) : null}
+									{sums?.total === 0 && dns.data ? (
+										<p className="mt-2">
+											{dns.data.error
+												? 'We could not check your DNS record just now. See DNS records above.'
+												: dns.data.found && dns.data.has_rua
+													? 'DNS record detected. Reports will start arriving soon.'
+													: dns.data.found
+														? hasReportAddress(domain.rua_address)
+															? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records above.'
+															: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
+														: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
+										</p>
+									) : null}
+								</Alert>
+							) : null}
+							{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
+							<div className="space-y-2">
+								<p className="text-sm font-semibold text-ink-1">Reporting address</p>
+								{hasReportAddress(domain.rua_address) ? (
+									<>
+										<p className="text-sm text-ink-2">
+											Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.
+										</p>
+										<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
+									</>
+								) : (
+									<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
+								)}
+							</div>
+							<Link className="inline-block text-sm text-brand-ink underline underline-offset-4" to={`/domains/${domain.id}/reports`}>
+								All reports
+							</Link>
 						</div>
-						{stats.isError ? <LoadError error={stats.error} onRetry={() => void stats.refetch()} title="Could not load results" /> : null}
-						{guidance ? (
-							<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
-								<p>{guidance.body}</p>
-								{guidance.upgradeTo && canWrite ? (
-									<Button asChild size="sm" variant="secondary" className="mt-3">
-										<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
-									</Button>
-								) : null}
-								{sums?.total === 0 && dns.data ? (
-									<p className="mt-2">
-										{dns.data.error
-											? 'We could not check your DNS record just now. See DNS records above.'
-											: dns.data.found && dns.data.has_rua
-												? 'DNS record detected. Reports will start arriving soon.'
-												: dns.data.found
-													? hasReportAddress(domain.rua_address)
-														? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records above.'
-														: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
-													: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
-									</p>
-								) : null}
-							</Alert>
-						) : null}
-						{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
-						<div className="space-y-2">
-							<p className="text-sm font-semibold text-ink-1">Reporting address</p>
-							{hasReportAddress(domain.rua_address) ? (
-								<>
-									<p className="text-sm text-ink-2">
-										Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.
-									</p>
-									<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
-								</>
-							) : (
-								<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
-							)}
-						</div>
-						<Link className="inline-block text-sm text-brand-ink underline underline-offset-4" to={`/domains/${domain.id}/reports`}>
-							All reports
-						</Link>
-					</div>
-				</Disclosure>
+					</Disclosure>
+				)}
 
-				{failing > 0 || sources.isError ? (
+				{!reportsOff && (failing > 0 || sources.isError) ? (
 					<Disclosure title="Failing senders" summary={sources.isError ? 'Could not be loaded.' : `${plural(failing, 'source')} sent mail that failed DMARC in the last 7 days.`}>
 						<FailingSources domainId={domain.id} q={sources} />
 					</Disclosure>
@@ -378,6 +386,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					</Disclosure>
 				) : null}
 
+				{/* A name DNS says does not exist has no records to report on: the DNS records section says so once. */}
+				{nxdomain ? null : (
 				<Disclosure
 					onOpenChange={(o) => o && setHealthOpen(true)}
 					title="Email health report"
@@ -393,6 +403,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				>
 					<HealthReportSection domainId={domain.id} enabled={healthOpen} />
 				</Disclosure>
+				)}
 
 				{toolsShown ? (
 					<Disclosure title="DNS tools" summary="Optional tools that change your DNS for you: SPF flattening and MTA-STS.">

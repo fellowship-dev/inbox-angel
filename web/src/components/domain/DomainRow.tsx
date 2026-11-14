@@ -3,14 +3,14 @@ import { RefreshCw } from 'lucide-react';
 import { useId } from 'react';
 import { Link } from 'react-router';
 import type { DomainVerdict } from '../../lib/verdict';
+import { TalkToMax } from '../TalkToMax';
 
 /**
- * Slot for one contextual "Talk to Max" link (verdict.help): renders nothing until the help link component exists.
- * PR 142 replaces the body with `<TalkToMax lead={help.lead} about={help.about} />`, which itself renders nothing
- * unless a help URL is configured.
+ * One contextual "Talk to Max" line where a person may be stuck (verdict.help). TalkToMax renders nothing without a
+ * booking link, and within one screen's scope only the most specific line shows.
  */
-export function ContextHelp(_props: { help: NonNullable<DomainVerdict['help']> }) {
-	return null;
+export function ContextHelp({ help }: { help: NonNullable<DomainVerdict['help']> }) {
+	return <TalkToMax priority={help.priority} lead={help.lead} about={help.about} />;
 }
 
 const AREAS = 'grid gap-x-6 gap-y-3 [grid-template-areas:"head"_"ladder"_"body"] lg:grid-cols-[22rem_minmax(0,1fr)] lg:[grid-template-areas:"ladder_head"_"ladder_body"]';
@@ -25,6 +25,7 @@ export function DomainRow({
 	verdict,
 	canWrite,
 	onRetry,
+	hideEvidence = false,
 }: {
 	domain: { id: number; domain: string };
 	/** Set for a subdomain listed under its parent. */
@@ -32,6 +33,8 @@ export function DomainRow({
 	verdict: DomainVerdict | null;
 	canWrite: boolean;
 	onRetry?: () => void;
+	/** Hosted before report intake: the overview says once that reports are not connected, so rows make no report claim. */
+	hideEvidence?: boolean;
 }) {
 	const nameId = useId();
 	const page = `/domains/${domain.id}`;
@@ -76,7 +79,7 @@ export function DomainRow({
 				<LevelLadder level={verdict.level} className="self-start [grid-area:ladder] lg:pt-1" aria-label={`${domain.domain}: protection level`} />
 				<div className="min-w-0 space-y-1.5 [grid-area:body]">
 					<p className="max-w-prose text-sm text-ink-1">{verdict.sentence}</p>
-					{verdict.evidence ? <p className="max-w-prose text-sm text-ink-2">{verdict.evidence}</p> : null}
+					{verdict.evidence && !hideEvidence ? <p className="max-w-prose text-sm text-ink-2">{verdict.evidence}</p> : null}
 					{verdict.checked ? <p className="text-xs text-ink-2">{verdict.checked}</p> : null}
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-sm">
 						{nothing ? (

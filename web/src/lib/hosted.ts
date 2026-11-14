@@ -47,6 +47,20 @@ export function useHostedConfig(): boolean {
 	return q.data?.enabled === true;
 }
 
+/**
+ * Can hosted records actually be enabled here? Hosted mode alone is not enough: the deployment needs a report intake
+ * domain and a records zone (`records` in GET /api/hosted/config). Without them "Enable hosted records" is not offered.
+ */
+export function useHostedRecordsAvailable(): boolean {
+	const q = useQuery({
+		queryKey: HOSTED_CONFIG_KEY,
+		queryFn: () => api<{ enabled: boolean; records?: boolean }>('/api/hosted/config'),
+		staleTime: Infinity,
+		retry: false,
+	});
+	return q.data?.enabled === true && q.data.records === true;
+}
+
 export function useHostedStatus(domainId: number) {
 	const configEnabled = useHostedConfig();
 	return useQuery({

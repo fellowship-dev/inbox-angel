@@ -22,8 +22,16 @@ const onboarding = (o: Partial<OnboardingResult> = {}): OnboardingResult => ({
 	routing: { mx_found: true, destination_verified: true, reports_domain: null, admin_email: null },
 	...o,
 });
-const input = (o: Partial<ActionInput> = {}): ActionInput => ({ domain, dns: dns('v=DMARC1; p=reject; rua=mailto:r@reports.test'), onboarding: onboarding(), summary: summary(), reports: reports(99), sources: [], ...o });
-const keys = (o: Partial<ActionInput>) => domainActions(input(o)).map((a) => `${a.status}:${a.key}`);
+type Effective = NonNullable<OnboardingResult['dmarc']['effective']>;
+const NO_POLICY: Effective = { policy: null, inherited_from: null, issue: null, record: null };
+/** The live read: the onboarding DMARC block follows the dns-check answer unless a test gives its own. */
+const input = (o: Partial<ActionInput> & { effective?: Effective | null } = {}): ActionInput => {
+	const { effective, ...rest } = o;
+	const d = 'dns' in o ? o.dns : dns('v=DMARC1; p=reject; rua=mailto:r@reports.test');
+	const ob = 'onboarding' in o ? o.onboarding : onboarding({ dmarc: { found: !!d?.found, has_our_rua: true, current_record: d?.current_record ?? null, effective: effective === undefined ? NO_POLICY : effective } });
+	return { domain, summary: summary(), reports: reports(99), sources: [], ...rest, dns: d, onboarding: ob };
+};
+const keys = (o: Parameters<typeof input>[0]) => domainActions(input(o)).map((a) => `${a.status}:${a.key}`);
 
 describe('domainActions: Do this next', () => {
 	it('a healthy enforced domain has nothing to do, and names what that covers', () => {
@@ -74,7 +82,7 @@ describe('domainActions: Do this next', () => {
 	});
 
 	it('a subdomain covered by its parent is not told to publish its own DMARC', () => {
-		const k = keys({ dns: dns(null), summary: summary({ dmarc_policy: 'reject', dmarc_inherited_from: 'example.org' }) });
+		const k = keys({ dns: dns(null), effective: { policy: 'reject', inherited_from: 'example.org', issue: null, record: 'v=DMARC1; p=reject' } });
 		expect(k).not.toContain('attention:dmarc-missing');
 		expect(k).toEqual(['verified:done']);
 	});
@@ -195,25 +203,32 @@ describe('truth table: overview row', () => {
 describe('truth table: Do this next', () => {
 	const sub = { ...domain, domain: 'mail.example.com' };
 	const noOwn = dns(null);
-	const inherits = summary({ domain: 'mail.example.com', dmarc_policy: 'reject', dmarc_inherited_from: 'example.com' });
 
-	it('a subdomain with no record of its own is offered a DMARC record only when no parent policy covers it, known from a current summary', () => {
-		const k = (o: Partial<ActionInput>) => keys({ domain: sub, dns: noOwn, ...o });
-		expect(k({ summary: inherits, summaryState: 'current' })).toEqual(['verified:done']);
-		for (const state of ['failed', 'stale'] as const) {
-			const got = domainActions(input({ domain: sub, dns: noOwn, summary: inherits, summaryState: state }));
+	it('a subdomain with no record of its own is offered a DMARC record only when DNS shows no policy covers it (PR 142 dmarcCoverage)', () => {
+		const k = (o: Parameters<typeof input>[0]) => keys({ domain: sub, dns: noOwn, ...o });
+		expect(k({ effective: { policy: 'reject', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=reject' } })).toEqual(['verified:done']);
+		// The server could not say (null) or did not say (absent): unknown, and nothing is offered.
+		for (const effective of [null, undefined]) {
+			const ob = onboarding({ dmarc: { found: false, has_our_rua: false, current_record: null, effective } });
+			const got = domainActions(input({ domain: sub, dns: noOwn, onboarding: ob }));
 			expect(got.map((a) => a.key)).toEqual(['dmarc-coverage']);
 			expect(got[0]!.status).toBe('unknown');
 			expect(got.some((a) => /Publish a DMARC record/.test(a.do))).toBe(false);
 		}
-		expect(k({ summary: null })).toEqual(['unknown:dmarc-coverage']);
+		// The DMARC lookup itself failed: unknown, nothing offered.
+		const failed = onboarding({ dns_errors: ['dmarc: SERVFAIL'], dmarc: { found: false, has_our_rua: false, current_record: null, effective: NO_POLICY } });
+		expect(domainActions(input({ domain: sub, dns: noOwn, onboarding: failed })).some((a) => a.key === 'dmarc-missing')).toBe(false);
 		// Loading: nothing yet, and the page shows it is still reading.
-		expect(domainActions(input({ domain: sub, dns: noOwn, summary: undefined }))).toEqual([]);
-		expect(actionsPending({ dns: noOwn, onboarding: onboarding(), summary: undefined, reports: reports(99) })).toBe(true);
-		// Known absent: no own record, a current successful check, and no parent policy.
-		expect(k({ summary: summary({ dmarc_policy: null, dmarc_inherited_from: null }), summaryState: 'current' })).toContain('attention:dmarc-missing');
-		// A summary whose latest check failed is not proof of absence.
-		expect(k({ summary: summary({ dmarc_policy: null, dns_check_status: 'failed' }), summaryState: 'current' })).toEqual(['unknown:dmarc-coverage']);
+		expect(domainActions(input({ domain: sub, dns: noOwn, onboarding: undefined }))).toEqual([]);
+		expect(actionsPending({ dns: noOwn, onboarding: undefined, reports: reports(99) })).toBe(true);
+		// Known absent: no own record and no parent policy. Only then is p=none offered.
+		const missing = domainActions(input({ domain: sub, dns: noOwn, effective: NO_POLICY })).find((a) => a.key === 'dmarc-missing')!;
+		expect(missing.do).toBe('Publish a DMARC record, starting at p=none');
+		// Inherited quarantine at pct=5: nothing offered that would weaken or tighten it; the parent's pct is the fix.
+		const partial = { policy: 'quarantine', inherited_from: 'example.com', issue: null, record: 'v=DMARC1; p=quarantine; pct=5' };
+		expect(k({ effective: partial })).toEqual(['improve:pct']);
+		// The parent's record gives no policy: fix it there.
+		expect(k({ effective: { policy: null, inherited_from: 'example.com', issue: 'invalid', record: 'v=DMARC1; p=banana' } })).toEqual(['attention:dmarc-parent']);
 	});
 
 	it('p=none is never "nothing to do", whatever the report totals', () => {
@@ -223,7 +238,7 @@ describe('truth table: Do this next', () => {
 			expect(got.some((a) => a.key === 'done')).toBe(false);
 		}
 		expect(keys({ dns: none, reports: null })).toEqual(['unknown:reports-failed']);
-		expect(actionsPending({ dns: none, onboarding: onboarding(), summary: summary(), reports: undefined })).toBe(true);
+		expect(actionsPending({ dns: none, onboarding: onboarding(), reports: undefined })).toBe(true);
 	});
 
 	it('enforced with report totals that failed to load is not "nothing to do"', () => {

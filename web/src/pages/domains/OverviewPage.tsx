@@ -6,13 +6,14 @@ import { Link } from 'react-router';
 import { ClaimCard } from '../../components/domain/ClaimCard';
 import { DomainRow } from '../../components/domain/DomainRow';
 import { GetStarted } from '../../components/GetStarted';
+import { ReportsNotConnected, useWorkspaceReportsNotConnected } from '../../components/ReportsNotConnected';
 import { ListSkeleton, LoadError, ReadOnlyNotice, WriteButton } from '../../components/states';
 import { api, errorMessage } from '../../lib/api';
 import { domainKeys, fetchStats, fetchSummary, useDomainSummaries } from '../../lib/domain-queries';
 import { getStartedSteps } from '../../lib/get-started';
 import { hostedKey, useHostedConfig, type HostedResponse } from '../../lib/hosted';
 import { useDomainClaims, useDomains } from '../../lib/queries';
-import { useSession } from '../../lib/session';
+import { useHosted, useSession } from '../../lib/session';
 import type { DailyStat, Domain, DomainCheckSummary } from '../../lib/types';
 import { domainVerdict, totalsFromSummary, unavailableVerdict, workspaceAnswer, type DomainVerdict, type ReportTotals } from '../../lib/verdict';
 
@@ -46,12 +47,15 @@ function AddDomainButton() {
 
 export function OverviewPage() {
 	const qc = useQueryClient();
-	const { canWrite, status } = useSession();
+	const { canWrite } = useSession();
 	const list = useDomains();
 	const domains = list.data ?? [];
 	const claims = useDomainClaims().data ?? [];
 	const [exporting, setExporting] = useState(false);
 	const listId = useId();
+	const hostedMode = useHosted();
+	// Hosted, before report intake: no domain can have reports, so say why once and make no pass-rate claim.
+	const reportsOff = useWorkspaceReportsNotConnected();
 
 	// One request for every domain's stored DNS facts and 30-day report totals (paged by 200); hosted status per domain only
 	// when hosted records are on for the deployment.
@@ -71,7 +75,7 @@ export function OverviewPage() {
 		if (s === undefined || (hostedOn && h.isPending)) return null;
 		if (s === null) return unavailableVerdict('it is not in the summary yet. Reload the page.', d.domain);
 		const info = hostedOn && h.data?.enabled ? h.data : null;
-		return domainVerdict(d, s, totals[i], info);
+		return domainVerdict(d, s, totals[i], info, undefined, { hostedMode });
 	});
 	const retry = batch.isError ? () => void batch.refetch() : undefined;
 	const byId = new Map(domains.map((d, i) => [d.id, { domain: d, verdict: verdicts[i] ?? null, retry }]));
@@ -87,7 +91,7 @@ export function OverviewPage() {
 
 	const answer = workspaceAnswer(domains.map((d, i) => ({ name: d.domain, verdict: verdicts[i] ?? null })), claims.length);
 	const steps = getStartedSteps({
-		hosted: status?.mode === 'saas',
+		hosted: hostedMode,
 		domains,
 		claims: claims.length,
 		summaries: domains.map(summaryOf),
@@ -148,7 +152,11 @@ export function OverviewPage() {
 						<p className="text-lg font-semibold tracking-tight text-ink-1 [overflow-wrap:anywhere] sm:text-xl" aria-live="polite" data-testid="am-i-done">
 							{answer}
 						</p>
-						{!empty ? <p className="max-w-prose text-sm text-ink-2">Each domain below says what public DNS and its last {WINDOW} days of reports show, and who acts next. Most urgent first.</p> : null}
+						{!empty ? (
+							<p className="max-w-prose text-sm text-ink-2">
+								{reportsOff ? 'Each domain below says what public DNS shows, and who acts next. Most urgent first.' : `Each domain below says what public DNS and its last ${WINDOW} days of reports show, and who acts next. Most urgent first.`}
+							</p>
+						) : null}
 					</div>
 
 					{canWrite ? <GetStarted steps={steps} /> : null}
@@ -166,7 +174,10 @@ export function OverviewPage() {
 								<h2 id="waiting-heading" className="text-lg font-semibold tracking-tight">
 									Waiting for verification
 								</h2>
-								<p className="text-sm text-ink-2">These domains are not monitored yet. Prove you own each one with a DNS record; there are no reports or stats until then.</p>
+								<p className="text-sm text-ink-2">
+									{/* Both modes show a live DNS preview on these cards, so "not monitored" must not read as "nothing to see". */}
+									Prove you own each one with a DNS record. Until then a domain is not monitored: there are no stored checks, stats or alerts, only a live look at its DNS.
+								</p>
 							</div>
 							{claims.map((c) => (
 								<ClaimCard key={c.id} claim={c} canWrite={canWrite} preview="lazy" />
@@ -179,10 +190,11 @@ export function OverviewPage() {
 							<h2 id={listId} className="sr-only">
 								Your domains
 							</h2>
+							{reportsOff ? <ReportsNotConnected /> : null}
 							<ul className="divide-y divide-line rounded-lg border border-line bg-surface-1">
 								{ordered.map(({ d, parent }) => {
 									const row = byId.get(d.id)!;
-									return <DomainRow key={d.id} domain={d} parent={parent} verdict={row.verdict} canWrite={canWrite} onRetry={row.retry} />;
+									return <DomainRow key={d.id} domain={d} parent={parent} verdict={row.verdict} canWrite={canWrite} onRetry={row.retry} hideEvidence={reportsOff} />;
 								})}
 							</ul>
 						</section>

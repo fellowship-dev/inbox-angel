@@ -29,7 +29,7 @@ const status = (ps: Record<string, string | null> = {}, extra: Record<string, un
 
 const detailRoutes = (over: Record<string, unknown> = {}) => ({
 	'GET /api/domains': { domains: [domain] },
-	'GET /api/hosted/config': { enabled: true },
+	'GET /api/hosted/config': { enabled: true, records: true },
 	'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },
 	'GET /api/domains/1/sources': { sources: [] },
 	'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
@@ -52,6 +52,13 @@ async function openEnable() {
 }
 
 describe('HostedPanel visibility', () => {
+	it('offers no "Enable hosted records" when the deployment has no records zone (hosted mode alone is not enough)', async () => {
+		detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: true, records: false }, 'GET /api/domains/1/hosted': { enabled: false } }) });
+		await screen.findByRole('heading', { level: 1, name: 'example.com' });
+		await waitFor(() => expect(screen.queryByText('Hosted records')).not.toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: 'Enable hosted records' })).not.toBeInTheDocument();
+	});
+
 	it('is absent and makes no hosted request when config says disabled', async () => {
 		const { calls } = detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: false } }) });
 		await screen.findByText('example.com');

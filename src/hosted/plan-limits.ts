@@ -1,7 +1,7 @@
 // Hosted plan caps: how many workspaces one person may own and how many domains one workspace may hold.
 // Self-host has no caps. The numbers are variables, not constants, so a plan can be raised without a deploy of code.
 import type { Env } from '../index';
-import { bookingUrl, type FunnelEnv } from '../funnel/config';
+import { helpUrl } from '../funnel/config';
 import { getMode } from '../tenancy/mode';
 
 export const DEFAULT_MAX_WORKSPACES_PER_USER = 5;
@@ -31,15 +31,14 @@ export function planLimits(env: Partial<LimitEnv>): PlanLimits | null {
 
 /** The booking link, only when it is https: the dashboard renders it as a link. */
 export function planHelpUrl(env: Partial<LimitEnv>): string | null {
-  const url = bookingUrl(env as FunnelEnv);
-  return url && /^https:\/\//i.test(url) ? url : null;
+  return helpUrl(env);
 }
 
 export function planLimitBody(env: Partial<LimitEnv>, kind: PlanLimitKind, max: number) {
   return {
     error: kind === 'domains_per_workspace'
-      ? `This workspace has reached its limit of ${max} domains.`
-      : `You have reached the limit of ${max} workspaces you can own.`,
+      ? `This workspace has reached its limit of ${max} ${max === 1 ? 'domain' : 'domains'}.`
+      : `You have reached the limit of ${max} ${max === 1 ? 'workspace' : 'workspaces'} you can own.`,
     code: 'plan_limit' as const,
     limit: { kind, max },
     help_url: planHelpUrl(env),

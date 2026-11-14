@@ -42,8 +42,11 @@ function LeadsTable({ data }: { data: LeadsResponse }) {
 	return (
 		<>
 			{!data.delivery.enabled ? (
-				<Alert variant="info" title="The onboarding sequence is off">
-					{data.delivery.blockers[0]}
+				<Alert variant="info" title="Follow-up emails are off">
+					Nobody listed here gets the onboarding emails until they are turned on for this instance.{' '}
+					<a href="https://github.com/fellowship-dev/inbox-angel/blob/main/docs/email-funnel.md" target="_blank" rel="noreferrer">
+						How to turn them on
+					</a>
 				</Alert>
 			) : !data.delivery.can_send ? (
 				<Alert variant="warning" title="Emails are queued, not sent">

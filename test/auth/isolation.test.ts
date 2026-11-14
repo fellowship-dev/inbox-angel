@@ -184,6 +184,8 @@ const ROUTES: Route[] = [
   { method: 'DELETE', path: `/api/team/invites/${B_INVITE_ID}`, kind: 'denied', note: 'B\'s pending invite' },
   { method: 'GET', path: '/api/audit-log', kind: 'scoped' },
   { method: 'GET', path: '/api/me', kind: 'scoped' },
+  { method: 'GET', path: '/api/agents/status', kind: 'scoped' },
+  { method: 'GET', path: '/api/instance/preflight', kind: 'scoped', note: 'instance owner only; A is not' },
   { method: 'GET', path: '/api/keys', kind: 'scoped' },
   { method: 'DELETE', path: '/api/keys/__B_KEY__', kind: 'denied' },
   { method: 'POST', path: '/api/keys/revoke-all', body: {}, kind: 'scoped' },

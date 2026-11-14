@@ -1,4 +1,5 @@
 import { Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { BackLink, Segmented, SourceTable, WindowPills, useRouteDomainId } from '../../components/reports';
@@ -15,6 +16,7 @@ export function ExplorePage() {
 	const { domain } = useDomain(id);
 	const [days, setDays] = useState<WindowDays>(DEFAULT_WINDOW);
 	const [filter, setFilter] = useState<Filter>('all');
+	const reportsOff = useReportsNotConnected(domain);
 
 	const q = useQuery({
 		queryKey: ['explore', id, days],
@@ -57,7 +59,9 @@ export function ExplorePage() {
 				<WindowPills value={days} onChange={setDays} />
 			</div>
 
-			{q.isPending ? (
+			{reportsOff ? (
+				<ReportsNotConnected domain={domain?.domain} />
+			) : q.isPending ? (
 				<ListSkeleton rows={4} label="Loading sources" />
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load sources" />

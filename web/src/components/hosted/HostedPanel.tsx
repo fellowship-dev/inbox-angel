@@ -1,7 +1,7 @@
 import { Alert, Button } from '@inbox-angel/ui';
 import { RefreshCw } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { hostedError, useHostedConfig, useHostedMutations, useHostedStatus, type HostedAddresses, type HostedStatus } from '../../lib/hosted';
+import { hostedError, useHostedConfig, useHostedMutations, useHostedRecordsAvailable, useHostedStatus, type HostedAddresses, type HostedStatus } from '../../lib/hosted';
 import { ConfirmDialog } from '../domain/ConfirmDialog';
 import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
 import { AddressesAlert } from './AddressesAlert';
@@ -25,6 +25,11 @@ function Panel({ domainId }: { domainId: number }) {
 	const [disableOpen, setDisableOpen] = useState(false);
 	const m = useHostedMutations(domainId, setAddresses);
 	const panelRef = useRef<HTMLDivElement>(null);
+	const recordsAvailable = useHostedRecordsAvailable();
+
+	// Not hosted yet, and this deployment cannot host records (no records zone or intake domain): offer nothing rather
+	// than an "Enable hosted records" button that can only fail.
+	if (status.isSuccess && !status.data.enabled && !recordsAvailable) return null;
 
 	const dismiss = () => {
 		setAddresses(null);

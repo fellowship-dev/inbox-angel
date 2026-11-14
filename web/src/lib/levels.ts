@@ -32,7 +32,7 @@ type DnsFacts = Partial<Pick<DomainCheckSummary, 'dns_checked_at' | 'dmarc_issue
 
 export function assessDomain(
 	s: Pick<DomainCheckSummary, 'dmarc_policy' | 'spf_record' | 'dkim_total' | 'dkim_pass' | 'spf_total' | 'spf_pass' | 'mta_sts_enabled' | 'mta_sts_mode'> & DnsFacts,
-	{ nullMeans = s.dns_checked_at ? 'missing' : 'unknown' }: { nullMeans?: 'unknown' | 'missing' } = {},
+	{ nullMeans = s.dns_checked_at ? 'missing' : 'unknown', reports = true }: { nullMeans?: 'unknown' | 'missing'; /** false: report intake is not connected (hosted), so no advice may lean on reports. */ reports?: boolean } = {},
 ): LevelAssessment {
 	const hasSpf = !!s.spf_record;
 	const policy = s.dmarc_policy;
@@ -56,7 +56,9 @@ export function assessDomain(
 	else if (issue === 'invalid') findings.push({ status: 'warn', label: 'DMARC record is invalid', detail: `It has no valid p= policy, so receivers ignore it. Fix the record at _dmarc.${s.dmarc_inherited_from ?? 'your domain'}.` });
 	else if (!policy) findings.push({ status: 'missing', label: 'DMARC record', detail: 'No DMARC record found.' });
 	else if (enforcing) findings.push({ status: 'pass', label: `DMARC enforced (p=${policy})${from}` });
-	else findings.push({ status: 'warn', label: `DMARC is monitoring only (p=none)${from}`, detail: 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.' });
+	else findings.push({ status: 'warn', label: `DMARC is monitoring only (p=none)${from}`, detail: reports
+				? 'Failing mail is still delivered. Move to quarantine, then reject, when reports look clean.'
+				: 'Failing mail is still delivered. Reports are not connected, so it cannot be confirmed here that every service sending as this domain passes; check that before you move to quarantine.' });
 
 	if (s.dkim_total > 0) {
 		const ok = s.dkim_pass / s.dkim_total >= DKIM_HEALTHY;
@@ -78,8 +80,8 @@ export function assessDomain(
 	else if (!hasSpf) next = 'Publish an SPF record.';
 	else if (issue === 'multiple') next = 'Remove the extra DMARC records so only one remains.';
 	else if (issue === 'invalid') next = 'Fix the DMARC record so it has a valid p= policy.';
-	else if (!policy) next = 'Publish a DMARC record with p=none to start receiving reports.';
-	else if (!enforcing) next = 'Review your reports, then move DMARC to quarantine.';
+	else if (!policy) next = reports ? 'Publish a DMARC record with p=none to start receiving reports.' : 'Publish a DMARC record with p=none.';
+	else if (!enforcing) next = reports ? 'Review your reports, then move DMARC to quarantine.' : 'Confirm every service that sends as this domain passes SPF or DKIM, then move DMARC to quarantine.';
 
 	return { level, description, findings, next };
 }

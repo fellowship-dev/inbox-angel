@@ -1,4 +1,5 @@
 import { EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@inbox-angel/ui';
+import { ReportsNotConnected, useReportsNotConnected, useWorkspaceReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -32,6 +33,10 @@ export function ReportBrowserPage() {
 	const visible = filterName ? all.filter((r) => r.domain === filterName) : all;
 	const showDomainColumn = !filterName;
 	const loading = q.isPending || domainPending;
+	// Hosted, before report intake: no reports can arrive, so say why the list is empty.
+	const domainOff = useReportsNotConnected(domain);
+	const workspaceOff = useWorkspaceReportsNotConnected();
+	const reportsOff = scope === 'domain' ? domainOff : workspaceOff;
 
 	return (
 		<div className="space-y-6">
@@ -54,7 +59,9 @@ export function ReportBrowserPage() {
 				{!loading && !q.isError ? <p className="text-sm text-ink-2">{plural(visible.length, 'report')}</p> : null}
 			</div>
 
-			{loading ? (
+			{reportsOff ? (
+				<ReportsNotConnected domain={filterName} />
+			) : loading ? (
 				<ListSkeleton rows={5} label="Loading reports" />
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load reports" />

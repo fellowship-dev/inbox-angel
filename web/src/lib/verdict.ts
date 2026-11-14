@@ -3,6 +3,7 @@ import { enforcementLevel, hasReportAddress, weakerSubdomainPolicy } from './dma
 import { formatNumber, timeAgo } from './format';
 import { applyHostedInputs, assessDomain, didNotResolve, dnsCheckLine, type HostedLevelInput } from './levels';
 import type { Domain, DomainCheckSummary } from './types';
+import { HELP_PRIORITY } from '../components/TalkToMax';
 
 /**
  * "Am I done?" for one domain, in the status vocabulary shared with the website: one state, the level under it, one
@@ -49,7 +50,7 @@ export interface DomainVerdict {
 	 * that fail, a summary that cannot load. `lead` is the question shown before the link. Rendered by DomainRow's
 	 * ContextHelp, which shows nothing until the help link exists (PR 142's TalkToMax, shown only when configured).
 	 */
-	help: { lead: string; about: string } | null;
+	help: { lead: string; about: string; priority: number } | null;
 }
 
 /** Report totals for the window, or null when they failed to load (undefined: still loading). */
@@ -113,11 +114,14 @@ export function domainVerdict(
 	reports: ReportTotals | null | undefined,
 	hosted: HostedLevelInput | null = null,
 	now = Date.now() / 1000,
+	/** `hostedMode`: the hosted service (MODE=saas). There, a domain with no report address has no report intake. */
+	opts: { hostedMode?: boolean } = {},
 ): DomainVerdict {
-	const core = coreVerdict(domain, s, reports, hosted, now);
+	const intakeOff = !!opts.hostedMode && reportsNotConnected(domain);
+	const core = coreVerdict(domain, s, reports, hosted, now, intakeOff);
 	const about = `about ${domain.domain}`;
 	const unresolved = hosted ? null : didNotResolve(s);
-	const help = unresolved ? { lead: 'Sure this is the right name?', about } : !hosted && s.dns_check_status === 'failed' ? { lead: 'DNS checks keep failing?', about } : null;
+	const help = unresolved ? { lead: 'Sure this is the right name?', about, priority: HELP_PRIORITY.dnsFailing } : !hosted && s.dns_check_status === 'failed' ? { lead: 'DNS checks keep failing?', about, priority: HELP_PRIORITY.dnsFailing } : null;
 	const rate = exactRate(reports);
 	return { ...core, reportsConfirmed: rate !== null && rate >= READY, reportsNotConnected: reportsNotConnected(domain), help };
 }
@@ -128,6 +132,7 @@ function coreVerdict(
 	reports: ReportTotals | null | undefined,
 	hosted: HostedLevelInput | null,
 	now: number,
+	intakeOff: boolean,
 ): Core {
 	const page = `/domains/${domain.id}`;
 	const name = domain.domain;
@@ -144,7 +149,8 @@ function coreVerdict(
 	}
 
 	const { summary: sum, unverified } = hosted ? applyHostedInputs(s, hosted) : { summary: s, unverified: [] as string[] };
-	const a = assessDomain(sum, hosted ? { nullMeans: 'missing' } : undefined);
+	// Hosted with no report intake: no advice may lean on reports (PR 142).
+	const a = assessDomain(sum, hosted ? { nullMeans: 'missing', reports: !intakeOff } : intakeOff ? { reports: false } : undefined);
 	const nullMeansUnknown = !hosted && !s.dns_checked_at;
 	const hasSpf = !!sum.spf_record;
 	const policy = sum.dmarc_policy;
@@ -263,7 +269,7 @@ export function unavailableVerdict(message: string, domain?: string): DomainVerd
 	return {
 		reportsNotConnected: false,
 		reportsConfirmed: false,
-		help: { lead: 'Still failing after a retry?', about: domain ? `about ${domain}` : 'about this domain' },
+		help: { lead: 'Still failing after a retry?', about: domain ? `about ${domain}` : 'about this domain', priority: HELP_PRIORITY.loadError },
 		status: 'unknown',
 		level: null,
 		sentence: `What we know about this domain could not be loaded: ${message}`,

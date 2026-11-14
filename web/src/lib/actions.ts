@@ -1,6 +1,7 @@
 import { statusRank, type StatusKind } from '@inbox-angel/ui';
 import { isRevokedDkimKey, isUsableDkimSelector } from './dkim';
 import { dkimWildcardSummary } from './dkim-wildcard';
+import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement } from './dmarc-coverage';
 import { enforcementLevel, hasReportAddress, parseDmarcPolicy, weakerSubdomainPolicy } from './dmarc-record';
 import type { DnsCheck, OnboardingResult } from './domain-queries';
 import { formatNumber } from './format';
@@ -31,50 +32,15 @@ export interface DomainAction {
 	retry?: boolean;
 }
 
-/**
- * Whether the stored summary reflects the live read on this page: `current` once it was fetched after the read stored its
- * facts, `loading` while it is being fetched, `failed` when that fetch failed, `stale` when it predates the read.
- */
-export type SummaryState = 'current' | 'stale' | 'loading' | 'failed';
-
 export interface ActionInput {
 	domain: Pick<Domain, 'id' | 'domain' | 'rua_address'>;
 	/** Undefined while loading, null when the request failed. */
 	dns: DnsCheck | null | undefined;
 	onboarding: OnboardingResult | null | undefined;
 	summary: DomainCheckSummary | null | undefined;
-	/** Defaults to `current` when a summary is given (tests and callers that read once). */
-	summaryState?: SummaryState;
 	/** Totals for the last `days` days of reports. Undefined while loading, null when it failed. */
 	reports: ReportTotals | null | undefined;
 	sources?: FailingSource[] | null;
-}
-
-/**
- * Which DMARC policy covers this name, and how sure we are. The live lookup reads `_dmarc.<name>` only, so a parent's
- * record that covers it is known only from the stored summary, and only when that summary is current.
- * (PR 142's `dmarcCoverage` / onboarding `dmarc.effective` can replace the body: the shape is the same idea.)
- */
-export type DmarcCoverage =
-	| { kind: 'own'; policy: string | null; record: string }
-	| { kind: 'inherited'; policy: string; from: string }
-	| { kind: 'issue'; issue: 'multiple' | 'invalid' }
-	| { kind: 'none' }
-	| { kind: 'unknown'; reason: 'lookup' | 'loading' | 'failed' | 'stale' };
-
-export function dmarcCoverage(i: Pick<ActionInput, 'dns' | 'summary' | 'summaryState'>): DmarcCoverage {
-	const { dns, summary } = i;
-	const state: SummaryState = i.summaryState ?? (summary === undefined ? 'loading' : summary === null ? 'failed' : 'current');
-	if (dns === undefined) return { kind: 'unknown', reason: 'loading' };
-	if (dns === null || dns.error) return { kind: 'unknown', reason: 'lookup' };
-	const usable = state === 'current' && summary ? summary : null;
-	if (usable && !usable.dmarc_policy && (usable.dmarc_issue === 'multiple' || usable.dmarc_issue === 'invalid')) return { kind: 'issue', issue: usable.dmarc_issue };
-	if (dns.found && dns.current_record) return { kind: 'own', policy: parseDmarcPolicy(dns.current_record), record: dns.current_record };
-	// No record at _dmarc.<name>: the effective policy is the parent's, if any, and only a current summary can say.
-	if (!usable) return { kind: 'unknown', reason: state === 'current' ? 'failed' : state };
-	if (usable.dmarc_policy && usable.dmarc_inherited_from) return { kind: 'inherited', policy: usable.dmarc_policy, from: usable.dmarc_inherited_from };
-	if (usable.dns_check_status !== 'ok' || !usable.dns_checked_at) return { kind: 'unknown', reason: 'stale' };
-	return { kind: 'none' };
 }
 
 const MAX = 3;
@@ -86,7 +52,7 @@ export function domainActions(input: ActionInput): DomainAction[] {
 	const page = `/domains/${domain.id}`;
 	const out: DomainAction[] = [];
 
-	if (summary && didNotResolve(summary) === 'now') {
+	if (onboarding?.nxdomain || (summary && didNotResolve(summary) === 'now')) {
 		return [{ key: 'nxdomain', status: 'attention', do: 'Check the spelling, or remove this domain', why: `DNS says ${name} does not exist, so there are no SPF, DKIM or DMARC records to check.`, who: WHO.you, to: `${page}/settings`, cta: 'Open the domain settings', writes: true }];
 	}
 
@@ -108,35 +74,45 @@ export function domainActions(input: ActionInput): DomainAction[] {
 		}
 	}
 
-	// DMARC: offer a record only when DNS has shown that no policy covers this name.
-	const cov = dmarcCoverage(input);
+	// DMARC. What covers this name comes from the live read (PR 142's dmarcCoverage: own record, inherited, none, or
+	// unknown). A record is offered only at exactly the enforcement in force (offerEnforcement): never weaker, never
+	// stricter, and nothing at all while coverage is unknown.
+	const dmarcFailed = dnsFailed || errors.some((e) => e.startsWith('dmarc:'));
+	const cov = onboarding === undefined ? null : dmarcCoverage(onboarding, dmarcFailed);
 	let policy: string | null = null;
 	let ownRecord: string | null = null;
-	if (cov.kind === 'issue' && cov.issue === 'multiple') {
+	const issue = summary && !summary.dmarc_policy ? summary.dmarc_issue : null;
+	if (cov?.kind === 'own' && issue === 'multiple') {
 		out.push({ key: 'dmarc-multiple', status: 'attention', do: 'Keep one DMARC record and delete the others', why: 'With several DMARC records published, receivers ignore all of them.', who: WHO.dns });
-	} else if (cov.kind === 'issue') {
+	} else if (cov?.kind === 'own' && issue === 'invalid' && !(dns?.current_record && parseDmarcPolicy(dns.current_record))) {
 		out.push({ key: 'dmarc-invalid', status: 'attention', do: 'Fix the DMARC record so it has a valid p= policy', why: 'Without a valid policy, receivers ignore the record.', who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
-	} else if (cov.kind === 'none') {
-		out.push({ key: 'dmarc-missing', status: 'attention', do: 'Publish a DMARC record, starting at p=none', why: `Neither ${name} nor a parent domain publishes a DMARC record, so receivers get no instruction for mail that fails, and nobody sends reports about who mails as ${name}.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
-	} else if (cov.kind === 'unknown' && (cov.reason === 'failed' || cov.reason === 'stale')) {
+	} else if (cov?.kind === 'none') {
+		const e = offerEnforcement(cov)!;
+		out.push({ key: 'dmarc-missing', status: 'attention', do: `Publish a DMARC record, starting at ${keptEnforcement(cov, e)}`, why: `Neither ${name} nor a parent domain publishes a DMARC record, so receivers get no instruction for mail that fails, and nobody sends reports about who mails as ${name}.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
+	} else if (cov?.kind === 'unknown' && !dnsFailed) {
 		out.push({
 			key: 'dmarc-coverage',
 			status: 'unknown',
 			do: `Check again whether a parent domain's DMARC record covers ${name}`,
-			why: `There is no DMARC record at _dmarc.${name}, and whether a parent domain's record covers it ${cov.reason === 'failed' ? 'could not be loaded' : 'has not been confirmed by the latest check'}. Nothing is suggested until it is known.`,
+			why: `There is no DMARC record at _dmarc.${name} that we could confirm, and whether a parent domain's record covers it is not known. Nothing is suggested until it is.`,
 			who: WHO.you,
 			retry: true,
 		});
-	} else if (cov.kind === 'own') {
-		policy = cov.policy;
-		ownRecord = cov.record;
-		if (dns && !dns.has_rua && hasReportAddress(domain.rua_address)) {
+	} else if (cov?.kind === 'inherited') {
+		if (!cov.policy) {
+			out.push({ key: 'dmarc-parent', status: 'attention', do: `Fix the DMARC record at _dmarc.${cov.parent}`, why: inheritedSentence(name, cov), who: WHO.dns });
+		} else {
+			policy = cov.policy;
+			if (cov.pct < 100 && cov.policy !== 'none') out.push({ key: 'pct', status: 'improve', do: `Raise pct from ${cov.pct} to 100 at _dmarc.${cov.parent}`, why: inheritedSentence(name, cov), who: WHO.dns });
+		}
+	} else if (cov?.kind === 'own' && dns?.found && dns.current_record) {
+		policy = parseDmarcPolicy(dns.current_record);
+		ownRecord = dns.current_record;
+		if (!dns.has_rua && hasReportAddress(domain.rua_address)) {
 			// Under enforcement this changes evidence, not protection: a Note, so the page agrees with the overview's Verified.
 			const enforcedNow = policy === 'quarantine' || policy === 'reject';
 			out.push({ key: 'dmarc-rua', status: enforcedNow ? 'note' : 'improve', do: 'Add the reports address to your DMARC record', why: `Until reports arrive here, nobody can confirm which services send as ${name} and pass.`, who: WHO.dns, to: `${page}/setup/4`, cta: 'Open the DMARC step', writes: true });
 		}
-	} else if (cov.kind === 'inherited') {
-		policy = cov.policy;
 	}
 
 	// Reports: what the senders do under the current policy. p=none is never "nothing to do".
@@ -179,7 +155,7 @@ export function domainActions(input: ActionInput): DomainAction[] {
 	// Order by consequence. When reports show mail passing, a DKIM selector DNS cannot find is not a problem in practice.
 	if (rate !== null && rate >= 95) for (const a of out) if (a.key === 'dkim-unknown' || a.key === 'dkim-wildcard') a.status = 'note';
 	const sorted = out.sort((a, b) => statusRank(a.status) - statusRank(b.status));
-	const pending = dns === undefined || onboarding === undefined || reports === undefined || cov.kind === 'unknown' && cov.reason === 'loading';
+	const pending = dns === undefined || onboarding === undefined || reports === undefined;
 	const blocking = sorted.filter((a) => a.status !== 'note');
 	if (blocking.length > 0) return sorted.slice(0, MAX);
 	if (pending) return [];
@@ -188,6 +164,5 @@ export function domainActions(input: ActionInput): DomainAction[] {
 	return [{ key: 'done', status: 'verified', do: 'Nothing to do', why: `Nothing in ${scope} needs a change right now.`, who: WHO.nobody } as DomainAction, ...sorted].slice(0, MAX);
 }
 
-/** Still reading: the list would change once DNS, the summary or the report totals answer. */
-export const actionsPending = (i: Pick<ActionInput, 'dns' | 'onboarding' | 'summary' | 'summaryState' | 'reports'>) =>
-	i.dns === undefined || i.onboarding === undefined || i.reports === undefined || (dmarcCoverage(i).kind === 'unknown' && (dmarcCoverage(i) as { reason: string }).reason === 'loading');
+/** Still reading: the list would change once DNS, onboarding or the report totals answer. */
+export const actionsPending = (i: Pick<ActionInput, 'dns' | 'onboarding' | 'reports'>) => i.dns === undefined || i.onboarding === undefined || i.reports === undefined;
