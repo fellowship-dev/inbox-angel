@@ -15,6 +15,7 @@ import { d1RateLimitStorage } from './rate-limit';
 import { authSecret } from './secret';
 import { VERIFICATION_LINK_SECONDS, verificationMailAllowed, welcomeLink, type MailPool } from './welcome';
 import { cleanName } from './names';
+import { rotateDeviceEpoch } from './device';
 import { signJWT } from 'better-auth/crypto';
 import { assertMaySignUp, provisionUser, type SignupIntent } from './signup-policy';
 
@@ -118,7 +119,10 @@ export async function createAuth(
           // The first time an OAuth login attaches to a user, every session they already had ends: whoever held them
           // (e.g. the registrant of a password for this address) no longer has access.
           after: async (account) => {
-            if (account.providerId !== 'credential') await globalQueries(db).sessions.revokeAll(account.userId);
+            if (account.providerId !== 'credential') {
+              await globalQueries(db).sessions.revokeAll(account.userId);
+              await rotateDeviceEpoch(env, account.userId); // and its device cookies stop skipping the per-address lock
+            }
           },
         },
       },

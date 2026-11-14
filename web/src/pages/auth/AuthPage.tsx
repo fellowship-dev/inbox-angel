@@ -100,7 +100,8 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 		}
 	}
 
-	if (verifyFor) return <CheckEmail email={verifyFor} onBack={() => setVerifyFor(null)} />;
+	// "Back to sign in" opens sign-in, whichever form led here.
+	if (verifyFor) return <CheckEmail email={verifyFor} onBack={() => { setVerifyFor(null); setCreating(false); setError(''); }} />;
 
 	const requestedDomain = mode === 'signup' ? readSignupDomain() : null;
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
