@@ -1,6 +1,6 @@
-import { CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@ready-set-mail/ui';
+import { Button, CheckResult, CheckResultList, RecordBlock, Skeleton, toast, type CheckStatus } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { api, errorMessage } from '../../lib/api';
 import { isRevokedDkimKey } from '../../lib/dkim';
 import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../lib/dkim-wildcard';
@@ -29,6 +29,29 @@ function spfStatus(count: number | null): { status: CheckStatus; note: string | 
 	if (count > SPF_LOOKUP_LIMIT) return { status: 'fail', note: `${count} of ${SPF_LOOKUP_LIMIT} DNS lookups. Over the limit, so receivers may reject your SPF record. Flattening can fix this.` };
 	if (count >= 8) return { status: 'warn', note: `${count} of ${SPF_LOOKUP_LIMIT} DNS lookups. Close to the limit.` };
 	return { status: 'pass', note: `${count} of ${SPF_LOOKUP_LIMIT} DNS lookups.` };
+}
+
+/** The DKIM record blocks behind one control: the count first ("Show 12 DKIM records"), the records on demand. */
+function DkimRecords({ selectors }: { selectors: Array<{ name: string; record: string }> }) {
+	const [open, setOpen] = useState(false);
+	const id = useId();
+	const n = selectors.length;
+	return (
+		<div className="space-y-2">
+			<Button variant="link" size="sm" className="h-auto px-0" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+				{open ? `Hide the DKIM record${n === 1 ? '' : 's'}` : `Show ${n} DKIM record${n === 1 ? '' : 's'}`}
+			</Button>
+			<div id={id} hidden={!open} className="space-y-2">
+				{selectors.map((s) => (
+					<RecordBlock
+						key={s.name}
+						title={isRevokedDkimKey(s.record) ? 'Revoked: empty key' : undefined}
+						record={{ type: /v=DKIM1|p=/i.test(s.record) ? 'TXT' : 'CNAME', name: s.name, value: s.record }}
+					/>
+				))}
+			</div>
+		</div>
+	);
 }
 
 /** DMARC, SPF and DKIM as the DNS shows them now. A failed lookup is "Lookup failed", never "Not found". */
@@ -197,10 +220,12 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 		if (selectors.length === 0 && dkimFailed) return <CheckResult status="error" title="DKIM selectors" summary="The DNS lookups did not complete." onRetry={retryOnboarding} />;
 		if (selectors.length === 0) {
 			return (
+				// DNS cannot list selectors, so none among the common names is not proof there is none: Unknown, never "Not found".
 				<CheckResult
-					status="missing"
+					status="neutral"
+					statusLabel="Unknown"
 					title="DKIM selectors"
-					summary="No DKIM record found for the selectors we check. Your provider may use another selector; ask them which one to publish."
+					summary="None of the common selectors we check has a key. Your provider may use another selector; ask them which one they sign with."
 				/>
 			);
 		}
@@ -219,15 +244,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 						: `No usable DKIM key. ${revokedNote}${partial}`
 				}
 			>
-				<div className="space-y-2">
-					{selectors.map((s) => (
-						<RecordBlock
-							key={s.name}
-							title={isRevokedDkimKey(s.record) ? 'Revoked: empty key' : undefined}
-							record={{ type: /v=DKIM1|p=/i.test(s.record) ? 'TXT' : 'CNAME', name: s.name, value: s.record }}
-						/>
-					))}
-				</div>
+				<DkimRecords selectors={selectors} />
 			</CheckResult>
 		);
 	})();

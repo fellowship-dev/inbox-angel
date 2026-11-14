@@ -1,6 +1,6 @@
 import { Button, EmptyState, IconButton, PageHeader, cn, toast } from '@ready-set-mail/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, Copy, Mail, MailQuestion } from 'lucide-react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BackLink, OverallBadge, ProtocolChip, ProtocolResults } from '../../components/reports';
 import { ListSkeleton, LoadError, Section } from '../../components/states';
@@ -120,7 +120,7 @@ function History({ expandedId, setExpandedId }: { expandedId: number | null; set
 			) : q.isError ? (
 				<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load recent checks" />
 			) : q.data.length === 0 ? (
-				<EmptyState icon={<Mail />} title="No checks yet" description="Run your first check above. Each result is kept here so you can compare after fixing something." />
+				<EmptyState title="No checks yet" description="Run your first check above. Each result is kept here so you can compare after fixing something." />
 			) : (
 				<>
 					<div className="hidden grid-cols-[minmax(0,12rem)_auto_minmax(0,1fr)_auto_auto] gap-x-4 px-4 text-xs font-semibold uppercase tracking-wide text-ink-2 md:grid" aria-hidden>
@@ -152,7 +152,6 @@ export function EmailCheckPage() {
 			<div className="space-y-6">
 				<PageHeader title="Email check" />
 				<EmptyState
-					icon={<MailQuestion />}
 					title="The email check isn't available here"
 					description="It needs an address that can receive your test email, and none is set up on this service. Your SPF, DKIM and DMARC records are still checked from live DNS on each domain's page."
 					action={<TalkToMax priority={HELP_PRIORITY.page} lead="Want a real email checked?" about="about your domains" />}
@@ -231,7 +230,6 @@ function EmailCheckAvailable() {
 				{phase.kind === 'timeout' ? (
 					<div className="max-w-xl space-y-4">
 						<EmptyState
-							icon={<MailQuestion />}
 							title="No email received yet"
 							description={
 								<>

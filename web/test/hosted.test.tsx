@@ -2,9 +2,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router';
 import { describe, expect, it } from 'vitest';
-import { DomainLevelCard } from '../src/components/domain/DomainLevelCard';
 import { READ_ONLY_REASON } from '../src/lib/session';
 import { DomainDetailPage } from '../src/pages/domains/DomainDetailPage';
+import { OverviewPage } from '../src/pages/domains/OverviewPage';
 import { DomainSettingsPage } from '../src/pages/domains/DomainSettingsPage';
 import { MtaStsPage } from '../src/pages/wizards/MtaStsPage';
 import { fail, renderApp } from './render';
@@ -29,7 +29,7 @@ const status = (ps: Record<string, string | null> = {}, extra: Record<string, un
 
 const detailRoutes = (over: Record<string, unknown> = {}) => ({
 	'GET /api/domains': { domains: [domain] },
-	'GET /api/hosted/config': { enabled: true },
+	'GET /api/hosted/config': { enabled: true, records: true },
 	'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },
 	'GET /api/domains/1/sources': { sources: [] },
 	'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
@@ -52,6 +52,13 @@ async function openEnable() {
 }
 
 describe('HostedPanel visibility', () => {
+	it('offers no "Enable hosted records" when the deployment has no records zone (hosted mode alone is not enough)', async () => {
+		detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: true, records: false }, 'GET /api/domains/1/hosted': { enabled: false } }) });
+		await screen.findByRole('heading', { level: 1, name: 'example.com' });
+		await waitFor(() => expect(screen.queryByText('Hosted records')).not.toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: 'Enable hosted records' })).not.toBeInTheDocument();
+	});
+
 	it('is absent and makes no hosted request when config says disabled', async () => {
 		const { calls } = detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: false } }) });
 		await screen.findByText('example.com');
@@ -251,41 +258,54 @@ describe('HostedPanel status', () => {
 	});
 });
 
-describe('DomainLevelCard with hosted records', () => {
+describe('Overview row for a hosted domain', () => {
 	const summary = { domain_id: 1, domain: 'example.com', dmarc_policy: null, spf_record: null, total_messages: 0, pass_messages: 0, fail_messages: 0, dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null };
 	const card = (hosted: unknown, config = true) =>
-		renderApp(<DomainLevelCard domain={domain as never} />, {
+		renderApp(<OverviewPage />, {
 			routes: {
+				'GET /api/domains': { domains: [domain] },
 				'GET /api/hosted/config': { enabled: config },
 				'GET /api/domains/1/hosted': hosted,
-				'GET /api/domains/1/check-summary': summary,
-				'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },
-				'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
+				'GET /api/domains/summaries': { summaries: [summary], next_after: null, window_days: 30 },
 			},
 		});
+	const row = () => screen.findByRole('listitem', { name: 'example.com' });
 
 	it('reads level_inputs for a hosted domain whose pointers are verified', async () => {
-		const ok = status({ dmarc: 'ok', spf: 'ok' }, { level_inputs: { dmarc_published: true, spf_published: true, mta_sts_published: false } });
-		card(ok);
-		expect(await screen.findByRole('group', { name: /Level 1/ })).toBeInTheDocument();
+		card(status({ dmarc: 'ok', spf: 'ok' }, { level_inputs: { dmarc_published: true, spf_published: true, mta_sts_published: false } }));
+		const r = await row();
+		await waitFor(() => expect(within(r).getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Level 1 of 2: Authenticated'));
 	});
 
-	it('does not count a record whose pointer is not verified, and says so', async () => {
+	it('a record written in our zone that DNS does not point to yet is "Change prepared", not counted as published', async () => {
 		card(status({ dmarc: 'missing', spf: 'ok' }, { level_inputs: { dmarc_published: true, spf_published: true, mta_sts_published: false } }));
-		expect(await screen.findByText('DMARC pointer not verified yet')).toBeInTheDocument();
-		expect(screen.getByRole('group', { name: /Level 0/ })).toBeInTheDocument();
+		const r = await row();
+		await waitFor(() => expect(within(r).getByText('Change prepared')).toBeInTheDocument());
+		expect(within(r).getByText('Your DMARC record is written, but public DNS does not point to it yet.')).toBeInTheDocument();
+		expect(within(r).getByText('Add the pointer records to your DNS')).toBeInTheDocument();
+		expect(within(r).getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Level 0 of 2: Delivering');
+	});
+
+	it('a pointer whose lookup failed is Unknown, not missing', async () => {
+		card(status({ dmarc: 'error', spf: 'ok' }, { level_inputs: { dmarc_published: true, spf_published: true, mta_sts_published: false } }));
+		const r = await row();
+		await waitFor(() => expect(within(r).getByText('Unknown')).toBeInTheDocument());
+		expect(within(r).getByText('The last lookup of your DMARC pointer failed, so it is not counted as published.')).toBeInTheDocument();
 	});
 
 	it('keeps the stored summary and makes no hosted status request when hosted is off', async () => {
 		const { calls } = card({ enabled: false }, false);
-		expect(await screen.findByRole('group', { name: /Level 0/ })).toBeInTheDocument();
+		const r = await row();
+		// Never read from DNS: unknown, not a level.
+		await waitFor(() => expect(within(r).getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Level not known yet'));
 		expect(calls.some((c) => c.path === '/api/domains/1/hosted')).toBe(false);
 	});
 
 	it('keeps the stored summary for a domain that is not hosted', async () => {
 		card({ enabled: false });
-		expect(await screen.findByRole('group', { name: /Level 0/ })).toBeInTheDocument();
-		expect(screen.queryByText(/pointer not verified/)).not.toBeInTheDocument();
+		const r = await row();
+		await waitFor(() => expect(within(r).getByText('Unknown')).toBeInTheDocument());
+		expect(screen.queryByText(/pointer/)).not.toBeInTheDocument();
 	});
 });
 

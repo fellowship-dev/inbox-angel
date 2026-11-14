@@ -2,8 +2,9 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SenderInventory } from '../src/components/analytics/SenderInventory';
 import { TrendChart } from '../src/components/analytics/TrendChart';
-import { DomainLevelCard } from '../src/components/domain/DomainLevelCard';
+import { DomainRow } from '../src/components/domain/DomainRow';
 import type { Sender, TrendDay } from '../src/lib/analytics';
+import type { DomainVerdict } from '../src/lib/verdict';
 import { renderApp } from './render';
 
 afterEach(() => vi.restoreAllMocks());
@@ -60,24 +61,44 @@ describe('SenderInventory scroll cue', () => {
 	});
 });
 
-const summary = { domain_id: 1, domain: 'example.com', dmarc_policy: 'none', spf_record: 'v=spf1 -all', total_messages: 0, pass_messages: 0, fail_messages: 0, dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null };
-const cardRoutes = {
-	'GET /api/domains/1/check-summary': summary,
-	'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [{ day: '2026-10-20', total: 100, passed: 97, failed: 3 }] },
-	'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'not_started', dmarc: 'not_started', routing: 'not_started' },
+const verdict: DomainVerdict = {
+	status: 'attention',
+	level: 0,
+	sentence: 'Public DNS shows no SPF record, so receivers cannot tell which servers may send for example.com.',
+	evidence: null,
+	checked: 'Checked 3 hours ago',
+	next: { label: 'Publish an SPF record', who: 'You or your DNS manager', to: '/domains/1/setup/2' },
+	reportsNotConnected: false,
+	reportsConfirmed: false,
+	help: null,
 };
-const domain = { id: 1, domain: 'example.com', dmarc_policy: 'none', rua_address: 'r@x.io', parent_id: null, created_at: 1700000000, alerts_enabled: 1, is_default: 0 } as const;
+const row = (canWrite: boolean, v: DomainVerdict | null = verdict) =>
+	renderApp(
+		<ul>
+			<DomainRow domain={{ id: 1, domain: 'example.com' }} verdict={v} canWrite={canWrite} />
+		</ul>,
+	);
 
-describe('DomainLevelCard setup nudge', () => {
-	it('invites writers to continue setup', async () => {
-		renderApp(<DomainLevelCard domain={domain as never} />, { routes: cardRoutes });
-		expect(await screen.findByRole('link', { name: /Continue setup \(2\/5\)/ })).toBeInTheDocument();
+describe('DomainRow', () => {
+	it('sends writers to the wizard step that makes the change', async () => {
+		row(true);
+		expect(await screen.findByRole('link', { name: 'Publish an SPF record for example.com' })).toHaveAttribute('href', '/domains/1/setup/2');
 	});
-	it('does not invite read-only members, who cannot run the wizard', async () => {
-		renderApp(<DomainLevelCard domain={domain as never} />, { role: 'member', routes: cardRoutes });
-		const card = await screen.findByRole('group', { name: /Level \d/ });
-		await within(card).findByText(/97% pass rate over 7 days/);
-		expect(within(card).queryByRole('link', { name: /Continue setup/ })).not.toBeInTheDocument();
-		expect(within(card).getByRole('link', { name: /View/ })).toBeInTheDocument();
+	it('sends read-only members, who cannot run the wizard, to the domain page instead', async () => {
+		row(false);
+		expect(await screen.findByRole('link', { name: 'Publish an SPF record for example.com' })).toHaveAttribute('href', '/domains/1');
+	});
+	it('is named by its domain and carries the state as a word', async () => {
+		row(true);
+		const li = await screen.findByRole('listitem', { name: 'example.com' });
+		expect(within(li).getByText('Needs attention')).toBeInTheDocument();
+		expect(within(li).getByRole('heading', { level: 3, name: 'example.com' })).toBeInTheDocument();
+	});
+	it('while loading, says so instead of guessing a level', async () => {
+		row(true, null);
+		const li = await screen.findByRole('listitem', { name: 'example.com' });
+		expect(li).toHaveAttribute('aria-busy', 'true');
+		expect(within(li).getByText('Checking what is known…')).toBeInTheDocument();
+		expect(within(li).queryByRole('progressbar')).not.toBeInTheDocument();
 	});
 });

@@ -19,7 +19,7 @@ import {
 	toast,
 } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Users } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { ListSkeleton, LoadError, ReadOnlyNotice, Section, WriteButton } from '../../components/states';
 import { api, ApiError, errorMessage } from '../../lib/api';
@@ -77,7 +77,7 @@ export function MembersPage() {
 			/>
 			<ReadOnlyNotice />
 			{!canWrite ? (
-				<EmptyState icon={<Users />} title="Only owners and admins can see the members" description="Ask an owner if you need to know who has access, or want someone invited." />
+				<EmptyState title="Only owners and admins can see the members" description="Ask an owner if you need to know who has access, or want someone invited." />
 			) : team.isPending ? (
 				<ListSkeleton rows={3} label="Loading members" />
 			) : team.isError ? (

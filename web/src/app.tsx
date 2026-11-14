@@ -50,7 +50,7 @@ function SetupRedirect({ children }: { children: ReactNode }) {
 }
 
 function NotFound() {
-	return <EmptyState title="Page not found" description="That page does not exist." action={<Button asChild><Link to="/">Back to domains</Link></Button>} />;
+	return <EmptyState title="This page does not exist" description="The link may be old or mistyped. Every domain and what to do next is on the overview." action={<Button asChild><Link to="/">Back to domains</Link></Button>} />;
 }
 
 /** Validates `:id` once so pages can take a number. */

@@ -5,7 +5,7 @@
  */
 
 /** The newest migration this build of the code depends on. Bump with every new migration. */
-export const REQUIRED_MIGRATION = '0009_claim_settled.sql';
+export const REQUIRED_MIGRATION = '0012_dmarc_enforcement.sql';
 
 export class SchemaNotReadyError extends Error {
 	constructor(detail: string) {

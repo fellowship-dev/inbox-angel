@@ -107,6 +107,7 @@ const ROUTES: Route[] = [
   { method: 'GET', path: '/api/domains/2/anomalies', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/export', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/check-summary', kind: 'denied' },
+  { method: 'GET', path: '/api/domains/summaries', kind: 'scoped', note: 'the caller\'s own domains only' },
   { method: 'GET', path: '/api/domains/2/dns-check', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/onboarding-status', kind: 'denied' },
   { method: 'GET', path: '/api/domains/2/rollout-next', kind: 'denied' },

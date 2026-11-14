@@ -58,10 +58,20 @@ describe('0009 claim_settled', () => {
 		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
 		d.sqlite.prepare("INSERT INTO workspaces (id, name) VALUES ('ws_x', 'X')").run();
 		d.sqlite.prepare("INSERT INTO domain_claims (workspace_id, domain, token) VALUES ('ws_x', 'acme.com', 't')").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0009_claim_settled.sql']);
+		expect(applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' })).toEqual(['0009_claim_settled.sql']);
 		expect(d.sqlite.prepare('SELECT domain, status, settled_at, settled_domain_id FROM domain_claims').all()).toEqual([{ domain: 'acme.com', status: 'pending', settled_at: null, settled_domain_id: null }]);
 		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domain_claims') WHERE name IN ('settled_at', 'settled_domain_id')").all() as any[];
 		expect(cols.map((c) => c.name).sort()).toEqual(['settled_at', 'settled_domain_id']);
 		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
+	});
+});
+
+describe('0012 dmarc_enforcement', () => {
+	it('adds a nullable dmarc_sp column and leaves existing domains unread', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
+		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, dmarc_policy) VALUES ('acme.com', 'r@x', 'reject')").run();
+		expect(applyMigrations(d.sqlite, { through: '0012_dmarc_enforcement.sql' })).toEqual(['0012_dmarc_enforcement.sql']);
+		expect(d.sqlite.prepare('SELECT dmarc_policy, dmarc_pct, dmarc_sp FROM domains').all()).toEqual([{ dmarc_policy: 'reject', dmarc_pct: null, dmarc_sp: null }]);
 	});
 });

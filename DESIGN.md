@@ -263,11 +263,45 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - **Badge:** pill, 12px medium text, variants neutral, brand, success, warning, danger, outline; paired with an icon or word.
 - **StatusDot:** per-status Lucide icon (check, triangle, x, dashed circle, info) plus label. **Alert:** tinted card with icon and title; danger and warning use `role="alert"`. **CheckResult** distinguishes "Lookup failed" from "Not found". **LevelCard** shows the Delivering, Authenticated and Protected levels with findings.
 
+### Shared status words (with the website)
+
+One vocabulary for a domain's state on the website check and in the dashboard (`packages/ui/src/components/status.tsx`, mirroring the website's `frontend/components/site/Status.tsx`: same keys, words and order). `StatusLabel` renders the icon plus the visible word; the colour only repeats it. The level stays the structure underneath: a row or page shows the word **and** the LevelLadder.
+
+| Word | Key | Means | Who acts next | Icon, tone | Existing states that read as it |
+|---|---|---|---|---|---|
+| Needs attention | `attention` | Public DNS or the reports show a problem that affects mail (no SPF or DMARC, an ignored DMARC record, a domain that does not resolve, enforced mail failing) | You or your DNS manager | XCircle, danger | CheckResult `fail`, `missing`; Finding `fail`, `missing`; StatusDot `fail`; Badge `danger` |
+| Awaiting your approval | `approval` | A tightening step is proposed and the evidence supports it (p=none to quarantine, quarantine to reject) | An owner or admin | CircleArrowRight, warning | StatusDot `warn`; Badge `warning` |
+| Worth fixing | `improve` | Works, could be safer (p=none, failing senders, pct below 100) | You decide when | AlertTriangle, warning | CheckResult `warn`; Finding `warn`; StatusDot `warn`; Badge `warning` |
+| Unknown | `unknown` | Cannot be settled yet: not checked, lookup failed, DKIM selector not discoverable, reports not connected. Never shown as "Not found" | You, or a retry | CircleHelp, ink-2 | CheckResult `error`; Finding `unknown`; StatusDot `unknown`; Badge `neutral` |
+| Still gathering evidence | `gathering` | Reports can arrive but too few have | Nobody yet | Clock, ink-2 | StatusDot `unknown`; Badge `neutral` |
+| Change prepared | `prepared` | A record is written (hosted zone) and public DNS does not point to it yet | You publish it | FileText, brand-ink | StatusDot `info`; Badge `brand` |
+| Verified | `verified` | The measured check passes, with its scope named ("from public DNS", "and reports") | Nobody | CheckCircle2, success | CheckResult `pass`; Finding `pass`; StatusDot `ok`; Badge `success` |
+| Note | `note` | Information only | Nobody | Info, brand-ink | CheckResult `neutral`; StatusDot `info`; Badge `brand` |
+
+Rules: a whole result takes its most urgent state (`worstStatus`, order as in the table). "Still gathering evidence" appears only where reports can arrive; before that, report-dependent checks are Unknown. The per-check words inside CheckResult ("Pass", "Not found", "Lookup failed") stay as details under these states.
+
+### LevelLadder (signature)
+- Delivering → Authenticated → Protected as three named rungs (`packages/ui/src/components/level-ladder.tsx`), the visual anchor of every overview row and the domain page. Reached rungs fill with `brand-ink` and carry a check; the **current rung's name sits on halo gold** (`bg-accent text-accent-fg`, navy on gold in both themes, about 11:1). This is the deliberate light-mode use of gold; the other is the current step marker in "Get to your first answer" and "Do this next".
+- `level={null}` is its own state: dashed empty rungs and "Level not known yet" in words. A domain never read from DNS, a failed check or a domain that does not resolve never shows a level.
+- `role="progressbar"` with `aria-valuetext` ("Level 1 of 2: Authenticated").
+- A level name is never cut. The rungs sit side by side when the ladder's own box is at least 22rem (a container query, so it holds in a row, a card or a claim preview) and stack as three short lines below that. Rows and "Where it stands" put the ladder in its own 22rem column from `lg`, and above the text below `lg`.
+
+### Empty states
+- `EmptyState` is a quiet, left-aligned note in the page flow: the title says what is empty and why ("No reports for this period"), the description the one thing to do next and what appears once it is done, plus at most one action. No icon in a circle, no dashed frame, no slogan, and no reassurance a region cannot back with evidence ("Nothing to fix" only with the number of messages it was judged from).
+
+### Collapsed sections (Disclosure)
+- Long or secondary content (DNS records, reports, failing senders, rollout, the health report, DNS tools) sits behind an h2 button that says what is inside ("DNS records: DMARC, SPF and 12 DKIM keys, read live from public DNS."), WAI-ARIA accordion pattern (`aria-expanded`, `aria-controls`). Content stays mounted while closed. A Section inside a Disclosure renders no second heading, and nested headings use `useHeadingTag`, so a page reads h1 → h2 → h3 with no skipped level. Long lists inside collapse behind their count ("Show 12 DKIM records").
+
 ### DNS Record Block (signature)
 - Raised-surface block with 14px radius; each field (Type, Name, Value, optional TTL) is a label/value row in Geist Mono with a copy icon button on Name and Value. Copy feedback is a check icon plus a polite live-region announcement ("Copied to clipboard") and resets after 2 seconds.
 
 ### Motion
 - `ia-fade-in` 150ms, `ia-pop` 120ms, `ia-scale-in` 200ms and `ia-slide-up` 200ms (`cubic-bezier(0.16, 1, 0.3, 1)`), `ia-slide-left` 220ms. `ia-pulse` 1.5s for skeletons: a solid `surface-3` fill pulsing between full and half opacity, held still under reduced motion. `prefers-reduced-motion` reduces all animation and transitions to 0.01ms.
+
+## Page structure: "Am I done?"
+
+- **Overview:** the h1, then one sentence that answers "Am I done?" for the workspace ("Not yet. Of 9 domains, 2 need attention, 1 is awaiting your approval…"; "Done, from public DNS: …" only when every domain is Verified, with its scope). Then, while the workspace is not done and the viewer can write, "Get to your first answer": the few real steps, each in the state the data shows (Done, To do, Waiting, Unknown), gone once all are done. Then one row per domain, most urgent first, a subdomain under its parent: name and state word, the LevelLadder, one sentence of what is true now, the report evidence, when DNS was checked, and exactly one next action with who acts. No KPI strip.
+- **Domain page:** "Do this next" first (one to three actions as Do this / Why / Who, most urgent first), then "Where it stands" (ladder, state, evidence, checked when), then collapsed sections. The first screen answers what to do.
 
 ## Do's and Don'ts
 
@@ -278,6 +312,8 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - **Do** show DNS records, addresses and codes in Geist Mono with a copy control.
 - **Do** use `control-border` for form edges and keep text pairs at 4.5:1 (3:1 for large text and UI borders).
 - **Do** honour `prefers-reduced-motion`.
+- **Do** use the shared status words (`StatusLabel`) for a domain's state, with the LevelLadder under them.
+- **Do** say why a region is empty and the one thing to do next.
 
 ### Don't:
 - **Don't** use sky blue as a primary or a mascot face.
@@ -286,3 +322,5 @@ Character source: `packages/ui/README.md` ("sober", status never by colour alone
 - **Don't** use enterprise-security imagery (shields, padlocks, badge walls) or hype-landing devices (counters, "trusted by").
 - **Don't** use `accent-fg` on `accent-subtle` in dark mode (fails AA; listed in `forbiddenPairs`) or `--line-strong` for form-control edges.
 - **Don't** invent proof: no user counts, customer logos or testimonials.
+- **Don't** add KPI tiles, icon-in-a-circle empty states or a second status vocabulary.
+- **Don't** show Unknown as "Not found", or a level for a domain that was never read.

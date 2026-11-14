@@ -10,6 +10,10 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## DMARC enforcement level
+
+Migration `0012_dmarc_enforcement.sql` is additive: one nullable `domains.dmarc_sp` column; the existing `domains.dmarc_pct` column is now written by each DNS check. Apply it before serving the new Worker (the schema guard requires it). Until a domain is read from DNS again its enforcement level is shown as not known yet.
+
 ## Settled claims
 
 Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.

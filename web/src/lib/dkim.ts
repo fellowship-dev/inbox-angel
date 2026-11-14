@@ -10,3 +10,4 @@ import { decodeTxtData } from '@ready-set-mail/dns-checks/txt';
 export function isRevokedDkimKey(record: string): boolean {
 	return /(^|;)\s*p=\s*(;|$)/i.test(decodeTxtData(record));
 }
+

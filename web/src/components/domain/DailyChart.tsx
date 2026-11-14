@@ -6,7 +6,7 @@ import type { DailyStat } from '../../lib/types';
 /** One row per day: passed and failed segments scaled to the busiest day (SVG, so no inline styles). Counts are text. */
 export function DailyChart({ domainId, stats, days }: { domainId: number; stats: DailyStat[]; days: number }) {
 	if (stats.length === 0) {
-		return <EmptyState title="No reports in this window" description="Daily bars appear once receivers send their first aggregate reports, usually within a day of publishing your DMARC record." />;
+		return <EmptyState title="No reports in this window" description="Receivers send reports about once a day after your DMARC record names the reports address. Daily bars appear when the first one arrives." />;
 	}
 	const max = Math.max(...stats.map((r) => r.total), 1);
 	return (

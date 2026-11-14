@@ -34,7 +34,6 @@ export function DomainEmpty() {
 				actions={<Button><Plus aria-hidden />Add domain</Button>}
 			/>
 			<EmptyState
-				icon={<Globe />}
 				title="No domains yet"
 				description="Add the domain you send email from. We look up SPF, DKIM and DMARC and tell you what to fix first."
 				action={<Button><Plus aria-hidden />Add your first domain</Button>}

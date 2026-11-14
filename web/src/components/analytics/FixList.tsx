@@ -1,5 +1,5 @@
 import { Badge, Card, CardContent, EmptyState, RecordBlock } from '@ready-set-mail/ui';
-import { CheckCircle2, ExternalLink, Inbox } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { Link } from 'react-router';
 import { fmtPct, SEVERITY_LABEL, type Fix } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';
@@ -12,10 +12,10 @@ const VARIANT = { high: 'danger', medium: 'warning', low: 'outline' } as const;
  */
 export function FixList({ fixes, messages, showDomain }: { fixes: Fix[]; messages: number; showDomain?: boolean }) {
 	if (fixes.length === 0 && messages === 0) {
-		return <EmptyState icon={<Inbox />} title="No reports yet" description="There are no DMARC reports for this period, so there is nothing to rank yet." />;
+		return <EmptyState title="No reports for this period" description="Fixes are ranked from DMARC reports, and none arrived in this window. Check that your DMARC record sends reports here; the domain page shows the record." />;
 	}
 	if (fixes.length === 0) {
-		return <EmptyState icon={<CheckCircle2 />} title="Nothing to fix right now" description="Every sender we can see passes DMARC, or the failures are too small to act on." />;
+		return <EmptyState title="No sender fails often enough to rank" description={`Every sender in the ${messages.toLocaleString()} reported messages for this period passes DMARC, or fails on too few messages to act on. New senders appear here as reports arrive.`} />;
 	}
 	return (
 		<ol aria-label="What to fix next" className="space-y-4">

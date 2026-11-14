@@ -4,7 +4,7 @@ import { expect, request as apiRequest, test } from '@playwright/test';
 import { signIn } from './support/session';
 import { ensureDomain } from './support/db';
 
-const DOMAIN = 'e2e-corp.test';
+const DOMAIN = 'e2e-corp.example.com'; // special-use names (.test) are refused by the domain rule
 test.describe.configure({ mode: 'serial' });
 // Password/one-time credentials must never be captured in Playwright traces or artifacts.
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
@@ -24,15 +24,17 @@ test('first-run setup, add the first domain, see its records', async ({ page }) 
 		await expect(page).toHaveURL(/\/domains\/\d+$/);
 	}
 
-	// The domain is listed as a level card, then opens to its records.
+	// The domain is listed as a row with its level ladder, then opens to its records.
 	await page.goto('/#/');
-	const card = page.getByRole('group').filter({ hasText: DOMAIN }).first();
-	await expect(card).toBeVisible();
-	await expect(card.getByText(/Level [012]/)).toBeVisible();
-	await page.getByRole('link', { name: new RegExp(DOMAIN) }).first().click();
+	const row = page.getByRole('listitem', { name: DOMAIN });
+	await expect(row).toBeVisible();
+	await expect(row.getByRole('progressbar')).toHaveAttribute('aria-valuetext', /Level [012] of 2|Level not known yet/);
+	await row.getByRole('link', { name: DOMAIN, exact: true }).click();
 
 	await expect(page.getByRole('heading', { name: DOMAIN, level: 1 })).toBeVisible();
-	const records = page.getByRole('region', { name: 'DNS records' }).or(page.locator('section', { has: page.getByRole('heading', { name: 'DNS records' }) }));
+	await expect(page.getByRole('heading', { name: 'Do this next', level: 2 })).toBeVisible();
+	await page.getByRole('button', { name: /^DNS records/ }).click();
+	const records = page.locator('section', { has: page.getByRole('heading', { name: /^DNS records/ }) });
 	await expect(records).toBeVisible();
 	// With no network the live lookup may fail; that must read as "Lookup failed", never as "Not found".
 	await expect(records.getByText(/DMARC record/).first()).toBeVisible();

@@ -44,9 +44,8 @@ test('Max creates the Lexgo workspace from the switcher and lands on its empty s
 
 	await expect(workspaceButton(page, 'Lexgo')).toBeVisible();
 	await expect(page).toHaveURL(/#\/w\/ws_[0-9a-f]{32}\//);
-	await expect(page.getByText('No domains yet')).toBeVisible();
-	await expect(page.getByRole('link', { name: 'Add your first domain' })).toBeVisible();
-	await expect(page.getByRole('link', { name: 'Connect Cloudflare' })).toBeVisible();
+	await expect(page.getByText('Nothing to check yet: this workspace has no domains.')).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Add a domain' })).toBeVisible();
 
 	const list = (await (await page.request.get('/api/workspaces')).json()).workspaces as Array<{ id: string; name: string }>;
 	lexgoId = list.find((w) => w.name === 'Lexgo')!.id;

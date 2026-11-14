@@ -1,21 +1,27 @@
-import { HealthReportSection } from './HealthReportSection';
-import { Alert, Badge, Button, EmptyState, PageHeader, Stat, StatGroup, Tabs, TabsList, TabsTrigger } from '@ready-set-mail/ui';
+import { HealthReportSection, useHealthReport } from './HealthReportSection';
+import { Alert, Badge, Button, EmptyState, LevelLadder, PageHeader, Skeleton, StatusLabel, Tabs, TabsList, TabsTrigger } from '@ready-set-mail/ui';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Settings } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useDomainId } from '../../app';
 import { DailyChart } from '../../components/domain/DailyChart';
 import { CopyField } from '../../components/domain/CopyField';
 import { DnsRecords } from '../../components/domain/DnsRecords';
 import { DnsTools } from '../../components/domain/DnsTools';
+import { DoThisNext } from '../../components/domain/DoThisNext';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
-import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { Rollout } from '../../components/domain/Rollout';
-import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
+import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
+import { Disclosure, ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
+import { actionsPending, domainActions } from '../../lib/actions';
+import { errorMessage } from '../../lib/api';
+import { useHostedInfo } from '../../lib/hosted';
+import { domainVerdict, totalsFromSummary, unavailableVerdict, type ReportTotals } from '../../lib/verdict';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
 import { getGuidance, spTag, sumStats, wizardProgress, type GuidanceTone } from '../../lib/dmarc';
-import { useDnsCheck, useFailingSources, useOnboardingStatus, useStats, useWizardState } from '../../lib/domain-queries';
+import { domainKeys, useCheckSummary, useDnsCheck, useFailingSources, useMtaSts, useOnboardingStatus, useRolloutNext, useSpfFlatten, useStats, useWizardState } from '../../lib/domain-queries';
 import { formatNumber } from '../../lib/format';
 import { useDomain, useDomains } from '../../lib/queries';
 import { hasReportAddress } from '../../lib/dmarc-record';
@@ -50,21 +56,6 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 	if (!dns.data.found || !dns.data.current_record) return <Badge variant="outline">No DMARC record found{lastKnown}</Badge>;
 	const live = dns.data.current_record.match(/(^|;\s*)p=([a-z]+)/i)?.[2]?.toLowerCase();
 	return live ? <PolicyBadge policy={live as Domain['dmarc_policy']} /> : <Badge variant="outline">DMARC record has no p= tag</Badge>;
-}
-
-function SetupBanner({ domainId }: { domainId: number }) {
-	const q = useWizardState(domainId);
-	const { canWrite } = useSession();
-	const hosted = useHosted();
-	if (!canWrite) return null; // read-only members cannot run the setup wizard
-	if (!q.data) return null; // a failed lookup of setup progress should not block the page
-	const { done, total, nextStep } = wizardProgress(q.data, { hosted });
-	if (done >= total) return null;
-	return (
-		<Alert variant="warning" title={`Setup incomplete: ${done}/${total} steps done`}>
-			<Link to={`/domains/${domainId}/setup/${nextStep}`}>Continue setup</Link>
-		</Alert>
-	);
 }
 
 function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
@@ -139,18 +130,118 @@ function Context({ domain, all }: { domain: Domain; all: Domain[] }) {
 	);
 }
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Where the domain stands: the level ladder, the state, what is true now and its evidence, and setup progress. */
+/** True when a stored summary fetched at `fetchedAt` (ms) can describe a live read made at `readAt` (ms; 0: none yet). */
+export const summaryFetchedAfterRead = (fetchedAt: number, readAt: number): boolean => readAt === 0 || fetchedAt >= readAt;
+
+function WhereItStands({ domain, nxdomain = false, readAt = 0 }: { domain: Domain; /** The live read says the name does not exist: no setup to continue. */ nxdomain?: boolean; /** When this page's live read answered (ms): an older summary is being refetched. */ readAt?: number }) {
+	const summary = useCheckSummary(domain.id);
+	const hosted = useHostedInfo(domain.id);
+	const wizard = useWizardState(domain.id);
+	const { canWrite } = useSession();
+	const hostedMode = useHosted();
+	const headingId = useId();
+	// The same summary and 30-day totals the overview reads, so both pages say the same thing.
+	// A summary fetched before the live read may predate what it stored: wait for the refetch rather than show it.
+	const fresh = summaryFetchedAfterRead(summary.dataUpdatedAt, readAt) || !summary.isFetching;
+	const v = summary.isError ? unavailableVerdict(errorMessage(summary.error), domain.domain) : summary.data && fresh ? domainVerdict(domain, summary.data, totalsFromSummary(summary.data), hosted, undefined, { hostedMode }) : null;
+	const progress = canWrite && wizard.data ? wizardProgress(wizard.data, { hosted: hostedMode }) : null;
+	return (
+		<section aria-labelledby={headingId} className="space-y-3">
+			<h2 id={headingId} className="text-lg font-semibold tracking-tight">
+				Where it stands
+			</h2>
+			<div className="grid gap-x-6 gap-y-4 rounded-lg border border-line bg-surface-1 p-4 sm:p-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
+				{v ? <LevelLadder level={v.level} className="self-start lg:pt-1" /> : <Skeleton className="h-8 w-full" />}
+				<div className="min-w-0 space-y-1.5">
+					{v ? (
+						<>
+							<StatusLabel kind={v.status} />
+							<p className="max-w-prose text-sm text-ink-1">{v.sentence}</p>
+							{v.evidence ? <p className="max-w-prose text-sm text-ink-2">{v.evidence}</p> : null}
+							{v.checked ? <p className="text-xs text-ink-2">{v.checked}</p> : null}
+							{summary.isError ? (
+								<Button variant="secondary" size="sm" onClick={() => void summary.refetch()}>
+									Try again
+								</Button>
+							) : null}
+						</>
+					) : (
+						<p className="text-sm text-ink-2">Loading what is known about this domain…</p>
+					)}
+					{/* Only while DNS shows the domain is not yet enforcing: an enforced domain's setup is done, whatever the wizard recorded. */}
+					{!nxdomain && progress && progress.done < progress.total && v && (v.level === 0 || v.level === 1) ? (
+						<p className="pt-1 text-sm text-ink-2">
+							Setup wizard: {progress.done} of {progress.total} steps done.{' '}
+							<Link to={`/domains/${domain.id}/setup/${progress.nextStep}`} className="font-medium text-brand-ink underline underline-offset-4">
+								Continue setup
+							</Link>
+						</p>
+					) : null}
+				</div>
+			</div>
+		</section>
+	);
+}
+
 function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
+	const qc = useQueryClient();
 	const [days, setDays] = useState<number>(7);
 	const stats = useStats(domain.id, days);
+	const week = useStats(domain.id, 7);
 	const sources = useFailingSources(domain.id);
 	const dns = useDnsCheck(domain.id);
-	const onboarding = useOnboardingStatus(domain.id); // shared with the DNS records card: is the name resolvable at all?
+	const onboarding = useOnboardingStatus(domain.id);
+	const summary = useCheckSummary(domain.id);
+	const rollout = useRolloutNext(domain.id);
+	// The health report runs live DNS and reads collected evidence: only when its section is opened.
+	const [healthOpen, setHealthOpen] = useState(false);
+	const health = useHealthReport(domain.id, healthOpen);
+	const spfTool = useSpfFlatten(domain.id);
+	const mtaTool = useMtaSts(domain.id);
 	const { canWrite } = useSession();
-	// Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros.
+	// Hosted, before report intake: no reports can arrive (see ReportsNotConnected).
 	const reportsOff = useReportsNotConnected(domain);
+	const nxdomain = !!onboarding.data?.nxdomain;
+
+	// Reading DNS here also stores what it found (the overview's "checked when"), so refresh the stored summary after it.
+	const readAt = onboarding.dataUpdatedAt;
+	useEffect(() => {
+		if (readAt) void qc.invalidateQueries({ queryKey: domainKeys.summary(domain.id) });
+	}, [readAt, qc, domain.id]);
+
+	const totals = (q: typeof week, n: number): ReportTotals | null | undefined => {
+		if (q.isPending) return undefined;
+		if (q.isError) return null;
+		const s = sumStats(q.data.stats);
+		return { total: s.total, passed: s.passed, failed: s.failed, passRate: s.passRate, days: n };
+	};
+	const week7 = totals(week, 7);
+	const actionInput = {
+		domain,
+		dns: dns.isPending ? undefined : dns.isError ? null : dns.data,
+		onboarding: onboarding.isPending ? undefined : onboarding.isError ? null : onboarding.data,
+		summary: summary.data ?? (summary.isError ? null : undefined),
+		reports: week7,
+		sources: sources.data ?? null,
+		// A fix to an inherited policy belongs on the parent: link to it when it is in this workspace.
+		parentId: all.find((d) => d.domain === onboarding.data?.dmarc.effective?.inherited_from)?.id,
+		// The stored summary counts only once it was fetched after this page's live read (compare fetch times).
+		summaryFresh: summaryFetchedAfterRead(summary.dataUpdatedAt, onboarding.isSuccess ? onboarding.dataUpdatedAt : 0),
+	};
+	const actions = domainActions(actionInput);
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
+
+	const parent = domain.parent_id ? all.find((d) => d.id === domain.parent_id) : undefined;
+	const children = all.filter((d) => d.parent_id === domain.id);
+	const selectors = onboarding.data?.dkim.selectors.length;
+	const enforcing = rollout.data && (rollout.data.current_policy === 'quarantine' || rollout.data.current_policy === 'reject');
+	const toolsShown = !(spfTool.isSuccess && !spfTool.data.available && !spfTool.data.config && mtaTool.isSuccess && !mtaTool.data.available && !mtaTool.data.config);
+	const failing = sources.data?.length ?? 0;
 
 	return (
 		<div className="space-y-8">
@@ -181,100 +272,154 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				}
 			/>
 			<ReadOnlyNotice />
-			{/* A name that does not resolve has no setup to continue and nothing to host. */}
-			{onboarding.data?.nxdomain ? null : <SetupBanner domainId={domain.id} />}
-			{/* A name DNS says does not exist has no records to report on: the DNS records card says so once. */}
-			{onboarding.data?.nxdomain ? null : <HealthReportSection domainId={domain.id} />}
+			<DoThisNext
+				actions={actions}
+				pending={actionsPending(actionInput)}
+				canWrite={canWrite}
+				onRetry={() => void Promise.all([dns.refetch(), onboarding.refetch()])}
+			/>
+			<WhereItStands domain={domain} nxdomain={nxdomain} readAt={onboarding.isSuccess ? onboarding.dataUpdatedAt : 0} />
 
-			{reportsOff ? (
-				<Section title="Results">
+			{/* A name that does not resolve has nothing to host. */}
+			{nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
+
+			<div className="space-y-3">
+				<Disclosure
+					id="dns-records"
+					title="DNS records"
+					summary={`DMARC, SPF${selectors === undefined ? ' and DKIM' : onboarding.data?.dkim.wildcard ? ', and DKIM that public DNS can\'t show (wildcard)' : selectors === 0 ? ', and no DKIM key among the common selectors' : ` and ${plural(selectors, 'DKIM key')}`}, read live from public DNS.`}
+				>
+					<DnsRecords domain={domain} />
+				</Disclosure>
+
+				{/* Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros. */}
+				{reportsOff ? (
 					<ReportsNotConnected domain={domain.domain} />
-				</Section>
-			) : (
-			<Section
-				title="Results"
-				actions={
-					<Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
-						<TabsList aria-label="Time window">
-							{WINDOWS.map((w) => (
-								<TabsTrigger key={w} value={String(w)}>
-									{w}d<span className="sr-only"> window</span>
-								</TabsTrigger>
-							))}
-						</TabsList>
-					</Tabs>
-				}
-			>
-				{stats.isPending ? (
-					<ListSkeleton rows={1} label="Loading results" />
-				) : stats.isError ? (
-					<LoadError error={stats.error} onRetry={() => void stats.refetch()} title="Could not load results" />
 				) : (
-					<>
-						<StatGroup className="sm:grid-cols-4" aria-label={`Last ${days} days`}>
-							<Stat label="Pass rate" value={sums?.passRate != null ? `${sums.passRate}%` : 'n/a'} />
-							<Stat label="Total" value={formatNumber(sums?.total ?? 0)} />
-							<Stat label="Passed" value={formatNumber(sums?.passed ?? 0)} />
-							<Stat label="Failed" value={formatNumber(sums?.failed ?? 0)} />
-						</StatGroup>
-						{guidance ? (
-							<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
-								<p>{guidance.body}</p>
-								{guidance.upgradeTo && canWrite ? (
-									<Button asChild size="sm" className="mt-3">
-										<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
-									</Button>
-								) : null}
-								{sums?.total === 0 && dns.data ? (
-									<p className="mt-2 italic">
-										{dns.data.error
-											? 'We could not check your DNS record just now. See DNS records below.'
-											: dns.data.found && dns.data.has_rua
-												? 'DNS record detected. Reports will start arriving soon.'
-												: dns.data.found
-													? hasReportAddress(domain.rua_address)
-														? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records below.'
-														: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
-													: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
-									</p>
-								) : null}
-							</Alert>
-						) : null}
-					</>
+				<Disclosure
+						title="Reports"
+						summary={
+							week.isPending
+								? 'Loading report totals…'
+								: week.isError
+									? 'Report totals could not be loaded.'
+									: week7 && week7.total > 0
+										? `${week7.passRate}% of ${formatNumber(week7.total)} reported messages passed DMARC in the last 7 days.`
+										: 'No reports in the last 7 days.'
+						}
+					>
+						<div className="space-y-6">
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<p className="text-sm text-ink-1">
+									{stats.isPending
+										? 'Loading…'
+										: stats.isError
+											? null
+											: sums && sums.total > 0
+												? `Last ${days} days: ${sums.passRate}% passed. ${formatNumber(sums.passed)} of ${formatNumber(sums.total)} messages passed, ${formatNumber(sums.failed)} failed.`
+												: `No reports in the last ${days} days.`}
+								</p>
+								<Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))}>
+									<TabsList aria-label="Time window">
+										{WINDOWS.map((w) => (
+											<TabsTrigger key={w} value={String(w)}>
+												{w}d<span className="sr-only"> window</span>
+											</TabsTrigger>
+										))}
+									</TabsList>
+								</Tabs>
+							</div>
+							{stats.isError ? <LoadError error={stats.error} onRetry={() => void stats.refetch()} title="Could not load results" /> : null}
+							{guidance ? (
+								<Alert variant={ALERT_VARIANT[guidance.tone]} title={guidance.title}>
+									<p>{guidance.body}</p>
+									{guidance.upgradeTo && canWrite ? (
+										<Button asChild size="sm" variant="secondary" className="mt-3">
+											<Link to={`/domains/${domain.id}/dmarc-wizard`}>Upgrade to {guidance.upgradeTo}</Link>
+										</Button>
+									) : null}
+									{sums?.total === 0 && dns.data ? (
+										<p className="mt-2">
+											{dns.data.error
+												? 'We could not check your DNS record just now. See DNS records above.'
+												: dns.data.found && dns.data.has_rua
+													? 'DNS record detected. Reports will start arriving soon.'
+													: dns.data.found
+														? hasReportAddress(domain.rua_address)
+															? 'A DMARC record is published, but it does not send reports to your reports address yet. See DNS records above.'
+															: 'A DMARC record is published. No reports address is configured for this domain, so no reports can arrive here yet.'
+														: 'DNS record not found yet. Make sure you have added it, then wait a few minutes for propagation.'}
+										</p>
+									) : null}
+								</Alert>
+							) : null}
+							{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
+							<div className="space-y-2">
+								<p className="text-sm font-semibold text-ink-1">Reporting address</p>
+								{hasReportAddress(domain.rua_address) ? (
+									<>
+										<p className="text-sm text-ink-2">
+											Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.
+										</p>
+										<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
+									</>
+								) : (
+									<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
+								)}
+							</div>
+							<Link className="inline-block text-sm text-brand-ink underline underline-offset-4" to={`/domains/${domain.id}/reports`}>
+								All reports
+							</Link>
+						</div>
+					</Disclosure>
 				)}
-			</Section>
-			)}
 
-			{onboarding.data?.nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
-			<DnsRecords domain={domain} />
-			<Rollout domain={domain} />
+				{!reportsOff && (failing > 0 || sources.isError) ? (
+					<Disclosure title="Failing senders" summary={sources.isError ? 'Could not be loaded.' : `${plural(failing, 'source')} sent mail that failed DMARC in the last 7 days.`}>
+						<FailingSources domainId={domain.id} q={sources} />
+					</Disclosure>
+				) : null}
 
-			{reportsOff ? null : (
-			<Section
-				title={`Last ${days} days`}
-				actions={
-					<Link className="text-sm text-brand-ink underline underline-offset-4" to={`/domains/${domain.id}/reports`}>
-						All reports
-					</Link>
-				}
-			>
-				{stats.isPending ? <ListSkeleton rows={1} label="Loading daily results" /> : stats.isError ? null : <DailyChart domainId={domain.id} stats={stats.data.stats} days={days} />}
-			</Section>
-			)}
+				{enforcing || rollout.isError ? (
+					<Disclosure
+						title="Rollout"
+						summary={rollout.data && enforcing ? `Step ${rollout.data.current_step_index + 1} of ${rollout.data.total_steps}, at p=${rollout.data.current_policy}.${rollout.data.next_step ? '' : ' Fully graduated.'}` : 'Could not be loaded.'}
+					>
+						<Rollout domain={domain} />
+					</Disclosure>
+				) : null}
 
-			{reportsOff ? null : (
-			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
-				{hasReportAddress(domain.rua_address) ? (
-					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
-				) : (
-					<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
+				{parent || children.length > 0 ? (
+					<Disclosure title={parent ? 'Parent domain' : 'Subdomains'} summary={parent ? `Subdomain of ${parent.domain}.` : `${plural(children.length, 'subdomain')} monitored.`}>
+						<Context domain={domain} all={all} />
+					</Disclosure>
+				) : null}
+
+				{/* A name DNS says does not exist has no records to report on: the DNS records section says so once. */}
+				{nxdomain ? null : (
+				<Disclosure
+					onOpenChange={(o) => o && setHealthOpen(true)}
+					title="Email health report"
+					summary={
+						!healthOpen
+							? 'Live DNS findings and proposed fixes, checked when you open this: the same evidence your authorized agent sees.'
+							: health.isPending
+							? 'Checking live DNS and collected evidence…'
+							: health.isError
+								? 'Could not be loaded.'
+								: `${plural(health.data.dns.findings.length, 'finding')} and ${plural(health.data.remediation.length, 'proposed fix', 'proposed fixes')}: the same evidence your authorized agent sees.`
+					}
+				>
+					<HealthReportSection domainId={domain.id} enabled={healthOpen} />
+				</Disclosure>
 				)}
-			</Section>
-			)}
 
-			<Context domain={domain} all={all} />
-			{reportsOff ? null : <FailingSources domainId={domain.id} q={sources} />}
-			<DnsTools domainId={domain.id} />
+				{toolsShown ? (
+					<Disclosure title="DNS tools" summary="Optional tools that change your DNS for you: SPF flattening and MTA-STS.">
+						<DnsTools domainId={domain.id} />
+					</Disclosure>
+				) : null}
+			</div>
 		</div>
 	);
 }
@@ -283,7 +428,17 @@ export function DomainDetailPage() {
 	const id = useDomainId();
 	const list = useDomains();
 	const { domain } = useDomain(id);
-	if (list.isPending) return <PageSkeleton label="Loading domain" />;
+	// A domain added in another tab or by an agent is not in a cached list yet: refetch once before saying "not found".
+	const [refetched, setRefetched] = useState(false);
+	const asked = useRef(false);
+	const missing = !list.isPending && !list.isError && !domain;
+	const { refetch } = list;
+	useEffect(() => {
+		if (!missing || asked.current) return;
+		asked.current = true;
+		void refetch().finally(() => setRefetched(true));
+	}, [missing, refetch]);
+	if (list.isPending || (missing && !refetched)) return <PageSkeleton label="Loading domain" />;
 	if (list.isError) return <LoadError error={list.error} onRetry={() => void list.refetch()} title="Could not load this domain" />;
 	if (!domain) {
 		return (

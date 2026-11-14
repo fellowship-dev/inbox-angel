@@ -1,6 +1,6 @@
 import { Alert, Badge, Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Segmented } from '../../components/reports';
 import { ListSkeleton, LoadError } from '../../components/states';
@@ -91,7 +91,6 @@ export function AuditLogPage() {
 						<LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load the audit log" />
 					) : entries.length === 0 ? (
 						<EmptyState
-							icon={<ScrollText />}
 							title={page > 1 ? 'No more entries' : action ? 'No entries for this filter' : 'No audit entries yet'}
 							description={page > 1 ? 'You have reached the end of the log.' : 'Sign-ins, DNS changes and settings changes will be recorded here as they happen.'}
 							action={

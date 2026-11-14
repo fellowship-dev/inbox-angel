@@ -27,7 +27,7 @@ test('operator enrollment, finite product access, revocation and responsive repo
   }, { ...operator, setup });
   await page.getByRole('button', { name: setup ? 'Create account' : 'Sign in', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Main' }).or(page.getByRole('heading', { name: "What's your main domain?" }))).toBeVisible();
-  const enrolled = await page.request.post('/api/domains', { headers: { Origin: origin }, data: { domain: 'agent-platform.test' } });
+  const enrolled = await page.request.post('/api/domains', { headers: { Origin: origin }, data: { domain: 'agent-platform.example.com' } });
   expect(enrolled.ok()).toBe(true);
   const result = await enrolled.json();
   const id = result.domain.id;
@@ -38,9 +38,9 @@ test('operator enrollment, finite product access, revocation and responsive repo
   await expect(page.getByLabel('Product', { exact: true })).not.toHaveValue('');
   const productId = await page.getByLabel('Product', { exact: true }).inputValue();
   // Mapping is persisted before the controlled checkbox re-renders.
-  await page.getByRole('checkbox', { name: /^agent-platform\.test/ }).first().click();
-  await expect(page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.test')).toBeVisible();
-  await page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.test').check();
+  await page.getByRole('checkbox', { name: /^agent-platform\.example\.com/ }).first().click();
+  await expect(page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.example.com')).toBeVisible();
+  await page.getByRole('group', { name: 'Exact credential domains' }).getByLabel('agent-platform.example.com').check();
   await page.getByLabel('Service principal and credential name').fill(serviceName);
   await page.getByRole('button', { name: 'Issue restricted credential' }).click();
   const secret = page.getByLabel('New credential secret');
@@ -50,7 +50,7 @@ test('operator enrollment, finite product access, revocation and responsive repo
   const machine = await playwright.request.newContext({ baseURL: origin, ignoreHTTPSErrors: true, extraHTTPHeaders: { Authorization: `Bearer ${credential}` } });
   const allowed = await machine.get(`/api/resources?product_id=${productId}`);
   expect(allowed.status()).toBe(200);
-  expect((await allowed.json()).domains.map((d: { domain: string }) => d.domain)).toEqual(['agent-platform.test']);
+  expect((await allowed.json()).domains.map((d: { domain: string }) => d.domain)).toEqual(['agent-platform.example.com']);
   await page.getByRole('button', { name: 'Credential stored — clear secret' }).click();
   await expect(secret).toHaveCount(0);
   for (const width of [1280, 390]) {
@@ -61,8 +61,10 @@ test('operator enrollment, finite product access, revocation and responsive repo
   await page.getByRole('button', { name: `Revoke ${serviceName}`, exact: true }).click();
   await expect.poll(async () => (await machine.get('/api/resources')).status()).toBe(401);
   await machine.dispose();
+  // The app cached the domain list before the domain was enrolled through the API: reload so the domain page can find it.
+  await page.reload();
   await page.goto(`/#/domains/${id}`);
-  await expect(page.getByRole('heading', { name: 'Email health report', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /^Email health report/ }).click();
   await expect(page.getByText('Inbox placement', { exact: true })).toBeVisible({ timeout: 30_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/inbox-agent-report-mobile.png', fullPage: true });

@@ -39,7 +39,7 @@ describe('ExplorePage', () => {
 	it('shows an empty state for no sources', async () => {
 		page(<ExplorePage />, '/domains/:id/explore', '/domains/1/explore', { 'GET /api/domains/1/explore': { days: 30, domain: 'example.com', sources: [] } });
 		expect(await screen.findByText('No sources in the last 30 days')).toBeInTheDocument();
-		expect(screen.getByText(/No DMARC reports received yet/)).toBeInTheDocument();
+		expect(screen.getByText(/No DMARC reports arrived in this window/)).toBeInTheDocument();
 	});
 
 	it('filters to anomalies and refetches when the window changes', async () => {
@@ -66,7 +66,11 @@ describe('ExplorePage', () => {
 describe('AnomaliesPage', () => {
 	it('shows the all-clear empty state', async () => {
 		page(<AnomaliesPage />, '/domains/:id/anomalies', '/domains/1/anomalies', { 'GET /api/domains/1/anomalies': { days: 30, domain: 'example.com', anomalies: [] } });
-		expect(await screen.findByText('No anomalies in the last 30 days')).toBeInTheDocument();
+		expect(await screen.findByText('No failing sources in the last 30 days')).toBeInTheDocument();
+		// No reassurance without evidence: with no anomalies it cannot tell "all pass" from "no reports", so it says so.
+		expect(screen.getByText(/If no reports arrived, there is nothing to judge yet/)).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'See received reports' })).toHaveAttribute('href', '/domains/1/reports');
+		expect(screen.queryByText(/Nothing to fix/)).not.toBeInTheDocument();
 	});
 
 	it('splits active from older sources', async () => {

@@ -2,14 +2,9 @@ import { AlertTriangle, CheckCircle2, CircleHelp, CircleSlash, XCircle } from "l
 import * as React from "react";
 import { cn } from "../lib/cn.js";
 import { Card, CardContent, CardHeader } from "./card.js";
+import { LEVELS, LevelLadder, type Level } from "./level-ladder.js";
 
-export type Level = 0 | 1 | 2;
-
-export const LEVELS = [
-	{ level: 0, name: "Delivering" },
-	{ level: 1, name: "Authenticated" },
-	{ level: 2, name: "Protected" },
-] as const;
+export { LEVELS, type Level } from "./level-ladder.js";
 
 /** `unknown`: nothing has been checked yet. Neutral, never shown as missing. */
 export type FindingStatus = "pass" | "warn" | "fail" | "missing" | "unknown";
@@ -40,8 +35,7 @@ export interface LevelCardProps extends Omit<React.HTMLAttributes<HTMLDivElement
 }
 
 /**
- * Level 0–2 (Delivering → Authenticated → Protected) with a 3-segment bar.
- * Reached segments are filled AND get a check + label; the current one is bold, so the bar is not colour-only.
+ * Level 0–2 (Delivering → Authenticated → Protected) on the LevelLadder, with findings below.
  */
 export const LevelCard = React.forwardRef<HTMLDivElement, LevelCardProps>(
 	({ className, level, domain, description, findings, children, ...props }, ref) => {
@@ -56,26 +50,7 @@ export const LevelCard = React.forwardRef<HTMLDivElement, LevelCardProps>(
 							<span className="text-ink-2">Level {current.level}</span> · {current.name}
 						</h2>
 					</div>
-					<div
-						role="progressbar"
-						aria-valuemin={1}
-						aria-valuemax={3}
-						aria-valuenow={level + 1}
-						aria-valuetext={`Level ${level} of 2: ${current.name}`}
-						aria-label="Protection level"
-						className="grid grid-cols-3 gap-1.5"
-					>
-						{LEVELS.map((l) => (
-							<div key={l.level} className="space-y-1.5">
-								<div className={cn("h-2 rounded-full", l.level <= level ? "bg-brand-ink" : "bg-surface-3")} />
-								<p className={cn("flex items-center gap-1 text-xs", l.level === level ? "font-semibold text-ink-1" : "text-ink-2")}>
-									{l.level <= level ? <CheckCircle2 aria-hidden className="size-3.5 text-brand-ink" /> : <span aria-hidden className="size-3.5 rounded-full border border-ink-3" />}
-									{l.name}
-									{l.level === level ? <span className="sr-only"> (current)</span> : null}
-								</p>
-							</div>
-						))}
-					</div>
+					<LevelLadder level={level} />
 					{description ? <p className="text-sm text-ink-2">{description}</p> : null}
 				</CardHeader>
 				<CardContent className="space-y-4">

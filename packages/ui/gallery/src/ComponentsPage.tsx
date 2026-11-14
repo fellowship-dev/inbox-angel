@@ -7,7 +7,7 @@ import {
 	TableRow, Tabs, TabsContent, TabsList, TabsTrigger, toast, Tooltip, TooltipContent,
 	TooltipProvider, TooltipTrigger, cn,
 } from "@ready-set-mail/ui";
-import { ChevronDown, Inbox, Plus, Settings, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Settings, Trash2 } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { SAMPLE_DOMAIN, SampleBanner } from "./sample";
 
@@ -196,9 +196,9 @@ export function ComponentsPage() {
 						</Table>
 						<Table label="Empty sample table">
 							<TableHeader><TableRow><TableHead>Sender</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-							<TableBody><TableEmpty colSpan={2} icon={<Inbox />} title="No reports yet" description="Reports arrive within a day of the first email being sent after you publish DMARC." /></TableBody>
+							<TableBody><TableEmpty colSpan={2} title="No reports yet" description="Reports arrive within a day of the first email being sent after you publish DMARC." /></TableBody>
 						</Table>
-						<EmptyState icon={<Inbox />} title="No domains yet" description="Add the domain your signup emails come from." action={<Button><Plus aria-hidden />Add domain</Button>} />
+						<EmptyState title="No domains in this workspace yet" description="Add the domain your signup emails come from. We read its SPF, DKIM and DMARC from public DNS right away." action={<Button><Plus aria-hidden />Add domain</Button>} />
 						<div aria-busy="true" className="space-y-2"><Skeleton className="h-5 w-1/2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
 					</Both>
 				</Section>

@@ -28,8 +28,10 @@ describe('pending domain claims', () => {
 
 	it('shows no section when there are none (self-host)', async () => {
 		renderApp(<OverviewPage />, { routes: { 'GET /api/domains': { domains: [] } } });
-		await screen.findByText('No domains yet');
+		await screen.findByText('Nothing to check yet: this workspace has no domains.');
 		expect(screen.queryByText('Waiting for verification')).not.toBeInTheDocument();
+		// Self-host adds a domain straight away: no ownership step in the first-answer list.
+		expect(screen.queryByText('Prove it is yours')).not.toBeInTheDocument();
 	});
 
 	it('shows the 422 reason inline when the TXT is not found, and removes a claim', async () => {
