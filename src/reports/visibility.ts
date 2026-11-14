@@ -6,6 +6,7 @@ import type { UncountedSummary, CountingMode, FailureRow, DropRow } from '@ready
 import type { TenantContext } from '../tenancy/context';
 import { intakeLimits } from '../hosted/config';
 import { hostedEnabled } from '../hosted/config';
+import { isMajorReporter, MAJOR_REPORTER_IDS } from '../dmarc/known-reporters';
 import { OWNER_VISIBLE, REASONS, type ReasonCode } from '../hosted/reasons';
 
 const authservConfigured = (env: { AUTHSERV_ID?: string; AUTHSERV_HEADER?: string }) => !!env.AUTHSERV_ID?.trim() && ['ar', 'arc'].includes(env.AUTHSERV_HEADER?.trim().toLowerCase() ?? '');
@@ -65,14 +66,14 @@ export interface ReporterMix {
 }
 
 /** The reporters whose counted reports carry the advice: the two receivers that see most of the mail. */
-export const MAJOR_REPORTERS: readonly string[] = ['google', 'microsoft'];
+export const MAJOR_REPORTERS: readonly string[] = MAJOR_REPORTER_IDS;
 
 export function reporterMix(rows: ReporterMix['counted']): ReporterMix {
   const reports = rows.reduce((n, r) => n + Number(r.reports), 0);
   return {
     counted: rows,
     attribution: reports ? `from ${reports} ${reports === 1 ? 'report' : 'reports'} by ${rows.map((r) => r.label).join(', ')}` : null,
-    major: rows.some((r) => MAJOR_REPORTERS.includes(r.reporter)),
+    major: rows.some((r) => isMajorReporter(r.reporter)),
   };
 }
 

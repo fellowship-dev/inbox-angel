@@ -262,3 +262,20 @@ describe('retention: uncounted reports (unknown and unauthenticated) are kept 30
     expect(storage(w)).toEqual([{ records: g, u: 0, reports: 1, ur: 0 }]);
   });
 });
+
+describe('an operator registry entry cannot reuse a built-in id (through email())', () => {
+  it('google|Evil|evil.com|...: evil.com is not counted, so it is not "safe to enforce" evidence; the real Google still counts', async () => {
+    const w = await twoWorkspaces();
+    const { token, id } = await own(w, 'ueber.net');
+    const env = { INTAKE_KNOWN_REPORTERS: 'google|Evil|evil.com|noreply-dmarc-support@evil.com|noreply-dmarc-support@evil.com' };
+    const m = await attacker(w, token, 'ueber.net', 'evil.com', 'e1', 3, env);
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(log()).toMatchObject({ tier: 'unknown', reporter: 'evil.com' });
+    expect(counted(w)).toEqual([]);
+    const tenant = makeTenant({ db: w.db, workspaceId: 'ws_a', env: { ...w.env, ...env } as any, mode: 'saas' });
+    expect((await reportVisibility(tenant, id, 0)).reporters.major).toBe(false);
+    await deliverGoogle(w, token, env);
+    expect(counted(w)).toHaveLength(1);
+    expect((await reportVisibility(tenant, id, 0)).reporters).toMatchObject({ major: true, attribution: 'from 1 report by Google' });
+  });
+});

@@ -1,8 +1,9 @@
 // The registry data, its matching rules, the operator's extension and disable variables, and the carrier / tier decisions built on it.
 import { describe, it, expect } from 'vitest';
-import { KNOWN_REPORTERS, NAMED_BUT_UNVERIFIED, effectiveRegistry, parseOperatorEntries, registryCandidates, reportEmailAccepted } from '../../src/dmarc/known-reporters';
+import { KNOWN_REPORTERS, NAMED_BUT_UNVERIFIED, effectiveRegistry, isMajorReporter, parseOperatorEntries, registryCandidates, reportEmailAccepted } from '../../src/dmarc/known-reporters';
 import { carrierFromHeaders, decideTier } from '../../src/dmarc/reporter-auth';
 import { describeAuthStatus, AUTH_TEXT } from '../../src/reports/auth-status';
+import { reporterMix } from '../../src/reports/visibility';
 
 const ID = 'mx.cloudflare.net';
 const env = { AUTHSERV_ID: ID, AUTHSERV_HEADER: 'ar' };
@@ -131,5 +132,42 @@ describe('describeAuthStatus (the instance owner\'s "can anything be counted?")'
   it('is silent when something authenticated, or nothing has arrived', () => {
     expect(describeAuthStatus(o({ ok: 1, absent: 9 })).text).toBeNull();
     expect(describeAuthStatus(o({})).kind).toBe('no_traffic');
+  });
+});
+
+describe('operator entries cannot take a built-in identity (the security review: google|Evil|evil.com|... counted evil.com as Google)', () => {
+  const evil = (id: string) => `${id}|Evil|evil.com|noreply@evil.com|noreply@evil.com`;
+  it.each(['google', 'Google', 'microsoft', 'yahoo', 'mimecast'])('id %s is refused and listed under issues; the built-in entry is unchanged', (id) => {
+    const p = parseOperatorEntries(evil(id));
+    expect(p.entries).toEqual([]);
+    expect(p.issues).toHaveLength(1);
+    expect(p.issues[0]).toMatch(/built-in reporter id/);
+    const reg = effectiveRegistry({ INTAKE_KNOWN_REPORTERS: evil(id) });
+    expect(reg).toEqual(effectiveRegistry({}));
+    expect(registryCandidates('evil.com', 'noreply@evil.com', { INTAKE_KNOWN_REPORTERS: evil(id) })).toEqual([]);
+  });
+  it('a disabled built-in id stays reserved (switching it off does not free the name)', () => {
+    expect(parseOperatorEntries(evil('yahoo')).entries).toEqual([]);
+    expect(effectiveRegistry({ INTAKE_KNOWN_REPORTERS: evil('yahoo'), INTAKE_KNOWN_REPORTERS_DISABLE: 'yahoo' }).map((e) => e.id)).not.toContain('yahoo');
+  });
+  it('a label equal to a built-in label is refused', () => {
+    const p = parseOperatorEntries('evilco|Google|evil.com|noreply@evil.com|noreply@evil.com');
+    expect(p.entries).toEqual([]);
+    expect(p.issues[0]).toMatch(/built-in reporter's name/);
+  });
+  it('the same id twice in the operator list: every entry with it is refused, others stay', () => {
+    const p = parseOperatorEntries(`${evil('twin')};${evil('twin').replace('evil.com', 'other.example').replaceAll('noreply@other.example', 'a@other.example')};acme|Acme|acme-mail.com|dmarc@acme-mail.com|dmarc@acme-mail.com`);
+    expect(p.entries.map((e) => e.id)).toEqual(['acme']);
+    expect(p.issues.some((i) => /appears 2 times/.test(i))).toBe(true);
+  });
+  it('"major reporter" keys on the built-in entry only: an operator entry with the label Google or a lookalike id never makes it true', () => {
+    const row = (reporter: string, label: string) => ({ reporter, label, reports: 3, messages: 30 });
+    expect(reporterMix([row('google', 'Google')]).major).toBe(true);
+    expect(reporterMix([row('microsoft', 'Microsoft')]).major).toBe(true);
+    expect(reporterMix([row('acme', 'Google')]).major).toBe(false); // an operator entry's label is never consulted
+    expect(reporterMix([row('evil', 'Google'), row('google.com', 'Google')]).major).toBe(false);
+    expect(reporterMix([row('yahoo', 'Yahoo (and AOL)')]).major).toBe(false);
+    expect(isMajorReporter('google')).toBe(true);
+    expect(isMajorReporter('evil')).toBe(false);
   });
 });

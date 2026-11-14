@@ -118,7 +118,22 @@ const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])
 
 export interface ParsedRegistry { entries: KnownReporter[]; issues: string[] }
 
-/** Parse INTAKE_KNOWN_REPORTERS. A malformed entry is ignored and named in `issues`. */
+/** The ids and labels of the built-in entries (also the disabled ones): reserved, an operator entry may not reuse either. */
+const RESERVED_IDS: ReadonlySet<string> = new Set(KNOWN_REPORTERS.map((e) => e.id));
+const RESERVED_LABELS: ReadonlySet<string> = new Set(KNOWN_REPORTERS.map((e) => e.label.toLowerCase()));
+
+/**
+ * The reporters whose counted reports carry the "safe to enforce" advice: the two receivers that see most of the mail. Keyed on the BUILT-IN entry's id only;
+ * an operator entry can never take one of these ids (parseOperatorEntries refuses it), and its label is never consulted.
+ */
+export const MAJOR_REPORTER_IDS: readonly string[] = ['google', 'microsoft'];
+export const isMajorReporter = (identity: string): boolean => MAJOR_REPORTER_IDS.includes(identity) && RESERVED_IDS.has(identity);
+
+/**
+ * Parse INTAKE_KNOWN_REPORTERS. A malformed entry is ignored and named in `issues`. An operator id that is a built-in id (google, microsoft, yahoo, ...), or
+ * that appears more than once in the operator's own list, is refused (every entry carrying it): the id is the identity counted reports are stored under, and
+ * `evil.com` must never count as Google. An operator label equal to a built-in label is refused too (it would show as that reporter).
+ */
 export function parseOperatorEntries(raw: string | undefined): ParsedRegistry {
   const entries: KnownReporter[] = [];
   const issues: string[] = [];
@@ -128,9 +143,16 @@ export function parseOperatorEntries(raw: string | undefined): ParsedRegistry {
     const dkimOrgs = list(dkim), froms = list(from), reportEmails = list(emails);
     if (!id || !/^[a-z0-9-]+$/.test(id) || !label || !dkimOrgs.length || !froms.length || !reportEmails.length) { issues.push(`${line}: expected id|label|dkim-org,…|from,…|report-email,…`); continue; }
     if (!dkimOrgs.every((d) => DOMAIN_RE.test(d)) || !froms.every((a) => FROM_RE.test(a)) || !reportEmails.every((a) => ADDRESS_RE.test(a))) { issues.push(`${line}: invalid domain or address`); continue; }
+    if (RESERVED_IDS.has(id)) { issues.push(`${line}: id "${id}" is a built-in reporter id and cannot be reused (to replace a built-in entry, disable it with INTAKE_KNOWN_REPORTERS_DISABLE and use another id)`); continue; }
+    if (RESERVED_LABELS.has(label)) { issues.push(`${line}: label "${label}" is a built-in reporter's name and cannot be reused`); continue; }
     entries.push({ id, label: (label.charAt(0).toUpperCase() + label.slice(1)), dkimOrgs, from: froms, reportEmails, verified: 'operator', evidence: [{ ref: 'INTAKE_KNOWN_REPORTERS', note: 'added by the operator', copied: false }] });
   }
-  return { entries, issues };
+  // The same id twice in the operator's list is ambiguous (which entry is it?): refuse every entry with that id.
+  const seen = new Map<string, number>();
+  for (const e of entries) seen.set(e.id, (seen.get(e.id) ?? 0) + 1);
+  const dup = new Set([...seen].filter(([, n]) => n > 1).map(([id]) => id));
+  for (const id of dup) issues.push(`id "${id}" appears ${seen.get(id)} times in INTAKE_KNOWN_REPORTERS: every entry with it is ignored`);
+  return { entries: entries.filter((e) => !dup.has(e.id)), issues };
 }
 
 /** The built-in entries minus the disabled ones, plus the operator's. */
