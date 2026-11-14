@@ -437,7 +437,7 @@ export async function handleAuthRoute(
     }
 
     const { res, user } = await signUp(env, request, ctx, { kind: 'invite', token: invite.token }, {
-      name: body.name.trim(), email: invite.email, password: body.password,
+      name: body.name.trim(), email: invite.email, password: body.password!, // required above for self-host
     });
     if (!res.ok || !user) return authError(res, 'could not accept invite');
     // Self-host: an invited teammate is verified by the invite itself (there is no verification mail to rely on).

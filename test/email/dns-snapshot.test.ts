@@ -7,31 +7,37 @@ const found = (raw: string, inherited: boolean): DmarcLookup => ({
 });
 
 describe('dmarcFactsFromLookup: the effective policy for this domain', () => {
+  it('keeps pct= of the record that applies, so enforcement on part of the mail is not called full', () => {
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=reject; pct=10', false))).toMatchObject({ policy: 'reject', pct: 10 });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=quarantine', true))).toMatchObject({ policy: 'quarantine', inherited_from: 'acme.com', pct: 100 });
+    expect(dmarcFactsFromLookup({ status: 'none', domain: 'a.com', record: null, foundAt: null, inherited: false, organizationalDomain: 'a.com' })).toEqual({ policy: null, issue: null, inherited_from: null, pct: null });
+  });
+
   it.each([
     ['v=DMARC1; p=reject; rua=mailto:a@b.c', 'reject'],
     ['v=DMARC1;p=Quarantine', 'quarantine'],
     ['v=DMARC1; sp=reject; p=none', 'none'], // own record: sp= is for subdomains of this domain, not for it
     ['v=DMARC1; t=y; p=none', 'none'],
-  ])('own record %s -> %s', (rec, policy) => expect(dmarcFactsFromLookup(found(rec, false))).toEqual({ policy, issue: null, inherited_from: null }));
+  ])('own record %s -> %s', (rec, policy) => expect(dmarcFactsFromLookup(found(rec, false))).toMatchObject({ policy, issue: null, inherited_from: null }));
 
   it('inherited: the parent\'s sp= when it has one', () => {
-    expect(dmarcFactsFromLookup(found('v=DMARC1; p=none; sp=reject', true))).toEqual({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
-    expect(dmarcFactsFromLookup(found('v=DMARC1; p=reject; sp=none', true))).toEqual({ policy: 'none', issue: null, inherited_from: 'acme.com' });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=none; sp=reject', true))).toMatchObject({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=reject; sp=none', true))).toMatchObject({ policy: 'none', issue: null, inherited_from: 'acme.com' });
   });
   it('inherited: the parent\'s p= when sp is absent', () => {
-    expect(dmarcFactsFromLookup(found('v=DMARC1; p=quarantine', true))).toEqual({ policy: 'quarantine', issue: null, inherited_from: 'acme.com' });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=quarantine', true))).toMatchObject({ policy: 'quarantine', issue: null, inherited_from: 'acme.com' });
   });
   it('no record at the domain or its parent is null with no issue (evidence of absence)', () => {
-    expect(dmarcFactsFromLookup({ status: 'none', domain: 'a.com', record: null, foundAt: null, inherited: false, organizationalDomain: 'a.com' })).toEqual({ policy: null, issue: null, inherited_from: null });
+    expect(dmarcFactsFromLookup({ status: 'none', domain: 'a.com', record: null, foundAt: null, inherited: false, organizationalDomain: 'a.com' })).toMatchObject({ policy: null, issue: null, inherited_from: null });
   });
   it('a record with no valid p= gives no policy (not "none")', () => {
-    expect(dmarcFactsFromLookup(found('v=DMARC1; sp=reject; rua=mailto:a@b.c', false))).toEqual({ policy: null, issue: 'invalid', inherited_from: null });
-    expect(dmarcFactsFromLookup(found('v=DMARC1; p=banana', true))).toEqual({ policy: null, issue: 'invalid', inherited_from: 'acme.com' });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; sp=reject; rua=mailto:a@b.c', false))).toMatchObject({ policy: null, issue: 'invalid', inherited_from: null });
+    expect(dmarcFactsFromLookup(found('v=DMARC1; p=banana', true))).toMatchObject({ policy: null, issue: 'invalid', inherited_from: 'acme.com' });
   });
   it('several records give no policy', () => {
     const l: DmarcLookup = { ...found('v=DMARC1; p=none', false), status: 'multiple', record: null, rawRecords: ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] };
-    expect(dmarcFactsFromLookup(l)).toEqual({ policy: null, issue: 'multiple', inherited_from: null });
-    expect(dmarcFactsFromLookup({ ...l, inherited: true })).toEqual({ policy: null, issue: 'multiple', inherited_from: 'acme.com' });
+    expect(dmarcFactsFromLookup(l)).toMatchObject({ policy: null, issue: 'multiple', inherited_from: null });
+    expect(dmarcFactsFromLookup({ ...l, inherited: true })).toMatchObject({ policy: null, issue: 'multiple', inherited_from: 'acme.com' });
   });
   it('a DNS failure is unknown: undefined, never "no record"', () => {
     expect(dmarcFactsFromLookup({ status: 'error', domain: 'a.com', record: null, foundAt: null, inherited: false, organizationalDomain: 'a.com', error: 'DNS SERVFAIL' })).toBeUndefined();
@@ -47,17 +53,17 @@ describe('dmarcFactsFor: reuses the caller\'s own-name answer and asks for the p
 
   it('an own record needs no further lookup', async () => {
     const { resolver, asked } = answers({});
-    expect(await dmarcFactsFor(resolver, 'mail.acme.com', ok('v=DMARC1; p=none'))).toEqual({ policy: 'none', issue: null, inherited_from: null });
+    expect(await dmarcFactsFor(resolver, 'mail.acme.com', ok('v=DMARC1; p=none'))).toMatchObject({ policy: 'none', issue: null, inherited_from: null });
     expect(asked).toEqual([]);
   });
   it('no own record: one lookup at the organizational domain, and its sp= applies', async () => {
     const { resolver, asked } = answers({ '_dmarc.acme.com': ok('v=DMARC1; p=none; sp=reject') });
-    expect(await dmarcFactsFor(resolver, 'mail.acme.com', { status: 'nxdomain', records: [] })).toEqual({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
+    expect(await dmarcFactsFor(resolver, 'mail.acme.com', { status: 'nxdomain', records: [] })).toMatchObject({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
     expect(asked).toEqual(['_dmarc.acme.com']);
   });
   it('a parent without DMARC: null', async () => {
     const { resolver } = answers({});
-    expect(await dmarcFactsFor(resolver, 'mail.acme.com', { status: 'nodata', records: [] })).toEqual({ policy: null, issue: null, inherited_from: null });
+    expect(await dmarcFactsFor(resolver, 'mail.acme.com', { status: 'nodata', records: [] })).toMatchObject({ policy: null, issue: null, inherited_from: null });
   });
   it('the parent lookup failing: undefined (nothing to store)', async () => {
     const { resolver } = answers({ '_dmarc.acme.com': { status: 'error', records: [], error: 'DNS SERVFAIL' } });
@@ -65,7 +71,7 @@ describe('dmarcFactsFor: reuses the caller\'s own-name answer and asks for the p
   });
   it('an apex domain has no parent to ask', async () => {
     const { resolver, asked } = answers({});
-    expect(await dmarcFactsFor(resolver, 'acme.com', { status: 'nxdomain', records: [] })).toEqual({ policy: null, issue: null, inherited_from: null });
+    expect(await dmarcFactsFor(resolver, 'acme.com', { status: 'nxdomain', records: [] })).toMatchObject({ policy: null, issue: null, inherited_from: null });
     expect(asked).toEqual([]);
   });
   it('agrees with the package lookupDmarc the domain page uses', async () => {
@@ -94,17 +100,17 @@ describe('stored effective policy from raw TXT: whitespace, case, invalid sp=', 
     ['v=DMARC1 ; p\t=\treject ;'],
     ['v = DMARC1; p=reject'],
     ['V=DMARC1; P=Reject'],
-  ])('own %j -> reject', async (rec) => expect(await own(rec)).toEqual({ policy: 'reject', issue: null, inherited_from: null }));
+  ])('own %j -> reject', async (rec) => expect(await own(rec)).toMatchObject({ policy: 'reject', issue: null, inherited_from: null }));
 
   it('inherited with sp=bogus: sp is absent, the parent\'s p applies', async () => {
-    expect(await inherited('v=DMARC1; p=reject; sp=bogus')).toEqual({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
+    expect(await inherited('v=DMARC1; p=reject; sp=bogus')).toMatchObject({ policy: 'reject', issue: null, inherited_from: 'acme.com' });
   });
   it('inherited with sp = none: none', async () => {
-    expect(await inherited('v=DMARC1; p=reject; sp = none')).toEqual({ policy: 'none', issue: null, inherited_from: 'acme.com' });
-    expect(await inherited('v=DMARC1; p=reject; SP=None')).toEqual({ policy: 'none', issue: null, inherited_from: 'acme.com' });
+    expect(await inherited('v=DMARC1; p=reject; sp = none')).toMatchObject({ policy: 'none', issue: null, inherited_from: 'acme.com' });
+    expect(await inherited('v=DMARC1; p=reject; SP=None')).toMatchObject({ policy: 'none', issue: null, inherited_from: 'acme.com' });
   });
   it('own record with an invalid p: issue invalid, no policy', async () => {
-    expect(await own('v=DMARC1; p=bogus')).toEqual({ policy: null, issue: 'invalid', inherited_from: null });
-    expect(await own('v=DMARC1; p = ; rua=mailto:a@b.c')).toEqual({ policy: null, issue: 'invalid', inherited_from: null });
+    expect(await own('v=DMARC1; p=bogus')).toMatchObject({ policy: null, issue: 'invalid', inherited_from: null });
+    expect(await own('v=DMARC1; p = ; rua=mailto:a@b.c')).toMatchObject({ policy: null, issue: 'invalid', inherited_from: null });
   });
 });

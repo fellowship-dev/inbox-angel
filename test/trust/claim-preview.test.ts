@@ -185,7 +185,7 @@ describe('previewClaimDns mapping', () => {
     const v = await run({});
     expect(v.nxdomain).toBe(true);
     expect(v.spf).toMatchObject({ status: 'missing', record: null, over_limit: false });
-    expect(v.dmarc).toEqual({ status: 'missing', policy: null, issue: null, inherited_from: null, record: null });
+    expect(v.dmarc).toEqual({ status: 'missing', policy: null, issue: null, inherited_from: null, record: null, pct: null });
     expect(v.dkim).toEqual({ status: 'not_found', selectors: [], scanned: COMMON_DKIM_SELECTORS.length, failed: 0 });
     expect(v.mx.status).toBe('none');
     expect(v.lookup_failed).toEqual([]);
@@ -225,7 +225,7 @@ describe('previewClaimDns mapping', () => {
 
   it('DMARC: a subdomain with no record of its own gets its parent\'s sp=, inherited_from the parent', async () => {
     const v = await previewClaimDns('mail.acme.com', { resolver: fakeResolver({ 'TXT _dmarc.acme.com': ['v=DMARC1; p=none; sp=reject'] }) });
-    expect(v.dmarc).toEqual({ status: 'found', policy: 'reject', issue: null, inherited_from: 'acme.com', record: 'v=DMARC1; p=none; sp=reject' });
+    expect(v.dmarc).toEqual({ status: 'found', policy: 'reject', issue: null, inherited_from: 'acme.com', record: 'v=DMARC1; p=none; sp=reject', pct: 100 });
   });
 
   it('DMARC: several records and an invalid record give no policy, with the issue named', async () => {
@@ -238,7 +238,7 @@ describe('previewClaimDns mapping', () => {
 
   it('DMARC: a failed lookup is an error, never missing', async () => {
     const v = await run({ ...published, 'TXT _dmarc.acme.com': 'SERVFAIL' });
-    expect(v.dmarc).toEqual({ status: 'error', policy: null, issue: null, inherited_from: null, record: null });
+    expect(v.dmarc).toEqual({ status: 'error', policy: null, issue: null, inherited_from: null, record: null, pct: null });
     expect(v.lookup_failed).toContain('dmarc');
   });
 
@@ -333,6 +333,9 @@ describe('the preview and the overview card cannot disagree', () => {
       dmarc_policy: snap.dmarc?.policy ?? null,
       dmarc_issue: snap.dmarc?.issue ?? null,
       dmarc_inherited_from: snap.dmarc?.inherited_from ?? null,
+      // What recordDnsCheck and updateSpfLookupCount store from the same snapshot, so the stricter SPF and pct= verdicts agree too.
+      spf_lookup_count: snap.spf_lookup_count ?? null,
+      dmarc_pct: snap.dmarc?.pct ?? null,
       dns_checked_at: 1_800_000_000,
       dkim_total: 0, dkim_pass: 0, spf_total: 0, spf_pass: 0, mta_sts_enabled: 0, mta_sts_mode: null,
     };
@@ -341,6 +344,7 @@ describe('the preview and the overview card cannot disagree', () => {
   const cases: Array<[string, string, Zone]> = [
     ['everything published', 'acme.com', published],
     ['enforced', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; p=reject'] }],
+    ['partly enforced (pct=50)', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; p=reject; pct=50'] }],
     ['inherited sp=reject', 'mail.acme.com', { 'TXT mail.acme.com': ['v=spf1 -all'], 'TXT _dmarc.acme.com': ['v=DMARC1; p=none; sp=reject'] }],
     ['inherited p=none', 'mail.acme.com', { 'TXT mail.acme.com': ['v=spf1 -all'], 'TXT _dmarc.acme.com': ['v=DMARC1; p=none'] }],
     ['several DMARC records', 'acme.com', { ...published, 'TXT _dmarc.acme.com': ['v=DMARC1; p=none', 'v=DMARC1; p=reject'] }],

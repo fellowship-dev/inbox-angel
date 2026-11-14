@@ -32,7 +32,7 @@ describe('reports.checkSummary', () => {
       domain_id: id, domain: 'example.com', dmarc_policy: 'reject', spf_record: 'v=spf1 ~all', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null,
       total_messages: 2000, pass_messages: 1960, fail_messages: 40,
       dkim_total: 1000, dkim_pass: 950, spf_total: 1000, spf_pass: 950,
-      mta_sts_enabled: 0, mta_sts_mode: null,
+      mta_sts_enabled: 0, mta_sts_mode: null, spf_lookup_count: null, dmarc_pct: null,
     });
   });
 

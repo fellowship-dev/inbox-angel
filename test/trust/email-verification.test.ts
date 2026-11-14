@@ -34,11 +34,11 @@ describe('hosted sign-up requires a verified email', () => {
     expect(await json(login)).toMatchObject({ code: 'email_not_verified' });
     expect(login.headers.get('set-cookie')).toBeNull();
 
-    // the emailed link verifies the address but signs nobody in: it hands over a set-password step
+    // the emailed link verifies the address but signs nobody in: it hands over a choose-your-password step
     const link = new URL(w.linkIn(0));
     const verified = await handleApi(new Request(`https://ia.example.com${link.pathname}${link.search}`, { headers: { 'cf-connecting-ip': '10.9.9.9' } }), w.env, ctx);
     expect(verified.status).toBe(302);
-    expect(verified.headers.get('location')).toMatch(/^\/#\/reset\/[0-9a-f]{48}$/);
+    expect(verified.headers.get('location')).toMatch(/^\/#\/welcome\/[0-9a-f]{48}$/);
     expect((verified.headers as any).getSetCookie()).toEqual([]);
     expect(w.rows("SELECT email_verified FROM users WHERE email = 'new@example.com'")).toEqual([{ email_verified: 1 }]);
     // the password chosen before the address was proven no longer works
