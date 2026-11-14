@@ -96,8 +96,9 @@ export async function refreshTenant(tenant: TenantContext): Promise<void> {
     }
   }
 
-  if (!s.reportsDomain && s.baseDomain) s.reportsDomain = `reports.${s.baseDomain}`;
-  if (!s.fromEmail && s.baseDomain) s.fromEmail = `noreply@reports.${s.baseDomain}`;
+  // Self-host only: the hosted service never derives a reports domain (report intake is not connected there).
+  if (tenant.mode !== 'saas' && !s.reportsDomain && s.baseDomain) s.reportsDomain = `reports.${s.baseDomain}`;
+  if (tenant.mode !== 'saas' && !s.fromEmail && s.baseDomain) s.fromEmail = `noreply@reports.${s.baseDomain}`;
 
   tenant.invalidate(); // a zone resolved above must be seeded into a fresh client
   if (Object.keys(persist).length) {

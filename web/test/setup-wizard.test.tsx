@@ -154,7 +154,7 @@ describe('DNS lookup failures are not missing records', () => {
 	it('DMARC: a missing record is shown as missing with the recommended record', async () => {
 		renderApp(<Wizard />, {
 			route: '/domains/7/setup/4',
-			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null } }) }),
+			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null, effective: { policy: null, inherited_from: null, issue: null, record: null } } }) }),
 		});
 		expect(await screen.findByText(/No DMARC record found/)).toBeInTheDocument();
 		expect(screen.getByText('v=DMARC1; p=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
@@ -183,7 +183,7 @@ describe('DNS lookup failures are not missing records', () => {
 	it('DMARC: reads the report address the API actually sends (top level), not a field that does not exist', async () => {
 		renderApp(<Wizard />, {
 			route: '/domains/7/setup/4',
-			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null } }) }),
+			routes: routes({ status: status({ dmarc: { found: false, has_our_rua: false, current_record: null, effective: { policy: null, inherited_from: null, issue: null, record: null } } }) }),
 		});
 		expect(await screen.findByText('v=DMARC1; p=none; rua=mailto:r@reports.example.com')).toBeInTheDocument();
 		expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();

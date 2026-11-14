@@ -207,17 +207,26 @@ describe('AddDomainPage prefill', () => {
 
 describe('AuthPage on an instance without bot protection', () => {
 	const CLOSED = { mode: 'saas', signup_open: false, signin_available: false, signup_unavailable_reason: 'bot_protection_not_configured' } as const;
-	const MESSAGE = 'Sign-up and sign-in are not available on this instance yet: bot protection is not configured.';
+	// Visitors get a plain sentence; the reason stays in the API for operators (no internals, no "check back soon").
+	const MESSAGE = "Sign-up and sign-in aren't open here.";
 
-	it.each([[undefined], ['signup' as const]])('shows one Alert and no form (initialMode %s)', async (initialMode) => {
+	it.each([[undefined], ['signup' as const]])('shows one notice and no form (initialMode %s)', async (initialMode) => {
 		renderApp(<AuthPage initialMode={initialMode} />, { role: null, status: CLOSED });
-		expect(await screen.findByRole('alert')).toHaveTextContent(MESSAGE);
-		expect(screen.getAllByRole('alert')).toHaveLength(1);
+		expect(await screen.findByRole('status')).toHaveTextContent(MESSAGE);
+		expect(screen.getAllByRole('status')).toHaveLength(1);
+		expect(screen.queryByText(/bot protection|configured|check back/i)).toBeNull();
+		expect(screen.queryByRole('link', { name: /Talk to Max/ })).toBeNull(); // no booking link configured
 		expect(document.querySelector('form')).toBeNull();
 		expect(screen.queryByLabelText(/email/i)).toBeNull();
 		expect(screen.queryByLabelText(/password/i)).toBeNull();
 		expect(screen.queryByRole('button')).toBeNull();
 		expect(screen.queryByText(/coming soon/i)).toBeNull();
+	});
+
+	it('with a booking link, offers one Talk to Max line under the notice', async () => {
+		renderApp(<AuthPage />, { role: null, status: { ...CLOSED, help_url: 'https://cal.example.com/max' } });
+		expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
+		expect(screen.getAllByRole('link', { name: /Talk to Max/ })).toHaveLength(1);
 	});
 
 	it('self-host and a working hosted instance keep their forms', async () => {

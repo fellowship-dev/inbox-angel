@@ -1,4 +1,5 @@
 import { Alert, Badge, Button, Card, CardContent, EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from '@inbox-angel/ui';
+import { useHosted } from '../../lib/session';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Download, PauseCircle, PlayCircle, Star } from 'lucide-react';
 import { useState } from 'react';
@@ -225,6 +226,7 @@ function LiveDmarcRecord({ domain }: { domain: Domain }) {
 }
 
 function Settings({ domain }: { domain: Domain }) {
+	const hosted = useHosted();
 	return (
 		<div className="max-w-3xl space-y-8">
 			<PageHeader
@@ -248,7 +250,7 @@ function Settings({ domain }: { domain: Domain }) {
 						{hasReportAddress(domain.rua_address) ? (
 							<CopyField label="RUA address" value={`rua=mailto:${domain.rua_address.trim()}`} />
 						) : (
-							<Info label="RUA address">No reports address is configured for this domain.</Info>
+							<Info label="RUA address">{hosted ? 'Reports not connected yet: this domain has no Inbox Angel report address.' : 'No reports address is configured for this domain.'}</Info>
 						)}
 						<LiveDmarcRecord domain={domain} />
 					</CardContent>

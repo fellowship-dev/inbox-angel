@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { bindSignupDomainToEmail, readSignupDomain } from '../../lib/signup-intent';
 import { useSession } from '../../lib/session';
+import { TalkToMax } from '../../components/TalkToMax';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
 import { Turnstile, turnstileToken } from './Turnstile';
@@ -35,11 +36,19 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
-	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either.
-	if (status.signin_available === false && status.signup_unavailable_reason === 'bot_protection_not_configured') {
-		return <AuthLayout title="Inbox Angel"><Alert variant="warning">Sign-up and sign-in are not available on this instance yet: bot protection is not configured.</Alert></AuthLayout>;
+	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either. Visitors
+	// get a plain sentence; the reason stays machine-readable in /api/auth/status (signup_unavailable_reason) for operators.
+	if (status.signin_available === false) {
+		return (
+			<AuthLayout title="Inbox Angel">
+				<Alert variant="info">Sign-up and sign-in aren't open here.</Alert>
+				<TalkToMax className="text-center" lead="Want to get started?" about="about your domains" />
+			</AuthLayout>
+		);
 	}
-	const mode: Mode = !status.configured ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
+	const hosted = status.mode === 'saas';
+	// The installer-proof screen is self-host only: the hosted service never asks a registrant for one.
+	const mode: Mode = !status.configured && !hosted ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
 	const registering = mode !== 'signin';
 	const providers = status.oauth_providers.filter((p) => p in PROVIDER_LABELS);
 
@@ -93,7 +102,13 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const requestedDomain = mode === 'signup' ? readSignupDomain() : null;
 	const title = mode === 'setup' ? 'Create your account' : mode === 'signup' ? 'Create an account' : 'Sign in';
 	const description =
-		mode === 'setup' ? 'This creates the account that owns this instance. It needs the installer proof, a secret only the person who deployed it holds. There is no default password.' : mode === 'signup' ? 'Start monitoring your domains.' : undefined;
+		mode === 'setup'
+			? 'This creates the account that owns this instance. It needs the installer proof, a secret only the person who deployed it holds. There is no default password.'
+			: mode === 'signup'
+				? hosted
+					? 'See where your domains stand and what to fix, checked from live DNS. DMARC reports are not connected yet.'
+					: 'Start monitoring your domains.'
+				: undefined;
 
 	return (
 		<AuthLayout title={title} description={description}>
@@ -109,7 +124,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />
 					</Field>
 				) : null}
-				<Field id="email" label="Email" hint={registering ? 'Used to sign in and to receive monitoring alerts.' : undefined}>
+				<Field id="email" label="Email" hint={registering ? (hosted ? 'Used to sign in.' : 'Used to sign in and to receive monitoring alerts.') : undefined}>
 					<Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" placeholder="you@yourcompany.com" aria-describedby={registering ? 'email-hint' : undefined} />
 				</Field>
 				<Field id="password" label="Password" hint={registering ? 'At least 8 characters.' : undefined}>
@@ -170,6 +185,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 					Sign-up is closed on this instance. Ask an owner for an invite link.
 				</Alert>
 			) : null}
+			{mode === 'signup' ? <TalkToMax className="text-center" lead="Questions first, or rather have someone set it up for you?" about="about your domains" /> : null}
 		</AuthLayout>
 	);
 }
