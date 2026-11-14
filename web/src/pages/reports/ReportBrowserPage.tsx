@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@inbox-angel/ui';
+import { EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, cn } from '@ready-set-mail/ui';
 import { ReportsNotConnected, useReportsNotConnected, useWorkspaceReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { FileText } from 'lucide-react';
@@ -70,7 +70,7 @@ export function ReportBrowserPage() {
 				<EmptyState
 					icon={<FileText />}
 					title={filterName ? `No reports for ${filterName} yet` : 'No reports yet'}
-					description="DMARC reports arrive daily from mail providers. Make sure your DMARC record's rua= address points to Inbox Angel, then check back tomorrow."
+					description="DMARC reports arrive daily from mail providers. Make sure your DMARC record's rua= address points to Ready Set Mail, then check back tomorrow."
 				/>
 			) : (
 				<Table label="DMARC aggregate reports">

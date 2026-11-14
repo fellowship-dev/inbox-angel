@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, FieldError, Input, Label } from '@inbox-angel/ui';
+import { Alert, Button, Checkbox, FieldError, Input, Label } from '@ready-set-mail/ui';
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
@@ -40,7 +40,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	// get a plain sentence; the reason stays machine-readable in /api/auth/status (signup_unavailable_reason) for operators.
 	if (status.signin_available === false) {
 		return (
-			<AuthLayout title="Inbox Angel">
+			<AuthLayout title="Ready Set Mail">
 				<Alert variant="info">Sign-up and sign-in aren't open here.</Alert>
 				<TalkToMax className="text-center" lead="Want to get started?" about="about your domains" />
 			</AuthLayout>
@@ -67,7 +67,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
 			const body = registering ? { name, email, password, ...(mode === 'setup' ? { telemetry } : {}), ...turnstile } : { email, password, ...turnstile };
 			if (mode === 'signup') bindSignupDomainToEmail(email);
-			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Inbox-Angel-Bootstrap': bootstrapProof } } : {}) });
+			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Ready-Set-Mail-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
 			if (res.verification_required) {
 				setVerifyFor(email);
@@ -118,7 +118,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 				</p>
 			) : null}
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
-				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="The BOOTSTRAP_SECRET value set on the Worker before its first start. The setup guide keeps it in a private file, such as ~/.config/inbox-angel/bootstrap-proof. It works once. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
+				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="The BOOTSTRAP_SECRET value set on the Worker before its first start. The setup guide keeps it in a private file, such as ~/.config/ready-set-mail/bootstrap-proof. It works once. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
 				{registering ? (
 					<Field id="name" label="Your name (optional)">
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { helpUrl } from '../../src/funnel/config';
 import { call, makeEnv } from './helpers';
 

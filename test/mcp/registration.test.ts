@@ -143,7 +143,7 @@ describe('real Workers OAuth contract',()=>{
  },30000);
 
  it('signed out: the authorize link renders the on-brand sign-in page with a CSP and no scripts',async()=>{
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query);
   expect(page.status).toBe(401);
   expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
@@ -158,7 +158,7 @@ describe('real Workers OAuth contract',()=>{
   const hostileId=(await reg.json() as any).client_id;
   const db=await runtime.getD1Database('DB');
   await db.prepare("INSERT INTO domains(workspace_id,domain,rua_address) VALUES ('ws_default','acme-consent.example','rua@reports.example.com')").run();
-  const query=new URLSearchParams({response_type:'code',client_id:hostileId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',state:'state-refuse',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:hostileId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',state:'state-refuse',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   const html=await page.text();
   expect(page.status,html).toBe(200);
@@ -181,7 +181,7 @@ describe('real Workers OAuth contract',()=>{
   expect((await db.prepare('SELECT COUNT(*) n FROM access_principals').first() as any).n).toBe(before);
  });
  it('a consent form without a permission gets a plain page, not a connection',async()=>{
-  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'inbox-angel',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
+  const query=new URLSearchParams({response_type:'code',client_id:clientId,redirect_uri:'https://client.example/callback',scope:'ready-set-mail',resource:origin+'/mcp',code_challenge:'A'.repeat(43),code_challenge_method:'S256'});
   const page=await fetch('/oauth/authorize?'+query,{headers:{cookie}});
   const handle=(await page.text()).match(/name="handle" value="([^"]+)"/)![1];
   const response=await fetch('/oauth/authorize',{method:'POST',headers:{cookie:cookie+'; '+cookieOf(page as unknown as Response),origin,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({handle,workspaceId:'ws_default',domain:'example.com',days:'7'}).toString()});
