@@ -513,7 +513,7 @@ describe('review blockers (fixed address)', () => {
     expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'everyone' })).map(i => [i.id, i.severity, i.setting])).toEqual([
       ['intake', 'action', 'HOSTED_CONNECT_REPORTS'], ['intake', 'action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL'],
     ]);
-    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'all' }))).toEqual([]);
+    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'all' })).map(i => i.message)).toEqual(['HOSTED_CONNECT_REPORTS is "all": every verified workspace can connect reports to the shared address.']);
     expect(JSON.stringify(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, OWNER_EMAIL: 'secret-owner@x.test' })))).not.toContain('secret-owner');
     expect(reportIntakePreflightItems({ MODE: 'selfhost' } as any)).toEqual([]);
   });
