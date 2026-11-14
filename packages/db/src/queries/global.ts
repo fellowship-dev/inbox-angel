@@ -3,7 +3,7 @@
  * in schema.ts): credentials lookups, anonymous free-check results, the shared
  * IP cache. Anything here must not return or modify tenant data.
  */
-import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm';
 import { getDb, type DbLike } from '../client';
 import { workspaces, authAccounts, authRateLimits, sessions, canaryTokens, checkResults, hostedZones, ipInfo, users, verifications } from '../schema';
 
@@ -77,6 +77,38 @@ export function globalQueries(dbLike: DbLike) {
 					.returning({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest })
 					.get();
 			},
+			/**
+			 * Count one request only if the window has expired or holds fewer than `max`: one conditional statement, so
+			 * simultaneous requests cannot all pass a stale read. Returns the new count, or null when refused (nothing counted).
+			 */
+			hitUnder: async (key: string, nowMs: number, windowMs: number, max: number): Promise<{ count: number; lastRequest: number } | null> => {
+				const expired = sql`${nowMs} - ${authRateLimits.lastRequest} >= ${windowMs}`;
+				const row = await db
+					.insert(authRateLimits)
+					.values({ id: crypto.randomUUID(), key, count: 1, lastRequest: nowMs })
+					.onConflictDoUpdate({
+						target: authRateLimits.key,
+						set: {
+							count: sql`CASE WHEN ${expired} THEN 1 ELSE ${authRateLimits.count} + 1 END`,
+							lastRequest: sql`CASE WHEN ${expired} THEN ${nowMs} ELSE ${authRateLimits.lastRequest} END`,
+						},
+						setWhere: sql`${expired} OR ${authRateLimits.count} < ${max}`,
+					})
+					.returning({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest })
+					.get();
+				return row ?? null;
+			},
+			/** The count in the key's current window, without counting a request (null when the window has expired or never started). */
+			peek: async (key: string, nowMs: number, windowMs: number): Promise<{ count: number; lastRequest: number } | null> => {
+				const row = await db.select({ count: authRateLimits.count, lastRequest: authRateLimits.lastRequest }).from(authRateLimits).where(eq(authRateLimits.key, key)).get();
+				return row && nowMs - row.lastRequest < windowMs ? row : null;
+			},
+			/** Undo one `hitUnder` in the same window (when a later limit refused the request). */
+			giveBack: (key: string, windowStart: number) =>
+				db.update(authRateLimits).set({ count: sql`${authRateLimits.count} - 1` }).where(and(eq(authRateLimits.key, key), eq(authRateLimits.lastRequest, windowStart), gt(authRateLimits.count, 0))).run(),
+			/** Delete expired windows whose key starts with `prefix` (opportunistic cleanup; the rows carry no other data). */
+			prune: (prefix: string, olderThanMs: number) =>
+				db.delete(authRateLimits).where(and(like(authRateLimits.key, `${prefix}%`), lt(authRateLimits.lastRequest, olderThanMs))).run(),
 		},
 
 		checkResults: {
