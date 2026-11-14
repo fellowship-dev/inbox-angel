@@ -1,0 +1,109 @@
+{
+	// ── Self-hosting checklist ──────────────────────────────────────────────────
+	// 1. Run: wrangler d1 create inbox-angel → paste database_id below
+	// 2. Create/bind an installation-owned OAUTH_KV namespace and set BETTER_AUTH_URL to its HTTPS origin.
+	// 3. Upload private BOOTSTRAP_SECRET proof before first-owner setup (docs/agent-operations.md).
+	// 4. For DNS/routing operations: wrangler secret put CLOUDFLARE_API_TOKEN
+	//    Create at: dash.cloudflare.com → My Profile → API Tokens
+	//    Required permissions:
+	//      Account: Account Settings:Read, Workers Scripts:Edit, D1:Edit, Email Sending:Edit
+	//      Zone (All zones): Zone:Read, Email Routing Rules:Edit, DNS:Edit, Workers Routes:Edit
+	// 5. npm run deploy
+	// 6. Visit the canonical dashboard → prove installer custody → create owner → enroll domain
+	//    The wizard handles everything else: zone ID resolution, reports subdomain,
+	//    DMARC records, email routing setup.
+	// ───────────────────────────────────────────────────────────────────────────
+
+	"name": "inbox-angel-worker",
+	"main": "src/index.ts",
+	"build": {
+		"command": "npm run build:dashboard"
+	},
+	"assets": {
+		"directory": "./web/dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/health", "/llms.txt"]
+	},
+	"compatibility_date": "2025-03-01",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"observability": {
+		"enabled": true,
+		"logs": { "enabled": true, "invocation_logs": false }
+	},
+
+	// Create an installation-owned namespace; substitute its ID before deployment.
+	"kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_INSTALLATION_OAUTH_KV_ID" }],
+	// Before first owner setup: wrangler secret put BOOTSTRAP_SECRET (random >=32 characters).
+	// Set BETTER_AUTH_URL to this installation HTTPS origin. Never reuse another instance namespace.
+
+	// D1 database binding
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "inbox-angel",
+			"database_id": "cf18a05c-9f6c-4f38-a43c-d85037d17534",
+			"migrations_dir": "migrations"
+		}
+	],
+
+	// Email Worker — catch-all on reports subdomain (inbound)
+	"email": [
+		{
+			"name": "EMAIL"
+		}
+	],
+
+	// Outbound email — requires CF Email Routing enabled on your zone.
+	// Recipients must be verified destination addresses in CF Email Routing.
+	"send_email": [
+		{
+			"name": "SEND_EMAIL"
+		}
+	],
+
+	// Custom domain route — optional, add if you want a vanity URL instead of workers.dev
+	// "routes": [
+	// 	{ "pattern": "mail.yourdomain.com/*", "zone_name": "yourdomain.com" }
+	// ],
+
+	// Rate limiting
+	"unsafe": {
+		"bindings": [
+			{ "name": "AUTH_LIMITER", "type": "ratelimit", "namespace_id": "1001", "simple": { "limit": 10,  "period": 60 } },
+			{ "name": "API_LIMITER",  "type": "ratelimit", "namespace_id": "1002", "simple": { "limit": 200, "period": 60 } },
+			{ "name": "DNS_PREVIEW_LIMITER", "type": "ratelimit", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
+			// Agent requests per connection (src/mcp/rate-limit.ts). Half of API_LIMITER, which counts per workspace, so one agent cannot starve the rest.
+		]
+	},
+
+	// Crons:
+	//   0 8 * * *  — daily DNS monitor check
+	//   0 9 * * 1  — weekly DMARC digest email (Mondays 9am UTC)
+	//   0 10 * * * — daily SPF flatten refresh
+	//   0 11 * * * — daily telemetry heartbeat (opt-in)
+	//   0 4 * * *  — daily data lifecycle: retry Cloudflare revocations, then retention sweeps (own invocation: src/cron.ts)
+	"triggers": {
+		"crons": ["0 8 * * *", "0 9 * * 1", "0 10 * * *", "0 11 * * *", "0 4 * * *"]
+	},
+
+	// Email funnel (docs/email-funnel.md), all optional: RESEND_API_KEY (secret), AUTHSERV_ID, AUTHSERV_HEADER, MAIL_FROM, MAIL_REPLY_TO,
+	// PUBLIC_BASE_URL, POSTAL_ADDRESS, BOOKING_URL, SERVICE_PRICES, SITE_ORIGINS, ONBOARDING_SEQUENCE_ENABLED.
+
+	// Hosted service only (MODE=saas + SAAS_ENABLED=1, see docs/hosted.md): INTAKE_DOMAIN, CANARY_DOMAIN,
+	// HOSTED_RECORDS_ZONE, HOSTED_RECORDS_LABEL, and the secret HOSTED_RECORDS_TOKEN. Self-hosters ignore these.
+	// Hosted plan caps (positive integers, anything else keeps the default; never applied when self-hosting):
+	//   MAX_WORKSPACES_PER_USER    workspaces one person may own (default 5; workspaces they were only invited to do not count)
+	//   MAX_DOMAINS_PER_WORKSPACE  domains one workspace may hold (default 10)
+	// A refused request answers 403 with code "plan_limit"; BOOKING_URL (https only) is offered as the way to ask for more.
+
+	// Environment variables
+	"vars": {
+		"WORKER_NAME": "inbox-angel-worker"
+		// Domain config is entered in the setup wizard and stored in D1.
+		// Installer proof secret: BOOTSTRAP_SECRET; agent issuer: BETTER_AUTH_URL + OAUTH_KV.
+		// DNS/routing secret: CLOUDFLARE_API_TOKEN (see README for token permissions).
+		// Optional HOSTED_SERVICE_URL (https): the hosted free tier. When set, /llms.txt, the MCP instructions, the
+		// setup pages and /api/version mention it once; unset, nothing mentions a hosted service (src/hosted-service.ts).
+	}
+}
