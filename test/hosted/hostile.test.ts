@@ -59,12 +59,22 @@ describe('archive bombs', () => {
     await refused(mimeWithAttachment(gzipSync(bomb), 'r.xml.gz', 'application/gzip'), 'decompressed_too_large', 'Report is too large once decompressed');
   });
 
-  it('the decompressed cap is the operator\'s: INTAKE_MAX_DECOMPRESSED_BYTES (default 3 MiB hosted)', async () => {
-    const big = strToU8(xml().replace('</feedback>', '<!--' + 'x'.repeat(2 * 1024 * 1024) + '--></feedback>'));
+  it('the decompressed cap is the operator\'s: INTAKE_MAX_DECOMPRESSED_BYTES (default 1 MiB hosted)', async () => {
+    const big = strToU8(xml().replace('</feedback>', '<!--' + 'x'.repeat(512 * 1024) + '--></feedback>'));
     const mime = mimeWithAttachment(gzipSync(big), 'r.xml.gz', 'application/gzip');
-    await refused(mime, 'decompressed_too_large', 'Report is too large once decompressed', { INTAKE_MAX_DECOMPRESSED_BYTES: '1000000' });
+    await refused(mime, 'decompressed_too_large', 'Report is too large once decompressed', { INTAKE_MAX_DECOMPRESSED_BYTES: '400000' });
     const w = await twoWorkspaces();
-    expect((await deliver(w, mime)).setReject).not.toHaveBeenCalled(); // under the 3 MiB default
+    expect((await deliver(w, mime)).setReject).not.toHaveBeenCalled(); // under the 1 MiB default
+  });
+
+  it('a gzip whose header carries megabytes of comment is refused before inflating (it would cost time quadratic in the comment)', async () => {
+    const g = gzipSync(strToU8(xml()));
+    const comment = new Uint8Array(6 * 1024 * 1024).fill(0x61); comment[comment.length - 1] = 0;
+    const bomb = new Uint8Array(g.length + comment.length);
+    bomb.set(g.subarray(0, 10)); bomb.set(comment, 10); bomb.set(g.subarray(10), 10 + comment.length); bomb[3] |= 0x10;
+    const t = Date.now();
+    await refused(mimeWithAttachment(bomb, 'r.xml.gz', 'application/gzip'), 'archive_invalid', /gzip header is longer than 1024 bytes/, { INTAKE_MAX_RAW_BYTES: String(25 * 1024 * 1024) });
+    expect(Date.now() - t).toBeLessThan(5000);
   });
 
   it('a gzip inside a gzip is not inflated twice: the inner stream is just not a report', async () => {
@@ -134,7 +144,9 @@ describe('invalid UTF-8', () => {
 
 describe('a domain the token does not own', () => {
   it('is refused with the legacy message and stored nowhere', async () => {
-    await refused(gzipReportMime(xml({ domain: 'b-corp.org' })), 'domain_not_owned', 'Unknown domain b-corp.org — not a registered InboxAngel inbox');
+    await refused(gzipReportMime(xml({ domain: 'b-corp.org' })), 'domain_not_owned', 'Report is for a domain this address does not belong to');
+    // the sender's own text is never reflected: not the domain, and the answer is the same for a domain another workspace owns or nobody does
+    await refused(gzipReportMime(xml({ domain: 'nobody-registered-this.example' })), 'domain_not_owned', 'Report is for a domain this address does not belong to');
   });
 });
 

@@ -4,6 +4,7 @@
 // Prints one JSON line. Bisecting --max-old-space-size finds the smallest V8 heap the report needs (the live set, not garbage):
 // compare it with the Workers isolate limit of 128 MB (https://developers.cloudflare.com/workers/platform/limits/).
 import { gzipSync, strToU8 } from 'fflate';
+import { randomBytes } from 'node:crypto';
 import { parseDmarcEmail } from '../src/dmarc/parse-email';
 import { storeStatements } from '@inbox-angel/db';
 import { toTuple } from '../src/dmarc/store-report';
@@ -15,7 +16,7 @@ function xml(records: number): string {
   const rec = (i: number) => `<record><row><source_ip>203.${(i >> 8) & 255}.${i & 255}.${(i % 250) + 1}</source_ip><count>${1 + (i % 7)}</count><policy_evaluated><disposition>none</disposition><dkim>pass</dkim><spf>${i % 5 ? 'pass' : 'fail'}</spf></policy_evaluated></row><identifiers><header_from>a-corp.com</header_from></identifiers><auth_results><spf><domain>a-corp.com</domain><result>pass</result></spf></auth_results></record>`;
   const parts: string[] = [];
   for (let i = 0; i < records; i++) parts.push(rec(i));
-  return `<?xml version="1.0"?><feedback><report_metadata><org_name>google.com</org_name><email>noreply@google.com</email><report_id>m</report_id><date_range><begin>${Math.floor(Date.now() / 1000) - 86400}</begin><end>${Math.floor(Date.now() / 1000) - 1}</end></date_range></report_metadata><policy_published><domain>a-corp.com</domain><p>none</p></policy_published>${parts.join('')}${pad ? '<!--' + 'x'.repeat(pad * 1048576) + '-->' : ''}</feedback>`;
+  return `<?xml version="1.0"?><feedback><report_metadata><org_name>google.com</org_name><email>noreply@google.com</email><report_id>m</report_id><date_range><begin>${Math.floor(Date.now() / 1000) - 86400}</begin><end>${Math.floor(Date.now() / 1000) - 1}</end></date_range></report_metadata><policy_published><domain>a-corp.com</domain><p>none</p></policy_published>${parts.join('')}${pad ? '<!--' + (process.env.RANDPAD ? randomBytes(Math.floor(pad * 1048576 * 3 / 4)).toString('base64') : 'x'.repeat(pad * 1048576)) + '-->' : ''}</feedback>`;
 }
 
 const gz = gzipSync(strToU8(xml(n)));

@@ -114,7 +114,10 @@ export async function handleDmarcReport(
       found.domain = await resolveDomain(tenant, info.policy_domain);
     }
     const domain = found.domain;
-    if (!domain) throw new ParseStop('refused', 'domain_not_owned', `Unknown domain ${info.policy_domain} — not a registered InboxAngel inbox`);
+    // Self-host keeps its message (one tenant, the sender is its own mail provider). Hosted does not echo the sender's text back into the
+    // SMTP response: it is attacker-chosen (up to 253 characters), may be copied into bounce mail by an intermediate server, and the hosted
+    // answer must not hint at what a domain is registered as. Same text for an unregistered domain and one another workspace owns.
+    if (!domain) throw new ParseStop('refused', 'domain_not_owned', opts.token ? REASONS.domain_not_owned : `Unknown domain ${info.policy_domain} — not a registered InboxAngel inbox`);
     if (await tenant.scope.reports.findReportId(domain.id, info.report_id)) throw new ParseStop('duplicate', 'duplicate');
     const over = opts.admit?.(info.record_count) ?? null;
     if (over) throw new ParseStop('refused', over);

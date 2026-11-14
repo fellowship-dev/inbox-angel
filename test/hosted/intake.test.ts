@@ -76,7 +76,7 @@ describe('DMARC aggregate reports', () => {
     const spoof = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'spoof')));
     await handleHostedEmail(spoof, w.env);
     expect(spoof.setReject).toHaveBeenCalledOnce();
-    expect(spoof.setReject.mock.calls[0][0]).toMatch(/Unknown domain b-corp\.org/);
+    expect(spoof.setReject.mock.calls[0][0]).toBe('Report is for a domain this address does not belong to'); // never echoes the sender's domain back
     expect(w.rows('SELECT * FROM aggregate_reports')).toEqual([]);
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"reason":"domain_not_owned"'));
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"ws":"ws_a"'));
@@ -125,7 +125,7 @@ describe('DMARC aggregate reports', () => {
 
     const m2 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')), { rawSize: 26 * 1024 * 1024 });
     await handleHostedEmail(m2, w.env);
-    expect(m2.setReject).toHaveBeenCalledWith('Report is larger than 10 MiB'); // the raw cap defaults to 10 MiB (INTAKE_MAX_RAW_BYTES, at most 25 MiB)
+    expect(m2.setReject).toHaveBeenCalledWith('Report is larger than 2 MiB'); // the raw cap defaults to 2 MiB (INTAKE_MAX_RAW_BYTES, at most 25 MiB)
     const m3 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'raw25')), { rawSize: 20 * 1024 * 1024 });
     await handleHostedEmail(m3, { ...w.env, INTAKE_MAX_RAW_BYTES: String(25 * 1024 * 1024) } as any);
     expect(m3.setReject).not.toHaveBeenCalled(); // an operator can raise it to Cloudflare's own 25 MiB ceiling

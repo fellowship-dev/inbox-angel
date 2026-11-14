@@ -138,7 +138,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_BYTES_PER_DAY: '1000' });
     expect((await send(w, dmarcXml('a-corp.com', 'j1'), { rawSize: 900, from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'j2'), { rawSize: 200, from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
-    expect((await GRPT(w, 'genuine', { ...GOOGLE, rawSize: 5_000_000 })).setReject).not.toHaveBeenCalled();
+    expect((await GRPT(w, 'genuine', { ...GOOGLE, rawSize: 1_500_000 })).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['j1', 'genuine']);
   });
 

@@ -53,9 +53,9 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 | `INTAKE_MAX_WORKSPACE_RECORDS` | `1000000` | report records one workspace may hold at once (13 months of data) |
 | `INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY` | `50000` | messages to the whole instance per UTC day |
 | `INTAKE_MAX_INSTANCE_RECORDS` | `10000000` | report records the whole instance may hold, so the shared D1 (10 GB limit) cannot be filled by one tenant or by all of them |
-| `INTAKE_MAX_RECORDS_PER_REPORT` | `5000` | records in one aggregate report, checked before any per-record work (see [Measured limits](#measured-limits)) |
-| `INTAKE_MAX_DECOMPRESSED_BYTES` | `3145728` | a report once decompressed (3 MiB; at most 25 MiB) |
-| `INTAKE_MAX_RAW_BYTES` | `10485760` | the raw message (10 MiB; at most Cloudflare's own 25 MiB) |
+| `INTAKE_MAX_RECORDS_PER_REPORT` | `2000` | records in one aggregate report, checked before any per-record work (self-host default 2,500; see [Measured limits](#measured-limits)) |
+| `INTAKE_MAX_DECOMPRESSED_BYTES` | `1048576` | a report once decompressed (1 MiB; self-host 1.25 MiB; at most 25 MiB) |
+| `INTAKE_MAX_RAW_BYTES` | `2097152` | the raw message (2 MiB; at most Cloudflare's own 25 MiB). A report that fits the decompressed cap is a few hundred KB compressed |
 | `INTAKE_MAX_NEW_IPS_PER_REPORT` | `50` | uncached source IPs enriched (DNS-over-HTTPS) per report, busiest first; the rest are stored without enrichment |
 | `INTAKE_MAX_STORAGE_RETRIES_PER_DAY` | `20` | storage failures per domain per day after which a failing message is refused for good instead of being retried |
 | `REPORT_COUNTING` | `proven` | `proven` or `all`: which stored reports feed pass rates, failing senders, anomalies, "safe to enforce", levels, digests and the MCP report. Hosted default `proven`; self-host default `all` ([proven reports](#proven-reports-and-what-counts)) |
@@ -228,7 +228,7 @@ Notes for the customer:
 
 | Outcome | Behaviour |
 |---------|-----------|
-| bad or unknown recipient, host, token; no attachment; not a report; invalid XML/JSON; too large, too many records, a field too long, absurd dates; a domain the token does not own; a TLS-RPT report sent to the rua address (or the reverse) | `setReject`: a permanent 5xx **in the SMTP session** (no backscatter), with a specific reason |
+| bad or unknown recipient, host, token; a gzip with an oversized header; no attachment; not a report; invalid XML/JSON; too large, too many records, a field too long, absurd dates; a domain the token does not own; a TLS-RPT report sent to the rua address (or the reverse) | `setReject`: a permanent 5xx **in the SMTP session** (no backscatter), with a specific reason |
 | over a daily cap, or the workspace/instance holds its record cap | `setReject` too (a retry the same day cannot succeed and only adds load; real reporters send again tomorrow) **and** a counter row the owner sees: "Report storage limit reached; newer reports are not being stored" |
 | D1 failed while storing a valid report | the Worker **throws** (the delivery fails, the sender may retry; one transaction, so nothing half-written) and the failure is counted for the owner ("N reports received for this domain could not be processed"). After `INTAKE_MAX_STORAGE_RETRIES_PER_DAY` failures for a domain the message is refused for good instead. **Cloudflare does not document what an uncaught throw tells the sender**, so retry is never the only record of a failure |
 | schema not migrated, or hosted env missing | the Worker throws (deployment problem, not the sender's) |
@@ -248,7 +248,7 @@ D1 allows 1,000 queries per Worker invocation on Workers Paid and 50 on Free; "a
 | the report, its records and the counters (one batch) | 1 |
 | first-report notification check (first counted report only) | up to 4 |
 
-Measured with the counting binding in `test/helpers/counting-d1.ts` (`prepare().first/all/run/raw` = 1, `batch()` = 1, refusing past the limit): **16 queries for 1, 5,000 and 20,000 records** (before: 15 for one record, **5,058 for 5,000**: the report was lost or the delivery failed on every retry). The tests assert ≤ 40 for any allowed report and that 5,000 records also fit the Free plan's 50.
+Measured with the counting binding in `test/helpers/counting-d1.ts` (`prepare().first/all/run/raw` = 1, `batch()` = 1, refusing past the limit): **16 queries for 1, 5,000 and 20,000 records** (the tests raise the caps to reach those sizes) (before: 15 for one record, **5,058 for 5,000**: the report was lost or the delivery failed on every retry). The tests assert ≤ 40 for any allowed report and that 5,000 records also fit the Free plan's 50.
 Records travel as JSON text in a bound parameter read by `json_each()`, cut so that every bound value is at most 1,000,000 bytes (D1 allows 2,000,000), every statement is a short fixed text (D1: 100,000 bytes, 100 bound parameters), and a batch holds at most ~32 statements even for the widest possible rows (`test/hosted/store-chunks.test.ts`).
 
 ### Proven reports and what counts
@@ -285,28 +285,39 @@ One JSON line per inbound message, `console.log` for accepted, `console.warn` fo
 {"evt":"intake","v":1,"kind":"rua","outcome":"accepted","reason":"ok","proven":true,"reporter":"google.com","size":5321,"records":87,"ms":412,"ws":"ws_a1b2","dom":12}
 ```
 
-`kind` rua | tls-rpt | canary | other; `outcome` accepted | duplicate | refused | deferred; `proven` true | false | null; `reporter` is the reporting organisation's domain; `ws`/`dom` are internal ids. There are never report contents, tokens, addresses, sender or customer domains. Reasons: `ok duplicate bad_recipient wrong_host unknown_token raw_too_large cap_address_day cap_unauth_day cap_workspace_day cap_instance_day cap_address_records cap_workspace_storage cap_instance_storage no_attachment wrong_attachment_type archive_invalid decompressed_too_large xml_invalid json_invalid kind_mismatch_tlsrpt_to_rua kind_mismatch_rua_to_tlsrpt too_many_records field_too_long date_range_invalid domain_not_owned storage_failed storage_failed_repeatedly not_configured schema_not_ready internal_error`.
+`kind` rua | tls-rpt | canary | other; `outcome` accepted | duplicate | refused | deferred; `proven` true | false | null; `reporter` is the reporting organisation's domain; `ws`/`dom` are internal ids. There are never report contents, tokens, addresses, sender or customer domains. (Real lines from the workerd run are in the pull request.) Reasons: `ok duplicate bad_recipient wrong_host unknown_token raw_too_large cap_address_day cap_unauth_day cap_workspace_day cap_instance_day cap_address_records cap_workspace_storage cap_instance_storage no_attachment wrong_attachment_type archive_invalid decompressed_too_large xml_invalid json_invalid kind_mismatch_tlsrpt_to_rua kind_mismatch_rua_to_tlsrpt too_many_records field_too_long date_range_invalid domain_not_owned storage_failed storage_failed_repeatedly not_configured schema_not_ready internal_error`.
 
 ### Hostile input
 
-Refused with a reason, nothing stored: gzip/zip bombs (inflation stops at `INTAKE_MAX_DECOMPRESSED_BYTES`; a zip's declared sizes are not trusted; more than 2 entries), a gzip inside a gzip (the inner stream is not inflated), DOCTYPE/ENTITY, invalid UTF-8, fields over their limits (org_name and report_id 256, domains 253, IP 45, other strings 512), a report whose period ends more than a day in the future, ends before it begins, spans more than 31 days or begins before 2012, a count above 2³¹−1 (clamped), a domain the token does not own. A duplicate report id is accepted once and never counted twice.
+Refused with a reason, nothing stored: gzip/zip bombs (inflation stops at `INTAKE_MAX_DECOMPRESSED_BYTES`; a zip's declared sizes are not trusted; more than 2 entries), a gzip inside a gzip (the inner stream is not inflated), DOCTYPE/ENTITY, invalid UTF-8, fields over their limits (org_name and report_id 256, domains 253, IP 45, other strings 512), a report whose period ends more than a day in the future, ends before it begins, spans more than 31 days or begins before 2012, a count above 2³¹−1 (clamped), a domain the token does not own (hosted answers "Report is for a domain this address does not belong to" and never echoes the sender's domain; self-host keeps "Unknown domain X — not a registered InboxAngel inbox"), a gzip header over 1 KiB. A duplicate report id is accepted once and never counted twice.
 
 ### Measured limits
 
-Measured on this repository's code (Node 22, arm64, 2026-11-14) with `scripts/measure-parse.ts`, `scripts/measure-mime.ts` and `test/hosted/measure.test.ts` (commands in each file): the parse of a gzip'd report of N distinct-IP records, no database around it.
+Measured on this repository's code (2026-11-14) in two ways. The first is authoritative for memory and CPU; the second explains it.
 
-| Records | XML | Parse + build statements | Live heap after parse | Peak RSS (whole process) | Smallest `--max-old-space-size` tried that ran (lower not tried) |
-|--------:|----:|------------------------:|----------------------:|-------------------------:|-------------------------------------------:|
-| 200 | 0.1 MB | 31 ms | 2 MB | 62 MB | – |
-| 1,000 | 0.3 MB | 86 ms | 8 MB | 87 MB | – |
-| 5,000 | 1.6 MB | 309 ms (CPU 511 ms incl. GC threads) | 36 MB | 136 MB | 48 MB |
-| 10,000 | 3.2 MB | 546 ms | 65 MB | 176 MB | 96 MB |
-| 20,000 | 6.4 MB | 964 ms | 119 MB | 250 MB | 128 MB |
+**1. The real Worker under `wrangler dev` (workerd 4.92.0, linux-arm64).** A local worker with `MODE=saas`, a seeded workspace, domain and token in local D1, driven by HTTP POSTs. `wrangler dev`'s own email endpoint (`POST /cdn-cgi/handler/email`) refuses messages over **1 MiB** ("the lower 1Mib limit for testing locally"), so the size runs used a measurement-only entry point (not committed) that hands a request body to the Worker's real `email()` export as the `raw` stream; the end-to-end runs below used the real `/cdn-cgi/handler/email` endpoint. Per message: **CPU** = delta of `utime+stime` of every `workerd` process from `/proc/<pid>/stat` (10 ms ticks; includes GC threads and the local D1's SQLite, which in production runs remotely), **memory** = peak of the summed `VmRSS` of the `workerd` processes sampled every 5 ms from `/proc/<pid>/status`, minus the sum just before the message (after a warm-up message), on a fresh `wrangler dev` per case. Timers inside workerd cannot measure CPU: `Date.now()` and `performance.now()` only advance on I/O. Enrichment lookups were limited to 1 IP per report (`INTAKE_MAX_NEW_IPS_PER_REPORT=1`): the sandbox has no outbound network, and waiting on DNS is not CPU.
 
-Reading the attachment of a message of 1 / 4 / 8 / 12 / 18 MB (`extractAttachmentBytes`, base64) peaked at 73 / 119 / 177 / 235 / 351 MB RSS: about 16 times the attachment, because the bytes, the decoded text, the base64 text and the decoded bytes are all alive at once.
+First message through a fresh isolate (hosted defaults: 2,000 records / 1 MiB decompressed / 2 MiB raw):
 
-What follows: the 25 MiB / 20,000-record documented limit was **not realistic** inside a 128 MB isolate (<https://developers.cloudflare.com/workers/platform/limits/>): 20,000 records leave ~119 MB of live heap after parsing and the raw message would add its own copies. The defaults are therefore 5,000 records, 3 MiB decompressed and 10 MiB raw (self-host: 10,000, 6 MiB, 10 MiB; raise them only after measuring your own reports). A typical report (a few hundred records) costs under 100 ms and under 10 MB. CPU is far below the 30 s default of Workers Paid (the limit is configurable with `limits.cpu_ms`, up to 300,000, and does not need raising for these caps; on the Free plan's 10 ms nothing but the tiniest report parses, so a hosted instance needs Workers Paid). Email Workers count toward the standard Workers CPU and memory limits (<https://developers.cloudflare.com/email-routing/limits/>).
-**How far to trust the numbers:** they are V8 on Node, not workerd; they leave out D1 round trips, the isolate's own overhead and Cloudflare's accounting (CPU is billed per workerd CPU time, memory is the isolate's total). Treat them as relative sizes and an order of magnitude, and watch `wrangler tail` and the Workers metrics for the first real week.
+| Case | Raw message | CPU per message | Peak RSS over idle (first message) |
+|------|------------:|----------------:|------------------------------------:|
+| small: 1 record | 1 KB | 0.03-0.05 s | +3 MB |
+| typical: 200 records, Google-like gzip | 3 KB | 0.10 s (then ~0.07) | +10 MB |
+| 2,000 records (the cap) | 20 KB | 0.37 s | +44 MB |
+| decompressed cap: 1 MiB of XML, incompressible | 0.24 MiB | 0.44 s | +71 MB |
+| raw cap: a 2 MiB message holding a small report | 2 MiB | 0.11 s | +17 MB |
+| **worst case: records, 1 MiB incompressible XML and 2 MiB raw together** | 2 MiB | 0.44 s | **+77 MB** |
+| self-host defaults (2,500 / 1.25 MiB / 2 MiB), worst case | 2 MiB | 0.50 s | +84 MB |
+
+Later messages in the same isolate show higher resident sizes (+100 to +190 MB after five worst-case messages): the heap is not returned to the OS and nothing forces collection locally. Production enforces the 128 MB limit with garbage collection, so this overstates the live set, but it is the reason the defaults aim for a first-message worst case of about 80 MB rather than for 128. The first defaults I measured (5,000 records / 3 MiB / 10 MiB) peaked at **+165 MB** on one message and were **not** honest for a 128 MB isolate; they were lowered until the worst case fell under ~90 MB.
+
+**Findings from the measurement.** (1) A gzip whose header carries a multi-megabyte comment made one 10 MiB message cost **88 s of CPU** (quadratic copying in fflate's streaming Gunzip: 2 MB of comment = 6 s even in Node); a gzip header over 1 KiB is now refused (`archive_invalid`, `MAX_GZIP_HEADER` in `src/dmarc/extract-report.ts`). (2) Inflating in 1 KiB steps cost ~50 MB more RSS than 16 KiB steps on an incompressible report; the step is 4 KiB (a bomb at 1032:1 can overshoot the cap by ~4 MB before it is noticed).
+
+**2. Node, parse only** (`scripts/measure-parse.ts`, `scripts/measure-mime.ts`): parsing keeps ~7 KB of live heap per record (5,000 records: 36 MB; 20,000: 119 MB), and reading the attachment of a 10 MB message peaked at ~16x its size in Node but ~4x in workerd (+43 MB for a 10 MiB message with a small report), because Node's RSS counts garbage that workerd's runtime reclaims sooner.
+
+**Recommended `limits.cpu_ms`: 5000.** The worst case above is 0.5 s of CPU; the default of Workers Paid is 30 s. 5 s is ten times the worst measured case, and kills a pathological input at 5 s instead of 30 (the gzip header above would have run to the 30 s default). A Free plan (10 ms CPU) cannot parse even a 200-record report, so hosted intake needs Workers Paid (<https://developers.cloudflare.com/workers/platform/limits/>: "5 min (default: 30 seconds)", configurable up to 300,000 ms; "Each isolate can consume up to 128 MB of memory"). Email Workers count toward these limits (<https://developers.cloudflare.com/email-routing/limits/>).
+
+**How far to trust the numbers.** workerd is the production runtime's open-source core, so CPU per message and the shape of memory use carry over; the absolute values do not. They include a local SQLite D1 in the same process (production D1 is remote, which lowers CPU and memory), exclude real network latency (D1 round trips, DNS-over-HTTPS), and Cloudflare's CPU billing, isolate sharing and garbage collection are not reproduced. On a 1-core arm64 sandbox, timings are not a benchmark. Watch `wrangler tail` and the Workers metrics for the first real week.
 
 ### Caps and what happens over them
 
@@ -327,7 +338,7 @@ On `GET /api/domains/:id/stats`, `/check-summary` and `/analytics` (and `section
 
 ### Self-host: what changes
 
-Self-host has one tenant and a private address (`rua@reports.<base>`), no tokens, no daily or per-tenant caps. What applies everywhere: the records cap (default 10,000), the decompressed cap (6 MiB), the raw cap (10 MiB), the fixed query budget, atomic storage, specific refusals, the date/field/DOCTYPE checks, and the structured log line. `REPORT_COUNTING` defaults to `all` (with `AUTHSERV_*` unset nothing can be proven, so `proven` would zero every dashboard); set `REPORT_COUNTING=proven` once `AUTHSERV_*` is configured if you want forged reports left out. `unverified` is reported in both modes.
+Self-host has one tenant and a private address (`rua@reports.<base>`), no tokens, no daily or per-tenant caps. What applies everywhere: the records cap (default 2,500), the decompressed cap (1.25 MiB), the raw cap (2 MiB; the same 128 MB isolate, so the measured worst case is +84 MB), the fixed query budget, atomic storage, specific refusals, the date/field/DOCTYPE checks, and the structured log line. `REPORT_COUNTING` defaults to `all` (with `AUTHSERV_*` unset nothing can be proven, so `proven` would zero every dashboard); set `REPORT_COUNTING=proven` once `AUTHSERV_*` is configured if you want forged reports left out. `unverified` is reported in both modes.
 
 **Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
@@ -380,6 +391,6 @@ The hosted service stores no raw report XML (`RAW_XML_RETENTION_DAYS=0` is the h
 |-|-|
 | Records per hosted domain | 3 (DMARC, SPF, TLS-RPT), 5 with MTA-STS |
 | Zone limit | 3,500 on Pro, about 700 domains at 5 records each or 1,160 at 3 (counts **every** record in the zone, including the ones that are not hosted); warning logged from 3,200; enabling is refused (`507`) if the records would not fit |
-| Report size | 10 MiB raw, 3 MiB decompressed, 5,000 records (configurable up to Cloudflare's 25 MiB; see [Measured limits](#measured-limits)) |
+| Report size | 2 MiB raw, 1 MiB decompressed, 2,000 records (configurable up to Cloudflare's 25 MiB; see [Measured limits](#measured-limits)) |
 | Token rotation grace | 72 h |
 | Canary | 1 hour, one email; 5 per authenticated sender domain, 20 unauthenticated, 500 overall, per hour |

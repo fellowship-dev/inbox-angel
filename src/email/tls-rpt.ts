@@ -161,7 +161,7 @@ export async function handleTlsRptReport(
     for (const policy of report.policies ?? []) {
       const policyDomain = policy.policy?.['policy-domain'];
       if (!policyDomain || !coversDomain(opts.hosted.token.domain, policyDomain)) {
-        return refuse('domain_not_owned', `Unknown domain ${String(policyDomain ?? '(none)').slice(0, 253)} — not a registered InboxAngel inbox`);
+        return refuse('domain_not_owned'); // hosted: the sender's text is not echoed back (see dmarc-report.ts)
       }
     }
     return storeHostedTlsRpt(report, raw, orgName, dateBegin, dateEnd, tenant, opts.hosted.token);

@@ -27,7 +27,9 @@ const D1_FREE_LIMIT = 50;
 /** The budget this change commits to for ANY allowed report (docs/hosted.md, "Query budget"): fixed, not per record. */
 const QUERY_BUDGET = 40;
 const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
-const MAX_ENV = { INTAKE_MAX_RECORDS_PER_REPORT: '20000', INTAKE_MAX_DECOMPRESSED_BYTES: String(25 * 1024 * 1024) };
+// an operator who raises the caps (the defaults are 2,000 records / 1 MiB / 2 MiB: measured, docs/hosted.md)
+const RAISED = { INTAKE_MAX_RECORDS_PER_REPORT: '5000', INTAKE_MAX_DECOMPRESSED_BYTES: String(3 * 1024 * 1024), INTAKE_MAX_RAW_BYTES: String(6 * 1024 * 1024) };
+const MAX_ENV = { INTAKE_MAX_RECORDS_PER_REPORT: '20000', INTAKE_MAX_DECOMPRESSED_BYTES: String(25 * 1024 * 1024), INTAKE_MAX_RAW_BYTES: String(25 * 1024 * 1024) };
 
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -50,7 +52,7 @@ const count = (w: { rows: (sql: string) => any[] }, table: string) => w.rows(`SE
 
 describe('G4: records are stored in a fixed number of D1 queries', () => {
   it('5,000 distinct-IP records: stays under the query budget, stores everything atomically, accepts the mail', async () => {
-    const { w, counter, m, threw } = await deliver(5000);
+    const { w, counter, m, threw } = await deliver(5000, { env: RAISED });
     // eslint-disable-next-line no-console
     console.info(`[G4] 5000 records: ${counter.count} queries (limit ${D1_PAID_LIMIT}), ${counter.refused} refused; kinds=${JSON.stringify(counter.kinds)}; largest batch ${counter.largestBatch} statements`);
     expect(threw).toBeNull();
@@ -62,6 +64,18 @@ describe('G4: records are stored in a fixed number of D1 queries', () => {
     expect(w.rows('SELECT record_count, reporter_auth FROM aggregate_reports')).toEqual([{ record_count: 5000, reporter_auth: 'pass' }]);
     expect(w.rows('SELECT records FROM workspace_storage WHERE workspace_id = ?', 'ws_a')).toEqual([{ records: 5000 }]);
     expect(w.rows("SELECT records FROM intake_quota WHERE scope = '*' AND day = 'total'")).toEqual([{ records: 5000 }]);
+  });
+
+  it('the defaults: 2,000 records are stored, 2,001 are refused with a reason, counted for the owner, and cost almost nothing', async () => {
+    const ok = await deliver(2000);
+    expect(ok.threw).toBeNull();
+    expect(ok.m.setReject).not.toHaveBeenCalled();
+    expect(count(ok.w, 'report_records')).toBe(2000);
+    const over = await deliver(2001);
+    expect(over.m.setReject.mock.calls[0][0]).toMatch(/Report has 2001 records; the limit is 2000/);
+    expect(count(over.w, 'aggregate_reports')).toBe(0);
+    expect(over.w.rows('SELECT reason, messages FROM intake_failures')).toEqual([{ reason: 'too_many_records', messages: 1 }]);
+    expect(over.counter.count).toBeLessThan(ok.counter.count);
   });
 
   it('20,000 records (the largest an operator can allow): same fixed budget, one transaction', async () => {
@@ -78,19 +92,19 @@ describe('G4: records are stored in a fixed number of D1 queries', () => {
 
   it('the query count does not depend on the record count', async () => {
     const small = await deliver(1);
-    const big = await deliver(5000);
+    const big = await deliver(5000, { env: RAISED });
     expect(big.counter.count - small.counter.count).toBeLessThanOrEqual(3); // at most the IP-cache batches and the extra IP writes
   });
 
   it('fits the Free plan\'s 50 queries per invocation too', async () => {
-    const { w, threw, counter } = await deliver(5000, { limit: D1_FREE_LIMIT });
+    const { w, threw, counter } = await deliver(5000, { limit: D1_FREE_LIMIT, env: RAISED });
     expect(threw).toBeNull();
     expect(counter.refused).toBe(0);
     expect(count(w, 'report_records')).toBe(5000);
   });
 
   it('one query reads the IP cache and one writes it, however many IPs the report has', async () => {
-    const { counter } = await deliver(5000);
+    const { counter } = await deliver(5000, { env: RAISED });
     // four batches in all: the caps, the IP-cache read, the IP-cache write, and the report with its records
     expect(counter.kinds.batch).toBe(4);
     expect(counter.trace.filter((q) => /^select .*ip_info|from ip_info/i.test(q))).toHaveLength(0); // no per-IP select

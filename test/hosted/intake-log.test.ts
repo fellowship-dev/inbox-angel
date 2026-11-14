@@ -87,14 +87,14 @@ describe('mail that is not a DMARC report is refused cleanly, with a specific re
     ['no token', () => ({ to: `rua@${RUA}` }), 'unknown_token', 'Unknown intake token'],
     ['a malformed token', () => ({ to: `rua+short@${RUA}` }), 'unknown_token', 'Unknown intake token'],
     ['an unknown token', () => ({ to: `rua+${generateToken()}@${RUA}` }), 'unknown_token', 'Unknown intake token'],
-    ['a message over the raw cap (10 MiB by default)', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, rawSize: 11 * 1024 * 1024 }), 'raw_too_large', 'Report is larger than 10 MiB'],
+    ['a message over the raw cap (2 MiB by default)', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, rawSize: 3 * 1024 * 1024 }), 'raw_too_large', 'Report is larger than 2 MiB'],
     ['no attachment', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, mime: 'From: a@b.example\r\nSubject: hi\r\nContent-Type: multipart/mixed; boundary="B"\r\n\r\n--B\r\nContent-Type: text/plain\r\n\r\nhello\r\n--B--\r\n' }), 'no_attachment', /Could not extract attachment/],
     ['an attachment that is not a report', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, mime: mimeWithAttachment(strToU8('hello world'), 'x.bin', 'application/octet-stream') }), 'wrong_attachment_type', /expected zip, gzip or XML|not a valid zip/i],
     ['an XML file that is not a report', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, mime: mimeWithAttachment(strToU8('<?xml version="1.0"?><feedback><oops/></feedback>'), 'r.xml', 'text/xml') }), 'xml_invalid', /Invalid DMARC report/],
     ['a TLS-RPT report sent to the rua address', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, mime: tlsRptMime(tlsRptJson('a-corp.com'), true) }), 'kind_mismatch_tlsrpt_to_rua', 'This is a TLS-RPT report; send it to the tls-rpt address, not the rua address'],
     ['a DMARC report sent to the tls-rpt address', (w) => ({ to: `tls-rpt+${w.tokenA}@${RUA}`, mime: gzipReportMime(dmarcXml('a-corp.com')) }), 'kind_mismatch_rua_to_tlsrpt', 'This is a DMARC aggregate report; send it to the rua address, not the tls-rpt address'],
     ['TLS-RPT that is not JSON', (w) => ({ to: `tls-rpt+${w.tokenA}@${RUA}`, mime: 'Subject: x\r\n\r\nnot json' }), 'json_invalid', 'Invalid TLS-RPT report JSON'],
-    ['TLS-RPT for a domain the token does not own', (w) => ({ to: `tls-rpt+${w.tokenA}@${RUA}`, mime: tlsRptMime(tlsRptJson('b-corp.org')) }), 'domain_not_owned', /Unknown domain b-corp\.org/],
+    ['TLS-RPT for a domain the token does not own', (w) => ({ to: `tls-rpt+${w.tokenA}@${RUA}`, mime: tlsRptMime(tlsRptJson('b-corp.org')) }), 'domain_not_owned', 'Report is for a domain this address does not belong to'],
   ];
   it.each(cases)('%s', async (_n, build, reason, text) => {
     const w = await twoWorkspaces();

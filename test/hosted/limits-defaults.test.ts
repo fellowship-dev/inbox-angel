@@ -10,13 +10,13 @@ describe('intake limits: hosted defaults', () => {
   it('every cap and its default', () => {
     expect(intakeLimits({ MODE: 'saas' })).toEqual({
       reportsPerDay: 50, bytesPerDay: 50 * MiB, reportersPerDay: 100,
-      recordsPerReport: 5_000, newIpsPerReport: 50,
+      recordsPerReport: 2_000, newIpsPerReport: 50,
       unauthReportsPerDay: 10, unauthBytesPerDay: 26_214_400, unauthSendersPerDay: 5, unauthTotalReportsPerDay: 25, unauthRecordsPerReport: 1_000,
       totalReportsPerDay: 1_000, totalBytesPerDay: 1024 * MiB,
       addressMessagesPerDay: 500, addressRecordsPerDay: 200_000,
       workspaceMessagesPerDay: 2_000, workspaceRecords: 1_000_000,
       instanceMessagesPerDay: 50_000, instanceRecords: 10_000_000,
-      maxDecompressedBytes: 3 * MiB, maxRawBytes: 10 * MiB, storageRetriesPerDay: 20,
+      maxDecompressedBytes: 1 * MiB, maxRawBytes: 2 * MiB, storageRetriesPerDay: 20,
     });
   });
 
@@ -28,7 +28,7 @@ describe('intake limits: hosted defaults', () => {
 
 describe('self-host: generous but bounded', () => {
   it('records, decompressed size and enrichment are capped too; there are no daily caps to hit (they apply to hosted intake)', () => {
-    expect(intakeLimits({})).toMatchObject({ recordsPerReport: 10_000, newIpsPerReport: 200, maxDecompressedBytes: 6 * MiB, maxRawBytes: 10 * MiB });
+    expect(intakeLimits({})).toMatchObject({ recordsPerReport: 2_500, newIpsPerReport: 200, maxDecompressedBytes: 1.25 * MiB, maxRawBytes: 2 * MiB });
   });
 });
 
