@@ -112,7 +112,7 @@ describe('report intake findings in the setup check', () => {
 
  it('1. AUTHSERV_ID / AUTHSERV_HEADER missing', async () => {
   const items = await intake(withSender(hosted()));
-  expect(items).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID, AUTHSERV_HEADER', message: 'AUTHSERV_ID and AUTHSERV_HEADER are not both set, so no inbound report can be counted: every report is stored but left out of the numbers. Set both from the authserv-id logged for a real report email.' }]);
+  expect(items).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID, AUTHSERV_HEADER', message: 'AUTHSERV_ID and AUTHSERV_HEADER are not both set, so no inbound report can be counted: every report is stored but left out of the numbers. Set both after confirming the authserv-id on a message you sent yourself (the Worker logs what it observed, but that is only what an inbound message said).' }]);
  });
 
  it('2. configured, but inbound mail carries no authentication results', async () => {
@@ -124,7 +124,7 @@ describe('report intake findings in the setup check', () => {
  it('3. configured, but the results name another authserv-id', async () => {
   const e = withSender(hosted({ AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }));
   note(e, 'auth:foreign', 2);
-  expect(await intake(e)).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID to the authserv-id logged for a real report email.' }]);
+  expect(await intake(e)).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID after confirming the authserv-id on a message you sent yourself (the Worker logs what it observed, but that is only what an inbound message said).' }]);
  });
 
  it('4. a storage or daily cap stopped mail recently', async () => {

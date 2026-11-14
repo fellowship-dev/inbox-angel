@@ -9,7 +9,7 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import worker from '../../src/index';
 import { generateToken } from '../../src/hosted/tokens';
-import { logAuthservDiscovery, resetAuthservDiscovery, seenAuthserv } from '../../src/hosted/intake-log';
+import { logAuthservDiscovery, resetAuthservDiscovery, seenAuthserv, observed, OBSERVED_MAX } from '../../src/hosted/intake-log';
 import { dmarcXml, fakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime } from '../helpers/mail';
 import { nxdomain, twoWorkspaces } from './world';
 import { strToU8, gzipSync } from 'fflate';
@@ -136,7 +136,8 @@ describe('authserv-id discovery (so AUTHSERV_ID can be set from one real message
     const w = await twoWorkspaces({ AUTHSERV_ID: '', AUTHSERV_HEADER: '' });
     await deliver(w, `rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')), { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com', 'arc-authentication-results': 'i=1; mx.cloudflare.net; dkim=pass' } });
     const [d] = lines('intake_authserv');
-    expect(d).toEqual({ evt: 'intake_authserv', v: 1, configured: false, ar: 'mx.cloudflare.net', arc: { i: 1, id: 'mx.cloudflare.net' }, hint: 'Set AUTHSERV_ID=mx.cloudflare.net and AUTHSERV_HEADER=ar' });
+    expect(d).toEqual({ evt: 'intake_authserv', v: 2, configured: false, observed_ar: 'mx.cloudflare.net', observed_arc: 'mx.cloudflare.net', observed_arc_i: 1, note: 'observed on an inbound message; confirm against a message you sent yourself before setting AUTHSERV_ID' });
+    expect(JSON.stringify(d)).not.toMatch(/Set AUTHSERV_ID|hint/); // an observation, never an instruction
   });
 
   it('is silent when the configured header is the receiver\'s (nothing to discover)', async () => {
@@ -148,7 +149,7 @@ describe('authserv-id discovery (so AUTHSERV_ID can be set from one real message
   it('is logged again when configured but the message names another server (a wrong AUTHSERV_ID shows what to set)', async () => {
     const w = await twoWorkspaces({ AUTHSERV_ID: 'wrong.example' });
     await deliver(w, `rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
-    expect(lines('intake_authserv')[0]).toMatchObject({ configured: true, ar: 'mx.cloudflare.net', hint: 'Set AUTHSERV_ID=mx.cloudflare.net and AUTHSERV_HEADER=ar' });
+    expect(lines('intake_authserv')[0]).toMatchObject({ configured: true, observed_ar: 'mx.cloudflare.net' });
   });
 
   it('only for messages that reached a valid token (random spam to a bad token cannot fill the log)', async () => {
@@ -166,16 +167,30 @@ describe('authserv-id discovery (so AUTHSERV_ID can be set from one real message
     expect(lines('intake_authserv')).toHaveLength(6);
   });
 
-  it('never logs an address or anything that is not a host name', () => {
+  it('never logs an address; what it does log is printable ASCII, capped, and phrased as an observation', () => {
     expect(seenAuthserv({ ar: 'someone@evil.example; dkim=pass', arc: 'i=1; a b c; x' })).toEqual({ ar: null, arc: { i: 1, id: null } });
-    expect(seenAuthserv({ ar: 'MX.Cloudflare.NET; dkim=pass', arc: null })).toEqual({ ar: 'mx.cloudflare.net', arc: null });
+    expect(seenAuthserv({ ar: 'MX.Cloudflare.NET 1 (c); dkim=pass', arc: null })).toEqual({ ar: 'MX.Cloudflare.NET', arc: null });
     logAuthservDiscovery({ ar: 'mx.cloudflare.net; dkim=pass header.d=a.com smtp.mailfrom=alice@a.com', arc: null }, {}, false);
     expect(logs.join('\n')).not.toContain('alice');
     expect(logs.join('\n')).not.toContain('a.com');
   });
 
-  it('with ARC only (no plain header) it suggests AUTHSERV_HEADER=arc', () => {
+  it('a hostile value is neutralised: control characters and non-ASCII give null, long values are cut at 64, and a "Set AUTHSERV_ID=" lookalike cannot form an instruction', () => {
+    expect(observed('mx\u0000.example')).toBeNull();
+    expect(observed('mx\u001b[31m.example')).toBeNull();
+    expect(observed('m\u00e9.example')).toBeNull();
+    expect(observed('a'.repeat(500))).toHaveLength(OBSERVED_MAX);
+    expect(observed('Set AUTHSERV_ID=evil.example AUTHSERV_HEADER=ar')).toBeNull(); // spaces: not an id
+    expect(observed('Set')).toBe('Set');
+    logAuthservDiscovery({ ar: 'Set\nAUTHSERV_ID=evil.example; dkim=pass', arc: null }, {}, false);
+    const line = lines('intake_authserv').at(-1);
+    expect(line.observed_ar).toBeNull();
+    expect(JSON.stringify(line)).not.toContain('evil.example');
+  });
+
+  it('with ARC only (no plain header) it observes the ARC authserv-id, without telling the operator what to set', () => {
     logAuthservDiscovery({ ar: null, arc: 'i=1; arc.example; dkim=pass' }, {}, false);
-    expect(lines('intake_authserv')[0].hint).toBe("Set AUTHSERV_ID=arc.example and AUTHSERV_HEADER=arc (only when i=1 is the receiver's own hop)");
+    expect(lines('intake_authserv')[0]).toMatchObject({ observed_ar: null, observed_arc: 'arc.example', observed_arc_i: 1 });
+    expect(JSON.stringify(lines('intake_authserv')[0])).not.toMatch(/Set AUTHSERV_ID/);
   });
 });

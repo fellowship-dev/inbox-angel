@@ -53,24 +53,35 @@ export function logIntake(input: LineInput): void {
 
 // ── authserv discovery ────────────────────────────────────────
 
-/** An authserv-id is a host name. Anything with an `@`, whitespace or odd characters is not one, and is never logged. */
-const AUTHSERV_RE = /^[a-z0-9]([a-z0-9._-]{0,253}[a-z0-9])?$/i;
+/** Longest value logged for an observed authserv-id. A real one is a host name (mx.cloudflare.net is 17 characters). */
+export const OBSERVED_MAX = 64;
+
+/**
+ * An observed authserv-id, made safe to log: printable ASCII without spaces (a trailing version number or comment is dropped; anything else, an address
+ * included, gives null), at most OBSERVED_MAX characters. It is the SENDER'S text when the receiver added no header of its own, so it is
+ * only ever logged as an observation, never as an instruction.
+ */
+export function observed(v: string | undefined | null): string | null {
+  if (!v) return null;
+  const t = v.replace(/\([^)]*\)/g, ' ').trim().replace(/\s+\d{1,3}$/, ''); // comments and a trailing authres-version are not part of the id
+  if (!/^[\x21-\x7e]+$/.test(t) || t.includes('@')) return null; // not printable ASCII without spaces, or an address: not logged
+  return t.slice(0, OBSERVED_MAX);
+}
 
 export interface SeenAuthserv {
-  /** authserv-id of the topmost Authentication-Results (null: none, or it is not a host name). */
+  /** authserv-id of the topmost Authentication-Results, as observed (null: none). */
   ar: string | null;
-  /** The topmost ARC-Authentication-Results: its instance number and authserv-id. */
+  /** The topmost ARC-Authentication-Results: its instance number and authserv-id, as observed. */
   arc: { i: number | null; id: string | null } | null;
 }
 
 export function seenAuthserv(h: Pick<AuthHeaders, 'ar' | 'arc'>): SeenAuthserv {
-  const host = (v: string | undefined) => (v && AUTHSERV_RE.test(v.trim()) ? v.trim().toLowerCase() : null);
-  const ar = h.ar ? host(h.ar.split(';')[0]) : null;
+  const ar = h.ar ? observed(h.ar.split(';')[0]) : null;
   let arc: SeenAuthserv['arc'] = null;
   if (h.arc) {
     const [hop, id] = h.arc.split(';');
-    const i = /^\s*i\s*=\s*(\d+)\s*$/i.exec(hop ?? '');
-    arc = { i: i ? Number(i[1]) : null, id: host(id) };
+    const i = /^\s*i\s*=\s*(\d{1,6})\s*$/i.exec(hop ?? '');
+    arc = { i: i ? Number(i[1]) : null, id: observed(id) };
   }
   return { ar, arc };
 }
@@ -96,17 +107,19 @@ const discoveryLimit = windowLimiter();
 export function resetAuthservDiscovery(): void { discoveryLimit.reset(); }
 
 /**
- * When AUTHSERV_ID / AUTHSERV_HEADER are not set (or are set and the message's results name another server), log what the receiver
- * put in the topmost Authentication-Results and ARC-Authentication-Results headers, so the operator can set the two variables from
- * one real message. At most 5 lines per isolate per hour; nothing is stored; never an address.
+ * When AUTHSERV_ID / AUTHSERV_HEADER are not set (or are set and the message's results name another server), log what the topmost Authentication-Results
+ * and ARC-Authentication-Results headers of an inbound message said, so the operator can compare it with a message they sent themselves. It is an OBSERVATION:
+ * if the receiver added no header of its own, the topmost one is the sender's, so the value must be confirmed against a message the operator sent before
+ * AUTHSERV_ID is set from it. At most 5 lines per isolate per hour; nothing is stored; never an address.
  */
 export function logAuthservDiscovery(h: Pick<AuthHeaders, 'ar' | 'arc'>, env: { AUTHSERV_ID?: string; AUTHSERV_HEADER?: string }, trusted: boolean, now = Date.now()): void {
   if (trusted || (!h.ar && !h.arc)) return;
   if (!discoveryLimit.allow(now)) return;
   const seen = seenAuthserv(h);
   const configured = !!env.AUTHSERV_ID?.trim() && ['ar', 'arc'].includes(env.AUTHSERV_HEADER?.trim().toLowerCase() ?? '');
-  const hint = seen.ar
-    ? `Set AUTHSERV_ID=${seen.ar} and AUTHSERV_HEADER=ar`
-    : seen.arc?.id ? `Set AUTHSERV_ID=${seen.arc.id} and AUTHSERV_HEADER=arc (only when i=1 is the receiver's own hop)` : 'No usable authserv-id seen';
-  console.log(JSON.stringify({ evt: 'intake_authserv', v: 1, configured, ar: seen.ar, arc: seen.arc, hint }));
+  console.log(JSON.stringify({
+    evt: 'intake_authserv', v: 2, configured,
+    observed_ar: seen.ar, observed_arc: seen.arc?.id ?? null, observed_arc_i: seen.arc?.i ?? null,
+    note: 'observed on an inbound message; confirm against a message you sent yourself before setting AUTHSERV_ID',
+  }));
 }

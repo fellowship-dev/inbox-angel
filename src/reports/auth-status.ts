@@ -73,11 +73,11 @@ export async function intakeSetupFindings(
   if (reportCounting(env) !== 'all') {
     const status = await intakeAuthStatus(env, nowSeconds);
     if (status.kind === 'unconfigured') {
-      out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID, AUTHSERV_HEADER', message: 'AUTHSERV_ID and AUTHSERV_HEADER are not both set, so no inbound report can be counted: every report is stored but left out of the numbers. Set both from the authserv-id logged for a real report email.' });
+      out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID, AUTHSERV_HEADER', message: 'AUTHSERV_ID and AUTHSERV_HEADER are not both set, so no inbound report can be counted: every report is stored but left out of the numbers. Set both after confirming the authserv-id on a message you sent yourself (the Worker logs what it observed, but that is only what an inbound message said).' });
     } else if (status.kind === 'no_results') {
       out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_HEADER', message: 'Inbound report mail arrived without any authentication results, so no report can be counted. Check that Email Routing adds Authentication-Results (or ARC-Authentication-Results, then set AUTHSERV_HEADER to arc).' });
     } else if (status.kind === 'foreign_authserv') {
-      out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID to the authserv-id logged for a real report email.' });
+      out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID after confirming the authserv-id on a message you sent yourself (the Worker logs what it observed, but that is only what an inbound message said).' });
     }
   }
   // A COUNTED report that could not be stored because the counted budget is full: loud, per known reporter, from the first drop time.
