@@ -4,7 +4,7 @@ import { api, errorMessage } from '../../lib/api';
 import { TalkToMax } from '../../components/TalkToMax';
 import { AuthLayout } from './AuthLayout';
 import { LINK_HOURS } from './WelcomePage';
-import { Turnstile, turnstileToken } from './Turnstile';
+import { useHumanCheck } from './Turnstile';
 import { useSession } from '../../lib/session';
 
 /** Shown when the server wants the email address verified before it opens a session (SaaS mode). */
@@ -12,20 +12,22 @@ export function CheckEmail({ email, onBack, note }: { email: string; onBack?: ()
 	const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
 	const [error, setError] = useState('');
 	const { status } = useSession();
-	const siteKey = status?.turnstile_site_key ?? null;
+	const check = useHumanCheck(status?.turnstile_site_key);
 
 	// A resend passes the same bot check as sign-up: an address's allowance of mail is not free to spend.
 	async function resend(e: FormEvent<HTMLFormElement>) {
 		e.preventDefault();
 		setError('');
 		setState('sending');
-		const cf = siteKey ? turnstileToken(e.currentTarget) : undefined;
+		const cf = check.token;
 		try {
 			await api('/api/auth/resend-verification', { method: 'POST', body: { email, ...(cf ? { cf_turnstile_token: cf } : {}) } });
 			setState('sent');
 		} catch (e) {
 			setError(errorMessage(e));
 			setState('idle');
+		} finally {
+			check.reset(); // a token is single use
 		}
 	}
 
@@ -38,8 +40,8 @@ export function CheckEmail({ email, onBack, note }: { email: string; onBack?: ()
 			{state === 'sent' ? <Alert variant="info">If this address is waiting to be confirmed, a new link is on its way. It can take a minute to arrive.</Alert> : null}
 			{error ? <Alert variant="danger">{error}</Alert> : null}
 			<form onSubmit={(e) => void resend(e)} className="space-y-4">
-				{siteKey ? <Turnstile siteKey={siteKey} /> : null}
-				<Button type="submit" variant="secondary" className="w-full" loading={state === 'sending'}>
+				{check.widget}
+				<Button type="submit" variant="secondary" className="w-full" loading={state === 'sending'} disabled={!check.ready}>
 					Resend verification email
 				</Button>
 			</form>

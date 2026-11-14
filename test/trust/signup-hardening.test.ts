@@ -191,3 +191,47 @@ describe('one pct= refresh per domain, however many views at once', () => {
     expect(w.rows('SELECT dmarc_pct FROM domains WHERE id = ?', id)).toEqual([{ dmarc_pct: 100 }]);
   });
 });
+
+describe('review follow-ups', () => {
+  it('a device that signed in to this account before skips the per-address lock; strangers, other accounts and forged cookies do not', async () => {
+    const w = hosted();
+    await signupVerified(w.env, 'real@example.com', 'right-password-1');
+    const first = await call(w.env, 'POST', '/api/auth/login', { body: { email: 'real@example.com', password: 'right-password-1' }, ...ip() });
+    const device = ((first.headers as any).getSetCookie() as string[]).find(c => c.startsWith('rsm_device='))!;
+    expect(device).toMatch(/HttpOnly/);
+    expect(device).toMatch(/SameSite=Lax/);
+    expect(device).toMatch(/Max-Age=15552000/);
+    const cookie = device.split(';')[0]!;
+    await signupVerified(w.env, 'other@example.com', 'other-password-1');
+    const otherDevice = ((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'other@example.com', password: 'other-password-1' }, ...ip() })).headers as any).getSetCookie().find((c: string) => c.startsWith('rsm_device=')).split(';')[0];
+    for (let i = 0; i < SIGNIN_FAILURE_LIMIT; i++) await call(w.env, 'POST', '/api/auth/login', { body: { email: 'real@example.com', password: 'wrong-password-x' }, ...ip() });
+    const login = (headers: Record<string, string> = {}) => call(w.env, 'POST', '/api/auth/login', { body: { email: 'real@example.com', password: 'right-password-1' }, headers, ...ip() });
+    expect((await login()).status).toBe(429);
+    expect((await login({ cookie: otherDevice })).status).toBe(429);
+    expect((await login({ cookie: cookie.slice(0, -2) + 'xx' })).status).toBe(429);
+    expect((await login({ cookie })).status).toBe(200);
+  });
+
+  it('expired rate-limit rows are swept in bounded batches, recent ones kept', async () => {
+    const { sweepExpiredRateLimits, d1RateLimitStorage, SWEEP_BATCH } = await import('../../src/auth/rate-limit');
+    const w = hosted();
+    const now = Date.now();
+    const ins = w.db.sqlite.prepare('INSERT INTO auth_rate_limits (id, key, count, last_request) VALUES (?, ?, 1, ?)');
+    for (let i = 0; i < SWEEP_BATCH + 50; i++) ins.run(`old-${i}`, `signin-fail:old-${i}`, now - 3 * 86_400_000);
+    ins.run('fresh', 'signin-fail:fresh', now - 3_600_000);
+    expect(await sweepExpiredRateLimits(w.env.DB as any, now)).toBe(SWEEP_BATCH);
+    expect(w.rows("SELECT COUNT(*) n FROM auth_rate_limits WHERE id LIKE 'old-%'")).toEqual([{ n: 50 }]);
+    // a write sweeps on its own now and then (forced here)
+    await d1RateLimitStorage(w.env.DB as any, () => 0).consume('some-key', { window: 60, max: 5 });
+    expect(w.rows("SELECT COUNT(*) n FROM auth_rate_limits WHERE id LIKE 'old-%'")).toEqual([{ n: 0 }]);
+    expect(w.rows("SELECT COUNT(*) n FROM auth_rate_limits WHERE id = 'fresh'")).toEqual([{ n: 1 }]);
+  });
+
+  it('a free-mail address starts with "My workspace", a company address with "<domain> workspace"', async () => {
+    const w = hosted();
+    for (const email of ['someone@gmail.com', 'cfo@acme.com']) await call(w.env, 'POST', '/api/auth/signup', { body: { email }, ...ip() });
+    const name = (email: string) => w.rows('SELECT w.name FROM workspaces w JOIN memberships m ON m.workspace_id = w.id JOIN users u ON u.id = m.user_id WHERE u.email = ?', email)[0].name;
+    expect(name('someone@gmail.com')).toBe('My workspace');
+    expect(name('cfo@acme.com')).toBe('acme.com workspace');
+  });
+});

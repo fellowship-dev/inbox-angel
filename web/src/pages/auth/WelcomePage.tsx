@@ -5,7 +5,7 @@ import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { TalkToMax } from '../../components/TalkToMax';
 import { AuthLayout, Field } from './AuthLayout';
-import { Turnstile, turnstileToken } from './Turnstile';
+import { useHumanCheck } from './Turnstile';
 
 /** How long the emailed link works (src/auth/welcome.ts VERIFICATION_LINK_HOURS). */
 export const LINK_HOURS = 24;
@@ -90,19 +90,21 @@ function NewLink({ expired }: { expired: boolean }) {
 	const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
 	const [error, setError] = useState('');
 	const { status } = useSession();
-	const siteKey = status?.turnstile_site_key ?? null;
+	const check = useHumanCheck(status?.turnstile_site_key);
 
 	async function send(e: FormEvent<HTMLFormElement>) {
 		e.preventDefault();
 		setError('');
 		setState('sending');
-		const cf = siteKey ? turnstileToken(e.currentTarget) : undefined;
+		const cf = check.token;
 		try {
 			await api('/api/auth/resend-verification', { method: 'POST', body: { email, ...(cf ? { cf_turnstile_token: cf } : {}) } });
 			setState('sent');
 		} catch (err) {
 			setError(errorMessage(err));
 			setState('idle');
+		} finally {
+			check.reset(); // a token is single use
 		}
 	}
 
@@ -119,9 +121,9 @@ function NewLink({ expired }: { expired: boolean }) {
 					<Field id="email" label="Email">
 						<Input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
 					</Field>
-					{siteKey ? <Turnstile siteKey={siteKey} /> : null}
+					{check.widget}
 					{error ? <FieldError>{error}</FieldError> : null}
-					<Button type="submit" className="w-full" loading={state === 'sending'}>
+					<Button type="submit" className="w-full" loading={state === 'sending'} disabled={!check.ready}>
 						Send me a new link
 					</Button>
 				</form>

@@ -19,6 +19,7 @@ import { verifyTurnstile } from './turnstile';
 import { hostedSignupClosed, SIGNUP_CLOSED_MESSAGE, turnstileSecret, turnstileSiteKey } from './bot-protection';
 import { clearSigninFailures, completeWelcome, legacyVerifyLinkPage, readVerificationToken, recordSigninFailure, signinWait, welcomeAttemptAllowed } from './welcome';
 import { cleanName } from './names';
+import { deviceCookie, knownDevice } from './device';
 import { helpUrl } from '../funnel/config';
 import { emailCheckAvailable } from '../hosted/config';
 import { hostedServiceUrl } from '../hosted-service';
@@ -286,7 +287,11 @@ export async function handleAuthRoute(
     // Per-address failure throttle (10 in 15 minutes), counted the same for addresses with no account, whether or not the
     // bot check is configured. A password reset (or choosing one from the emailed link) clears it.
     const wait = await signinWait(env, email);
-    if (wait) return throttled(wait);
+    if (wait) {
+      // A device that signed in to this very account before skips the per-address lock (the per-IP limits still apply).
+      const known = await globalQueries(env.DB).users.byEmail(email);
+      if (!known || !(await knownDevice(env, request, known.id))) return throttled(wait);
+    }
 
     const auth = await createAuth(env, request, { ctx });
     const res = await callAuth(auth, env, request, '/sign-in/email', { body: { email, password: body.password } });
@@ -306,7 +311,9 @@ export async function handleAuthRoute(
       resource_type: 'user', resource_id: user.id, resource_name: user.email,
       meta: { ip: request.headers.get('CF-Connecting-IP') ?? 'unknown' },
     });
-    return sessionResponse(request, res, {});
+    const out = sessionResponse(request, res, {});
+    out.headers.append('set-cookie', await deviceCookie(env, user.id, baseUrl(env, url.origin).startsWith('https://')));
+    return out;
   }
 
   // ── POST /api/auth/resend-verification — always the same answer ──
