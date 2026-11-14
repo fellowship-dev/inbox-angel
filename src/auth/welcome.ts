@@ -102,6 +102,19 @@ export async function legacyVerifyLinkPage(): Promise<Response> {
   });
 }
 
+/** A short key for an address (FNV-1a, two lanes): the rate-limit table never holds the address itself. Synchronous on purpose:
+ *  the cap runs inside the mail callback, before the send. */
+function addressKey(email: string): string {
+  const s = email.toLowerCase().trim();
+  let a = 0x811c9dc5, b = 0x050c5d1f;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = Math.imul(b ^ c, 2246822519);
+  }
+  return `${(a >>> 0).toString(16).padStart(8, '0')}${(b >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 /**
  * Per-address cap on verification mail, counted across every route that sends one (sign-up, resend, a sign-in of an unverified
  * account, a hosted invitee): 3 an hour and 10 a day. Over the cap the mail is simply not sent; the routes answer exactly as
@@ -109,7 +122,7 @@ export async function legacyVerifyLinkPage(): Promise<Response> {
  */
 export async function verificationMailAllowed(env: AuthEnv, email: string): Promise<boolean> {
   const limiter = d1RateLimitStorage(env.DB as D1Database);
-  const k = (await sha256Hex(`verify-mail:${email.toLowerCase().trim()}`)).slice(0, 40);
+  const k = addressKey(email);
   const hour = await limiter.consume(`verify-mail:h:${k}`, { window: 3600, max: 3 });
   if (!hour.allowed) return false;
   const day = await limiter.consume(`verify-mail:d:${k}`, { window: 86400, max: 10 });
