@@ -10,7 +10,7 @@
 // session of the account ends, then the person is signed in. Once the account is verified with a password chosen this way,
 // the token is refused ("already used"): it can set a password once.
 import { verifyJWT } from 'better-auth/crypto';
-import { globalQueries } from '@ready-set-mail/db';
+import { authLookups, forWorkspace, globalQueries, workspaceLifecycle } from '@ready-set-mail/db';
 import { hashPassword } from '../api/password';
 import type { AuthEnv } from './config';
 import { d1RateLimitStorage } from './rate-limit';
@@ -93,9 +93,13 @@ export async function completeWelcome(env: AuthEnv, email: string, password: str
 async function resetUnprovenNames(db: D1Database, userId: string, email: string, name: string): Promise<void> {
   const given = cleanName(name);
   await db.prepare('UPDATE users SET name = ?1 WHERE id = ?2').bind(given || email, userId).run();
-  await db.prepare(
-    "UPDATE workspaces SET name = ?1 WHERE id IN (SELECT m.workspace_id FROM memberships m WHERE m.user_id = ?2 AND m.role = 'owner' AND (SELECT COUNT(*) FROM memberships o WHERE o.workspace_id = m.workspace_id) = 1)",
-  ).bind(defaultWorkspaceName(given, email), userId).run();
+  const name = defaultWorkspaceName(given, email);
+  for (const m of await authLookups(db).membershipsOf(userId)) {
+    if (m.role !== 'owner') continue;
+    // Only a workspace this account alone is in: the one sign-up made (an unproven account can have done nothing else).
+    if ((await forWorkspace(db, m.workspace_id).team.list()).length !== 1) continue;
+    await workspaceLifecycle(db).rename(m.workspace_id, name);
+  }
 }
 
 /** Clear the per-address sign-in failure count (a password chosen or reset). */

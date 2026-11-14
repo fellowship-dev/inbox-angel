@@ -46,7 +46,9 @@ describe('1. resend needs the bot check, and a resend flood cannot use up the li
     }
     expect(w.sentTo('victim@example.com')).toBe(1 + MAIL_CAPS.other.hour); // the resend allowance, then nothing
     // the victim signs up themselves: a fresh link arrives from the sign-up allowance
+    const waits = (ctx.waitUntil as any).mock.calls.length;
     const own = await call(w.env, 'POST', '/api/auth/signup', { body: { email: 'victim@example.com' }, ...ip() });
+    await Promise.all((ctx.waitUntil as any).mock.calls.slice(waits).map((c: any[]) => c[0])); // the link is sent in the background
     expect(own.status).toBe(first.status);
     expect(await json(own)).toEqual(await json(first));
     expect(w.sentTo('victim@example.com')).toBe(2 + MAIL_CAPS.other.hour);
@@ -62,6 +64,7 @@ describe('1. resend needs the bot check, and a resend flood cannot use up the li
       vi.spyOn(Date, 'now').mockReturnValue(t0 + hour * 3601_000);
       for (let i = 0; i < 3; i++) bodies.add(JSON.stringify(await json(await call(w.env, 'POST', '/api/auth/signup', { body: { email: 'v@example.com' }, ...ip() }))));
     }
+    await Promise.all((ctx.waitUntil as any).mock.calls.map((c: any[]) => c[0])); // background sends finished
     expect(bodies.size).toBe(1);
     expect(w.sentTo('v@example.com')).toBe(4);
   }, 30000);
