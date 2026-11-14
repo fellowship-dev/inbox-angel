@@ -80,7 +80,8 @@ describe('labels', () => {
 
 describe('counted reports dropped for want of storage (the server sends ISO times; the web renders them)', () => {
 	// newer ICU writes a narrow no-break space before AM/PM
-	const sp = (t: string | string[]) => (Array.isArray(t) ? t.map((x) => sp(x) as string) : t.replace(/\u202f/g, ' '));
+	const one = (t: string) => t.replace(/\u202f/g, ' ');
+	const sp = <T extends string | string[]>(t: T): T => (Array.isArray(t) ? t.map(one) : one(t as string)) as T;
 	const dropped = { reporter: 'google', label: 'Google', since: '2026-11-14T03:12:00.000Z', last_at: '2026-11-14T05:00:00.000Z', messages: 2, text: 'server text (UTC)' };
 	const v = { intake: { status: 'limited' as const, limit: 'counted_storage_dropped' as const, notice: 'server text (UTC)', not_processed: { messages: 0, last_at: null, reasons: [] }, dropped: [dropped] } };
 
