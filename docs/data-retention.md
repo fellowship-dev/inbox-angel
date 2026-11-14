@@ -17,7 +17,7 @@ Defaults apply when the variable is unset. Values are whole days; a value that i
 | Free-check results (`check_results`) | **30 days** | `RETENTION_CHECK_RESULTS_DAYS` | |
 | Intake counters (`intake_usage`, `intake_quota`: messages and records per address, workspace and day) | **8 days** | `RETENTION_INTAKE_COUNTERS_DAYS` | Counters, no report content. |
 | "Reports we could not store" markers (`intake_failures`: a count per domain, day and reason) | **90 days** | `RETENTION_INTAKE_FAILURES_DAYS` | A counter, no report content. |
-| Aggregate reports from senders that could not be authenticated (`reporter_tier = 'unauthenticated'`) | **30 days** | `RETENTION_UNAUTHENTICATED_REPORTS_DAYS` | Stored but never counted. Not applied when `REPORT_COUNTING=all`, where they are the numbers. |
+| Aggregate reports that are stored but never counted (`reporter_tier` `unknown` or `unauthenticated`) | **30 days** | `RETENTION_UNCOUNTED_REPORTS_DAYS` (the earlier name `RETENTION_UNAUTHENTICATED_REPORTS_DAYS` is still honoured when it is unset) | Stored but never counted. Not applied when `REPORT_COUNTING=all`, where they are the numbers. A reporter an owner later promotes becomes `counted` and keeps the normal window. |
 | Authenticated senders not in the known-reporter registry (`reporter_candidate_days`: DKIM organisation, From domain, report email, counts per day) | **90 days** | | Instance-wide, no report content, no customer or address. |
 | Sessions | until they expire (sessions last 30 days) | | Includes the IP address and user agent stored with the session. |
 | Email-verification and password-reset tokens | until they expire | | |

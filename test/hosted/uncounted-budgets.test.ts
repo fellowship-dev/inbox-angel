@@ -153,7 +153,7 @@ describe('a counted report dropped because the counted budget is genuinely full 
     expect(v.intake.notice).toMatch(text);
     // the web helper renders the same sentence in the user's locale and time zone
     expect(storageDropNotice(v.intake.dropped[0], { locale: 'en-GB', timeZone: 'Pacific/Auckland' })).toMatch(/^Report storage limit reached; reports from Google since \d{1,2} \w{3} \d{4}, \d\d:\d\d were not stored$/);
-    expect(storageDropNotice({ label: 'Google', since: '2026-11-14T03:12:00.000Z' }, { locale: 'en-US', timeZone: 'America/Los_Angeles' })).toBe('Report storage limit reached; reports from Google since Nov 13, 2026, 7:12 PM were not stored');
+    expect(storageDropNotice({ label: 'Google', since: '2026-11-14T03:12:00.000Z' }, { locale: 'en-US', timeZone: 'America/Los_Angeles' }).replace(/\u202f/g, ' ')).toBe('Report storage limit reached; reports from Google since Nov 13, 2026, 7:12 PM were not stored');
 
     // the owner's setup check
     const findings = await intakeSetupFindings({ DB: w.env.DB, MODE: 'saas', AUTHSERV_ID: ID, AUTHSERV_HEADER: 'ar' });

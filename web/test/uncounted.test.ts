@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { candidatesSummary, countedReporters, hasMajorReporter, countingBasisNote, emptyReportsMessage, emptyReportsState, intakeNotice, reporterLabel, uncountedNotice, uncountedReporters, type ReportVisibilityFields } from '../src/lib/uncounted';
+import { candidatesSummary, countedReporters, hasMajorReporter, countingBasisNote, emptyReportsMessage, emptyReportsState, intakeNotice, reporterLabel, storageDropNotice, storageDropNotices, uncountedNotice, uncountedReporters, type ReportVisibilityFields } from '../src/lib/uncounted';
 
 const none = { reports: 0, messages: 0, latest_at: null, by_reporter: [] };
 const intakeOk = { status: 'ok' as const, limit: null, notice: null, not_processed: { messages: 0, last_at: null, reasons: [] } };
@@ -75,5 +75,33 @@ describe('labels', () => {
 		const c = (dkim_org: string, reports: number, last_seen: string) => ({ dkim_org, from_domain: dkim_org, org_name: null, report_email: null, reports, workspaces: 1, days: 1, first_seen: last_seen, last_seen });
 		expect(candidatesSummary({ candidates: [c('a.example', 2, '2026-11-01'), c('b.example', 1, '2026-11-03')], registry: [], issues: [], since: '' })).toBe('2 authenticated senders are not in the registry (3 reports in total); latest: b.example.');
 		expect(candidatesSummary({ candidates: [], registry: [], issues: [], since: '' })).toBeNull();
+	});
+});
+
+describe('counted reports dropped for want of storage (the server sends ISO times; the web renders them)', () => {
+	// newer ICU writes a narrow no-break space before AM/PM
+	const sp = (t: string | string[]) => (Array.isArray(t) ? t.map((x) => sp(x) as string) : t.replace(/\u202f/g, ' '));
+	const dropped = { reporter: 'google', label: 'Google', since: '2026-11-14T03:12:00.000Z', last_at: '2026-11-14T05:00:00.000Z', messages: 2, text: 'server text (UTC)' };
+	const v = { intake: { status: 'limited' as const, limit: 'counted_storage_dropped' as const, notice: 'server text (UTC)', not_processed: { messages: 0, last_at: null, reasons: [] }, dropped: [dropped] } };
+
+	it('renders the time in the user\'s locale and time zone', () => {
+		expect(sp(storageDropNotice(dropped, { locale: 'en-US', timeZone: 'America/Los_Angeles' }))).toBe('Report storage limit reached; reports from Google since Nov 13, 2026, 7:12 PM were not stored');
+		expect(storageDropNotice(dropped, { locale: 'en-GB', timeZone: 'Pacific/Auckland' })).toBe('Report storage limit reached; reports from Google since 14 Nov 2026, 16:12 were not stored');
+	});
+	it('names every reporter, and intakeNotice prefers it to the server\'s UTC text', () => {
+		const two = { intake: { ...v.intake, dropped: [dropped, { ...dropped, reporter: 'microsoft', label: 'Microsoft', since: '2026-11-15T00:00:00.000Z' }] } };
+		expect(sp(storageDropNotices(two, { locale: 'en-US', timeZone: 'UTC' }))).toEqual([
+			'Report storage limit reached; reports from Google since Nov 14, 2026, 3:12 AM were not stored',
+			'Report storage limit reached; reports from Microsoft since Nov 15, 2026, 12:00 AM were not stored',
+		]);
+		expect(sp(intakeNotice(v, { locale: 'en-US', timeZone: 'UTC' })!)).toBe('Report storage limit reached; reports from Google since Nov 14, 2026, 3:12 AM were not stored');
+		expect(intakeNotice({ intake: { ...v.intake, dropped: [] } })).toBe('server text (UTC)');
+		expect(storageDropNotices(undefined)).toEqual([]);
+	});
+	it('an unreadable time is shown as sent, never as "Invalid Date"', () => {
+		expect(storageDropNotice({ label: 'Google', since: 'soon' })).toBe('Report storage limit reached; reports from Google since soon were not stored');
+	});
+	it('a drop is never "no reports": the empty state is limited', () => {
+		expect(emptyReportsState(0, v)).toBe('limited');
 	});
 });
