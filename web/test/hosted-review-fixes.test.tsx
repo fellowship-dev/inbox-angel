@@ -10,7 +10,8 @@ import { DnsRecords } from '../src/components/domain/DnsRecords';
 import { ImportResults } from '../src/components/domain/ImportResults';
 import { EmailCheckPage } from '../src/pages/check/EmailCheckPage';
 import { TalkToMax, TalkToMaxScope } from '../src/components/TalkToMax';
-import { dmarcCoverage } from '../src/lib/dmarc-coverage';
+import { dmarcCoverage, inheritedSentence as sentence, keptEnforcement, offerEnforcement, recordFor } from '../src/lib/dmarc-coverage';
+import { DomainDetailPage } from '../src/pages/domains/DomainDetailPage';
 import { wizardProgress } from '../src/lib/dmarc';
 import { assessDomain } from '../src/lib/levels';
 import { createQueryClient } from '../src/lib/query';
@@ -50,7 +51,7 @@ const wizard: WizardState = { domain: 'complete', spf: 'complete', dkim: 'comple
 describe('dmarcCoverage', () => {
 	it('own record, inherited, none, unknown', () => {
 		expect(dmarcCoverage(onboarding({ dmarc: { found: true, has_our_rua: false, current_record: 'v=DMARC1; p=none' } }))).toEqual({ kind: 'own' });
-		expect(dmarcCoverage(onboarding({}, inherits('reject')))).toEqual({ kind: 'inherited', parent: 'mozilla.test', policy: 'reject', issue: null, pct: 100 });
+		expect(dmarcCoverage(onboarding({}, inherits('reject')))).toMatchObject({ kind: 'inherited', parent: 'mozilla.test', policy: 'reject', issue: null, pct: 100 });
 		expect(dmarcCoverage(onboarding({}, none))).toEqual({ kind: 'none' });
 		expect(dmarcCoverage(onboarding({}, null))).toEqual({ kind: 'unknown' });
 		expect(dmarcCoverage(onboarding({}, none), true)).toEqual({ kind: 'unknown' });
@@ -407,5 +408,125 @@ describe('names that do not resolve, beyond the setup wizard', () => {
 		await user.click(screen.getByRole('button', { name: 'Continue' }));
 		expect(await screen.findByRole('heading', { name: 'This domain does not resolve' })).toBeInTheDocument();
 		expect(screen.queryByText(/rua=mailto/)).not.toBeInTheDocument();
+	});
+});
+
+describe('hosted wizard: one count', () => {
+	it('step 2 says "Step 2 of 4" and the header counts out of 4', async () => {
+		stepAt(2, onboarding({}, none));
+		const nav = await screen.findByRole('navigation', { name: 'Setup progress' });
+		expect(nav).toHaveTextContent('Step 2 of 4: SPF');
+		expect(screen.getByText(/of 4 steps complete/)).toBeInTheDocument();
+	});
+});
+
+// ── Third review: exactly the enforcement in force, never weaker or stricter ─────────────────
+
+
+const inheritRecord = (record: string, policy: string) => onboarding({ rua_address: 'rua@reports.mozilla.test' }, { policy, inherited_from: 'npmjs.test', issue: null, record });
+
+describe('offered record carries the inherited enforcement exactly', () => {
+	const cases: Array<[string, string, string, string]> = [
+		// [parent record, effective policy for the subdomain, offered record, kept phrase]
+		['v=DMARC1; p=reject', 'reject', 'v=DMARC1; p=reject; rua=mailto:rua@reports.mozilla.test', 'p=reject'],
+		['v=DMARC1; p=quarantine; pct=5', 'quarantine', 'v=DMARC1; p=quarantine; pct=5; rua=mailto:rua@reports.mozilla.test', 'p=quarantine at pct=5'],
+		['v=DMARC1; p=reject; sp=quarantine', 'quarantine', 'v=DMARC1; p=quarantine; rua=mailto:rua@reports.mozilla.test', 'the inherited sp=quarantine as its p=quarantine'],
+		['v=DMARC1; p=reject; sp=quarantine; pct=25', 'quarantine', 'v=DMARC1; p=quarantine; pct=25; rua=mailto:rua@reports.mozilla.test', 'the inherited sp=quarantine as its p=quarantine at pct=25'],
+	];
+	it.each(cases)('%s', (record, policy, offered, kept) => {
+		const c = dmarcCoverage(inheritRecord(record, policy));
+		const e = offerEnforcement(c);
+		expect(e).not.toBeNull();
+		expect(recordFor(e!, 'rua@reports.mozilla.test')).toBe(offered);
+		expect(keptEnforcement(c, e!)).toBe(kept);
+	});
+
+	it('parent p=reject with sp=none: says the subdomain policy is sp=none, offers p=none', () => {
+		const c = dmarcCoverage(inheritRecord('v=DMARC1; p=reject; sp=none', 'none'));
+		if (c.kind !== 'inherited') throw new Error('expected inherited');
+		expect(sentence('support.ibm.test', c)).toContain("npmjs.test's policy for its subdomains is sp=none (its own p=reject does not apply here)");
+		expect(sentence('support.ibm.test', c)).not.toContain('inherits p=none');
+		expect(recordFor(offerEnforcement(c)!, null)).toBe('v=DMARC1; p=none');
+	});
+
+	it('an absent effective field is unknown: nothing offered', () => {
+		const ob = onboarding({}, none);
+		delete (ob.dmarc as { effective?: unknown }).effective;
+		expect(dmarcCoverage(ob)).toEqual({ kind: 'unknown' });
+		expect(offerEnforcement(dmarcCoverage(ob))).toBeNull();
+	});
+
+	it('self-host domain page for docs.npmjs-style pct=5: p=quarantine at pct=5, and says so', async () => {
+		const selfDomain = { ...domain, rua_address: 'rua@reports.mozilla.test' };
+		renderApp(<DnsRecords domain={selfDomain as never} />, {
+			routes: { 'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false }, 'GET /api/domains/7/onboarding-status': inheritRecord('v=DMARC1; p=quarantine; pct=5', 'quarantine') },
+		});
+		expect(await screen.findAllByText('v=DMARC1; p=quarantine; pct=5; rua=mailto:rua@reports.mozilla.test')).not.toHaveLength(0);
+		expect(screen.getByText(/it keeps p=quarantine at pct=5 and adds/)).toBeInTheDocument();
+		expect(screen.queryByText('v=DMARC1; p=quarantine; rua=mailto:rua@reports.mozilla.test')).not.toBeInTheDocument();
+	});
+});
+
+describe('self-host failed lookup: no required authorization record when nothing is offered', () => {
+	it('wizard step 4', async () => {
+		const selfDomain = { ...domain, rua_address: 'rua@reports.mozilla.test' };
+		stepAt(4, onboarding({ rua_address: 'rua@reports.mozilla.test', dmarc: { found: false, has_our_rua: false, current_record: null, auth_record: { found: false, record_name: 'developer.mozilla.test._report._dmarc.reports.mozilla.test' }, effective: null } }), {}, selfDomain);
+		expect(await screen.findByText(/could not tell which DMARC policy applies/)).toBeInTheDocument();
+		expect(screen.queryByText('Report authorization record')).not.toBeInTheDocument();
+	});
+});
+
+describe('repeat verify', () => {
+	it('says "Already verified", not "Ownership verified"', async () => {
+		const claim = { id: 5, domain: 'acme-agency.com', status: 'pending', txt_name: '_inboxangel.acme-agency.com', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
+		renderApp(<AddDomainPage />, {
+			status: HOSTED,
+			routes: {
+				'GET /api/zones': fail(400),
+				'POST /api/domains': { __status: 202, body: { pending: true, claim, domain: null } },
+				'POST /api/domains/claims/5/verify': { domain: { ...domain, id: 9, domain: 'acme-agency.com' }, resumed: true },
+				'GET /api/domains': { domains: [] },
+				'GET /api/domains/claims/5/preview': fail(404),
+			},
+		});
+		const user = (await import('@testing-library/user-event')).default.setup();
+		await user.type(await screen.findByLabelText('Your domain'), 'acme-agency.com');
+		await user.click(screen.getByRole('button', { name: 'Continue' }));
+		await user.click(await screen.findByRole('button', { name: 'Verify' }));
+		expect(await screen.findByText('Already verified')).toBeInTheDocument();
+		expect(screen.queryByText('Ownership verified')).not.toBeInTheDocument();
+	});
+});
+
+describe('domain page for a name that does not resolve', () => {
+	const page = (nxdomain: boolean) =>
+		renderApp(
+			<Routes>
+				<Route path="/domains/:id" element={<DomainDetailPage />} />
+			</Routes>,
+			{
+				route: '/domains/7',
+				status: HOSTED,
+				routes: {
+					'GET /api/domains': { domains: [domain] },
+					'GET /api/domains/7/onboarding-status': onboarding({ nxdomain }, none),
+					'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
+					'GET /api/domains/7/wizard-state': wizard,
+					'GET /api/hosted/config': { enabled: true },
+					'GET /api/domains/7/hosted': { enabled: false },
+				},
+			},
+		);
+
+	it('no "Continue setup" and no "Enable hosted records"', async () => {
+		page(true);
+		expect(await screen.findByText('This domain does not resolve')).toBeInTheDocument();
+		expect(screen.queryByText('Continue setup')).not.toBeInTheDocument();
+		expect(screen.queryByText('Enable hosted records')).not.toBeInTheDocument();
+	});
+
+	it('a resolving name still shows them', async () => {
+		page(false);
+		expect(await screen.findByText('Continue setup')).toBeInTheDocument();
 	});
 });

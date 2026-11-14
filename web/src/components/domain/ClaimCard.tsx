@@ -24,7 +24,7 @@ function verifyFailure(e: unknown): string {
  * A domain that is not ours to monitor yet: add this TXT record to prove ownership, then Verify.
  * `pending` has no reports, stats or DNS: only the claim exists. `lost` can only be removed.
  */
-export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, preview }: { claim: DomainClaim; onVerified?: (domain: Domain) => void; onRemoved?: () => void; canWrite?: boolean; /** Show what public DNS says about the domain: `true` loads it now, `'lazy'` waits for a click. */ preview?: boolean | 'lazy' }) {
+export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, preview }: { claim: DomainClaim; onVerified?: (domain: Domain, info: { resumed: boolean }) => void; onRemoved?: () => void; canWrite?: boolean; /** Show what public DNS says about the domain: `true` loads it now, `'lazy'` waits for a click. */ preview?: boolean | 'lazy' }) {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const [error, setError] = useState('');
@@ -34,10 +34,11 @@ export function ClaimCard({ claim, onVerified, onRemoved, canWrite = true, previ
 	const refresh = () => qc.invalidateQueries({ queryKey: ['domains'] });
 
 	const verify = useMutation({
-		mutationFn: () => api<{ domain: Domain }>(`/api/domains/claims/${claim.id}/verify`, { method: 'POST' }),
+		mutationFn: () => api<{ domain: Domain; resumed?: boolean }>(`/api/domains/claims/${claim.id}/verify`, { method: 'POST' }),
 		onSuccess: async (res) => {
 			await refresh();
-			if (onVerified) onVerified(res.domain);
+			// `resumed`: the workspace already had the domain, so this press verified nothing new.
+			if (onVerified) onVerified(res.domain, { resumed: res.resumed === true });
 			else navigate(`/domains/${res.domain.id}`);
 		},
 		onError: (e) => {

@@ -181,7 +181,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 				}
 			/>
 			<ReadOnlyNotice />
-			<SetupBanner domainId={domain.id} />
+			{/* A name that does not resolve has no setup to continue and nothing to host. */}
+			{onboarding.data?.nxdomain ? null : <SetupBanner domainId={domain.id} />}
 			{/* A name DNS says does not exist has no records to report on: the DNS records card says so once. */}
 			{onboarding.data?.nxdomain ? null : <HealthReportSection domainId={domain.id} />}
 
@@ -244,7 +245,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			</Section>
 			)}
 
-			<HostedPanel key={domain.id} domainId={domain.id} />
+			{onboarding.data?.nxdomain ? null : <HostedPanel key={domain.id} domainId={domain.id} />}
 			<DnsRecords domain={domain} />
 			<Rollout domain={domain} />
 

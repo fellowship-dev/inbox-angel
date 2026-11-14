@@ -14,7 +14,7 @@ import { useHosted } from '../../lib/session';
 import { normalizeDomain } from '../../lib/dmarc';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
 import { domainKeys, useOnboardingStatus, type DnsCheck } from '../../lib/domain-queries';
-import { dmarcCoverage, inheritedSentence, offerPolicy } from '../../lib/dmarc-coverage';
+import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement, recordFor } from '../../lib/dmarc-coverage';
 import { clearSignupDomainIf, readSignupDomain } from '../../lib/signup-intent';
 import type { AddDomainResult, PendingDomainResult } from '../../lib/types';
 
@@ -78,7 +78,7 @@ function LiveDnsCheck({ q, rua }: { q: ReturnType<typeof useLiveDnsCheck>; rua: 
 function SetupStep({ result }: { result: AddDomainResult }) {
 	const { domain } = result;
 	const hosted = useHosted();
-	if (hosted && !hasReportAddress(domain.rua_address)) return <HostedVerified domain={domain} />;
+	if (hosted && !hasReportAddress(domain.rua_address)) return <HostedVerified domain={domain} resumed={result.resumed} />;
 	return <SelfHostSetupStep result={result} />;
 }
 
@@ -86,7 +86,7 @@ function SetupStep({ result }: { result: AddDomainResult }) {
  * Hosted, before report intake: the domain is in, but there is no report address, so there is no rua= record to add.
  * Point to what works now (the live DNS checks in the setup wizard) and say plainly that reports are not connected.
  */
-function HostedVerified({ domain }: { domain: AddDomainResult['domain'] }) {
+function HostedVerified({ domain, resumed = false }: { domain: AddDomainResult['domain']; resumed?: boolean }) {
 	return (
 		<div className="max-w-2xl space-y-6">
 			<PageHeader
@@ -95,7 +95,7 @@ function HostedVerified({ domain }: { domain: AddDomainResult['domain'] }) {
 				eyebrow={
 					<Badge variant="success">
 						<CheckCircle2 aria-hidden />
-						Ownership verified
+						{resumed ? 'Already verified' : 'Ownership verified'}
 					</Badge>
 				}
 			/>
@@ -124,10 +124,10 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	const live = lookup === 'done' && q.data?.found ? q.data.current_record : null;
 	const livePolicy = parseDmarcPolicy(live);
 	// No record of its own: the new one replaces what it inherits, so it starts at the inherited policy when that enforces.
-	const floor = live ? (livePolicy ?? 'none') : offerPolicy(coverage);
+	const floor = live ? { policy: 'none' as const, pct: 100 } : offerEnforcement(coverage);
 	// DNS says the name does not exist: there is no record to add anywhere.
 	const nxdomain = ob.data?.nxdomain === true;
-	const record = rua && lookup === 'done' && floor && !nxdomain ? buildRecommendedRecord(live, floor, rua) : null;
+	const record = rua && lookup === 'done' && floor && !nxdomain ? (live ? buildRecommendedRecord(live, livePolicy ?? 'none', rua) : recordFor(floor, rua)) : null;
 	const inPlace = lookup === 'done' && !!q.data?.found && !!q.data.has_rua;
 	const offered = record !== null && !inPlace;
 
@@ -139,7 +139,7 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 	else if (inPlace) heading = { title: 'Your DNS record is in place', description: `The DMARC record for ${domain.domain} already sends reports here.` };
 	else if (live) heading = { title: 'Update your DMARC record', description: `${domain.domain} already has a DMARC record. Replace it with this one: it keeps your settings and adds our reports address.` };
 	else if (!floor) heading = { title: 'Could not tell which DMARC policy applies', description: `We could not tell whether a parent domain's policy covers ${domain.domain}, so no record is offered until the lookup works.` };
-	else if (coverage.kind === 'inherited') heading = { title: 'Add this DNS record', description: `${inheritedSentence(domain.domain, coverage)} To receive reports here, add this TXT record: it keeps p=${floor} and adds our reports address.` };
+	else if (coverage.kind === 'inherited') heading = { title: 'Add this DNS record', description: `${inheritedSentence(domain.domain, coverage)} To receive reports here, add this TXT record: it keeps ${floor ? keptEnforcement(coverage, floor) : ''} and adds our reports address.` };
 	else heading = { title: 'Add this DNS record', description: `Log in to wherever you manage ${domain.domain} (GoDaddy, Namecheap, Cloudflare, Route 53 …) and add this TXT record.` };
 
 	return (
@@ -164,7 +164,7 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 			{offered ? (
 				<RecordBlock title="DMARC record" record={{ type: 'TXT', name: `_dmarc.${domain.domain}`, value: record, ttl: '3600 (or your provider default)' }} />
 			) : null}
-			{offered && !live && floor === 'none' ? (
+			{offered && !live && floor?.policy === 'none' ? (
 				<p className="text-sm text-ink-2">
 					<strong className="text-ink-1">p=none</strong> means you are just watching. No email gets blocked or redirected. Once DMARC reports start coming in (usually within 24 hours), the dashboard shows whether your mail is fully aligned and when it is safe to enforce.
 				</p>
@@ -174,7 +174,8 @@ function SelfHostSetupStep({ result }: { result: AddDomainResult }) {
 					Your policy stays <strong className="text-ink-1">p={livePolicy ?? 'as published'}</strong>: only the reports address is added, so nothing about how your mail is handled changes.
 				</p>
 			) : null}
-			{result.manual_dns && result.dns_instructions ? (
+			{/* The authorization record goes with a DMARC record: when none is offered (unknown policy, no such name), none is required. */}
+			{result.manual_dns && result.dns_instructions && (offered || inPlace || !!live) ? (
 				<Alert variant="warning" title="Also add">
 					{result.dns_instructions}
 				</Alert>
@@ -216,7 +217,7 @@ export function AddDomainPage() {
 		return (
 			<div className="max-w-2xl space-y-6">
 				<PageHeader title="Verify you own this domain" description="One DNS record and we can start. Nothing is monitored until it is verified." />
-				<ClaimCard claim={pending.claim} preview onVerified={(d) => setResult({ domain: d, rua_hint: '' })} onRemoved={() => { setPending(null); setInput(''); }} />
+				<ClaimCard claim={pending.claim} preview onVerified={(d, { resumed }) => setResult({ domain: d, rua_hint: '', resumed })} onRemoved={() => { setPending(null); setInput(''); }} />
 				<p className="text-sm text-ink-2">
 					You can leave this page: the domain stays under “Waiting for verification” on the <Link className="text-brand-ink underline underline-offset-4" to="/">Domains</Link> page.
 				</p>

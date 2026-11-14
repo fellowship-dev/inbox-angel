@@ -180,13 +180,13 @@ describe('hosted setup wizard', () => {
 		expect(await screen.findByRole('heading', { name: 'DMARC reports' })).toBeInTheDocument();
 		expect(screen.getByText('Not connected')).toBeInTheDocument();
 		expect(screen.getByText('Reports not connected yet')).toBeInTheDocument();
-		expect(screen.getByRole('navigation', { name: 'Setup progress' })).toHaveTextContent('Step 5 of 5: Reports');
+		// One count: hosted progress is out of four, and the Reports page carries no "Step 5 of 5" marker.
+		expect(screen.queryByRole('navigation', { name: 'Setup progress' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /Set up email routing|Register email destination/ })).not.toBeInTheDocument();
 		expect(document.body.textContent).not.toMatch(/reports\.acme\.com|rua@reports/);
 		expectSafeTalkLink(screen.getAllByRole('link', { name: /Talk to Max/ })[0]!);
 		// Not counted and not ticked: progress is out of four, and leaving the step saves nothing.
 		expect(screen.getByText('4 of 4 steps complete')).toBeInTheDocument();
-		expect(screen.getByRole('navigation', { name: 'Setup progress' }).textContent).not.toContain('Reports(complete)');
 		const user = userEvent.setup();
 		await user.click(screen.getByRole('button', { name: 'Go to dashboard' }));
 		expect(await screen.findByText('Domain page')).toBeInTheDocument();

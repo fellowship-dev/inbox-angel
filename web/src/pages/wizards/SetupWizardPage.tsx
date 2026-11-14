@@ -45,15 +45,20 @@ function Frame({ title, subtitle, skipTo, wizard, current, children }: { title: 
 						<Link to={skipTo}>Skip setup</Link>
 					</Button>
 				</div>
-				<WizardProgress
-					label="Setup progress"
-					current={current}
-					steps={stepLabels(hosted).map((label, i) => ({
-						label,
-						// Hosted: the Reports step only reports "not connected", so it is never shown as done.
-						state: hosted && STEP_KEYS[i] === 'routing' ? 'pending' : wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
-					}))}
-				/>
+				{/* Hosted counts four steps (the Reports page only says reports are not connected), so the progress line
+				    and the "n of 4 steps complete" header use the same count; the Reports page shows no step marker. */}
+				{hosted && current >= 4 ? null : (
+					<WizardProgress
+						label="Setup progress"
+						current={current}
+						steps={stepLabels(hosted)
+							.slice(0, hosted ? 4 : undefined)
+							.map((label, i) => ({
+								label,
+								state: wizard[STEP_KEYS[i] ?? 'domain'] === 'complete' ? 'complete' : wizard[STEP_KEYS[i] ?? 'domain'] === 'skipped' ? 'skipped' : 'pending',
+							}))}
+					/>
+				)}
 			</header>
 			<ReadOnlyNotice />
 			{children}

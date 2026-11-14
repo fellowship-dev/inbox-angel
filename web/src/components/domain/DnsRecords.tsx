@@ -5,7 +5,7 @@ import { api, errorMessage } from '../../lib/api';
 import { isRevokedDkimKey } from '../../lib/dkim';
 import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../lib/dkim-wildcard';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../lib/dmarc-record';
-import { dmarcCoverage, inheritedSentence, offerPolicy } from '../../lib/dmarc-coverage';
+import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement, recordFor } from '../../lib/dmarc-coverage';
 import { domainKeys, invalidateDomain, useDnsCheck, useOnboardingStatus } from '../../lib/domain-queries';
 import { useHosted } from '../../lib/session';
 import type { Domain } from '../../lib/types';
@@ -46,8 +46,9 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 	// No record of its own: a new one replaces what the name inherits, so it starts at the inherited policy when that
 	// enforces, and nothing is offered while the policy that applies is unknown. Never weaker than the effective policy.
 	const coverage = dmarcCoverage(onboarding.data ?? null, onboarding.isError || (onboarding.data?.dns_errors ?? []).some((e) => e.startsWith('dmarc:')));
-	const floor = current ? policy : offerPolicy(coverage);
-	const recommended = buildRecommendedRecord(current, floor ?? 'none', domain.rua_address);
+	// With a record: keep its policy and add our address. Without: exactly the enforcement in force (policy and pct).
+	const floor = current ? null : offerEnforcement(coverage);
+	const recommended = current ? buildRecommendedRecord(current, policy, domain.rua_address) : recordFor(floor ?? { policy: 'none', pct: 100 }, domain.rua_address);
 	const dmarcName = `_dmarc.${domain.domain}`;
 	const cfAvailable = !!(dns.data?.cf_managed || onboarding.data?.cf_available);
 
@@ -126,7 +127,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 		// Without a report address of our own, no record can send reports here, whatever the lookup matched.
 		const has_rua = dns.data.has_rua && ruaReady;
 		const status: CheckStatus = found && has_rua ? 'pass' : found ? 'warn' : !found && coverage.kind === 'inherited' && (coverage.policy === 'quarantine' || coverage.policy === 'reject') ? 'warn' : 'missing';
-		const offerBlocked = !found && floor === null;
+		const offerBlocked = !found && !floor;
 		const upToDate = !ruaReady || offerBlocked || (found && has_rua && current === recommended);
 		return (
 			<CheckResult
@@ -138,7 +139,7 @@ export function DnsRecords({ domain }: { domain: Domain }) {
 						: !found && offerBlocked
 							? `No TXT record at ${dmarcName}, and we could not tell whether a parent domain's policy covers this name, so no record is offered.`
 							: !found && coverage.kind === 'inherited'
-								? `${inheritedSentence(domain.domain, coverage)} To receive reports here, publish the record below: it keeps p=${floor} and adds Inbox Angel's report address.`
+								? `${inheritedSentence(domain.domain, coverage)} To receive reports here, publish the record below: it keeps ${floor ? keptEnforcement(coverage, floor) : ''} and adds Inbox Angel's report address.`
 							: !found
 							? `No TXT record at ${dmarcName}. Add the record below so reports start arriving.`
 							: has_rua

@@ -8,7 +8,7 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
-import { dmarcCoverage, inheritedSentence, offerPolicy } from '../../../lib/dmarc-coverage';
+import { dmarcCoverage, inheritedSentence, keptEnforcement, offerEnforcement, recordFor } from '../../../lib/dmarc-coverage';
 import { useHosted } from '../../../lib/session';
 import { buildRecommendedRecord, hasReportAddress, parseDmarcPolicy } from '../../../lib/dmarc-record';
 import type { OnboardingStatus } from '../../../lib/types';
@@ -58,12 +58,12 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	// inherited policy, so an inherited, unknown or failed lookup gets no offer: never weaker than the effective policy.
 	// Self-host with no record of its own: the new record replaces whatever it inherits, so it starts at the inherited
 	// policy when that enforces (never weaker), and nothing is offered when the policy that applies is unknown.
-	const floor = offerPolicy(coverage);
+	const floor = offerEnforcement(coverage);
 	const recommended = rua
 		? dmarc.current_record
 			? buildRecommendedRecord(dmarc.current_record, parseDmarcPolicy(dmarc.current_record) ?? 'none', rua)
 			: floor
-				? buildRecommendedRecord(null, floor, rua)
+				? recordFor(floor, rua)
 				: null
 		: hostedNoReports && coverage.kind === 'none'
 			? buildRecommendedRecord(null, 'none', null)
@@ -147,7 +147,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 					{rua && !applied && coverage.kind === 'inherited' ? (
 						<p className="text-sm text-ink-2">
 							{inheritedSentence(status.domain, coverage)}
-							{floor ? ` To receive reports here, publish the record below: it keeps p=${floor} and adds Inbox Angel's report address.` : ''}
+							{floor ? ` To receive reports here, publish the record below: it keeps ${keptEnforcement(coverage, floor)} and adds Inbox Angel's report address.` : ''}
 						</p>
 					) : null}
 					{rua && !applied && coverage.kind === 'unknown' && !dmarc.found ? (
@@ -192,7 +192,8 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 				</>
 			)}
 
-			{auth && !hostedNoReports ? (
+			{/* The authorization record only matters next to a DMARC record: none published and none offered, none required. */}
+			{auth && !hostedNoReports && (dmarc.found || !!recommended) ? (
 				<section aria-label="Report authorization record" className="space-y-2">
 					<h3 className="text-sm font-semibold text-ink-1">Report authorization record</h3>
 					<CheckResultList>
