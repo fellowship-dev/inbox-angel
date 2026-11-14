@@ -4,15 +4,8 @@
  * been run, and says so clearly if not.
  */
 
-/**
- * The specific migrations this build of the code needs, by file name. The guard checks that EACH of them is recorded in `d1_migrations`; it does
- * not require a contiguous sequence and does not look at "the latest": a gap (0010 applied later, or never, by a branch that is not merged) and
- * newer migrations from other branches (0012…) are fine. Add a name here when code starts to depend on a new migration; never remove one.
- */
-export const REQUIRED_MIGRATIONS: readonly string[] = ['0011_intake_hardening.sql'];
-
-/** The newest of the required migrations (kept for callers that name one). */
-export const REQUIRED_MIGRATION = REQUIRED_MIGRATIONS[REQUIRED_MIGRATIONS.length - 1];
+/** The newest migration this build of the code depends on. Bump with every new migration. */
+export const REQUIRED_MIGRATION = '0010_intake_hardening.sql';
 
 export class SchemaNotReadyError extends Error {
 	constructor(detail: string) {
@@ -31,11 +24,11 @@ export async function assertSchemaReady(db: D1Database): Promise<void> {
 	if (verified) return;
 	let row: { n: number } | null;
 	try {
-		row = await db.prepare(`SELECT COUNT(*) AS n FROM d1_migrations WHERE name IN (${REQUIRED_MIGRATIONS.map(() => '?').join(', ')})`).bind(...REQUIRED_MIGRATIONS).first<{ n: number }>();
+		row = await db.prepare('SELECT COUNT(*) AS n FROM d1_migrations WHERE name = ?').bind(REQUIRED_MIGRATION).first<{ n: number }>();
 	} catch {
 		throw new SchemaNotReadyError('no migration history found');
 	}
-	if (!row || row.n < REQUIRED_MIGRATIONS.length) throw new SchemaNotReadyError(`${REQUIRED_MIGRATIONS.join(', ')} ${REQUIRED_MIGRATIONS.length === 1 ? 'has' : 'have'} not been applied`);
+	if (!row || row.n === 0) throw new SchemaNotReadyError(`${REQUIRED_MIGRATION} has not been applied`);
 	verified = true;
 }
 

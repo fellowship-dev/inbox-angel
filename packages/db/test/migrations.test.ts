@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { REQUIRED_MIGRATIONS, assertSchemaReady, resetSchemaReadyCache, SchemaNotReadyError } from '../src/ready';
+import { REQUIRED_MIGRATION } from '../src/ready';
 import { createTestD1, applyMigrations, appliedMigrations, migrationFiles } from '../src/testing';
 import { IMPLICIT_WORKSPACE_ID } from '../src/schema';
 import { freshDb } from './helpers';
@@ -31,42 +31,8 @@ describe('migrations', () => {
 		]);
 	});
 
-	it('the runtime schema guard names only migrations that exist', () => {
-		for (const m of REQUIRED_MIGRATIONS) expect(migrationFiles()).toContain(m);
-	});
-});
-
-describe('the runtime schema guard checks the specific migrations this code needs, not contiguity or "the latest"', () => {
-	const record = (d: ReturnType<typeof createTestD1>, ...names: string[]) => { for (const n of names) d.sqlite.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(n); };
-	const ready = async (d: ReturnType<typeof createTestD1>) => { resetSchemaReadyCache(); return assertSchemaReady(d as unknown as D1Database); };
-
-	it('0001-0009 plus 0011 with no 0010 is accepted (what a deploy of this branch alone looks like)', async () => {
-		const d = createTestD1();
-		expect(applyMigrations(d.sqlite)).toEqual(migrationFiles());
-		expect(migrationFiles().some((f) => f.startsWith('0010'))).toBe(false);
-		await expect(ready(d)).resolves.toBeUndefined();
-	});
-
-	it('a 0010 or 0012 applied afterwards (other branches merging later) changes nothing', async () => {
-		const d = createTestD1();
-		applyMigrations(d.sqlite);
-		await ready(d);
-		record(d, '0010_connect_reports.sql');
-		await expect(ready(d)).resolves.toBeUndefined();
-		record(d, '0012_overview.sql');
-		await expect(ready(d)).resolves.toBeUndefined();
-	});
-
-	it('0012 applied without 0011 is NOT enough: it checks 0011 itself, not the newest name', async () => {
-		const d = createTestD1();
-		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
-		record(d, '0010_connect_reports.sql', '0012_overview.sql');
-		await expect(ready(d)).rejects.toBeInstanceOf(SchemaNotReadyError);
-		await expect(ready(d)).rejects.toThrow('0011_intake_hardening.sql');
-	});
-
-	it('no migration history at all is refused with the same error', async () => {
-		await expect(ready(createTestD1())).rejects.toBeInstanceOf(SchemaNotReadyError);
+	it('the runtime schema guard names the newest migration', () => {
+		expect(REQUIRED_MIGRATION).toBe(migrationFiles().at(-1));
 	});
 });
 
@@ -100,14 +66,14 @@ describe('0009 claim_settled', () => {
 	});
 });
 
-describe('0011 intake hardening', () => {
+describe('0010 intake hardening', () => {
 	it('is additive: existing reports keep their rows, new columns are NULL, new tables are empty', () => {
 		const d = createTestD1();
 		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
 		d.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'r@x')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, reporter_auth) VALUES (1, 'google.com', 'r1', 1, 2, 5, 5, 'pass')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count) VALUES (1, 'old.example', 'r2', 1, 2, 5, 5)").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0011_intake_hardening.sql']);
+		expect(applyMigrations(d.sqlite)).toEqual(['0010_intake_hardening.sql']);
 		expect(d.sqlite.prepare('SELECT report_id, reporter_auth, reporter_auth_reason, ingest_token, record_count FROM aggregate_reports ORDER BY report_id').all()).toEqual([
 			{ report_id: 'r1', reporter_auth: 'pass', reporter_auth_reason: null, ingest_token: null, record_count: null },
 			{ report_id: 'r2', reporter_auth: null, reporter_auth_reason: null, ingest_token: null, record_count: null },

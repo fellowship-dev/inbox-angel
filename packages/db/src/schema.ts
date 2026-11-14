@@ -160,15 +160,15 @@ export const aggregateReports = sqliteTable(
 		reporter_auth_domain: text('reporter_auth_domain'),
 		/** Why reporter_auth is not 'pass' (a reason code from src/hosted/reasons.ts), or null. */
 		reporter_auth_reason: text('reporter_auth_reason'),
-		/** What the intake decided: 'counted' (authenticated and a known reporter), 'unknown' (authenticated, not known), 'unauthenticated'. Null: stored before 0011. */
+		/** What the intake decided: 'counted' (authenticated and a known reporter), 'unknown' (authenticated, not known), 'unauthenticated'. Null: stored before 0010. */
 		reporter_tier: text('reporter_tier'),
 		/** Organisation of the known-reporters entry that matched, for 'counted'. */
 		reporter_known_as: text('reporter_known_as'),
-		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>'. Null: stored before 0011. */
+		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>'. Null: stored before 0010. */
 		reporter_identity: text('reporter_identity'),
-		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0011). Null: stored before 0011. */
+		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0010). Null: stored before 0010. */
 		ingest_token: text('ingest_token'),
-		/** Rows stored in report_records for this report. Null: stored before 0011. */
+		/** Rows stored in report_records for this report. Null: stored before 0010. */
 		record_count: integer('record_count'),
 	},
 	(t) => [

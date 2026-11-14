@@ -131,7 +131,7 @@ export function lifecycleQueries(dbLike: DbLike) {
 
 		/**
 		 * Recount what workspaces hold (workspace_storage and the instance total) for up to `workspaces` of them, least recently
-		 * recounted first: the live counters move with every store and purge, this repairs any drift (and counts data stored before 0011).
+		 * recounted first: the live counters move with every store and purge, this repairs any drift (and counts data stored before 0010).
 		 */
 		reconcileStorage: async (limits: SweepLimits, workspaces = 5): Promise<SweepResult> => {
 			if (limits.budget.left < 3) return { deleted: 0, truncated: true }; // three statements: pick, recount, instance total

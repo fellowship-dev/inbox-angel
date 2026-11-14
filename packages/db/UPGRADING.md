@@ -14,9 +14,9 @@ Local dev database: `npm run migrate:local`.
 
 Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.
 
-## Intake hardening (0011)
+## Intake hardening (0010)
 
-Migration `0011_intake_hardening.sql` is additive: three nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`), the tables `intake_quota`, `workspace_storage` and `intake_failures`, and indexes. Apply it before serving the new Worker (the schema guard requires it; `0009` and any other lower-numbered migration are applied first, in name order; a gap in the numbering (`0010` is reserved) is harmless). Existing reports keep working. **Behaviour change:** on `MODE=saas` only reports whose sender was proven (`reporter_auth = 'pass'`) feed the numbers (`REPORT_COUNTING=proven`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
+Migration `0010_intake_hardening.sql` is additive: nullable `aggregate_reports` columns (`ingest_token`, `record_count`, `reporter_auth_reason`, `reporter_tier`, `reporter_known_as`, `reporter_identity`), the tables `intake_quota`, `workspace_storage`, `intake_failures` and `reporter_candidate_days`, and indexes. Apply it before serving the new Worker (the schema guard requires it; `0009` and any other lower-numbered migration are applied first, in name order). Existing reports keep working. **Behaviour change:** on `MODE=saas` only reports from a known reporter whose email authenticated (`reporter_tier = 'counted'`) feed the numbers (`REPORT_COUNTING=registry`); self-host keeps counting everything (`REPORT_COUNTING=all`). `workspace_storage` is filled by the daily retention job (5 workspaces per run) for data stored before this migration.
 
 ## DNS check time
 
@@ -41,14 +41,14 @@ created before the reset must be recreated (`wrangler d1 export` a backup if you
 
 * `wrangler d1 migrations apply` runs the unapplied files in `/migrations` in name order, each in one transaction, and records
   them by file name in `d1_migrations`. `npm run migrate` is a thin wrapper around it.
-* The Worker never changes the schema. On startup it checks that every name in `REQUIRED_MIGRATIONS` (`src/ready.ts`: the specific
-  migrations this build depends on; not a contiguous run and not "the latest", so a gap or a newer migration from another branch is fine) is recorded in `d1_migrations`; if not it answers `503` with "Database schema is out of date … run
+* The Worker never changes the schema. On startup it checks that `REQUIRED_MIGRATION` (`src/ready.ts`: the newest migration
+  this build depends on) is recorded in `d1_migrations`; if not it answers `503` with "Database schema is out of date … run
   `npm run migrate`" (cron and email handlers log the same message).
 * `test/schema-drift.test.ts` and `test/drizzle-baseline.test.ts` fail if `src/schema.ts` and `/migrations` disagree.
 
 ## Adding a migration
 
-See [SCHEMA.md](SCHEMA.md#3-changing-the-schema). Never edit a released migration; add a new numbered file and add its name to `REQUIRED_MIGRATIONS`.
+See [SCHEMA.md](SCHEMA.md#3-changing-the-schema). Never edit a released migration; add a new numbered file and bump `REQUIRED_MIGRATION`.
 Prefer additive changes (new tables, nullable or defaulted columns) so the old Worker keeps running while you migrate.
 
 ## Rollback

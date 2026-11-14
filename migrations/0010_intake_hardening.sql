@@ -3,14 +3,14 @@
 --
 -- aggregate_reports.ingest_token          random id of the storing attempt. The records of a report are inserted in the same
 --                                         db.batch() as the report row, joined on this token, so a re-delivery (different token)
---                                         inserts no records and a failed batch leaves nothing behind. NULL: stored before 0011.
--- aggregate_reports.record_count          rows stored in report_records for this report. NULL: stored before 0011.
+--                                         inserts no records and a failed batch leaves nothing behind. NULL: stored before 0010.
+-- aggregate_reports.record_count          rows stored in report_records for this report. NULL: stored before 0010.
 -- aggregate_reports.reporter_auth_reason  why reporter_auth is not 'pass' (a reason code), or NULL.
 -- aggregate_reports.reporter_tier         what the intake decided about the sender: 'counted' (carrier authenticated AND a registry reporter),
 --                                         'unknown' (authenticated, self-consistent, not in the registry: stored, not counted) or
---                                         'unauthenticated' (stored, not counted, 30-day retention). NULL: stored before 0011.
+--                                         'unauthenticated' (stored, not counted, 30-day retention). NULL: stored before 0010.
 -- aggregate_reports.reporter_identity     who the intake took the sender to be: the registry id, else the authenticated organisational domain,
---                                         else '~unauth'. NULL: stored before 0011. When set, report_id holds '<identity>|<id from the report>'
+--                                         else '~unauth'. NULL: stored before 0010. When set, report_id holds '<identity>|<id from the report>'
 --                                         (the existing UNIQUE(domain_id, report_id) therefore dedups per reporter: a forger cannot squat a real
 --                                         reporter's report id, and a counted report supersedes an uncounted one with the same id).
 -- aggregate_reports.reporter_known_as     the registry entry's label ('Google'), for 'counted'.--
