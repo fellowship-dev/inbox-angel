@@ -114,6 +114,9 @@ describe('connecting reports (G1, fixed address)', () => {
     txt['_dmarc.a-corp.com'] = ['v=DMARC1; p=reject; rua=mailto:dmarc@a-corp.com'];
     const { body } = await w.connect(5);
     expect(body.dns.plan).toMatchObject({ kind: 'inherited', from: 'a-corp.com', policy: 'reject', own: { kind: 'add', name: '_dmarc.mail.a-corp.com', record: `v=DMARC1; p=reject; rua=mailto:dmarc@a-corp.com,mailto:${FIXED}` } });
+    expect(body.parent).toEqual({ domain_id: 1, domain: 'a-corp.com', connected: false });
+    await w.connect(1);
+    expect((await w.status(5)).parent).toEqual({ domain_id: 1, domain: 'a-corp.com', connected: true });
   });
 
   it('disconnect: reports for the domain are refused from then on; stored reports stay', async () => {

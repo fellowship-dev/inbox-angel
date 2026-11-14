@@ -99,7 +99,7 @@ describe('Connect reports', () => {
 			}),
 		});
 		expect(await screen.findByText(/has no DMARC record of its own/)).toBeInTheDocument();
-		expect(screen.getByText(/connect reports on parent\.test instead/)).toBeInTheDocument();
+		expect(screen.getByText(/add parent\.test to this workspace and connect reports there instead/)).toBeInTheDocument();
 		expect(screen.getByText(/later changes to parent\.test/)).toBeInTheDocument();
 		expect(screen.getByText(`v=DMARC1; p=reject; rua=mailto:${ADDR}`)).toBeInTheDocument();
 	});
@@ -188,5 +188,16 @@ describe('Connect reports', () => {
 		expect(screen.queryByText('Reports not connected yet')).not.toBeInTheDocument();
 		expect(await screen.findByText('Connected, record not published yet')).toBeInTheDocument();
 		expect(screen.queryByRole('heading', { name: 'DMARC reports' })).not.toBeInTheDocument();
+	});
+
+	it('inherited, parent connected in this workspace: says the reports arrive with the parent, links to it', async () => {
+		show({
+			'GET /api/domains/1/report-address': issued(
+				{ kind: 'inherited', from: 'parent.test', parent_record: 'v=DMARC1; p=reject', policy: 'reject', parent_has_address: false, own: { kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=reject; rua=mailto:${ADDR}`, created: true } },
+				{ parent: { domain_id: 9, domain: 'parent.test', connected: true } },
+			),
+		});
+		expect(await screen.findByText(/is connected here, so once its record lists the report address/)).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'parent.test' })).toHaveAttribute('href', '/domains/9');
 	});
 });

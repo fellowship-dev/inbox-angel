@@ -36,6 +36,7 @@ export interface ReportAddressView {
 	last_report_at: number | null;
 	state: ReportAddressState;
 	dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | null } | null;
+	parent?: { domain_id: number; domain: string; connected: boolean } | null;
 }
 
 export type ReportIntakeStatus = { available: false } | ReportAddressView;

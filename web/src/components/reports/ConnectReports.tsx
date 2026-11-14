@@ -96,7 +96,7 @@ function Panel({ domainId, domainName, bare }: { domainId: number; domainName: s
 		<div className="space-y-4 rounded-lg border border-line bg-surface-1 p-4" data-state={s.state}>
 			<StateLine s={s} />
 			<CopyField label="Report address" value={s.address} />
-			{s.dns?.plan ? <PlanView plan={s.dns.plan} domain={domainName} /> : null}
+			{s.dns?.plan ? <PlanView plan={s.dns.plan} domain={domainName} parent={s.parent ?? null} /> : null}
 			<div className="flex flex-wrap gap-2">
 				<Button variant="secondary" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
 					<RefreshCw aria-hidden />
@@ -151,7 +151,7 @@ function StateLine({ s }: { s: ReportAddressView }) {
 
 const Mono = ({ children }: { children: ReactNode }) => <code className="font-mono text-sm text-ink-1 [overflow-wrap:anywhere]">{children}</code>;
 
-function PlanView({ plan, domain }: { plan: ReportAddressPlan; domain: string }) {
+function PlanView({ plan, domain, parent }: { plan: ReportAddressPlan; domain: string; parent: ReportAddressView['parent'] }) {
 	if (plan.kind === 'published') return null;
 	if (plan.kind === 'multiple') {
 		return (
@@ -181,8 +181,21 @@ function PlanView({ plan, domain }: { plan: ReportAddressPlan; domain: string })
 					</Alert>
 				) : null}
 				<p className="text-sm text-ink-2">
-					To keep following {plan.from}, connect reports on {plan.from} instead: add it to this workspace if it is not here yet. Reports about {domain} then arrive with
-					its reports.
+					{parent?.connected ? (
+						<>
+							<Link to={`/domains/${parent.domain_id}`}>{plan.from}</Link> is connected here, so once its record lists the report address, reports about {domain} arrive
+							with its reports.
+						</>
+					) : parent ? (
+						<>
+							To keep following {plan.from}, connect reports on <Link to={`/domains/${parent.domain_id}`}>{plan.from}</Link> instead. Reports about {domain} then arrive with
+							its reports.
+						</>
+					) : (
+						<>
+							To keep following {plan.from}, add {plan.from} to this workspace and connect reports there instead. Reports about {domain} then arrive with its reports.
+						</>
+					)}
 				</p>
 				<p className="text-sm text-ink-2">
 					Or give {domain} a record of its own. It keeps the policy it has now (p={plan.policy}) and the addresses {plan.from} lists, but later changes to {plan.from}

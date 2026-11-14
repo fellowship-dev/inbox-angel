@@ -59,6 +59,8 @@ export interface ReportAddressView {
   state: ReportAddressState;
   /** The live DMARC check, made only when connected. `plan` is null when the lookup failed. */
   dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | InheritedPlan | null } | null;
+  /** When the domain follows its organizational domain's record: that domain, if this workspace has it, and whether its reports are connected. */
+  parent: { domain_id: number; domain: string; connected: boolean } | null;
 }
 
 export type ReportIntakeStatus = { available: false } | ReportAddressView;
@@ -101,6 +103,11 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
     const checked_at = Math.floor((deps.now?.() ?? Date.now()) / 1000);
     dns = { checked_at, error: lookup.status === 'error' ? (lookup.error ?? 'DNS lookup failed') : null, plan: planReportAddress(lookup, address) };
   }
+  let parent: ReportAddressView['parent'] = null;
+  if (dns?.plan?.kind === 'inherited') {
+    const row = await tenant.scope.domains.getByName(dns.plan.from);
+    if (row) parent = { domain_id: row.id, domain: row.domain, connected: !!(await connectedAddress(tenant, row, intakeDomain)) };
+  }
 
   let state: ReportAddressState = 'not_connected';
   if (address) {
@@ -109,7 +116,7 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
     else state = dns.plan.kind === 'published' ? 'waiting' : 'not_published';
   }
 
-  return { available: true, domain_id: domain.id, domain: domain.domain, managed_by, can_connect: !refusal, refusal, address, last_report_at, state, dns };
+  return { available: true, domain_id: domain.id, domain: domain.domain, managed_by, can_connect: !refusal, refusal, address, last_report_at, state, dns, parent };
 }
 
 function requireIntake(tenant: TenantContext): string {
