@@ -93,12 +93,12 @@ export async function completeWelcome(env: AuthEnv, email: string, password: str
 async function resetUnprovenNames(db: D1Database, userId: string, email: string, name: string): Promise<void> {
   const given = cleanName(name);
   await db.prepare('UPDATE users SET name = ?1 WHERE id = ?2').bind(given || email, userId).run();
-  const name = defaultWorkspaceName(given, email);
+  const workspaceName = defaultWorkspaceName(given, email);
   for (const m of await authLookups(db).membershipsOf(userId)) {
     if (m.role !== 'owner') continue;
     // Only a workspace this account alone is in: the one sign-up made (an unproven account can have done nothing else).
     if ((await forWorkspace(db, m.workspace_id).team.list()).length !== 1) continue;
-    await workspaceLifecycle(db).rename(m.workspace_id, name);
+    await workspaceLifecycle(db).rename(m.workspace_id, workspaceName);
   }
 }
 
