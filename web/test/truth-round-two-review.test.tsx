@@ -174,7 +174,7 @@ describe('review item 1: the add-domain page builds the record from the live one
 	const mine = { id: 7, domain: 'google.com', dmarc_policy: 'none', rua_address: 'r@reports.test', parent_id: null, created_at: 1, alerts_enabled: 1, is_default: 0 };
 	const add = async (d: typeof mine, dns: unknown) => {
 		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
-		const r = renderApp(<AddDomainPage />, { routes: { 'GET /api/zones': fail(400), 'POST /api/domains': { domain: d, rua_hint: '' }, 'GET /api/domains/7/dns-check': dns } });
+		const r = renderApp(<AddDomainPage />, { routes: { 'GET /api/zones': fail(400), 'POST /api/domains': { domain: d, rua_hint: '' }, 'GET /api/domains/7/dns-check': dns, 'GET /api/domains/7/onboarding-status': { domain_id: 7, dmarc: { found: false, has_our_rua: false, current_record: null } } } });
 		await user.type(await screen.findByLabelText('Your domain'), d.domain);
 		await user.click(screen.getByRole('button', { name: 'Continue' }));
 		return r;

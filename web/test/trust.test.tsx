@@ -54,6 +54,7 @@ describe('pending domain claims', () => {
 				'POST /api/domains': { __status: 202, body: { pending: true, claim: claim(), domain: null } },
 				'POST /api/domains/claims/5/verify': { domain },
 				'GET /api/domains/9/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
+				'GET /api/domains/9/onboarding-status': { domain_id: 9, dmarc: { found: false, has_our_rua: false, current_record: null } },
 			},
 		});
 		const user = userEvent.setup();
