@@ -50,6 +50,7 @@ export interface StoreReportInput {
 		org_name: string; report_id: string; date_begin: number; date_end: number;
 		total_count: number; pass_count: number; fail_count: number; raw_xml: string | null;
 		reporter_auth: string | null; reporter_auth_domain: string | null; reporter_auth_reason: string | null;
+		reporter_tier: string | null; reporter_known_as: string | null;
 	};
 	records: RecordTuple[];
 	/** Random id of this attempt (links the records to the row this batch inserted). */
@@ -64,8 +65,8 @@ export function storeStatements(i: StoreReportInput): SQL[] {
 	const ws = i.workspaceId;
 	const mine = sql`domain_id = ${i.domainId} AND report_id = ${r.report_id} AND ingest_token = ${i.ingestToken}`;
 	const out: SQL[] = [
-		sql`INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, raw_xml, workspace_id, reporter_auth, reporter_auth_domain, reporter_auth_reason, ingest_token, record_count)
-			VALUES (${i.domainId}, ${r.org_name}, ${r.report_id}, ${r.date_begin}, ${r.date_end}, ${r.total_count}, ${r.pass_count}, ${r.fail_count}, ${r.raw_xml}, ${ws}, ${r.reporter_auth}, ${r.reporter_auth_domain}, ${r.reporter_auth_reason}, ${i.ingestToken}, ${i.records.length})
+		sql`INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, raw_xml, workspace_id, reporter_auth, reporter_auth_domain, reporter_auth_reason, reporter_tier, reporter_known_as, ingest_token, record_count)
+			VALUES (${i.domainId}, ${r.org_name}, ${r.report_id}, ${r.date_begin}, ${r.date_end}, ${r.total_count}, ${r.pass_count}, ${r.fail_count}, ${r.raw_xml}, ${ws}, ${r.reporter_auth}, ${r.reporter_auth_domain}, ${r.reporter_auth_reason}, ${r.reporter_tier}, ${r.reporter_known_as}, ${i.ingestToken}, ${i.records.length})
 			ON CONFLICT DO NOTHING`,
 	];
 	for (const chunk of chunkJson(i.records)) {

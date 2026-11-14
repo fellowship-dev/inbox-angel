@@ -15,9 +15,9 @@ export interface IntakeLogLine {
   kind: IntakeKind;
   outcome: Outcome;
   reason: ReasonCode;
-  /** Did the receiver prove the reporter (null: not judged, e.g. refused before the report was read). */
-  proven: boolean | null;
-  /** The reporting organisation's domain as the report names it. */
+  /** What the intake decided about the sender: counted (authenticated and known), unknown (authenticated, not known), unauthenticated; null: refused before that. */
+  tier: 'counted' | 'unknown' | 'unauthenticated' | null;
+  /** The AUTHENTICATED sending domain (never the report's own claim). */
   reporter: string | null;
   /** Raw message size in bytes. */
   size: number;

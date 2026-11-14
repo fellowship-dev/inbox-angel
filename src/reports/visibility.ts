@@ -2,11 +2,13 @@
 // the report address and could not be stored. These are API fields; the dashboard, the digest and agents render them. They exist so the
 // UI never shows "no reports" (or a healthy-looking 100%) while reports were received and left out or lost.
 
-import type { UnverifiedSummary, CountingMode, FailureRow } from '@inbox-angel/db';
+import type { UncountedSummary, CountingMode, FailureRow } from '@inbox-angel/db';
 import type { TenantContext } from '../tenancy/context';
 import { intakeLimits } from '../hosted/config';
 import { hostedEnabled } from '../hosted/config';
 import { OWNER_VISIBLE, REASONS, type ReasonCode } from '../hosted/reasons';
+
+const authservConfigured = (env: { AUTHSERV_ID?: string; AUTHSERV_HEADER?: string }) => !!env.AUTHSERV_ID?.trim() && ['ar', 'arc'].includes(env.AUTHSERV_HEADER?.trim().toLowerCase() ?? '');
 
 const DAY = 86400;
 const day = (unix: number) => new Date(unix * 1000).toISOString().slice(0, 10);
@@ -18,7 +20,7 @@ export interface UncountedView {
   reports: number;
   messages: number;
   latest_at: number | null;
-  by_reporter: UnverifiedSummary['by_reporter'];
+  by_reporter: UncountedSummary['by_reporter'];
 }
 
 export type IntakeStatus = 'ok' | 'limited' | 'not_processed';
@@ -35,9 +37,11 @@ export interface IntakeView {
 
 export interface ReportVisibility {
   report_counting: CountingMode;
-  /** Stored reports whose sender the receiver did not prove (whatever the mode). */
-  unverified: UncountedView;
-  /** The part of `unverified` that is left out of the numbers (empty when report_counting is 'all'). */
+  /** Why nothing can be counted right now (AUTHSERV_* not set while the mode needs authentication), or null. */
+  counting_note: string | null;
+  /** Stored reports from senders we do not recognise (authenticated but not a known reporter, or not authenticated), whatever the mode. */
+  unrecognised: UncountedView;
+  /** The part that is left out of the numbers in this mode (empty when report_counting is 'all'). */
   uncounted: UncountedView;
   intake: IntakeView;
 }
@@ -47,8 +51,17 @@ const emptyUncounted = (): UncountedView => ({ reports: 0, messages: 0, latest_a
 export const STORAGE_LIMIT_NOTICE = 'Report storage limit reached; newer reports are not being stored';
 export const DAILY_LIMIT_NOTICE = 'Daily report limit reached for this address; newer reports are not being stored until tomorrow';
 
-/** "3 reports from senders we could not verify are not counted." (plain, specific; used by the digest, the API and the dashboard helper). */
-export const uncountedNotice = (n: number) => (n === 1 ? '1 report from a sender we could not verify is not counted.' : `${n} reports from senders we could not verify are not counted.`);
+/** "3 reports from senders we do not recognise are not counted." (plain, specific; used by the digest, the API and the dashboard helper). */
+export const uncountedNotice = (n: number, mode: CountingMode = 'known') =>
+  mode === 'authenticated'
+    ? (n === 1 ? '1 report from a sender that could not be authenticated is not counted.' : `${n} reports from senders that could not be authenticated are not counted.`)
+    : (n === 1 ? '1 report from a sender we do not recognise is not counted.' : `${n} reports from senders we do not recognise are not counted.`);
+
+/** For a server that counts every report: how many of them come from senders we do not recognise. */
+export const unrecognisedCountedNotice = (n: number) =>
+  n === 1 ? '1 report is from a sender we do not recognise; it is counted because this server counts every report.' : `${n} reports are from senders we do not recognise; they are counted because this server counts every report.`;
+
+export const AUTHSERV_NOTICE = 'Reports cannot be counted until AUTHSERV_ID and AUTHSERV_HEADER are set on this server.';
 
 /** "3 reports could not be processed" / "1 report could not be processed". */
 export const notProcessedNotice = (n: number) => `${n} ${n === 1 ? 'report' : 'reports'} received for this domain could not be processed`;
@@ -82,16 +95,19 @@ export function intakeView(failures: FailureRow[], usage: { addressMessagesToday
 /** Everything above for one domain: `since` (unix seconds) is the same window the numbers use. */
 export async function reportVisibility(tenant: TenantContext, domainId: number, since: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<ReportVisibility> {
   const counting = tenant.scope.counting;
-  const [unverified, failures, usage] = await Promise.all([
-    tenant.scope.reports.unverified(domainId, since),
+  const [unrecognised, uncounted, failures, usage] = await Promise.all([
+    tenant.scope.reports.unrecognised(domainId, since),
+    tenant.scope.reports.uncounted(domainId, since),
     tenant.scope.intake.failures(domainId, day(nowSeconds - FAILURE_WINDOW_DAYS * DAY)),
     tenant.scope.intake.usage(domainId, day(nowSeconds)),
   ]);
+  const hosted = hostedEnabled(tenant.env);
   return {
     report_counting: counting,
-    unverified,
-    uncounted: counting === 'proven' ? unverified : emptyUncounted(),
+    counting_note: counting !== 'all' && !authservConfigured(tenant.env) ? AUTHSERV_NOTICE : null,
+    unrecognised,
+    uncounted,
     // The caps only apply to hosted intake; self-host has no daily caps to hit.
-    intake: intakeView(failures, hostedEnabled(tenant.env) ? usage : null, hostedEnabled(tenant.env) ? intakeLimits(tenant.env) : null),
+    intake: intakeView(failures, hosted ? usage : null, hosted ? intakeLimits(tenant.env) : null),
   };
 }

@@ -160,6 +160,10 @@ export const aggregateReports = sqliteTable(
 		reporter_auth_domain: text('reporter_auth_domain'),
 		/** Why reporter_auth is not 'pass' (a reason code from src/hosted/reasons.ts), or null. */
 		reporter_auth_reason: text('reporter_auth_reason'),
+		/** What the intake decided: 'counted' (authenticated and a known reporter), 'unknown' (authenticated, not known), 'unauthenticated'. Null: stored before 0011. */
+		reporter_tier: text('reporter_tier'),
+		/** Organisation of the known-reporters entry that matched, for 'counted'. */
+		reporter_known_as: text('reporter_known_as'),
 		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0011). Null: stored before 0011. */
 		ingest_token: text('ingest_token'),
 		/** Rows stored in report_records for this report. Null: stored before 0011. */
@@ -173,7 +177,7 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_date_end').on(t.date_end),
 		index('idx_agg_reports_created').on(t.created_at),
 		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
-		index('idx_agg_reports_auth').on(t.workspace_id, t.reporter_auth, t.date_begin),
+		index('idx_agg_reports_tier').on(t.workspace_id, t.reporter_tier, t.date_begin),
 	],
 );
 
@@ -719,6 +723,7 @@ export const GLOBAL_TABLES = {
 	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
 	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
 	intake_quota: 'instance-wide intake counters per scope and day; a counter, no tenant content',
+	intake_unknown_reporters: 'authenticated sending domains that are not known reporters, for the instance owner: domain, count, first/last seen',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */
@@ -791,7 +796,7 @@ export const intakeUsage = sqliteTable(
 );
 
 /**
- * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'u:<domain_id>' (all unproven mail to one address),
+ * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'k:<domain_id>' (all mail from unknown reporters to one address),
  * 'w:<workspace_id>' and '*' (the instance). A counter, not tenant content (GLOBAL_TABLES).
  */
 export const intakeQuota = sqliteTable(
@@ -805,6 +810,14 @@ export const intakeQuota = sqliteTable(
 	},
 	(t) => [primaryKey({ columns: [t.scope, t.day] }), index('idx_intake_quota_day').on(t.day)],
 );
+
+/** Authenticated sending domains that are not known reporters, instance-wide (a list for the instance owner; no content, no customer). */
+export const intakeUnknownReporters = sqliteTable('intake_unknown_reporters', {
+	reporter: text('reporter').primaryKey(),
+	reports: integer('reports').notNull().default(0),
+	first_seen: integer('first_seen').notNull(),
+	last_seen: integer('last_seen').notNull(),
+});
 
 /** report_records rows a workspace holds right now: what the storage cap compares against. */
 export const workspaceStorage = sqliteTable('workspace_storage', {

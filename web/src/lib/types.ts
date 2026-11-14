@@ -124,8 +124,12 @@ export interface AggregateReport {
   /** Did the report email itself pass DMARC-aligned auth? null = reported before this was recorded. */
   reporter_auth?: 'pass' | 'fail' | 'none' | null;
   reporter_auth_domain?: string | null;
-  /** Why the sender was not verified (a reason code), or null. */
+  /** Why the sender was not authenticated (a reason code), or null. */
   reporter_auth_reason?: string | null;
+  /** What the intake decided: counted (authenticated and known), unknown (authenticated, not known), unauthenticated. Null: stored before senders were checked. */
+  reporter_tier?: 'counted' | 'unknown' | 'unauthenticated' | null;
+  /** The known-reporters organisation that matched. */
+  reporter_known_as?: string | null;
   /** Does this report feed the numbers (REPORT_COUNTING)? Absent on older servers. */
   counted?: boolean;
 }

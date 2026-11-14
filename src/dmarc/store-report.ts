@@ -7,7 +7,18 @@ import type { TenantContext } from '../tenancy/context';
 import type { RecordTuple } from '@inbox-angel/db';
 import { rawXmlRetentionDays } from '../lifecycle/config';
 import { sendFirstReportNotification } from '../notifications/first-report';
-import type { ReporterAuthResult } from './reporter-auth';
+import type { ReporterTier } from './reporter-auth';
+
+/** What the intake decided about the sender (src/dmarc/reporter-auth.ts `classifySender`), stored with the report. */
+export interface ReporterInfo {
+  tier: ReporterTier;
+  /** The authenticated sending domain, null when not authenticated. */
+  domain: string | null;
+  /** The known-reporters entry that matched. */
+  knownAs: string | null;
+  auth: 'pass' | 'fail' | 'none';
+  reason: string | null;
+}
 
 export interface StoreReportResult {
   stored: boolean;       // false = duplicate, nothing written
@@ -70,7 +81,7 @@ export function toTuple(rec: ParserRecord): RecordTuple {
  * @param report      Parsed AggregateReport from parseDmarcEmail()
  * @param rawXml      Original XML string to store for reprocessing (nullable)
  * @param notifyFirstReport  send the first-report notification email when this is the domain's first counted report
- * @param reporterAuth what the receiver proved about the sender (src/dmarc/reporter-auth.ts)
+ * @param reporter what the intake decided about the sender: tier, authenticated domain, known organisation
  * @throws when D1 fails: nothing of the report is stored then (the caller decides what the sender is told)
  */
 export async function storeReport(
@@ -79,7 +90,7 @@ export async function storeReport(
   report: AggregateReport,
   rawXml: string | null = null,
   notifyFirstReport = false,
-  reporterAuth?: Pick<ReporterAuthResult, 'result' | 'domain'> & { reason?: string | null },
+  reporter?: ReporterInfo,
 ): Promise<StoreReportResult> {
   const { total, pass, fail } = computeCounts(report.records);
   const meta = report.report_metadata;
@@ -97,9 +108,11 @@ export async function storeReport(
       fail_count: fail,
       // RAW_XML_RETENTION_DAYS=0 (the hosted default): the parsed rows are kept, the original XML is not
       raw_xml: rawXmlRetentionDays(tenant.env) > 0 ? rawXml : null,
-      reporter_auth: reporterAuth?.result ?? null,
-      reporter_auth_domain: reporterAuth?.domain ?? null,
-      reporter_auth_reason: reporterAuth?.reason ?? null,
+      reporter_auth: reporter?.auth ?? null,
+      reporter_auth_domain: reporter?.domain ?? null,
+      reporter_auth_reason: reporter?.reason ?? null,
+      reporter_tier: reporter?.tier ?? null,
+      reporter_known_as: reporter?.knownAs ?? null,
     },
     records: report.records.map(toTuple),
     ingestToken: crypto.randomUUID(),

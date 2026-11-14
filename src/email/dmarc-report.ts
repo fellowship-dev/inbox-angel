@@ -21,7 +21,8 @@ import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { intakeLimits } from '../hosted/config';
 import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
-import { reporterAuth } from '../dmarc/reporter-auth';
+import { classifySender, type ReporterTier } from '../dmarc/reporter-auth';
+import type { ReporterInfo } from '../dmarc/store-report';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
 import { rawTooLarge, REASONS, type Outcome, type ReasonCode } from '../hosted/reasons';
 
@@ -47,6 +48,8 @@ export interface ReportOptions {
   admit?: (recordCount: number) => ReasonCode | null;
   /** The clock, unix seconds (tests). */
   now?: number;
+  /** What the intake already decided about the sender (hosted intake does, to pick the allowance). Absent: decided here from the headers. */
+  reporter?: ReporterInfo;
 }
 
 export interface ReportResult {
@@ -55,10 +58,10 @@ export interface ReportResult {
   reason: ReasonCode;
   /** Records in the report (null: it was not parsed far enough to know). */
   records: number | null;
-  /** The reporting organisation's domain as the report names it, null when unknown. */
+  /** The AUTHENTICATED sending domain (never the report's own claim), null when the sender was not authenticated. */
   reporter: string | null;
-  /** Did the receiver prove the reporter (null: not judged). */
-  proven: boolean | null;
+  /** What the intake decided about the sender (null: not decided, refused before). */
+  tier: ReporterTier | null;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -69,7 +72,7 @@ export async function handleDmarcReport(
   opts: ReportOptions = {},
 ): Promise<ReportResult> {
   const result = (outcome: Outcome, reason: ReasonCode, extra: Partial<ReportResult> = {}): ReportResult =>
-    ({ failure_count: 0, outcome, reason, records: null, reporter: null, proven: null, ...extra });
+    ({ failure_count: 0, outcome, reason, records: null, reporter: null, tier: null, ...extra });
   const refuse = (reason: ReasonCode, text: string = REASONS[reason], extra: Partial<ReportResult> = {}): ReportResult => {
     message.setReject(text);
     return result('refused', reason, extra);
@@ -95,6 +98,15 @@ export async function handleDmarcReport(
     console.error('dmarc-report: mime extraction failed:', err instanceof Error ? err.name : 'error'); // the structured intake line has the reason
     if (err instanceof MimeExtractError) return refuse(/No DMARC attachment|No MIME headers|boundary/i.test(err.message) ? 'no_attachment' : 'archive_invalid', `Could not extract attachment: ${err.message}`);
     return refuse('archive_invalid', 'Unexpected error reading email');
+  }
+
+  // 1b. Who sent it: authenticated? a known reporter? (the report's own org_name/email are never used for this). The hosted intake has
+  //     already decided (it needs the tier for the allowance); self-host decides here and, by default, keeps unauthenticated mail.
+  let reporter = opts.reporter;
+  if (!reporter) {
+    const d = classifySender(authHeaders, tenant.env);
+    if (d.action === 'refuse') return refuse(d.reason);
+    reporter = { tier: d.tier, domain: d.domain, knownAs: d.knownAs, auth: d.auth, reason: d.reason };
   }
 
   // 2. Parse the DMARC XML. The gate runs once the header is known (before any per-record work): it finds the domain, skips a
@@ -128,7 +140,7 @@ export async function handleDmarcReport(
   try {
     report = await parseDmarcEmail(bytes, false, tenant.db, {
       maxBytes: opts.maxBytes ?? limits.maxDecompressedBytes,
-      maxRecords: opts.maxRecords ?? limits.recordsPerReport,
+      maxRecords: opts.maxRecords ?? (reporter.tier === 'counted' ? limits.recordsPerReport : Math.min(limits.recordsPerReport, limits.unknownRecordsPerReport)),
       maxNewIps: opts.maxNewIps ?? limits.newIpsPerReport,
       ...(opts.now !== undefined && { now: opts.now }),
       gate,
@@ -161,14 +173,12 @@ export async function handleDmarcReport(
 
   const domain = found.domain!;
 
-  // 3. Judge the sender against the report's own claim (hosted and self-host alike; nothing is proven without AUTHSERV_*)
-  const auth = reporterAuth(authHeaders, report.report_metadata, tenant.env);
   const failureCount = report.records.reduce((sum, r) => sum + (r.count ?? 0) * (r.policy_evaluated?.dkim === 'fail' || r.policy_evaluated?.spf === 'fail' ? 1 : 0), 0);
-  const known = { failure_count: failureCount, records: report.records.length, reporter: auth.domain, proven: auth.result === 'pass' };
+  const known = { failure_count: failureCount, records: report.records.length, reporter: reporter.domain, tier: reporter.tier };
 
   // 4. Store in D1: one batch, all or nothing
   try {
-    const stored = await storeReport(tenant, domain.id, report, rawXml, true, auth);
+    const stored = await storeReport(tenant, domain.id, report, rawXml, true, reporter);
     if (stored.stored) return result('accepted', 'ok', known);
     // Lost the race to a concurrent delivery of the same report: nothing was written, which is the right outcome.
     return result('duplicate', 'duplicate', known);

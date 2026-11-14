@@ -15,14 +15,9 @@ export interface HostedEnv {
   INTAKE_MAX_RECORDS_PER_REPORT?: string;
   INTAKE_MAX_BYTES_PER_DAY?: string;
   INTAKE_MAX_NEW_IPS_PER_REPORT?: string;
-  INTAKE_MAX_REPORTERS_PER_DAY?: string;
-  INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string;
-  INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string;
-  INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string;
-  INTAKE_MAX_TOTAL_REPORTS_PER_DAY?: string;
-  INTAKE_MAX_TOTAL_BYTES_PER_DAY?: string;
-  INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY?: string;
-  INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT?: string;
+  INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY?: string;
+  INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY?: string;
+  INTAKE_MAX_UNKNOWN_RECORDS_PER_REPORT?: string;
   INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY?: string;
   INTAKE_MAX_ADDRESS_RECORDS_PER_DAY?: string;
   INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY?: string;
@@ -32,7 +27,9 @@ export interface HostedEnv {
   INTAKE_MAX_DECOMPRESSED_BYTES?: string;
   INTAKE_MAX_RAW_BYTES?: string;
   INTAKE_MAX_STORAGE_RETRIES_PER_DAY?: string;
-  INTAKE_TRUSTED_REPORTER_ADDRESSES?: string;
+  INTAKE_KNOWN_REPORTERS?: string;
+  INTAKE_KNOWN_REPORTERS_REMOVE?: string;
+  INTAKE_UNAUTHENTICATED?: string;
   REPORT_COUNTING?: string;
   AUTHSERV_ID?: string;
   AUTHSERV_HEADER?: string;
@@ -87,29 +84,17 @@ export const DEFAULT_MAX_NEW_IPS_PER_REPORT = 50;
 /** Self-host (one tenant, a private address, no daily caps): generous but bounded. Records and the decompressed size are limits there too. */
 export const SELFHOST_MAX_RECORDS_PER_REPORT = 2_500;
 export const SELFHOST_MAX_NEW_IPS_PER_REPORT = 200;
-/** Distinct authenticated reporter domains accepted per token per day. */
-export const DEFAULT_MAX_REPORTERS_PER_DAY = 100;
 
 /**
- * Organisations that send DMARC aggregate reports in volume. A proven report from one of these is never refused for want of
- * a reporter slot, and does not use one: an attacker with many cheap DKIM-signing domains can fill the slots of unknown
- * reporters, but not take these.
+ * Authenticated reporters that are not on the known-reporters list (src/dmarc/known-reporters.ts): their reports are stored but not counted,
+ * so they get a small allowance, per reporter domain and in total per report address. A genuine receiver sends one report per domain per day
+ * (some send a few), so 5 per reporter leaves room for retries and resends; 20 in total per address bounds what any number of invented
+ * reporter domains can store. Records per report are capped much lower than for a known reporter (a stranger's report is never counted).
  */
-export const WELL_KNOWN_REPORTERS: readonly string[] = [
-  'google.com', 'yahoo.com', 'yahoo.co.jp', 'microsoft.com', 'outlook.com', 'hotmail.com', 'live.com', 'apple.com', 'icloud.com',
-  'amazon.com', 'amazonses.com', 'aol.com', 'comcast.net', 'verizon.net', 'att.net', 'mail.ru', 'yandex.ru', 'yandex.net',
-  'zoho.com', 'fastmail.com', 'gmx.net', 'gmx.de', 'web.de', 'seznam.cz', 'qq.com', '163.com', 'naver.com', 'linkedin.com',
-  'proofpoint.com', 'mimecast.com', 'cisco.com', 'barracuda.com', 'protonmail.com', 'proton.me',
-];
-/** The one shared bucket for messages without an aligned authentication pass; never touches authenticated allowance. */
-export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 10;
-export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 25 * 1024 * 1024;
-export const DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY = 5;
-/** All unproven mail to one address per UTC day, over every claimed sender (a forger can claim any sender domain). */
-export const DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY = 25;
-/** Records in one report whose sender the receiver did not prove. */
-export const DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT = 1_000;
-/** Messages per UTC day to one report address (token), proven or not. */
+export const DEFAULT_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY = 5;
+export const DEFAULT_MAX_UNKNOWN_REPORTS_PER_DAY = 20;
+export const DEFAULT_MAX_UNKNOWN_RECORDS_PER_REPORT = 1_000;
+/** Messages per UTC day to one report address (token), whatever the sender. */
 export const DEFAULT_MAX_ADDRESS_MESSAGES_PER_DAY = 500;
 /** Records stored per UTC day for one report address. */
 export const DEFAULT_MAX_ADDRESS_RECORDS_PER_DAY = 200_000;
@@ -130,9 +115,6 @@ export const DEFAULT_MAX_RAW_BYTES = 2 * 1024 * 1024;
 export const SELFHOST_MAX_RAW_BYTES = 2 * 1024 * 1024;
 /** Storage failures per domain and UTC day after which a failing message is refused for good instead of being retried. */
 export const DEFAULT_MAX_STORAGE_RETRIES_PER_DAY = 20;
-/** Per token and day, across every proven reporter that is not well known (slots coming and going do not reset it). */
-export const DEFAULT_MAX_TOTAL_REPORTS_PER_DAY = 1000;
-export const DEFAULT_MAX_TOTAL_BYTES_PER_DAY = 1024 * 1024 * 1024;
 export const DEFAULT_MAX_HOSTED_DOMAINS_PER_WORKSPACE = 10;
 
 const positive = (v: string | undefined, dflt: number): number => {
@@ -141,19 +123,14 @@ const positive = (v: string | undefined, dflt: number): number => {
 };
 
 export interface IntakeLimits {
-  /** Per authenticated reporter domain. */
+  /** Per known reporter (counted), per address, per UTC day. */
   reportsPerDay: number;
   recordsPerReport: number;
   bytesPerDay: number;
   newIpsPerReport: number;
-  reportersPerDay: number;
-  unauthReportsPerDay: number;
-  unauthBytesPerDay: number;
-  unauthSendersPerDay: number;
-  totalReportsPerDay: number;
-  totalBytesPerDay: number;
-  unauthTotalReportsPerDay: number;
-  unauthRecordsPerReport: number;
+  unknownReportsPerReporterPerDay: number;
+  unknownReportsPerDay: number;
+  unknownRecordsPerReport: number;
   addressMessagesPerDay: number;
   addressRecordsPerDay: number;
   workspaceMessagesPerDay: number;
@@ -172,14 +149,9 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     recordsPerReport: positive(env.INTAKE_MAX_RECORDS_PER_REPORT, saas ? DEFAULT_MAX_RECORDS_PER_REPORT : SELFHOST_MAX_RECORDS_PER_REPORT),
     bytesPerDay: positive(env.INTAKE_MAX_BYTES_PER_DAY, DEFAULT_MAX_BYTES_PER_DAY),
     newIpsPerReport: positive(env.INTAKE_MAX_NEW_IPS_PER_REPORT, saas ? DEFAULT_MAX_NEW_IPS_PER_REPORT : SELFHOST_MAX_NEW_IPS_PER_REPORT),
-    reportersPerDay: positive(env.INTAKE_MAX_REPORTERS_PER_DAY, DEFAULT_MAX_REPORTERS_PER_DAY),
-    unauthReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY),
-    unauthBytesPerDay: positive(env.INTAKE_MAX_UNAUTH_BYTES_PER_DAY, DEFAULT_MAX_UNAUTH_BYTES_PER_DAY),
-    unauthSendersPerDay: positive(env.INTAKE_MAX_UNAUTH_SENDERS_PER_DAY, DEFAULT_MAX_UNAUTH_SENDERS_PER_DAY),
-    totalReportsPerDay: positive(env.INTAKE_MAX_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_TOTAL_REPORTS_PER_DAY),
-    totalBytesPerDay: positive(env.INTAKE_MAX_TOTAL_BYTES_PER_DAY, DEFAULT_MAX_TOTAL_BYTES_PER_DAY),
-    unauthTotalReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY),
-    unauthRecordsPerReport: positive(env.INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT, DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT),
+    unknownReportsPerReporterPerDay: positive(env.INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY, DEFAULT_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY),
+    unknownReportsPerDay: positive(env.INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY, DEFAULT_MAX_UNKNOWN_REPORTS_PER_DAY),
+    unknownRecordsPerReport: positive(env.INTAKE_MAX_UNKNOWN_RECORDS_PER_REPORT, DEFAULT_MAX_UNKNOWN_RECORDS_PER_REPORT),
     addressMessagesPerDay: positive(env.INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY, DEFAULT_MAX_ADDRESS_MESSAGES_PER_DAY),
     addressRecordsPerDay: positive(env.INTAKE_MAX_ADDRESS_RECORDS_PER_DAY, DEFAULT_MAX_ADDRESS_RECORDS_PER_DAY),
     workspaceMessagesPerDay: positive(env.INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY, DEFAULT_MAX_WORKSPACE_MESSAGES_PER_DAY),

@@ -47,7 +47,7 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
   const totals = analytics.totals;
   const vis = 'intake' in analytics ? analytics : null;
   // Never "no reports" while reports were received and left out or lost.
-  const noDmarc = vis?.intake.not_processed.messages ? 'reports_not_processed' : vis?.uncounted.reports ? 'only_unverified_reports' : 'no_reports';
+  const noDmarc = vis?.intake.not_processed.messages ? 'reports_not_processed' : vis?.uncounted.reports ? 'only_unrecognised_reports' : 'no_reports';
   const section = <T>(source: string, population: string, data: T | null, reason?: string): EvidenceSection<T> => ({
     status: data === null ? 'unavailable' : 'available', ...(reason ? { reason } : {}), source, population, window, data,
   });
@@ -58,7 +58,7 @@ export async function getDomainReport(tenant: TenantContext, domainId: number, o
     intake: enrollmentView(domain, tenant.settings.reportsDomain).intake,
     dns, analytics,
     sections: {
-      dmarc: { ...section('dmarc-aggregate', 'Messages represented in received aggregate DMARC reports; not all mail sent', evidence.dmarc.report_count ? { ...totals, unit: 'messages', denominator: totals.messages, alignment: analytics.alignment } : null, evidence.dmarc.report_count ? undefined : noDmarc), evidence: provenance(evidence.dmarc), ...(vis ? { report_counting: vis.report_counting, uncounted: vis.uncounted, intake: vis.intake } : {}) },
+      dmarc: { ...section('dmarc-aggregate', 'Messages represented in received aggregate DMARC reports; not all mail sent', evidence.dmarc.report_count ? { ...totals, unit: 'messages', denominator: totals.messages, alignment: analytics.alignment } : null, evidence.dmarc.report_count ? undefined : noDmarc), evidence: provenance(evidence.dmarc), ...(vis ? { report_counting: vis.report_counting, counting_note: vis.counting_note, unrecognised: vis.unrecognised, uncounted: vis.uncounted, intake: vis.intake } : {}) },
       tls: { ...section('tls-rpt', 'SMTP TLS sessions represented in received TLS-RPT reports; not delivery or inbox placement', tls?.report_count ? { ...tls, unit: 'sessions' } : null, tls?.report_count ? undefined : 'no_reports'), evidence: provenance(evidence.tls) },
       google,
       inbox_placement: section('none', 'Recipient inbox versus spam placement', null, 'not_measured'),

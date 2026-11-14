@@ -50,13 +50,13 @@ export { funnelQueries, hashEmail, type LeadRow } from './funnel';
  *   const domains = await q.domains.list();
  */
 export interface ScopeOptions {
-	/** Which stored reports feed the numbers. Default `proven`: a caller that does not say never counts unproven reports. */
+	/** Which stored reports feed the numbers. Default `known`: a caller that does not say counts only authenticated reports from known reporters. */
 	counting?: CountingMode;
 }
 
 export function forWorkspace(db: DbLike, workspaceId: string, opts: ScopeOptions = {}) {
 	const d = getDb(db);
-	const counting = opts.counting ?? 'proven';
+	const counting = opts.counting ?? 'known';
 	return {
 		workspaceId,
 		metrics: metricQueries(d, workspaceId),

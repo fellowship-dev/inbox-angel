@@ -1,122 +1,85 @@
-// Did the report email itself pass DMARC-aligned authentication for the organisation that claims to have sent it?
-// Judged from the Authentication-Results header the receiving MTA added. A report that fails (or has no such header)
-// is still stored, but flagged: anyone can mail a forged report to a rua address.
+// Who sent this report mail, and do we recognise them? Two separate conditions, decided from the MESSAGE, before the report is read.
+//
+// 1. AUTHENTICATED (this file, `authenticateSender`). The receiver's own results prove the From domain:
+//      - header: AUTHSERV_HEADER=ar  → the TOPMOST `Authentication-Results`;  =arc → the topmost `ARC-Authentication-Results` with i=1.
+//        Taken from the raw message (`Headers.get` joins duplicates). The other kind is never consulted.
+//      - authserv-id: its first token must equal AUTHSERV_ID (case-insensitive). A header the sender added, or one naming another
+//        server, is ignored. Until AUTHSERV_ID and AUTHSERV_HEADER are set, nothing is authenticated (fail closed).
+//      - proof: dkim=pass (header.d), spf=pass (smtp.mailfrom) or dmarc=pass (header.from) whose domain is ALIGNED with the domain of the
+//        message's From header. Alignment is RELAXED (same organisational domain), as in DMARC's default: reporters sign and send from
+//        subdomains of their own domain (Yahoo sends From noreply@dmarc.yahoo.com with DKIM d=yahoo.com), which strict alignment would
+//        refuse. It still means the sender controls the From domain: nobody else can produce a DKIM/SPF pass for it.
+//      - the From header must hold exactly one address (src/email/sender-proof.ts `singleAddress`).
+// 2. KNOWN (src/dmarc/known-reporters.ts). The authenticated From identity is matched against the maintained list. The report's own
+//    org_name/email are never used: they are text the sender wrote, and a known name inside the XML must not help.
+//
+// The result is a tier: 'counted' (authenticated AND known), 'unknown' (authenticated, not known: stored, not counted) or refused
+// (not authenticated). Self-host may keep unauthenticated mail as 'unauthenticated' instead of refusing it (INTAKE_UNAUTHENTICATED).
 
 import { organizationalDomain } from '@inbox-angel/dns-checks';
 import { parseAuthResults } from '../email/parse-headers';
-import { proveSender, type AuthHeaders } from '../email/sender-proof';
-import type { AggregateReport } from './types';
+import { trustedResults, type AuthHeaders } from '../email/sender-proof';
+import { getMode } from '../tenancy/mode';
+import { matchKnownReporter, type KnownReporterEnv } from './known-reporters';
 
-export type ReporterAuth = 'pass' | 'fail' | 'none';
-/** Why a report is not proven (null when it is). Shown to the owner and logged. */
-export type ReporterAuthReason =
-  | 'authserv_not_configured' | 'no_results_header' | 'no_reporter_domain' | 'org_mismatch'
-  | 'authserv_id_not_found' | 'not_aligned' | 'shared_mailbox_domain';
-export interface ReporterAuthResult { result: ReporterAuth; domain: string | null; reason: ReporterAuthReason | null }
+export { SHARED_MAILBOX_DOMAINS } from './known-reporters';
 
-/**
- * Organisations whose domain anyone can send authenticated mail from: free-mailbox providers and shared sending services. A DKIM
- * pass for `d=yahoo.com` proves "a Yahoo mailbox sent this", not "Yahoo's reporting system did", so for these domains a pass proves
- * the reporter only when the message's From address is exactly a known report-sender address (below). Listed by organisational domain.
- */
-export const SHARED_MAILBOX_DOMAINS: ReadonlySet<string> = new Set([
-  'yahoo.com', 'yahoo.co.jp', 'ymail.com', 'rocketmail.com', 'aol.com', 'aim.com', 'verizon.net', 'att.net', 'sbcglobal.net', 'comcast.net',
-  'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'gmail.com', 'googlemail.com', 'icloud.com', 'me.com', 'mac.com',
-  'gmx.net', 'gmx.de', 'gmx.com', 'web.de', 'mail.com', 'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru', 'yandex.ru', 'yandex.com', 'yandex.net', 'ya.ru',
-  'qq.com', '163.com', '126.com', 'sina.com', 'naver.com', 'daum.net', 'hanmail.net', 'seznam.cz', 'proton.me', 'protonmail.com', 'pm.me',
-  'zoho.com', 'zohomail.com', 'fastmail.com', 'fastmail.fm', 'hey.com', 'tutanota.com', 'tuta.io',
-  'amazonses.com', 'sendgrid.net', 'mailgun.org', 'mandrillapp.com', 'postmarkapp.com', 'sparkpostmail.com', 'mailchimp.com',
-]);
+export type ReporterTier = 'counted' | 'unknown' | 'unauthenticated';
 
-/**
- * Exact From addresses, for the shared-mailbox domains above, known to be an aggregate-report sender. Deliberately empty: no
- * provider documents the From address of its report mail with enough certainty to ship here (google.com and microsoft.com are not
- * shared-mailbox domains and need no entry). An operator adds the ones seen on real report mail with
- * INTAKE_TRUSTED_REPORTER_ADDRESSES (docs/hosted.md); until then such a reporter is stored but not counted.
- */
-export const BUILT_IN_REPORT_SENDERS: readonly string[] = [];
+/** Why a message is not authenticated (a reason code, src/hosted/reasons.ts). */
+export type AuthFailure = 'authserv_unconfigured' | 'no_authentication_results' | 'authserv_id_not_found' | 'from_invalid' | 'not_authenticated';
 
-export interface AuthservEnv { AUTHSERV_ID?: string; AUTHSERV_HEADER?: string; INTAKE_TRUSTED_REPORTER_ADDRESSES?: string }
+export interface AuthservEnv extends KnownReporterEnv {
+  MODE?: string;
+  AUTHSERV_ID?: string;
+  AUTHSERV_HEADER?: string;
+  /** `refuse` | `store`: what to do with mail that is not authenticated. Hosted: always refused. Self-host default: store (see docs). */
+  INTAKE_UNAUTHENTICATED?: string;
+}
 
+export type SenderAuth =
+  | { authenticated: true; from: string; domain: string; via: 'dkim' | 'spf' | 'dmarc' }
+  | { authenticated: false; reason: AuthFailure; from: string | null };
+
+const org = (d: string | null | undefined) => (d ? (organizationalDomain(d) ?? d.toLowerCase()) : null);
 const domainOf = (address: string) => address.slice(address.lastIndexOf('@') + 1);
 
-/** The trusted report-sender addresses: the built-in ones and INTAKE_TRUSTED_REPORTER_ADDRESSES (comma or space separated). */
-export function trustedSenderAddresses(env: Pick<AuthservEnv, 'INTAKE_TRUSTED_REPORTER_ADDRESSES'>): Set<string> {
-  const fromEnv = (env.INTAKE_TRUSTED_REPORTER_ADDRESSES ?? '').split(/[\s,;]+/).map((a) => a.trim().toLowerCase()).filter((a) => /^[^\s@]+@[^\s@]+$/.test(a));
-  return new Set([...BUILT_IN_REPORT_SENDERS, ...fromEnv]);
+/** Condition 1: did the receiver authenticate the domain of the message's From address? */
+export function authenticateSender(headers: AuthHeaders | undefined, env: Pick<AuthservEnv, 'AUTHSERV_ID' | 'AUTHSERV_HEADER'>): SenderAuth {
+  const from = headers?.from ?? null;
+  const mode = env.AUTHSERV_HEADER?.trim().toLowerCase();
+  if (!env.AUTHSERV_ID?.trim() || (mode !== 'ar' && mode !== 'arc')) return { authenticated: false, reason: 'authserv_unconfigured', from };
+  if (!headers || (!headers.ar && !headers.arc) || !(mode === 'ar' ? headers.ar : headers.arc)) return { authenticated: false, reason: 'no_authentication_results', from };
+  const trusted = trustedResults(headers, env.AUTHSERV_ID, mode);
+  if (!trusted) return { authenticated: false, reason: 'authserv_id_not_found', from };
+  if (!from) return { authenticated: false, reason: 'from_invalid', from };
+  const fromOrg = org(domainOf(from));
+  const auth = parseAuthResults(trusted);
+  if (!auth || !fromOrg) return { authenticated: false, reason: 'not_authenticated', from };
+  const aligned = (d: string | null | undefined) => org(d) === fromOrg;
+  const via = auth.dkim?.result === 'pass' && aligned(auth.dkim.domain) ? 'dkim'
+    : auth.dmarc?.result === 'pass' && aligned(auth.dmarc.domain) ? 'dmarc'
+    : auth.spf?.result === 'pass' && aligned(auth.spf.domain) ? 'spf' : null;
+  return via ? { authenticated: true, from, domain: fromOrg, via } : { authenticated: false, reason: 'not_authenticated', from };
 }
 
-/**
- * May the authenticated organisation `org` be taken as the reporter? Always, unless it is a shared-mailbox domain: then only when the
- * message's From address is exactly a trusted report-sender address of that organisation. (A mailbox on yahoo.com cannot send as
- * another Yahoo address: the provider's own authentication ties the From address to the account.)
- */
-export function mayBeReporter(org: string, headers: AuthHeaders, env: AuthservEnv): boolean {
-  if (!SHARED_MAILBOX_DOMAINS.has(org)) return true;
-  const from = headers.from;
-  return !!from && trustedSenderAddresses(env).has(from) && organizationalDomain(domainOf(from)) === org;
+export type Decision =
+  | { action: 'refuse'; reason: AuthFailure }
+  | { action: 'accept'; tier: ReporterTier; /** The authenticated sending domain (organisational), null when not authenticated. */ domain: string | null; knownAs: string | null; auth: 'pass' | 'fail' | 'none'; reason: AuthFailure | null };
+
+/** Hosted always refuses unauthenticated mail; self-host keeps it as 'unauthenticated' unless INTAKE_UNAUTHENTICATED=refuse. */
+export function refusesUnauthenticated(env: Pick<AuthservEnv, 'MODE' | 'INTAKE_UNAUTHENTICATED'>): boolean {
+  if (getMode(env) === 'saas') return true;
+  return env.INTAKE_UNAUTHENTICATED?.trim().toLowerCase() === 'refuse';
 }
 
-/** The registrable domains the report names as its author: from report_metadata's email, and from an org_name that looks like a domain. */
-function namedDomains(meta: Pick<AggregateReport['report_metadata'], 'org_email' | 'org_name'>): { email: string | null; name: string | null } {
-  const email = meta.org_email?.trim().toLowerCase();
-  const fromEmail = email?.includes('@') ? email.split('@').pop()! : null;
-  const name = meta.org_name?.trim().toLowerCase();
-  const fromName = name && !name.includes(' ') && name.includes('.') ? name : null;
-  return { email: fromEmail ? organizationalDomain(fromEmail) : null, name: fromName ? organizationalDomain(fromName) : null };
-}
-
-/** The registrable domain of the reporting organisation: from report_metadata's email, else an org_name that looks like a domain. */
-export function reporterOrgDomain(meta: Pick<AggregateReport['report_metadata'], 'org_email' | 'org_name'>): string | null {
-  const n = namedDomains(meta);
-  return n.email ?? n.name;
-}
-
-/**
- * The organisational domain the message proved to the receiver (an aligned DKIM pass or a DMARC pass in the TOPMOST
- * results header naming our AUTHSERV_ID: src/email/sender-proof.ts), decided before the report is parsed. Null when
- * the env is unset, nothing is proven, the header is not the receiver's, or the domain is a shared-mailbox domain without a
- * trusted From address: such a message is unproven.
- */
-export function provenReporter(headers: AuthHeaders, env: AuthservEnv): string | null {
-  if (!env.AUTHSERV_ID || !env.AUTHSERV_HEADER) return null;
-  const candidates = new Set<string>();
-  for (const value of [headers.ar, headers.arc ? headers.arc.split(';').slice(1).join(';') : null]) {
-    const auth = value ? parseAuthResults(value) : null;
-    for (const r of [auth?.dkim, auth?.dmarc]) {
-      const org = r?.result === 'pass' && r.domain ? organizationalDomain(r.domain) : null;
-      if (org) candidates.add(org);
-    }
+/** Conditions 1 and 2 for one message: refuse it, or accept it with its tier. */
+export function classifySender(headers: AuthHeaders | undefined, env: AuthservEnv): Decision {
+  const auth = authenticateSender(headers, env);
+  if (!auth.authenticated) {
+    if (refusesUnauthenticated(env)) return { action: 'refuse', reason: auth.reason };
+    return { action: 'accept', tier: 'unauthenticated', domain: null, knownAs: null, auth: auth.reason === 'authserv_unconfigured' || auth.reason === 'no_authentication_results' ? 'none' : 'fail', reason: auth.reason };
   }
-  for (const c of candidates) if (mayBeReporter(c, headers, env) && proveSender(headers, c, env.AUTHSERV_ID, env.AUTHSERV_HEADER).ok) return c;
-  return null;
-}
-
-/** The sender domain an unproven message claims (SMTP envelope sender), as a bucket key. Forgeable: it only spreads the allowance. */
-export function claimedSender(from: string | undefined): string {
-  const host = from?.split('@').pop()?.trim().toLowerCase();
-  return '~' + ((host && organizationalDomain(host)) || '');
-}
-
-/**
- * Did the report email prove, to the receiver, the organisation its report claims to come from?
- *  pass  an aligned DKIM pass or a DMARC pass for the reporter's organisational domain in the receiver's own header, and the
- *        reporter domain is not a shared-mailbox domain (or the From address is a trusted report sender)
- *  fail  the receiver's results are there but do not prove it, or name another server, or the report names two different organisations
- *  none  nothing to go on: no results header, or AUTHSERV_ID / AUTHSERV_HEADER are not configured (fail closed)
- * `reason` says which. The reporter domain comes from the REPORT (its `email`, else a domain-shaped `org_name`), never from the mail:
- * a forger who authenticates as her own domain is proven as that domain, not as google.com.
- */
-export function reporterAuth(headers: AuthHeaders | undefined, meta: Pick<AggregateReport['report_metadata'], 'org_email' | 'org_name'>, env: AuthservEnv): ReporterAuthResult {
-  const named = namedDomains(meta);
-  const domain = named.email ?? named.name;
-  if (!env.AUTHSERV_ID || !env.AUTHSERV_HEADER) return { result: 'none', domain, reason: 'authserv_not_configured' };
-  if (!headers || (!headers.ar && !headers.arc)) return { result: 'none', domain, reason: 'no_results_header' };
-  if (!domain) return { result: 'fail', domain, reason: 'no_reporter_domain' };
-  // Two named organisations that disagree: the report is not clearly from one reporter.
-  if (named.email && named.name && named.email !== named.name) return { result: 'fail', domain, reason: 'org_mismatch' };
-  const proof = proveSender(headers, domain, env.AUTHSERV_ID, env.AUTHSERV_HEADER);
-  if (!proof.ok) return { result: 'fail', domain, reason: /names the configured AUTHSERV_ID/.test(proof.reason) ? 'authserv_id_not_found' : 'not_aligned' };
-  if (!mayBeReporter(domain, headers, env)) return { result: 'fail', domain, reason: 'shared_mailbox_domain' };
-  return { result: 'pass', domain, reason: null };
+  const known = matchKnownReporter(auth.from, env);
+  return { action: 'accept', tier: known ? 'counted' : 'unknown', domain: auth.domain, knownAs: known?.org ?? null, auth: 'pass', reason: null };
 }

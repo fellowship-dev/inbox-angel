@@ -98,12 +98,13 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
     };
   }
 
-  const [allRows, allTrend, earliest, totals, unverified] = await Promise.all([
+  const [allRows, allTrend, earliest, totals, unrecognised, uncounted] = await Promise.all([
     q.senderRows(null, since, adviceSince, now),
     q.trend(null, Math.min(since, adviceSince), now),
     q.earliestReport(null, now),
     q.domainTotals(adviceSince, now),
-    tenant.scope.reports.unverified(null, since),
+    tenant.scope.reports.unrecognised(null, since),
+    tenant.scope.reports.uncounted(null, since),
   ]);
   const senders = buildSenders(inWindow(allRows, 'messages'), { now, earliest });
   const adviceRows = inWindow(allRows, 'advice_messages');
@@ -124,7 +125,7 @@ export async function getAnalytics(tenant: TenantContext, options: AnalyticsDeps
 
   return {
     days, totals: sum(trend), trend,
-    report_counting: tenant.scope.counting, unverified, uncounted: tenant.scope.counting === 'proven' ? unverified : { reports: 0, messages: 0, latest_at: null, by_reporter: [] },
+    report_counting: tenant.scope.counting, unrecognised, uncounted,
     alignment: { spf: 'relaxed', dkim: 'relaxed', basis: 'assumed', estimated: true },
     senders: senders.slice(0, MAX_SENDERS), sender_count: senders.length, fixes,
     domains: perDomain.map(({ d, readiness }) => ({

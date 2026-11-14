@@ -118,6 +118,10 @@ export function lifecycleQueries(dbLike: DbLike) {
 			const b = await simple(limits, () => db.run(sql`DELETE FROM intake_quota WHERE rowid IN (SELECT rowid FROM intake_quota WHERE day < ${cutoffDay} AND day <> ${STORED_ROW.day} LIMIT ${limits.batch})`));
 			return { deleted: a.deleted + b.deleted, truncated: a.truncated || b.truncated };
 		},
+		/** Unknown-reporter list entries not seen since `cutoff` (unix seconds). */
+		purgeUnknownReporters: (cutoff: number, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM intake_unknown_reporters WHERE rowid IN (SELECT rowid FROM intake_unknown_reporters WHERE last_seen < ${cutoff} LIMIT ${limits.batch})`)),
+
 		purgeIntakeFailures: (cutoffDay: string, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM intake_failures WHERE rowid IN (SELECT rowid FROM intake_failures WHERE day < ${cutoffDay} LIMIT ${limits.batch})`)),
 

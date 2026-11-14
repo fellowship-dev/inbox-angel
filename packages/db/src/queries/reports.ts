@@ -104,7 +104,7 @@ export interface DomainCheckSummary {
 	mta_sts_mode: string | null;
 }
 
-export interface UnverifiedSummary {
+export interface UncountedSummary {
 	reports: number;
 	messages: number;
 	latest_at: number | null;
@@ -134,10 +134,24 @@ interface EvidenceSummaryRow {
   latest_received_at: number | null;
 }
 
-export function reportQueries(db: Db, workspaceId: string, counting: CountingMode = 'proven') {
+export function reportQueries(db: Db, workspaceId: string, counting: CountingMode = 'known') {
 	const A = sql`${workspaceId}`;
 	/** The statement counts this report (see counting.ts). */
 	const C = (alias: string) => counted(alias, counting);
+
+	const summarise = async (domainId: number | null, since: number, excluded: ReturnType<typeof sql>): Promise<UncountedSummary> => {
+		const scope = domainId === null ? sql`` : sql`AND aggregate_reports.domain_id = ${domainId}`;
+		const [tot, by] = await Promise.all([
+			db.all<{ reports: number; messages: number; latest_at: number | null }>(sql`
+				SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at
+				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND aggregate_reports.date_begin >= ${since} AND ${excluded}`),
+			db.all<{ reporter: string; reports: number }>(sql`
+				SELECT COALESCE(aggregate_reports.reporter_auth_domain, aggregate_reports.org_name) AS reporter, COUNT(*) AS reports
+				FROM aggregate_reports WHERE aggregate_reports.workspace_id = ${A} ${scope} AND aggregate_reports.date_begin >= ${since} AND ${excluded}
+				GROUP BY reporter ORDER BY reports DESC, reporter LIMIT 5`),
+		]);
+		return { reports: tot[0]?.reports ?? 0, messages: tot[0]?.messages ?? 0, latest_at: tot[0]?.latest_at ?? null, by_reporter: by };
+	};
 
 	return {
 		insertAggregate(r: NewReport) {
@@ -165,21 +179,20 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 		},
 
 		/**
-		 * Reports in the window that are stored but not proven (`reporter_auth` is not 'pass'), whatever the counting mode:
-		 * the numbers behind "N reports from senders we could not verify". `domainId` null: the whole workspace.
+		 * Reports in the window that are stored but NOT counted in this workspace's counting mode (empty in `all` mode), with the
+		 * authenticated reporter domains behind them. `domainId` null: the whole workspace.
 		 */
-		async unverified(domainId: number | null, since: number): Promise<UnverifiedSummary> {
-			const scope = domainId === null ? sql`` : sql`AND domain_id = ${domainId}`;
-			const [tot, by] = await Promise.all([
-				db.all<{ reports: number; messages: number; latest_at: number | null }>(sql`
-					SELECT COUNT(*) AS reports, COALESCE(SUM(total_count), 0) AS messages, MAX(created_at) AS latest_at
-					FROM aggregate_reports WHERE workspace_id = ${A} ${scope} AND date_begin >= ${since} AND reporter_auth IS NOT 'pass'`),
-				db.all<{ reporter: string; reports: number }>(sql`
-					SELECT COALESCE(reporter_auth_domain, org_name) AS reporter, COUNT(*) AS reports
-					FROM aggregate_reports WHERE workspace_id = ${A} ${scope} AND date_begin >= ${since} AND reporter_auth IS NOT 'pass'
-					GROUP BY reporter ORDER BY reports DESC, reporter LIMIT 5`),
-			]);
-			return { reports: tot[0]?.reports ?? 0, messages: tot[0]?.messages ?? 0, latest_at: tot[0]?.latest_at ?? null, by_reporter: by };
+		async uncounted(domainId: number | null, since: number): Promise<UncountedSummary> {
+			if (counting === 'all') return { reports: 0, messages: 0, latest_at: null, by_reporter: [] };
+			return summarise(domainId, since, sql`NOT (${C('aggregate_reports')})`);
+		},
+
+		/**
+		 * Reports in the window from senders we do not recognise (the intake did not class them 'counted'), whatever the counting mode:
+		 * in `all` mode they are counted, and this is how a dashboard can still say so.
+		 */
+		unrecognised(domainId: number | null, since: number): Promise<UncountedSummary> {
+			return summarise(domainId, since, sql`aggregate_reports.reporter_tier IS NOT 'counted'`);
 		},
 
 		insertRecords(records: NewRecord[]) {
@@ -243,8 +256,8 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 					COALESCE(SUM(r.pass_count),  0) AS pass_messages,
 					COALESCE(SUM(r.fail_count),  0) AS fail_messages,
 					COUNT(r.id) AS report_count,
-					${counting === 'proven'
-						? sql`(SELECT COUNT(*) FROM aggregate_reports u WHERE u.workspace_id = ${A} AND u.domain_id = d.id AND u.date_begin >= ${since} AND u.reporter_auth IS NOT 'pass')`
+					${counting !== 'all'
+						? sql`(SELECT COUNT(*) FROM aggregate_reports u WHERE u.workspace_id = ${A} AND u.domain_id = d.id AND u.date_begin >= ${since} AND NOT (${C('u')}))`
 						: sql`0`} AS uncounted_reports
 				FROM domains d
 				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND ${C('r')}

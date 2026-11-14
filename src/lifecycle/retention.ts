@@ -47,6 +47,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
     ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
     ['intake_failures', () => q.purgeIntakeFailures(dayOf(ago(p.intakeFailureDays)), limits)],
+    ['unknown_reporters', () => q.purgeUnknownReporters(ago(p.intakeFailureDays), limits)],
     // Last: recount a few workspaces' stored records (repairs drift, counts data stored before the counters existed).
     ['storage_reconciled', () => q.reconcileStorage(limits)],
   ];

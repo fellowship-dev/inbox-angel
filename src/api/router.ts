@@ -83,6 +83,7 @@ import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
 import { reportVisibility } from '../reports/visibility';
+import { handleUnknownReporterRoutes } from '../reports/unknown-reporters';
 import { handleConnectionRoutes } from '../connections/routes';
 import { TokenEnvelopeError, TokenKeyError } from '../connections/crypto';
 import { handleWorkspaceRoutes, isWorkspaceRoute } from '../workspaces/routes';
@@ -640,6 +641,8 @@ async function _handleApi(
 
   const leadResponse = await handleLeadRoutes(request, env, instanceOwner);
   if (leadResponse) return leadResponse;
+  const reporterResponse = await handleUnknownReporterRoutes(request, env, instanceOwner);
+  if (reporterResponse) return reporterResponse;
 
   try {
     // POST /api/settings/base-domain — wizard step 0: set the base domain

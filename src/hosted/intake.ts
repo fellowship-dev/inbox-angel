@@ -15,14 +15,14 @@
 // Every message leaves one JSON log line (src/hosted/intake-log.ts).
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, globalQueries, intakeLookups } from '@inbox-angel/db';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport, StorageFailure, type ReportResult } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
-import { claimedSender, provenReporter } from '../dmarc/reporter-auth';
+import { classifySender } from '../dmarc/reporter-auth';
 import { readAuthHeaders, trustedResults } from '../email/sender-proof';
-import { hostedConfig, hostedEnabled, intakeLimits, WELL_KNOWN_REPORTERS } from './config';
+import { hostedConfig, hostedEnabled, intakeLimits } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
 import { logAuthservDiscovery, logIntake, type IntakeKind } from './intake-log';
@@ -31,17 +31,17 @@ import { OWNER_VISIBLE, rawTooLarge, REASONS, type Outcome, type ReasonCode } fr
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** What the log line is built from, filled in as the message is understood. */
-interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; proven: boolean | null; reporter: string | null; records: number | null }
+interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 'counted' | 'unknown' | 'unauthenticated' | null; reporter: string | null; records: number | null }
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
 export async function handleHostedEmail(message: ForwardableEmailMessage, env: BoundEnv): Promise<void> {
   const started = Date.now();
-  const seen: Seen = { kind: 'other', ws: null, dom: null, proven: null, reporter: null, records: null };
+  const seen: Seen = { kind: 'other', ws: null, dom: null, tier: null, reporter: null, records: null };
   const line = (v: Verdict) => logIntake({ ...seen, ...v, size: message.rawSize ?? 0, ms: Date.now() - started });
   try {
     line(await intake(message, env, seen));
   } catch (e) {
-    if (e instanceof StorageFailure) Object.assign(seen, { records: e.known.records ?? null, reporter: e.known.reporter ?? null, proven: e.known.proven ?? null });
+    if (e instanceof StorageFailure) Object.assign(seen, { records: e.known.records ?? null, reporter: e.known.reporter ?? null, tier: e.known.tier ?? null });
     line({ outcome: 'deferred', reason: e instanceof StorageFailure ? 'storage_failed' : (e as { reason?: ReasonCode }).reason ?? 'internal_error' });
     throw e;
   }
@@ -90,30 +90,37 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     return refuse(reason);
   };
 
-  // What the receiver proved about the message comes first (its own topmost results header, never the joined headers:
-  // src/email/sender-proof.ts): a proven reporter is charged to its own domain's allowance. Everything else is charged to the
-  // sender domain it CLAIMS, in a small bucket of its own, so junk cannot use up a proven reporter's allowance. Until AUTHSERV_ID and
-  // AUTHSERV_HEADER are set nothing is proven: reports are accepted, stored, flagged, charged this way, and NOT counted in the numbers.
+  // Three tiers, decided from the MESSAGE before anything is parsed (src/dmarc/reporter-auth.ts):
+  //   refused  not authenticated (aligned DKIM/SPF/DMARC in the trusted results header, for the From domain). Nothing is stored. While
+  //            AUTHSERV_ID / AUTHSERV_HEADER are unset nothing can be authenticated, so all report mail is refused (authserv_unconfigured);
+  //            the authserv discovery line below is still logged, so the operator can configure it before publishing addresses.
+  //   unknown  authenticated, but the From identity is not a known reporter: stored, NOT counted, on a small allowance of its own.
+  //   counted  authenticated AND a known reporter.
   const [forHeaders, rest] = message.raw.tee();
   const authHeaders = await readAuthHeaders(forHeaders);
-  const reporter = provenReporter(authHeaders, env);
-  seen.proven = reporter !== null;
   const trusted = !!(env.AUTHSERV_ID && env.AUTHSERV_HEADER && trustedResults(authHeaders, env.AUTHSERV_ID, env.AUTHSERV_HEADER));
   logAuthservDiscovery(authHeaders, env, trusted);
+  const decision = classifySender(authHeaders, env);
+  if (decision.action === 'refuse') return refuse(decision.reason);
+  seen.tier = decision.tier;
+  seen.reporter = decision.domain;
+  const reporterDomain = decision.domain!;
+  const unknown = decision.tier === 'unknown';
+  // Authenticated senders we do not know: listed for the instance owner (domain, count, last seen) so the list can grow. Best effort.
+  if (unknown && kind === 'rua') await globalQueries(env.DB).unknownReporters.note(reporterDomain, now()).catch(() => undefined);
 
-  // Caps in one batch: this address, its workspace, the instance (and this address's unproven total), then the per-reporter allowance.
-  const quota = await q.consumeQuota(target.domain_id, day, message.rawSize, !reporter, {
-    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
+  // Caps in one batch: this address, its workspace, the instance (and, for an unknown reporter, this address's unknown-reporter total),
+  // then the sending organisation's own allowance. Unknown reporters get a small one: they are stored, never counted.
+  const quota = await q.consumeQuota(target.domain_id, day, message.rawSize, unknown, {
+    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unknownTotal: limits.unknownReportsPerDay,
   });
   if (!quota.ok) {
-    return refuseAndMark(({ address: 'cap_address_day', unauth: 'cap_unauth_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
+    return refuseAndMark(({ address: 'cap_address_day', unknown: 'cap_unknown_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
   }
-  const ok = reporter
-    ? await q.tryConsume(target.domain_id, day, reporter, message.rawSize, limits.reportsPerDay, limits.bytesPerDay, limits.reportersPerDay, WELL_KNOWN_REPORTERS, { reports: limits.totalReportsPerDay, bytes: limits.totalBytesPerDay })
-    : await q.tryConsume(target.domain_id, day, claimedSender(message.from), message.rawSize, limits.unauthReportsPerDay, limits.unauthBytesPerDay, limits.unauthSendersPerDay);
+  const ok = await q.consumeReporter(target.domain_id, day, reporterDomain, message.rawSize, unknown ? limits.unknownReportsPerReporterPerDay : limits.reportsPerDay, limits.bytesPerDay);
   if (!ok) {
-    await q.releaseQuota(target.domain_id, day, message.rawSize, [`a:${target.domain_id}`, ...(reporter ? [] : [`u:${target.domain_id}`]), `w:${target.workspace_id}`, '*']);
-    return refuseAndMark(reporter ? 'cap_address_day' : 'cap_unauth_day');
+    await q.releaseQuota(target.domain_id, day, message.rawSize, [`a:${target.domain_id}`, ...(unknown ? [`k:${target.domain_id}`] : []), `w:${target.workspace_id}`, '*']);
+    return refuseAndMark(unknown ? 'cap_unknown_reporter_day' : 'cap_address_day');
   }
 
   const body = new Proxy(message, { get: (t, p) => (p === 'raw' ? rest : Reflect.get(t, p, t) instanceof Function ? (Reflect.get(t, p, t) as Function).bind(t) : Reflect.get(t, p, t)) });
@@ -123,8 +130,9 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   if (kind === 'rua') {
     result = await handleDmarcReport(body, tenant, {
       authHeaders,
+      reporter: { tier: decision.tier, domain: decision.domain, knownAs: decision.knownAs, auth: decision.auth, reason: decision.reason },
       maxBytes: limits.maxDecompressedBytes,
-      maxRecords: reporter ? limits.recordsPerReport : Math.min(limits.recordsPerReport, limits.unauthRecordsPerReport),
+      maxRecords: unknown ? Math.min(limits.recordsPerReport, limits.unknownRecordsPerReport) : limits.recordsPerReport,
       maxNewIps: limits.newIpsPerReport,
       token: { id: target.domain_id, domain: target.domain },
       admit: (n) =>
@@ -133,12 +141,9 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
         : quota.instanceRecords + n > limits.instanceRecords ? 'cap_instance_storage' : null,
     });
     seen.records = result.records;
-    seen.reporter = result.reporter;
-    if (result.proven !== null) seen.proven = result.proven;
     if (result.outcome === 'accepted' || result.outcome === 'duplicate') track(tenant, { event: 'report.received', failure_count: result.failure_count });
   } else {
     result = await handleTlsRptReport(body, tenant, { hosted: { maxBytes: limits.maxDecompressedBytes, token: { id: target.domain_id, domain: target.domain } } });
-    seen.proven = null;
     if (result.outcome === 'accepted') track(tenant, { event: 'tls-rpt.received', failure_count: result.failure_count });
   }
   // Refused after the address was known (a cap on stored records, a report too big): tell the owner.

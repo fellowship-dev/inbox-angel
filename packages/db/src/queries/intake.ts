@@ -4,7 +4,7 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, isNull, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, isNull, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { batchStatements, getDb, type DbLike } from '../client';
 import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
@@ -22,10 +22,10 @@ export interface QuotaLimits {
 	workspace: number;
 	/** Messages per UTC day to the whole instance. */
 	instance: number;
-	/** Unproven messages per UTC day to one address, over every claimed sender. */
-	unauthTotal: number;
+	/** Messages from authenticated reporters we do not know, per UTC day to one address, over every such reporter. */
+	unknownTotal: number;
 }
-export type QuotaScope = 'address' | 'unauth' | 'workspace' | 'instance';
+export type QuotaScope = 'address' | 'unknown' | 'workspace' | 'instance';
 export interface QuotaResult {
 	ok: boolean;
 	/** The first cap that refused the message (nothing was counted then). */
@@ -73,35 +73,12 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		},
 
 		/**
-		 * Atomically count one report of `bytes` against the allowance of (domain, `day` (YYYY-MM-DD, UTC), `reporter`).
-		 * `reporter` is a proven reporter's organisational domain, or `~<claimed sender domain>` for an unproven message ('~' alone: the overflow bucket). Returns false, and counts nothing, when it would exceed
-		 * `maxReports` or `maxBytes`, or (a proven reporter that is not `wellKnown`) when it is out of its own cap. Past `maxDistinct`
-		 * unknown proven reporters a day the least-used one is dropped to make room; an unproven sender falls into the overflow bucket instead. (best-effort bound: the check and the insert are separate statements).
+		 * Count one report of `bytes` against the allowance of (domain, `day` (YYYY-MM-DD, UTC), `reporter`), where `reporter` is the
+		 * authenticated sending organisation's domain. One atomic conditional upsert: nothing is counted (and false is returned) when it
+		 * would exceed `maxReports` or `maxBytes`. A reporter's allowance is its own: another reporter cannot use it up.
 		 */
-		async tryConsume(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number, maxDistinct = 100, wellKnown: readonly string[] = [], totals?: { reports: number; bytes: number }): Promise<boolean> {
+		async consumeReporter(domainId: number, day: string, reporter: string, bytes: number, maxReports: number, maxBytes: number): Promise<boolean> {
 			if (maxReports < 1 || bytes > maxBytes) return false;
-			// '~…' keys are unproven senders (by the sender domain they claim), everything else is a proven reporter domain:
-			// the two kinds are counted and bounded separately, and never share an allowance.
-			const unproven = reporter.startsWith('~');
-			const dayRows = and(mine_usage(), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day));
-			const kind = unproven ? sql`${intakeUsage.reporter} LIKE '~%'` : sql`${intakeUsage.reporter} NOT LIKE '~%'`;
-			const known = !unproven && wellKnown.includes(reporter);
-			const seen = await db.select({ n: count() }).from(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, reporter))).get();
-			if (!seen?.n && !known) {
-				// Slots are for reporters we know nothing about; well-known ones neither use nor need one.
-				const unknown = and(dayRows, kind, ne(intakeUsage.reporter, TOTAL_ROW), wellKnown.length ? notInArray(intakeUsage.reporter, [...wellKnown]) : undefined);
-				const distinct = await db.select({ n: count() }).from(intakeUsage).where(unknown).get();
-				if ((distinct?.n ?? 0) >= maxDistinct) {
-					if (unproven) reporter = '~'; // more claimed senders than bucket slots: the rest share one overflow bucket
-					else {
-						// All slots taken: the least-used unknown reporter makes way, so a new one is never refused and junk
-						// domains cannot lock genuine ones out for the day.
-						const victim = await db.select({ r: intakeUsage.reporter }).from(intakeUsage).where(unknown).orderBy(intakeUsage.reports, intakeUsage.bytes).limit(1).get();
-						// Only the slot is freed: what the evicted reporter used stays counted in the token's daily total (below).
-						if (victim) await db.delete(intakeUsage).where(and(dayRows, eq(intakeUsage.reporter, victim.r))).run();
-					}
-				}
-			}
 			const res = await db
 				.insert(intakeUsage)
 				.values({ domain_id: domainId, workspace_id: workspaceId, day, reporter, reports: 1, bytes })
@@ -111,38 +88,23 @@ export function intakeQueries(db: Db, workspaceId: string) {
 					set: { reports: sql`${intakeUsage.reports} + 1`, bytes: sql`${intakeUsage.bytes} + ${bytes}` },
 				})
 				.run();
-			if ((res.meta?.changes ?? 0) === 0) return false;
-			// A token's day is also capped in total for reporters we know nothing about, whatever their slots do: reporters
-			// that come and go cannot each bring a fresh allowance. Well-known reporters are outside it (their own caps apply),
-			// so a flood of cheap domains cannot use up what Google or Microsoft need.
-			if (totals && !unproven && !known) {
-				const t = await db
-					.insert(intakeUsage)
-					.values({ domain_id: domainId, workspace_id: workspaceId, day, reporter: TOTAL_ROW, reports: 1, bytes })
-					.onConflictDoUpdate({
-						target: [intakeUsage.domain_id, intakeUsage.day, intakeUsage.reporter],
-						setWhere: and(eq(intakeUsage.workspace_id, workspaceId), lt(intakeUsage.reports, totals.reports), sql`${intakeUsage.bytes} + ${bytes} <= ${totals.bytes}`),
-						set: { reports: sql`${intakeUsage.reports} + 1`, bytes: sql`${intakeUsage.bytes} + ${bytes}` },
-					})
-					.run();
-				if ((t.meta?.changes ?? 0) === 0) {
-					// Over the total: give back what was just counted for the reporter.
-					await db.update(intakeUsage).set({ reports: sql`MAX(0, ${intakeUsage.reports} - 1)`, bytes: sql`MAX(0, ${intakeUsage.bytes} - ${bytes})` })
-						.where(and(dayRows, eq(intakeUsage.reporter, reporter))).run();
-					return false;
-				}
-			}
-			return true;
+			return (res.meta?.changes ?? 0) > 0;
+		},
+
+		/** Give back one report counted by consumeReporter (a later check refused the message). */
+		releaseReporter(domainId: number, day: string, reporter: string, bytes: number) {
+			return db.update(intakeUsage).set({ reports: sql`MAX(0, ${intakeUsage.reports} - 1)`, bytes: sql`MAX(0, ${intakeUsage.bytes} - ${bytes})` })
+				.where(and(eq(intakeUsage.workspace_id, workspaceId), eq(intakeUsage.domain_id, domainId), eq(intakeUsage.day, day), eq(intakeUsage.reporter, reporter))).run();
 		},
 
 		/**
-		 * Count one message against the address, workspace and instance daily caps (and, when it is unproven, the address's unproven
+		 * Count one message against the address, workspace and instance daily caps (and, for an unknown reporter, the address's unknown-reporter
 		 * total) in ONE batch: each is a conditional upsert that counts nothing once its cap is reached. When any refuses, the ones that
 		 * counted are given back (a second batch). Also returns the stored-records figures the post-parse checks need.
 		 */
-		async consumeQuota(domainId: number, day: string, bytes: number, unproven: boolean, lim: QuotaLimits): Promise<QuotaResult> {
+		async consumeQuota(domainId: number, day: string, bytes: number, unknownReporter: boolean, lim: QuotaLimits): Promise<QuotaResult> {
 			const scopes: Array<[QuotaScope, string, number]> = [['address', `a:${domainId}`, lim.address], ['workspace', `w:${workspaceId}`, lim.workspace], ['instance', '*', lim.instance]];
-			if (unproven) scopes.splice(1, 0, ['unauth', `u:${domainId}`, lim.unauthTotal]);
+			if (unknownReporter) scopes.splice(1, 0, ['unknown', `k:${domainId}`, lim.unknownTotal]);
 			const up = (scope: string, max: number) => sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, ${bytes})
 				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1, bytes = intake_quota.bytes + excluded.bytes WHERE intake_quota.messages < ${max}`;
 			const res = await batchStatements(db, [
@@ -162,7 +124,7 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		},
 
 		/** Give back what consumeQuota counted for a message that was then refused by a later check. `scopes` default: all four. */
-		async releaseQuota(domainId: number, day: string, bytes: number, scopes: string[] = [`a:${domainId}`, `u:${domainId}`, `w:${workspaceId}`, '*']): Promise<void> {
+		async releaseQuota(domainId: number, day: string, bytes: number, scopes: string[] = [`a:${domainId}`, `k:${domainId}`, `w:${workspaceId}`, '*']): Promise<void> {
 			if (!scopes.length) return;
 			await batchStatements(db, scopes.map((scope) => sql`UPDATE intake_quota SET messages = MAX(0, messages - 1), bytes = MAX(0, bytes - ${bytes}) WHERE scope = ${scope} AND day = ${day}`));
 		},

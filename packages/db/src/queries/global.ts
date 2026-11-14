@@ -148,6 +148,16 @@ export function globalQueries(dbLike: DbLike) {
 			purgeExpired: (nowSeconds: number) => db.delete(canaryTokens).where(lt(canaryTokens.expires_at, nowSeconds - 86400)).run(),
 		},
 
+		/** Authenticated sending domains that are not known reporters (instance-wide list for the instance owner; no content). */
+		unknownReporters: {
+			/** One more message from this authenticated unknown reporter. */
+			note: (reporter: string, nowSeconds: number) =>
+				db.run(sql`INSERT INTO intake_unknown_reporters (reporter, reports, first_seen, last_seen) VALUES (${reporter}, 1, ${nowSeconds}, ${nowSeconds})
+					ON CONFLICT(reporter) DO UPDATE SET reports = reports + 1, last_seen = excluded.last_seen`),
+			list: (limit = 200) =>
+				db.all<{ reporter: string; reports: number; first_seen: number; last_seen: number }>(sql`SELECT reporter, reports, first_seen, last_seen FROM intake_unknown_reporters ORDER BY last_seen DESC, reporter LIMIT ${limit}`),
+		},
+
 		ipInfo: {
 			/** Cached rows for many IPs in ONE D1 query (chunks of json_each, in one batch), whatever their age. */
 			getMany: async (ips: readonly string[]): Promise<Map<string, IpInfoRow>> => {

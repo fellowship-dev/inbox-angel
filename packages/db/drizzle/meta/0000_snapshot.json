@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "43257d4c-2bdd-4b15-a1b8-305cdfe4b06e",
+  "id": "426791f3-9d5f-4218-a550-afe006916973",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "access_credentials": {
@@ -434,6 +434,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "reporter_tier": {
+          "name": "reporter_tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_known_as": {
+          "name": "reporter_known_as",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "ingest_token": {
           "name": "ingest_token",
           "type": "text",
@@ -494,11 +508,11 @@
           "isUnique": false,
           "where": "\"aggregate_reports\".\"raw_xml\" IS NOT NULL"
         },
-        "idx_agg_reports_auth": {
-          "name": "idx_agg_reports_auth",
+        "idx_agg_reports_tier": {
+          "name": "idx_agg_reports_tier",
           "columns": [
             "workspace_id",
-            "reporter_auth",
+            "reporter_tier",
             "date_begin"
           ],
           "isUnique": false
@@ -2469,6 +2483,45 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "intake_unknown_reporters": {
+      "name": "intake_unknown_reporters",
+      "columns": {
+        "reporter": {
+          "name": "reporter",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reports": {
+          "name": "reports",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "first_seen": {
+          "name": "first_seen",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen": {
+          "name": "last_seen",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

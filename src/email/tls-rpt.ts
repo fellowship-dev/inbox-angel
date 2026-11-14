@@ -86,7 +86,7 @@ async function storeHostedTlsRpt(
   report: TlsRptReport, raw: string, orgName: string, dateBegin: number, dateEnd: number, tenant: TenantContext, token: TokenDomain,
 ): Promise<ReportResult> {
   const domain = await tenant.scope.domains.getById(token.id);
-  if (!domain) return { failure_count: 0, outcome: 'refused', reason: 'domain_not_owned', records: null, reporter: null, proven: null };
+  if (!domain) return { failure_count: 0, outcome: 'refused', reason: 'domain_not_owned', records: null, reporter: null, tier: null };
   let success = 0;
   let failure = 0;
   const details: unknown[] = [];
@@ -108,7 +108,7 @@ async function storeHostedTlsRpt(
     try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* a courtesy */ }
     throw new StorageFailure({ failure_count: failure }, e);
   }
-  return { failure_count: failure, outcome: 'accepted', reason: 'ok', records: null, reporter: null, proven: null };
+  return { failure_count: failure, outcome: 'accepted', reason: 'ok', records: null, reporter: null, tier: null };
 }
 
 /** Failure details kept per report: a hostile report can list thousands, and a stored cell may not exceed 2,000,000 bytes. */
@@ -122,7 +122,7 @@ export async function handleTlsRptReport(
   tenant: TenantContext,
   opts: TlsRptOptions = {},
 ): Promise<ReportResult> {
-  const result = (outcome: Outcome, reason: ReasonCode, failure_count = 0): ReportResult => ({ failure_count, outcome, reason, records: null, reporter: null, proven: null });
+  const result = (outcome: Outcome, reason: ReasonCode, failure_count = 0): ReportResult => ({ failure_count, outcome, reason, records: null, reporter: null, tier: null });
   const refuse = (reason: ReasonCode, text: string = REASONS[reason]): ReportResult => { message.setReject(text); return result('refused', reason); };
 
   // Extract the JSON (a plain body; hosted intake also accepts compressed attachments)
