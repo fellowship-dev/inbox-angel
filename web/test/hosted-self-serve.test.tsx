@@ -251,7 +251,7 @@ describe('hosted report views', () => {
 
 	it('self-host anomalies with a report address keep the existing all-clear', async () => {
 		hostedPage(<AnomaliesPage />, '/domains/:id/anomalies', '/domains/7/anomalies', { 'GET /api/domains': { domains: [{ ...hostedDomain, rua_address: 'rua@reports.acme.com' }] }, 'GET /api/domains/7/anomalies': { days: 30, domain: 'acme.com', anomalies: [] } }, {});
-		expect(await screen.findByText('No anomalies in the last 30 days')).toBeInTheDocument();
+		expect(await screen.findByText('No failing sources in the last 30 days')).toBeInTheDocument();
 		expect(screen.queryByText('Reports not connected yet')).not.toBeInTheDocument();
 	});
 
