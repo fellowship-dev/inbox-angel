@@ -1,6 +1,6 @@
 # Cloudflare connections: OAuth and pasted tokens
 
-An Ready Set Mail **workspace** (one per business: a Fellowship workspace, a separate Lexgo workspace…) can connect **one or more
+A Ready Set Mail **workspace** (one per business: a Fellowship workspace, a separate Lexgo workspace…) can connect **one or more
 Cloudflare accounts**. Each connection is either
 
 * **OAuth**: the user clicks *Connect Cloudflare*, consents at Cloudflare, and Ready Set Mail keeps the access + refresh token; or
