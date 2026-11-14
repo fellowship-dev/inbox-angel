@@ -26,6 +26,8 @@ export interface AuthHeaders {
   arc: string | null;
   /** The From header's single address, lowercased; null when the message has no From, more than one, or an address list. */
   from?: string | null;
+  /** How many DKIM-Signature header fields the message carries (set by readAuthHeaders; undefined: not read, nothing checked against it). */
+  dkimSignatures?: number;
 }
 
 /** The one address in a From header value (`Name <a@b.c>` or `a@b.c`), lowercased, or null when it is not exactly one address. */
@@ -62,9 +64,10 @@ export async function readAuthHeaders(raw: ReadableStream<Uint8Array> | null | u
     reader.cancel().catch(() => {});
   }
   const block = text.split(/\r?\n\r?\n/)[0].replace(/\r?\n[ \t]+/g, ' ');
-  const out: AuthHeaders = { ar: null, arc: null, from: null };
+  const out: AuthHeaders = { ar: null, arc: null, from: null, dkimSignatures: 0 };
   let froms = 0;
   for (const line of block.split(/\r?\n/)) {
+    if (/^dkim-signature:/i.test(line)) out.dkimSignatures = (out.dkimSignatures ?? 0) + 1;
     const from = line.match(/^from:\s*(.*)$/i);
     if (from && ++froms === 1) out.from = singleAddress(from[1]);
     const ar = line.match(/^authentication-results:\s*(.*)$/i);

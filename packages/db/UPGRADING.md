@@ -10,6 +10,10 @@ npm run deploy         # also runs the migrate step first
 
 Local dev database: `npm run migrate:local`.
 
+## Reports connected at
+
+Migration `0011_reports_connected_at.sql` is additive: one nullable `domains.reports_connected_at` column, set when a hosted domain's reports are connected to the fixed report address and cleared when they are disconnected. Apply it before serving the new Worker (the schema guard requires it). Existing rows stay NULL.
+
 ## Settled claims
 
 Migration `0009_claim_settled.sql` is additive: two nullable `domain_claims` columns (`settled_at`, `settled_domain_id`). Apply it before serving the new Worker (the schema guard requires it). Existing claims stay open.

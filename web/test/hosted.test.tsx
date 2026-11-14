@@ -29,7 +29,7 @@ const status = (ps: Record<string, string | null> = {}, extra: Record<string, un
 
 const detailRoutes = (over: Record<string, unknown> = {}) => ({
 	'GET /api/domains': { domains: [domain] },
-	'GET /api/hosted/config': { enabled: true },
+	'GET /api/hosted/config': { enabled: true, reports: false, records: true },
 	'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },
 	'GET /api/domains/1/sources': { sources: [] },
 	'GET /api/domains/1/wizard-state': { domain: 'complete', spf: 'complete', dkim: 'complete', dmarc: 'complete', routing: 'complete' },
@@ -65,6 +65,50 @@ describe('HostedPanel visibility', () => {
 		await waitFor(() => expect(calls.some((c) => c.path === '/api/hosted/config')).toBe(true));
 		expect(screen.queryByText('Hosted records')).not.toBeInTheDocument();
 		expect(calls.some((c) => c.path === '/api/domains/1/hosted')).toBe(false);
+	});
+});
+
+describe('Hosted records need a records zone', () => {
+	it('no "Enable hosted records" (and no hosted-records request) when the server has no records zone', async () => {
+		const { calls } = detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: true, reports: false, records: false } }) });
+		await screen.findByText('example.com');
+		await waitFor(() => expect(calls.some((c) => c.path === '/api/hosted/config')).toBe(true));
+		expect(screen.queryByText('Enable hosted records')).not.toBeInTheDocument();
+		expect(calls.some((c) => c.path === '/api/domains/1/hosted')).toBe(false);
+	});
+});
+
+describe('Hosted report intake on the domain page', () => {
+	const notConnected = { available: true, domain_id: 1, domain: 'example.com', managed_by: null, can_connect: true, refusal: null, address: null, connected_at: null, last_report_at: null, reports_since_connect: 0, reports_before_connect: 0, state: 'not_connected', dns: null, parent: null };
+	it('hosted, no address: "Reports not connected yet" carries the Connect reports action; no RUA section', async () => {
+		detail({
+			status: { mode: 'saas' },
+			routes: detailRoutes({
+				'GET /api/domains': { domains: [{ ...domain, rua_address: '' }] },
+				'GET /api/hosted/config': { enabled: true, reports: true, records: false },
+				'GET /api/domains/1/report-address': notConnected,
+			}),
+		});
+		const box = await screen.findByTestId('reports-not-connected');
+		expect(await within(box).findByRole('button', { name: 'Connect reports' })).toBeInTheDocument();
+		expect(screen.queryByText('RUA reporting address')).not.toBeInTheDocument();
+		expect(screen.queryByText('Enable hosted records')).not.toBeInTheDocument();
+	});
+	it('shows the DMARC reports panel and hides the self-host "RUA reporting address" section', async () => {
+		detail({
+			status: { mode: 'saas' },
+			routes: detailRoutes({
+				'GET /api/hosted/config': { enabled: true, reports: true, records: false },
+				'GET /api/domains/1/report-address': { available: true, domain_id: 1, domain: 'example.com', managed_by: null, can_connect: true, refusal: null, address: null, connected_at: null, last_report_at: null, reports_since_connect: 0, reports_before_connect: 0, state: 'not_connected', dns: null, parent: null },
+			}),
+		});
+		expect(await screen.findByText('Reports not connected yet')).toBeInTheDocument();
+		expect(screen.queryByText('RUA reporting address')).not.toBeInTheDocument();
+		expect(screen.queryByText('Hosted records')).not.toBeInTheDocument(); // no records zone
+	});
+	it('self-host keeps the "RUA reporting address" section', async () => {
+		detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: false } }) });
+		expect(await screen.findByText('RUA reporting address')).toBeInTheDocument();
 	});
 });
 
@@ -256,7 +300,7 @@ describe('DomainLevelCard with hosted records', () => {
 	const card = (hosted: unknown, config = true) =>
 		renderApp(<DomainLevelCard domain={domain as never} />, {
 			routes: {
-				'GET /api/hosted/config': { enabled: config },
+				'GET /api/hosted/config': { enabled: config, reports: false, records: config },
 				'GET /api/domains/1/hosted': hosted,
 				'GET /api/domains/1/check-summary': summary,
 				'GET /api/domains/1/stats': { domain: 'example.com', days: 7, stats: [] },

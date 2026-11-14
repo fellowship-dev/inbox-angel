@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { batchStatements, unwrapDriverError, type Db } from '../client';
 import { cloudflareConnections, domains, productDomains } from '../schema';
 import { PlanLimitError, changesOf } from './plan-limit';
@@ -90,6 +90,15 @@ export function domainQueries(db: Db, workspaceId: string) {
 
 		delete(id: number) {
 			return db.delete(domains).where(and(mine, eq(domains.id, id))).run();
+		},
+
+		/**
+		 * Mark live rows of this workspace as unproven ('legacy'): a subdomain admitted through a parent that has gone. A
+		 * legacy row keeps working for its holder but proves nothing, and any workspace's TXT or Cloudflare proof evicts it.
+		 */
+		markUnproven(ids: number[]) {
+			if (ids.length === 0) return Promise.resolve();
+			return db.update(domains).set({ verified_via: 'legacy', updated_at: touch }).where(and(mine, live, inArray(domains.id, ids), eq(domains.verified_via, 'parent'))).run().then(() => undefined);
 		},
 
 		/** Make `id` the workspace's only default domain (atomic). */

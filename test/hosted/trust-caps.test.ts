@@ -335,7 +335,7 @@ describe('policy_published must be the token’s domain or a subdomain', () => {
 
   it('files a subdomain under its own row when it is a verified domain of the same workspace', async () => {
     const w = await twoWorkspaces();
-    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x')").run();
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x', 'txt')").run(); // proven: an unproven (legacy) row never receives reports
     expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-2'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(filed(w)).toEqual([{ domain_id: 3, report_id: 'google|sub-2' }]);
   });

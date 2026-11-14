@@ -8,6 +8,7 @@ import { mcpInstallation } from '../mcp/discovery';
 import { getMode } from '../tenancy/mode';
 import { bookingUrl, helpUrl, sequenceEnabled } from '../funnel/config';
 import { intakeSetupFindings } from '../reports/auth-status';
+import { reportIntakePreflightItems } from '../hosted/report-intake-check';
 
 export interface PreflightItem {
   /** Stable id for tests and the UI key. */
@@ -114,6 +115,7 @@ export async function instancePreflight(env: BoundEnv, requestOrigin: string): P
 
   // Report intake: authentication settings and caps hit recently (src/reports/auth-status.ts).
   items.push(...await intakeSetupFindings(env));
+  items.push(...reportIntakePreflightItems(env)); // the fixed report address: INTAKE_DOMAIN and who may connect (src/hosted/report-intake-check.ts)
 
   // Booking link: the day-14 follow-up email offers a call through it, and hosted dashboards show it as "Talk to Max".
   // Hosted uses the same https-only rule as the dashboard link (helpUrl), so this check and the link always agree.

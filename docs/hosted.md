@@ -3,7 +3,7 @@
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
 
-> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1` (and `INTAKE_DOMAIN`, `CANARY_DOMAIN`), **every inbound message makes the Worker throw**, so senders see temporary failures and retry. Set `SAAS_ENABLED=1`, `INTAKE_DOMAIN` and `CANARY_DOMAIN` *before* deploying this version, and run `npm run migrate`. Mail addressed without a valid token is rejected, not filed anywhere.
+> **Rollout warning: existing `MODE=saas` deployments.** Before this change `MODE=saas` inbound mail silently went to the default workspace. Now, without `SAAS_ENABLED=1`, **every inbound message makes the Worker throw**, so senders see temporary failures and retry; report mail also throws until `INTAKE_DOMAIN` is set. Set `SAAS_ENABLED=1` and `INTAKE_DOMAIN` (and `CANARY_DOMAIN` if the free check is wanted) *before* deploying this version, and run `npm run migrate`. Mail addressed without a valid token is rejected, not filed anywhere.
 
 Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Customer setup](#customer-setup) · [How it works](#how-it-works) · [API](#api) · [Limits](#limits-and-quotas)
 
@@ -34,8 +34,9 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
-| `INTAKE_DOMAIN` | `rua.readysetmail.com` | |
-| `CANARY_DOMAIN` | `canary.readysetmail.com` | |
+| `INTAKE_DOMAIN` | `rua.readysetmail.com` | report intake. With it set (and `MODE`, `SAAS_ENABLED`), owners and admins can connect a verified domain's reports to `rua@<INTAKE_DOMAIN>` (see [Report address without hosted records](#report-address-without-hosted-records)); it does not need `CANARY_DOMAIN` or the `HOSTED_RECORDS_*` settings |
+| `HOSTED_CONNECT_REPORTS` | `owner` | who may connect reports to `rua@<INTAKE_DOMAIN>`: `owner` (default; also any unknown value) lets only workspaces owned by the `OWNER_EMAIL` account connect, and the intake refuses every other workspace's reports; `all` opens it to every verified workspace. Keep `owner` until large-report handling, forged-report weighting and storage caps have landed. Without `OWNER_EMAIL`, `owner` means nobody. The owner setup check reports it |
+| `CANARY_DOMAIN` | `canary.readysetmail.com` | optional: the free check. Without it `POST /api/check-sessions` answers `503` and report intake is unaffected |
 | `HOSTED_RECORDS_ZONE` | `readysetmail.com` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
 | `INTAKE_MAX_REPORTS_PER_DAY` | `50` | reports per intake token **per registry reporter** per UTC day |
@@ -240,10 +241,50 @@ Notes for the customer:
   A hosted record counts toward the domain's **Level** only once its pointer is `ok` (`level_inputs` in the status response).
 * Token rotation (`POST …/hosted/rotate-token`) edits the hosted records; the customer changes nothing. The previous token keeps being accepted for 72 hours.
 
+### Report address without hosted records
+
+The simplest way to receive reports, and the only one that needs no records zone and no Email Routing sub-addressing: every customer publishes the same address, `rua@<INTAKE_DOMAIN>`.
+Nothing is issued. **Connect reports** on the domain page (`POST /api/domains/:id/report-address`) records that the workspace wants this domain's reports filed here by setting `domains.rua_address` to that address.
+It needs `MODE=saas`, `SAAS_ENABLED=1` and `INTAKE_DOMAIN`, an owner or admin, and a verified domain (never a pending or lost claim, an evicted row, or a `legacy` row from before ownership checks).
+
+Filing (`src/hosted/fixed-address.ts`, `src/hosted/intake.ts`). Mail to `rua@<INTAKE_DOMAIN>` carries no token, so it has no workspace until the report names its domain. Its order of work: (1) the carrier's authentication result (`carrierFromHeaders`, plus the envelope guard below); (2) one peek against an instance-wide **per-minute ceiling** (`INTAKE_MAX_FIXED_PEEKS_PER_MINUTE`, default 120; registry reporters are not counted): past it the message is deferred, so the sender retries and nothing is refused for good (cost: at most 7.5 MiB inflated per minute, one `intake_quota` row per minute of the day); (3) a peek at `feedback/policy_published/domain` from at most the first 64 KiB of the decompressed report (inflation stops there), one linear scan that skips comments, CDATA and processing instructions and refuses a DOCTYPE; (4) attribution to the owner (below). When nobody connected the domain the message is charged to the **unattributed budget** and refused: its carrier class's daily total (`INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY`, default 2000) and, only while that has room, the sender's own allowance (`INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY`, default 100: an authenticated sender by its DKIM organisation, an unauthenticated one by the envelope-sender domain it claims), so at most one row per message within the total. Mail for a connected domain is never charged to it and never refused because of it, and no workspace's or instance budget is touched by unconnected mail. Then, exactly like a token address, (5) `chargeIntakeCaps` before the full decompression (capped by carrier class), (6) `decideTier`, (7) the atomic batched store. The full parse must name the same domain as the peek (`report_domain_mismatch`), and every record's `header_from` must be that domain or a subdomain of it (`record_domain_mismatch`; on token addresses too).
+
+`GET /api/domains/:id/report-address` reads the live `_dmarc` record and says what to publish:
+
+* the current record with the address added to `rua=`, every other tag and the policy unchanged;
+* when the record already lists two addresses (receivers only have to honour two, RFC 7489 §6.2), a choice of which one to replace, or to add a third knowingly; nothing is dropped without that choice;
+* for a subdomain that follows its organizational domain's record: where the record lives, and a record of its own that keeps the policy it gets today (`sp=`, else `p=`) and the parent's addresses;
+* for a domain with no DMARC record: `v=DMARC1; p=none; rua=mailto:<address>`;
+* several DMARC records at one name: no proposal (receivers ignore them all);
+* a failed lookup: `plan: null` and `state: "unknown"`, never "no record".
+
+`state` comes from evidence: `not_connected`; `not_published` (connected, the live record does not list the address); `waiting` (listed, no COUNTED report since connecting); `receiving` (listed AND at least one COUNTED report, `reporter_tier = 'counted'`, stored since `connected_at`; `last_report_at` is the newest of those); or `unknown` (the lookup failed). `counted_since_connect`, `reports_since_connect` and `reports_before_connect` count the rest, and `visibility` carries the uncounted and not-stored reports RECEIVED since connecting (the same fields as `/stats`, windowed on `created_at`: a report covers the previous day, so its period starts before the connection), so a reconnect, an uncounted or a forged report never reads as "received".
+Token addresses (`rua+<token>@…`) keep working: hosted records issue them, and an operator-issued one shows as connected while its token is current. `tls-rpt@` without a token is refused: TLS-RPT still needs a token address.
+A domain with hosted records keeps its address there: these routes report `managed_by: "hosted_records"` and refuse to change it (`409`).
+Receivers outside the customer's organization only send to the address once the [authorisation record](#4-the-records-zone) `*._report._dmarc.<INTAKE_DOMAIN>` exists.
+
+
+### Going from owner to all
+
+`HOSTED_CONNECT_REPORTS` stays `owner` until every line below is true; the owner setup check shows its current value. Turning it to `all` lets every verified workspace connect reports to the shared address.
+
+**The risk this checklist exists for.** A receiver that writes a sender-chosen value back into its results header unquoted lets that sender add a result the receiver never produced. Reproduced in review: `smtp.helo=x;dkim=pass(c)header.d=google.com` was counted as Google. A HELO written back unquoted that splits into valid pieces **would be counted as the forged identity**. The switch must stay `owner` until the live header check below rules it out. Two defences do not depend on that check: a carrier whose envelope sender is not a plain address is not believed (`guardEnvelope`), and a results header with **more dkim results (other than `none`) than the message has `DKIM-Signature` fields, or more than one dmarc result, is not believed** (`carrierFromHeaders`, `src/dmarc/reporter-auth.ts`). That closes an injected result on an unsigned message and on a message signed fewer times than it has results. It does not close a sender that adds extra `DKIM-Signature` fields to a receiver that writes fewer results than there are signatures, nor an injected result that replaces nothing (one signature, the receiver's own result dropped or mangled by the split): the live check decides those.
+
+1. **Operator setup in place.** The `rua@<INTAKE_DOMAIN>` routing rule (Email Routing, action "Send to a Worker") and the wildcard authorisation record `*._report._dmarc.<INTAKE_DOMAIN>` TXT `v=DMARC1` (receivers outside a customer's organisation only send to the address once it exists).
+2. **One real routed header inspected.** Send a report-shaped message through Email Routing to `rua@<INTAKE_DOMAIN>` from a mailbox you control and read the Worker's view of it: the topmost `Authentication-Results` must carry `AUTHSERV_ID`, and `smtp.mailfrom` must be written quoted or rejected when it holds `;`, spaces, quotes or parentheses. The parser drops a result whose property values are not valid (`validPropertyValue`, `src/email/auth-results.ts`) but cannot catch a value that splits into valid pieces.
+3. **The HELO test.** From a server you control, send one message whose SMTP `HELO` (or `EHLO`) name is a HELO containing `;` (for example `x;dkim=pass(c)header.d=example.org`) and read how Cloudflare writes `smtp.helo` back: quoted, rejected at the SMTP stage, or not written at all rules the risk above out. Written back unquoted, the switch stays `owner`. Workers never see the HELO name, so this test is the only way to know.
+4. **What the sending server sees when the Worker throws.** Past the per-minute peek ceiling, authenticated non-registry mail is deferred by throwing; Cloudflare does not document what an uncaught throw in an email Worker tells the sending server (a temporary failure is expected, a permanent one is possible). This is **unknown until observed**: trigger it once (a low `INTAKE_MAX_FIXED_PEEKS_PER_MINUTE` on a test instance), send from a mailbox you control, and record the SMTP reply and whether the message is retried. Unauthenticated mail past the ceiling is refused with a permanent reply instead (it can never count).
+5. **`AUTHSERV_ID` and `AUTHSERV_HEADER` set** from that message, and the setup check shows no `intake` action.
+6. **Budgets sized and quiet.** `INTAKE_MAX_FIXED_PEEKS_PER_MINUTE` (default 120), `INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY` (2000) and `INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY` (100) set for the expected volume; the setup check names no cap hit in the last three days under `owner`. Unattributed mail cannot block attributed mail: it is charged only after a failed attribution, in its own budget.
+7. **No `header.i` fallback, no copied-envelope trust, no unverified names.** DKIM results are read from `header.d` only; a report from an unauthenticated sender is shown as an "unverified sender" that only claims its name.
+8. **Terms and privacy** cover processing aggregate reports for 13 months.
+9. **Undo is ready:** setting it back to `owner` stops new connections and makes the intake refuse other workspaces' reports at once; already-connected domains show "not connected".
+
 ## How it works
 
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
 
+1. `rua@` (no tag) at `INTAKE_DOMAIN`: the report's own domain picks the workspace, see [Report address without hosted records](#report-address-without-hosted-records).
 1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to workspace + domain. The `TenantContext` is built for that workspace. **There is no default-workspace fallback in `saas`**: `resolveInboundWorkspace` throws.
 2. **Caps first, before any parsing**: per address, workspace and instance (below). A message over a cap costs a handful of queries and is refused.
 3. The report is parsed (gzip, zip, plain), limited in size, records and fields (below). Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read. A `<!DOCTYPE` or `<!ENTITY` is refused before the parser runs (a DMARC report has neither); the five standard XML escapes still work.
@@ -258,7 +299,8 @@ Notes for the customer:
 | bad or unknown recipient, host, token; a gzip with an oversized header; no attachment; not a report; invalid XML/JSON; too large, too many records, a field too long, absurd dates; a domain the token does not own; a TLS-RPT report sent to the rua address (or the reverse) | `setReject`: a permanent 5xx **in the SMTP session** (no backscatter), with a specific reason |
 | over a daily cap, or the workspace/instance holds its record cap | `setReject` too (a retry the same day cannot succeed and only adds load; real reporters send again tomorrow) **and** a counter row the owner sees: "Report storage limit reached; newer reports are not being stored" |
 | D1 failed while storing a valid report | the Worker **throws** (the delivery fails, the sender may retry; one transaction, so nothing half-written) and the failure is counted for the owner ("N reports received for this domain could not be processed"). After `INTAKE_MAX_STORAGE_RETRIES_PER_DAY` failures for a domain the message is refused for good instead. **Cloudflare does not document what an uncaught throw tells the sender**, so retry is never the only record of a failure |
-| schema not migrated, or hosted env missing | the Worker throws (deployment problem, not the sender's) |
+| schema not migrated, `SAAS_ENABLED` missing, or report mail while `INTAKE_DOMAIN` is missing | the Worker throws (deployment problem, not the sender's) |
+| `check+` mail while `CANARY_DOMAIN` is not set | `setReject` (unknown recipient) |
 | a report already stored | accepted, nothing stored again |
 
 A report that could not be processed is never shown as "no reports": the dashboard fields `intake` and `uncounted` (see [API fields](#api-fields-for-the-dashboard)) say so.
@@ -285,6 +327,8 @@ A report address is public (it sits in the customer's DMARC record), so anybody 
 **Order of work** (cheap and unforgeable first; `src/hosted/intake.ts`): (a) recipient, token and raw size; (b) classify the **carrier**: read the topmost authentication header and see whether it authenticates the From address and whether the sender is in the registry; (c) charge the caps (instance, workspace, address, and the tier's own) **before decompressing anything**; (d) decompress with a hard cap by carrier class (`INTAKE_MAX_DECOMPRESSED_BYTES` for a registry sender, `INTAKE_MAX_NONREGISTRY_DECOMPRESSED_BYTES` for anyone else); (e) parse, then decide the tier from the report's own metadata.
 
 **Authenticated.** `AUTHSERV_ID` and `AUTHSERV_HEADER` are set; the header read is the **topmost** `Authentication-Results` (`ar`) or the topmost `ARC-Authentication-Results` with `i=1` (`arc`), taken from the raw message; its authserv-id equals `AUTHSERV_ID` (a header the sender added is ignored); and it shows **any** `dkim=pass` (`header.d`, or without it the domain of `header.i`) or a `dmarc=pass` (`header.from`) **aligned (same organisational domain) with the From address**, which must be exactly one address. A message with two signatures has two `dkim` results and all of them are collected: a later one never overwrites an earlier one. SPF alone never authenticates. Mail with no authentication results at all is unauthenticated (fail closed).
+
+**Receiver extensions and copied envelope senders.** A bare `word=value` inside a resinfo (an extension such as `action=none`) no longer fails the header: it and the rest of that resinfo are skipped, which can lose a pass but never create one (a method is only read after a top-level `;`). A receiver that copies a sender-chosen envelope address unquoted into `smtp.mailfrom` lets that sender's `;` start a resinfo the receiver never wrote (`x;dkim=pass header.d=google.com;arc=none smtp.x=y@attacker.example`); no tokenizer can tell, so a carrier whose envelope sender is not a plain address is not believed (`guardEnvelope`, reason `authres_malformed`).
 
 **How the header is read (`src/email/auth-results.ts`, RFC 8601 §2.2).** A real tokenizer, not a text search: CFWS with nested comments and quoted-pairs, quoted strings with backslash escapes, the authserv-id, an optional version, then `;`-separated results. A method (`dkim`, `spf`, `dmarc`, `arc`, …) is read **only at the start of a result**, and its `ptype.property=value` pairs belong to that method alone. Text the sender influences (a quoted local part such as `smtp.mailfrom="x dkim=pass header.d=google.com y"@attacker.example`, a comment the receiver copies, `header.i`) is one value or one comment and can never become a result: the security review stored two such forgeries as counted Google reports before this. Names are case-insensitive. Folded lines are unfolded first. `none` yields no methods.
 
@@ -435,7 +479,17 @@ MTA-STS on a hosted domain: `POST /api/domains/:id/mta-sts` answers `409` (use `
 Errors: `409` already enabled · `422` SPF cannot be resolved, no MX for MTA-STS, several SPF records · `502` Cloudflare/DNS failure · `507` records zone full.
 Enabling is all-or-nothing: if Cloudflare fails part-way, the records already written are removed.
 
-`POST /api/check-sessions` (public) returns `{ token, email, expires_at }` in `saas` (`email` is the `check+…@canary…` address).
+`POST /api/check-sessions` (public) returns `{ token, email, expires_at }` in `saas` (`email` is the `check+…@canary…` address), or `404` when `CANARY_DOMAIN` is not set.
+
+`GET /api/hosted/config` (any signed-in caller) returns `{ enabled, reports, records }`: hosted mode, report addresses (`INTAKE_DOMAIN`), hosted records (`HOSTED_RECORDS_ZONE`).
+
+Connecting reports (see [above](#report-address-without-hosted-records); `404` outside hosted mode; writes need an owner/admin):
+
+| Method & path | Response |
+|---------------|----------|
+| `GET /api/domains/:id/report-address` | `{ available: false }` without `INTAKE_DOMAIN`, else `{ available, domain_id, domain, managed_by, can_connect, refusal, address, connected_at, last_report_at, reports_since_connect, reports_before_connect, state, dns: { checked_at, error, plan } \| null, parent }`. `plan.kind` is `published`, `add`, `choose`, `multiple`, `invalid` (no valid `p=`: fix it first) or `inherited` (with `policy_tag` `sp`/`p`) |
+| `POST /api/domains/:id/report-address` | connect: `201` with the status; `200` and the unchanged status when already connected; `403` for a `legacy` row, an orphaned subdomain, or a workspace `HOSTED_CONNECT_REPORTS` does not admit; `409` with hosted records |
+| `DELETE /api/domains/:id/report-address` | disconnect: the status (`not_connected`) |
 
 ## Data retention
 

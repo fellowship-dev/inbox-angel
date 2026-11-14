@@ -1,8 +1,10 @@
 // Central intake for the hosted service (MODE=saas, SAAS_ENABLED=1).
 //
-//   rua+<token>@rua.readysetmail.com       DMARC aggregate report, token → workspace + domain
+//   rua@rua.readysetmail.com               DMARC aggregate report to the FIXED address (src/hosted/fixed-address.ts): the report's own
+//                                          domain → the one workspace that proved it and connected its reports
+//   rua+<token>@rua.readysetmail.com       DMARC aggregate report, token → workspace + domain (hosted records)
 //   tls-rpt+<token>@rua.readysetmail.com   TLS-RPT report
-//   check+<token>@canary.readysetmail.com  anonymous free check (src/hosted/canary.ts)
+//   check+<token>@canary.readysetmail.com  anonymous free check (src/hosted/canary.ts), only when CANARY_DOMAIN is set
 //
 // Subdomains can't have a catch-all, so one Email Routing rule per base address (`rua@`, `tls-rpt@`,
 // `check@`) delivers every `+token` variant here. The token picks the workspace; the report's own
@@ -15,14 +17,15 @@
 // Every message leaves one JSON log line (src/hosted/intake-log.ts).
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, globalQueries, intakeLookups } from '@ready-set-mail/db';
+import { forWorkspace, globalQueries, intakeLookups, type IntakeTarget } from '@ready-set-mail/db';
 import type { Carrier } from '../dmarc/reporter-auth';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport, StorageFailure, type ReportResult } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
-import { carrierFromHeaders } from '../dmarc/reporter-auth';
-import { readAuthHeaders, trustedResults } from '../email/sender-proof';
+import { carrierFromHeaders, guardEnvelope } from '../dmarc/reporter-auth';
+import { readAuthHeaders, trustedResults, type AuthHeaders } from '../email/sender-proof';
+import { attributeReport, chargeUnattributed, peekReportDomain, takePeek } from './fixed-address';
 import { hostedConfig, hostedEnabled, intakeLimits } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
@@ -36,7 +39,8 @@ interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
 /** The caps the instance owner is told about: storage and daily limits at address, workspace and instance level. */
-export const isSetupCap = (reason: ReasonCode): boolean => /^cap_(address_day|workspace_day|instance_day|address_records|workspace_storage|instance_storage)$/.test(reason);
+export const isSetupCap = (reason: ReasonCode): boolean =>
+  /^cap_(address_day|workspace_day|instance_day|address_records|workspace_storage|instance_storage|uncounted_(workspace_day|instance_day|address_records|workspace_storage|instance_storage)|unattributed_(sender_day|total_day))$/.test(reason);
 
 type IntakeQueries = ReturnType<typeof forWorkspace>['intake'];
 
@@ -84,16 +88,17 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
 
 async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: Seen): Promise<Verdict> {
   const cfg = hostedConfig(env);
-  if (!hostedEnabled(env) || !cfg.intakeDomain || !cfg.canaryDomain) {
+  if (!hostedEnabled(env)) {
     // A deployment problem, not the sender's: fail the delivery so it is retried once fixed.
-    throw Object.assign(new Error('Hosted intake is not configured: MODE=saas needs SAAS_ENABLED=1, INTAKE_DOMAIN and CANARY_DOMAIN'), { reason: 'not_configured' as ReasonCode });
+    throw Object.assign(new Error('Hosted intake is not configured: MODE=saas needs SAAS_ENABLED=1'), { reason: 'not_configured' as ReasonCode });
   }
   const refuse = (reason: ReasonCode, text: string = REASONS[reason]): Verdict => { message.setReject(text); return { outcome: 'refused', reason }; };
 
   const rcpt = parseRecipient(message.to);
   if (!rcpt) return refuse('bad_recipient');
 
-  if (rcpt.host === cfg.canaryDomain) {
+  // The free check and report intake are independent: each needs only its own domain (CANARY_DOMAIN, INTAKE_DOMAIN).
+  if (cfg.canaryDomain && rcpt.host === cfg.canaryDomain) {
     seen.kind = 'canary';
     let rejected = false;
     const watched = new Proxy(message, { get: (t, p) => (p === 'setReject' ? (r: string) => { rejected = true; t.setReject(r); } : (() => { const v = Reflect.get(t, p, t); return typeof v === 'function' ? v.bind(t) : v; })()) });
@@ -101,6 +106,8 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     return rejected ? { outcome: 'refused', reason: 'unknown_token' } : { outcome: 'accepted', reason: 'ok' };
   }
 
+  // Anything else is report intake. Without INTAKE_DOMAIN that is a deployment problem: fail so the sender retries.
+  if (!cfg.intakeDomain) throw Object.assign(new Error('Hosted report intake is not configured: MODE=saas needs INTAKE_DOMAIN'), { reason: 'not_configured' as ReasonCode });
   if (rcpt.host !== cfg.intakeDomain) return refuse('wrong_host');
   if (rcpt.base !== 'rua' && rcpt.base !== 'tls-rpt') return refuse('bad_recipient');
   const kind = rcpt.base;
@@ -108,20 +115,60 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
 
   const limits = intakeLimits(env);
   if (message.rawSize > limits.maxRawBytes) return refuse('raw_too_large', rawTooLarge(limits.maxRawBytes));
-  if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return refuse('unknown_token');
 
-  const hash = await hashToken(rcpt.tag);
-  const target = await intakeLookups(env.DB).resolveToken(hash, Math.floor(Date.now() / 1000));
-  if (!target) return refuse('unknown_token');
-  seen.ws = target.workspace_id;
-  seen.dom = target.domain_id;
+  // The FIXED address (rua@, no token) has no workspace until the report names its domain. Its order of work:
+  //   (1) the carrier's authentication result   (2) one peek against the instance-wide per-minute ceiling (deferred past it)
+  //   (3) a capped peek at the report's policy domain (at most the first 64 KiB inflated)   (4) attribution to the verified, connected
+  //   owner; when there is none the mail is charged to the UNATTRIBUTED budget and refused (no workspace's or instance budget is
+  //   touched, and mail for a connected domain never pays for mail for unconnected ones)   then, like a token address: (5) the
+  //   attributed caps (chargeIntakeCaps) before the full, capped decompression, (6) the tier decision, (7) the atomic store; the full
+  //   parse must name the domain the peek read.
+  let raw = message.raw;
+  let early: { headers: AuthHeaders; carrier: Carrier } | null = null;
+  let peeked: string | null = null;
+  let target: IntakeTarget | null;
+  if (kind === 'rua' && !rcpt.tag) {
+    const [forHeaders, afterHeaders] = raw.tee();
+    raw = afterHeaders;
+    const headers = await readAuthHeaders(forHeaders);
+    early = { headers, carrier: guardEnvelope(carrierFromHeaders(headers, env), message.from) };
+    if (!(await takePeek(env, early.carrier, Date.now()))) {
+      await globalQueries(env.DB).capObservations.note('fixed_address_busy', today()).catch(() => undefined);
+      // Unauthenticated mail can never count: refuse it for good (a retry would only hold the ceiling, and nothing depends on what a
+      // thrown handler tells the sender). Only authenticated non-registry mail is deferred, so its sender retries later.
+      if (!early.carrier.authenticated) return refuse('fixed_address_busy_unauthenticated');
+      throw Object.assign(new Error('The shared report address is busy; the sender should retry'), { reason: 'fixed_address_busy' as ReasonCode });
+    }
+    const [forPeek, afterPeek] = raw.tee();
+    raw = afterPeek;
+    const peek = await peekReportDomain(forPeek);
+    if (!peek.ok) return refuse(peek.reason);
+    peeked = peek.domain;
+    target = await attributeReport(env, cfg.intakeDomain, peeked);
+    if (!target) {
+      const over = await chargeUnattributed(env, early.carrier, message.from, today());
+      if (over) {
+        await globalQueries(env.DB).capObservations.note(over, today()).catch(() => undefined);
+        return refuse(over);
+      }
+      return refuse('domain_not_connected');
+    }
+  } else {
+    if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return refuse('unknown_token');
+    const hash = await hashToken(rcpt.tag);
+    target = await intakeLookups(env.DB).resolveToken(hash, Math.floor(Date.now() / 1000));
+    if (!target) return refuse('unknown_token');
+  }
+  const tgt: IntakeTarget = target;
+  seen.ws = tgt.workspace_id;
+  seen.dom = tgt.domain_id;
 
-  const q = forWorkspace(env.DB, target.workspace_id).intake;
+  const q = forWorkspace(env.DB, tgt.workspace_id).intake;
   const day = today();
   const now = () => Math.floor(Date.now() / 1000);
   /** Mail that reached the address and was not stored is counted where the owner can see it (best effort). */
   const refuseAndMark = async (reason: ReasonCode): Promise<Verdict> => {
-    if (OWNER_VISIBLE.has(reason)) await q.markFailure(target.domain_id, day, reason, now()).catch(() => 0);
+    if (OWNER_VISIBLE.has(reason)) await q.markFailure(tgt.domain_id, day, reason, now()).catch(() => 0);
     return refuse(reason);
   };
 
@@ -131,11 +178,19 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   //       (src/email/dmarc-report.ts: 1 MiB unless the carrier matches a registry entry)   (e) parse; decide the tier from the report's metadata.
   // Tiers: counted (authenticated AND a registry reporter), received-not-counted authenticated (stored, small caps), received-not-counted
   // unauthenticated (stored, tightest caps, 30 days, no IP lookups). Not stored: malformed, over a cap, domain not owned.
-  const [forHeaders, rest] = message.raw.tee();
-  const headers = await readAuthHeaders(forHeaders);
+  let headers: AuthHeaders;
+  let rest: ReadableStream<Uint8Array>;
+  if (early) {
+    headers = early.headers;
+    rest = raw;
+  } else {
+    const [forHeaders, afterHeaders] = raw.tee();
+    rest = afterHeaders;
+    headers = await readAuthHeaders(forHeaders);
+  }
   const trusted = !!(env.AUTHSERV_ID && env.AUTHSERV_HEADER && trustedResults(headers, env.AUTHSERV_ID, env.AUTHSERV_HEADER));
   logAuthservDiscovery(headers, env, trusted);
-  const carrier: Carrier = carrierFromHeaders(headers, env);
+  const carrier: Carrier = early?.carrier ?? guardEnvelope(carrierFromHeaders(headers, env), message.from);
   seen.dkim_org = carrier.dkimOrg;
   seen.from_org = carrier.fromOrg;
   const globals = globalQueries(env.DB);
@@ -149,16 +204,16 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   const overCap = async (reason: ReasonCode): Promise<Verdict> => {
     await noteCap(reason);
     if (carrier.class !== 'registry') return refuseAndMark(reason);
-    await q.markFailure(target.domain_id, day, 'over_cap_accepted_dropped', now()).catch(() => 0);
+    await q.markFailure(tgt.domain_id, day, 'over_cap_accepted_dropped', now()).catch(() => 0);
     seen.reporter = registryId;
     return { outcome: 'accepted', reason: 'over_cap_accepted_dropped' };
   };
 
-  const { reason: capped, quota } = await chargeIntakeCaps(q, { domainId: target.domain_id, workspaceId: target.workspace_id, day, rawSize: message.rawSize, envelopeFrom: message.from, carrier }, limits);
+  const { reason: capped, quota } = await chargeIntakeCaps(q, { domainId: tgt.domain_id, workspaceId: tgt.workspace_id, day, rawSize: message.rawSize, envelopeFrom: message.from, carrier }, limits);
   if (capped) return overCap(capped);
 
   const body = new Proxy(message, { get: (t, p) => (p === 'raw' ? rest : Reflect.get(t, p, t) instanceof Function ? (Reflect.get(t, p, t) as Function).bind(t) : Reflect.get(t, p, t)) });
-  const tenant = await loadTenant(env, { workspaceId: target.workspace_id });
+  const tenant = await loadTenant(env, { workspaceId: tgt.workspace_id });
 
   let result: ReportResult;
   if (kind === 'rua') {
@@ -168,7 +223,9 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
       dropOverCap: carrier.class === 'registry',
       maxRecords: limits.recordsPerReport,
       maxNewIps: limits.newIpsPerReport,
-      token: { id: target.domain_id, domain: target.domain },
+      token: { id: tgt.domain_id, domain: tgt.domain },
+      // The fixed address was routed by the peek: the full parse must name the very same domain.
+      ...(peeked ? { expectedDomain: peeked } : {}),
       // Two separate storage budgets (the report's tier is known once its metadata is): counted reports, and uncounted ones with their own, much smaller caps.
       admit: (n, tier) => tier === 'counted'
         ? (quota.addressRecordsToday + n > limits.addressRecordsPerDay ? 'cap_address_records'
@@ -181,13 +238,15 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     Object.assign(seen, { records: result.records, tier: result.tier, reporter: result.identity ?? result.reporter, dedup: result.dedup ?? null, email_matched: result.emailMatched ?? null });
     if (result.outcome === 'accepted' || result.outcome === 'duplicate') track(tenant, { event: 'report.received', failure_count: result.failure_count });
   } else {
-    result = await handleTlsRptReport(body, tenant, { hosted: { maxBytes: limits.maxDecompressedBytes, token: { id: target.domain_id, domain: target.domain } } });
+    result = await handleTlsRptReport(body, tenant, { hosted: { maxBytes: limits.maxDecompressedBytes, token: { id: tgt.domain_id, domain: tgt.domain } } });
     if (result.outcome === 'accepted') track(tenant, { event: 'tls-rpt.received', failure_count: result.failure_count });
   }
   // Refused after the address was known (a cap on stored records, a report too big): tell the owner.
   if (result.outcome === 'refused' && OWNER_VISIBLE.has(result.reason) && !result.reason.startsWith('storage_failed')) {
-    await q.markFailure(target.domain_id, day, result.reason, now()).catch(() => 0);
+    await q.markFailure(tgt.domain_id, day, result.reason, now()).catch(() => 0);
     await noteCap(result.reason);
+  } else if (result.outcome === 'refused') {
+    await noteCap(result.reason); // the uncounted storage caps: not shown per domain, but the owner's setup check names them
   }
   return { outcome: result.outcome, reason: result.reason };
 }

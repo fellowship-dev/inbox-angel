@@ -3,6 +3,7 @@ import { hasReportAddress } from '../lib/dmarc-record';
 import { useDomains } from '../lib/queries';
 import { useHosted } from '../lib/session';
 import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
+import { ConnectReports } from './reports/ConnectReports';
 
 /**
  * Hosted only: a domain whose DMARC reports cannot reach this dashboard, because it has no report address (hosted
@@ -24,8 +25,9 @@ export function useWorkspaceReportsNotConnected(): boolean {
 /**
  * "Reports not connected yet", in place of report data: what that means, what still works from live DNS, and a
  * person to talk to. Status "unknown" (dashed circle), never a pass: without reports nobody can say every sender passes.
+ * With `domainId` (one domain) and report intake on, it also offers Connect reports (ConnectReports `bare`: the action only).
  */
-export function ReportsNotConnected({ domain, className }: { domain?: string; className?: string }) {
+export function ReportsNotConnected({ domain, domainId, className }: { domain?: string; domainId?: number; className?: string }) {
 	return (
 		<section aria-label="Reports" className={cn('space-y-2 rounded-lg border border-line bg-surface-2 p-4 sm:p-5', className)} data-testid="reports-not-connected">
 			<StatusDot status="unknown" label="Reports not connected yet" className="font-semibold" />
@@ -35,6 +37,7 @@ export function ReportsNotConnected({ domain, className }: { domain?: string; cl
 				senders and whether it is safe to enforce cannot be shown.
 			</p>
 			<p className="text-sm text-ink-2">Still checked from live DNS: your SPF, DKIM and DMARC records, each domain&apos;s level, and the exact records to fix.</p>
+			{domain && domainId !== undefined ? <ConnectReports domain={{ id: domainId, domain }} bare /> : null}
 			<TalkToMax priority={HELP_PRIORITY.reportsNotConnected} lead="Want reports for your domains?" about="about connecting them" />
 		</section>
 	);

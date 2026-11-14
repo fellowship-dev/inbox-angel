@@ -10,6 +10,7 @@ import { DnsRecords } from '../../components/domain/DnsRecords';
 import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
+import { ConnectReports } from '../../components/reports/ConnectReports';
 import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
@@ -148,6 +149,8 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 	const { canWrite } = useSession();
 	// Hosted, before report intake: no reports can arrive, so the report sections say so once instead of showing zeros.
 	const reportsOff = useReportsNotConnected(domain);
+	// Hosted: the self-host "RUA reporting address" section never applies (the DMARC reports panel shows the address).
+	const hosted = useHosted();
 
 	const sums = stats.data ? sumStats(stats.data.stats) : null;
 	const guidance = sums ? getGuidance(domain, sums.passRate, sums.total > 0, dns.data && !dns.data.error && dns.data.found ? dns.data.current_record : null) : null;
@@ -188,7 +191,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 
 			{reportsOff ? (
 				<Section title="Results">
-					<ReportsNotConnected domain={domain.domain} />
+					<ReportsNotConnected domain={domain.domain} domainId={domain.id} />
 				</Section>
 			) : (
 			<Section
@@ -262,7 +265,10 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 			</Section>
 			)}
 
-			{reportsOff ? null : (
+			{/* Hosted with report intake, once connected: connected → published → received. Before that, ReportsNotConnected
+			    (in Results above) carries the Connect reports action. Renders nothing elsewhere. */}
+			{reportsOff ? null : <ConnectReports domain={domain} />}
+			{hosted || reportsOff ? null : (
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
 				{hasReportAddress(domain.rua_address) ? (
 					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />

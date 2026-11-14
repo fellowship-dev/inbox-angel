@@ -63,6 +63,7 @@ export interface Env {
   MODE?: string;                 // "selfhost" (default) | "saas"
   // Hosted service (MODE=saas + SAAS_ENABLED=1), see docs/hosted.md
   INTAKE_DOMAIN?: string;        // central report address domain, e.g. rua.readysetmail.com
+  HOSTED_CONNECT_REPORTS?: string; // who may connect reports to the fixed address: owner (default: OWNER_EMAIL's workspaces) | all
   CANARY_DOMAIN?: string;        // anonymous free-check address domain, e.g. canary.readysetmail.com
   HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. readysetmail.com
   HOSTED_RECORDS_LABEL?: string; // single label every hosted record lives under (default "h")

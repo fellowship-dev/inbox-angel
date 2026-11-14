@@ -23,6 +23,16 @@
 //     the receiver whose semantics we verified. (Method versions, "dkim/1=pass", are accepted when numeric; they do not change the result.)
 //   - "none" in place of the results (no-result) yields no methods.
 //   - A property that appears twice inside one resinfo fails closed (which one the receiver meant is unknowable).
+//   - PROPERTY VALUES are checked (see below): a value a property cannot have drops that whole resinfo, and so does a non-ASCII
+//     character in a property value (a Unicode-form IDN): only that result is lost, never the whole header.
+//   - TOLERANCE. A bare "word=value" inside a resinfo (a receiver's extension such as "action=none", which RFC 8601 does not define) is
+//     not refused: it and the rest of THAT resinfo, up to the next top-level ";" (quotes and comments respected), are skipped, and the
+//     method's result and the properties read before it are kept. Skipping can lose a pass (a header.d after the extension is dropped)
+//     but can never create one: a method is still only read right after a top-level ";", and what is skipped could equally have been
+//     written as a well-formed "ptype.word=value". Anything else unreadable still fails the whole header closed.
+//   - What no tokenizer can catch: a receiver that copies a sender-chosen value unquoted, so the sender's ";" starts a resinfo the
+//     receiver never wrote. The hosted intake does not believe a carrier whose envelope sender could do that (guardEnvelope,
+//     src/dmarc/reporter-auth.ts).
 //   - FAILS CLOSED for the whole header, with the reason in `detail`: longer than MAX_HEADER_CHARS; NUL or any other control character
 //     (anything below 0x20 except tab, and 0x7F), a stray CR/LF; unbalanced quotes or parentheses; comment nesting over MAX_COMMENT_DEPTH;
 //     more than MAX_RESULTS results or MAX_PROPS properties in one; a character outside the grammar (non-ASCII, "\" or ")" outside a quoted
@@ -52,6 +62,8 @@ export interface AuthResultInfo {
   props: Record<string, string>;
   /** Text of the comments inside this resinfo (the receiver's free text: p=reject dis=none), capped. */
   comments: string[];
+  /** True when a bare "word=value" extension and the rest of this resinfo were skipped (see TOLERANCE). */
+  skipped?: boolean;
 }
 
 export type AuthResultsFailure = 'too_long' | 'unsupported_version' | 'malformed';
@@ -152,6 +164,17 @@ export function tokenizeAuthResults(header: string): AuthResultsParse {
     if (i === from) stop(`${what} expected`);
     return s.slice(from, i).toLowerCase();
   };
+  /** Skip to the next top-level ";" (quotes and comments respected), failing closed on a stray ")" or "\\" or an unbalanced construct. */
+  const skipRest = (what: string) => {
+    for (;;) {
+      const c = at();
+      if (c === -1 || c === 0x3b) return;
+      if (c === 0x22) { quoted(); continue; }
+      if (c === 0x28) { cfws(); continue; }
+      if (c === 0x29 || c === 0x5c) stop(`stray characters in ${what}`);
+      i++;
+    }
+  };
   /** After a token-like word, the next character must be a delimiter: stops "dkimx=y" style runs from being read as two things. */
   const atBoundary = () => { const c = at(); return c === -1 || isWsp(c) || c === 0x28 || c === 0x3b; };
 
@@ -198,6 +221,7 @@ export function tokenizeAuthResults(header: string): AuthResultsParse {
       if (!atBoundary()) stop('stray characters after the result');
       const info: AuthResultInfo = { method, methodVersion, result, reason: null, props: Object.create(null), comments };
       let props = 0;
+      let dropped = false;
       for (;;) {
         cfws(comments);
         if (i >= n || at() === 0x3b) break;
@@ -208,25 +232,65 @@ export function tokenizeAuthResults(header: string): AuthResultsParse {
           info.reason = value();
           continue;
         }
+        if (at() === 0x3d) {
+          // A bare "word=value" extension (see TOLERANCE): skip the rest of this resinfo, failing closed on any structural error.
+          skipRest('a skipped extension');
+          info.skipped = true;
+          break;
+        }
         if (at() !== 0x2e) stop('"." expected after the property type');
         i++; cfws(comments);
         const property = ldh('property');
         cfws(comments);
         if (at() !== 0x3d) stop('"=" expected after the property');
         i++; cfws(comments);
+        // A non-ASCII character in a property value (a Unicode-form IDN in header.d or smtp.mailfrom, written by a receiver that does not
+        // convert it to A-labels) is not a value this grammar has: that whole result is dropped, the rest of the header still counts.
+        if (at() > 0x7f) { skipRest('a dropped result'); dropped = true; break; }
         const v = value();
+        if (at() > 0x7f) { skipRest('a dropped result'); dropped = true; break; }
         const key = `${word}.${property}`;
         if (key in info.props) stop(`duplicate property ${key.slice(0, 40)}`);
         if (++props > MAX_PROPS) stop('too many properties');
+        if (!validPropertyValue(key, v)) {
+          // Not a value this property can have (see PROPERTY VALUES): the whole resinfo is dropped, never believed in part.
+          skipRest('a dropped result');
+          dropped = true;
+          break;
+        }
         info.props[key] = v;
       }
       if (results.length >= MAX_RESULTS) stop('too many results');
-      results.push(info);
+      if (!dropped) results.push(info);
     }
     return { ok: true, authservId, version: 1, results };
   } catch (e) {
     if (e instanceof Stop) return fail(e.failure, e.detail);
     return fail('malformed', 'unreadable'); // never throws
+  }
+}
+
+// PROPERTY VALUES. A property whose value is not one that property can have (RFC 8601 section 2.7, RFC 5321 for the SMTP ones) means the
+// receiver wrote something it should not have, most likely copied from the sender: header.d and smtp.helo a host name (smtp.helo also an
+// address literal), header.i "[local]@host", smtp.mailfrom and header.from a host or "local@host" (mailfrom may be empty: the null sender),
+// header.s a selector. Such a resinfo is dropped as a whole (it may lose a pass, never create one). Other properties are not checked.
+// What this cannot catch: a sender-chosen value that the receiver writes unquoted AND that splits at its ";" into pieces that are each
+// valid (a HELO name like "x;dkim=pass(c)header.d=google.com"). Workers do not see the HELO name, so this is decided at go-live by
+// inspecting one real routed header (docs/hosted.md, "Going from owner to all").
+const HOST_RE = /^(?=.{1,253}$)[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?)*\.?$/i;
+const isHost = (v: string) => HOST_RE.test(v);
+const isAddressLiteral = (v: string) => /^\[(?:IPv6:)?[0-9a-f:.]{2,45}\]$/i.test(v);
+const isMailbox = (v: string) => { const at = v.lastIndexOf('@'); return at > 0 && isHost(v.slice(at + 1)); };
+
+export function validPropertyValue(key: string, v: string): boolean {
+  switch (key) {
+    case 'header.d': return isHost(v);
+    case 'smtp.helo': return isHost(v) || isAddressLiteral(v);
+    case 'header.i': return v.startsWith('@') ? isHost(v.slice(1)) : isMailbox(v);
+    case 'smtp.mailfrom': return v === '' || isHost(v) || isMailbox(v);
+    case 'header.from': return isHost(v) || isMailbox(v);
+    case 'header.s': return /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/i.test(v) && v.length <= 253;
+    default: return true;
   }
 }
 
@@ -237,5 +301,9 @@ export function domainOfValue(v: string | undefined): string | null {
   return d.length <= 253 && d.split('.').every((l) => /^[a-z0-9-]{1,63}$/.test(l) && !l.startsWith('-') && !l.endsWith('-')) ? d : null;
 }
 
-/** The domain a DKIM result is about: header.d, else the domain of header.i. */
-export const dkimDomain = (r: AuthResultInfo): string | null => domainOfValue(r.props['header.d']) ?? domainOfValue(r.props['header.i']);
+/**
+ * The domain a DKIM result is about: header.d only. header.i is never used: it is optional, the identity may be a subdomain the
+ * signer chose, and a tolerant skip can drop header.d while leaving a header.i behind ("dkim=pass header.i=@google.com x-cf=1
+ * header.d=attacker.example"). Every real report email in test/fixtures/third-party carries header.d on its DKIM results.
+ */
+export const dkimDomain = (r: AuthResultInfo): string | null => domainOfValue(r.props['header.d']);

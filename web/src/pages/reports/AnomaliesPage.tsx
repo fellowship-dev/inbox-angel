@@ -35,7 +35,7 @@ export function AnomaliesPage() {
 			/>
 
 			{reportsOff ? (
-				<ReportsNotConnected domain={domain?.domain} />
+				<ReportsNotConnected domain={domain?.domain} domainId={domain?.id} />
 			) : q.isPending ? (
 				<ListSkeleton rows={3} label="Loading anomalies" />
 			) : q.isError ? (
