@@ -295,21 +295,27 @@ export function intakeLookups(dbLike: DbLike) {
 	const db = getDb(dbLike);
 	return {
 		/**
-		 * The fixed hosted address's UNATTRIBUTED budget, charged before anything of a message is decompressed (its workspace is not known yet):
-		 * per sending organisation (`f:s:<bucket>`) and per carrier class (`f:<class>`), per UTC day, in intake_quota. It never touches a
-		 * workspace's or the instance's own counted or uncounted budgets, so mail for domains nobody connected cannot use those up.
-		 * Atomic per scope (conditional upsert); when either refuses, what counted is given back. Returns the refusing scope, or null.
+		 * The fixed hosted address's UNATTRIBUTED budget, charged only to mail whose report names a domain nobody connected (after the peek
+		 * and a failed attribution), in intake_quota, per UTC day: first the carrier class's total (`total.scope`), and only while that has room,
+		 * the sending organisation's own allowance (`bucket.scope`). Once the class total is used up no further per-sender row is created, so
+		 * the table grows by at most `total.max` sender rows per class and day. Returns which allowance is exhausted, or null.
 		 */
 		async consumeUnattributed(day: string, bucket: { scope: string; max: number }, total: { scope: string; max: number }): Promise<'sender' | 'total' | null> {
 			const up = (scope: string, max: number) => sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, 0)
 				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1 WHERE intake_quota.messages < ${max}`;
-			const res = await batchStatements(db, [up(bucket.scope, bucket.max), up(total.scope, total.max)]);
-			const okSender = (res[0]?.meta?.changes ?? 0) > 0;
-			const okTotal = (res[1]?.meta?.changes ?? 0) > 0;
-			if (okSender && okTotal) return null;
-			const giveBack = [okSender ? bucket.scope : null, okTotal ? total.scope : null].filter((x): x is string => !!x);
-			if (giveBack.length) await batchStatements(db, giveBack.map((scope) => sql`UPDATE intake_quota SET messages = MAX(0, messages - 1) WHERE scope = ${scope} AND day = ${day}`));
-			return okSender ? 'total' : 'sender';
+			const t = await batchStatements(db, [up(total.scope, total.max)]);
+			if ((t[0]?.meta?.changes ?? 0) === 0) return 'total';
+			const b = await batchStatements(db, [up(bucket.scope, bucket.max)]);
+			if ((b[0]?.meta?.changes ?? 0) > 0) return null;
+			await batchStatements(db, [sql`UPDATE intake_quota SET messages = MAX(0, messages - 1) WHERE scope = ${total.scope} AND day = ${day}`]);
+			return 'sender';
+		},
+
+		/** Count one event against a small instance-wide counter (`scope`, `day`) that refuses past `max`; true when it had room. */
+		async consumeCounter(scope: string, day: string, max: number): Promise<boolean> {
+			const res = await batchStatements(db, [sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, 0)
+				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1 WHERE intake_quota.messages < ${max}`]);
+			return (res[0]?.meta?.changes ?? 0) > 0;
 		},
 
 		/** The domain a token (as hashed from an inbound address) belongs to: the current token, or the previous one within its grace. */

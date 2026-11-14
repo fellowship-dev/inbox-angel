@@ -19,7 +19,7 @@ export interface SpfHeaderResult {
 
 export interface DkimHeaderResult {
   result: AuthMethodResult;
-  domain: string | null;    // header.d, else the domain of header.i
+  domain: string | null;    // header.d (header.i is never used)
   selector: string | null;  // header.s
 }
 

@@ -18,6 +18,7 @@ import { CopyField } from '../domain/CopyField';
 import { ConfirmDialog } from '../domain/ConfirmDialog';
 import { RadioCard } from '../wizard/RadioCard';
 import { inheritedCoverage, keptEnforcement, offerEnforcement, recordFor } from '../../lib/dmarc-coverage';
+import { parseDmarcTags } from '../../lib/dmarc-record';
 import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
 
 /**
@@ -339,12 +340,21 @@ function InheritedOwnRecord({ plan, domain, address }: { plan: Extract<ReportAdd
 	const e = offerEnforcement(coverage);
 	if (!e) return null;
 	const align = [e.adkim ? `adkim=${e.adkim}` : null, e.aspf ? `aspf=${e.aspf}` : null].filter(Boolean).join(', ');
+	// Failure reports (RFC 7489 ruf= and its fo= options) are not part of the enforcement in force: a record of its own does not carry them.
+	const tags = parseDmarcTags(plan.parent_record);
+	const failureTags = (['ruf', 'fo'] as const).filter((t) => tags[t] !== undefined);
 	return (
 		<div className="space-y-2">
 			<p className="text-sm text-ink-2">
 				Or give {domain} a record of its own. It keeps {keptEnforcement(coverage, e)}
 				{align ? ` with ${align}` : ''}, so nothing changes for its mail, and its reports go only to the report address. Later changes to {plan.from}&apos;s record no
 				longer apply to it.
+				{failureTags.length ? (
+					<>
+						{' '}
+						{plan.from}&apos;s failure-report settings ({failureTags.map((t) => `${t}=`).join(', ')}) are not carried over: no failure reports are requested for {domain}.
+					</>
+				) : null}
 			</p>
 			<RecordToPublish replace={false} name={plan.own.name} value={recordFor(e, address)} />
 		</div>

@@ -149,31 +149,47 @@ export async function peekReportDomain(raw: ReadableStream<Uint8Array>): Promise
   return domain ? { ok: true, domain } : { ok: false, reason: 'report_domain_unreadable' };
 }
 
-// ── The unattributed budget (before the peek) ───────────────
+// ── Budgets of the fixed address ────────────────────────────
+//
+// PEEKS PER MINUTE (before the peek): the backstop against pure volume. Every message to the fixed address that is not from an
+// authenticated registry reporter costs one peek (at most 64 KiB inflated, one linear scan, a few D1 queries). Past
+// INTAKE_MAX_FIXED_PEEKS_PER_MINUTE (default 120) such mail is DEFERRED for the rest of that minute (the Worker throws: the sender
+// retries, nothing is lost and nobody is refused for good). Registry reporters and token addresses never count against it. Cost: at
+// most 120 × 64 KiB = 7.5 MiB inflated per minute (~170,000 peeks a day), one intake_quota row per minute of the day.
+//
+// UNATTRIBUTED (after a failed attribution): charged ONLY to mail whose report names a domain nobody connected, so mail for a connected
+// domain can never be refused because of mail for unconnected ones. It bounds what such mail writes and tells the owner when it piles up.
 
 export const DEFAULT_UNATTRIBUTED_MESSAGES_PER_DAY = 2000;
 export const DEFAULT_UNATTRIBUTED_PER_SENDER_PER_DAY = 100;
+export const DEFAULT_FIXED_PEEKS_PER_MINUTE = 120;
 
-export interface UnattributedEnv { INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY?: string; INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY?: string }
+export interface UnattributedEnv { INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY?: string; INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY?: string; INTAKE_MAX_FIXED_PEEKS_PER_MINUTE?: string }
 
 const positive = (v: string | undefined, dflt: number): number => {
   const n = Number(v?.trim());
   return v && Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt;
 };
 
-export function unattributedLimits(env: UnattributedEnv): { perSender: number; total: number } {
+export function unattributedLimits(env: UnattributedEnv): { perSender: number; total: number; peeksPerMinute: number } {
   return {
     perSender: positive(env.INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY, DEFAULT_UNATTRIBUTED_PER_SENDER_PER_DAY),
     total: positive(env.INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY, DEFAULT_UNATTRIBUTED_MESSAGES_PER_DAY),
+    peeksPerMinute: positive(env.INTAKE_MAX_FIXED_PEEKS_PER_MINUTE, DEFAULT_FIXED_PEEKS_PER_MINUTE),
   };
 }
 
+/** Count one peek against this minute's ceiling (registry reporters are never counted). False: the ceiling is reached, defer the message. */
+export async function takePeek(env: UnattributedEnv & { DB: D1Database }, carrier: Carrier, nowMs: number): Promise<boolean> {
+  if (carrier.class === 'registry') return true;
+  const iso = new Date(nowMs).toISOString();
+  return intakeLookups(env.DB).consumeCounter(`f:peek:${iso.slice(11, 16)}`, iso.slice(0, 10), unattributedLimits(env).peeksPerMinute);
+}
+
 /**
- * Before anything of a message to the fixed address is decompressed, charge the sender's UNATTRIBUTED budget: its own allowance (an
- * authenticated sender by its DKIM organisation, an unauthenticated one by the envelope-sender domain it claims) and its carrier class's
- * daily total. This is the only budget mail for a domain nobody connected can use: it is refused right after the peek, before any
- * workspace's or the instance's own budgets are charged. Registry reporters (authenticated Google, Microsoft…) are not charged: they
- * cannot be forged, and a flood of anyone else's mail can then never hold them up. Null: proceed; else the reason code to refuse with.
+ * Mail whose report names a domain nobody connected: charge the sender's UNATTRIBUTED allowance (an authenticated sender by its DKIM
+ * organisation, an unauthenticated one by the envelope-sender domain it claims) within its carrier class's daily total. It is refused
+ * either way; the reason names the exhausted allowance, which the owner's setup check reports. Registry reporters are not charged.
  */
 export async function chargeUnattributed(env: UnattributedEnv & { DB: D1Database }, carrier: Carrier, envelopeFrom: string | null | undefined, day: string): Promise<'cap_unattributed_sender_day' | 'cap_unattributed_total_day' | null> {
   if (carrier.class === 'registry') return null;

@@ -17,9 +17,12 @@ export function reportIntakePreflightItems(env: Pick<BoundEnv, 'MODE' | 'SAAS_EN
   }
   const connect = connectReportsSetting(env);
   if (!connect.valid) item('action', 'HOSTED_CONNECT_REPORTS', 'HOSTED_CONNECT_REPORTS is neither "owner" nor "all", so it is treated as "owner".');
+  // Always one line with the switch's current value (the parsed mode, never the raw setting).
   if (connect.mode === 'owner') {
-    if (!env.OWNER_EMAIL?.trim()) item('action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL', 'Only the instance owner\'s workspaces may connect reports, but OWNER_EMAIL is not set, so nobody can.');
-    else item('note', 'HOSTED_CONNECT_REPORTS', 'Only workspaces you own can connect reports. Set HOSTED_CONNECT_REPORTS to "all" to open it to every verified workspace.');
+    if (!env.OWNER_EMAIL?.trim()) item('action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL', 'HOSTED_CONNECT_REPORTS is "owner": only the instance owner\'s workspaces may connect reports, but OWNER_EMAIL is not set, so nobody can.');
+    else item('note', 'HOSTED_CONNECT_REPORTS', 'HOSTED_CONNECT_REPORTS is "owner": only workspaces you own can connect reports. Before setting it to "all", go through "Going from owner to all" in docs/hosted.md.');
+  } else {
+    item('note', 'HOSTED_CONNECT_REPORTS', 'HOSTED_CONNECT_REPORTS is "all": every verified workspace can connect reports to the shared address.');
   }
   return items;
 }

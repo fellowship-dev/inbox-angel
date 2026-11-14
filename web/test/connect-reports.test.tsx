@@ -288,4 +288,14 @@ describe('Connect reports', () => {
 		expect(await screen.findByText(`v=DMARC1; p=quarantine; pct=25; adkim=s; rua=mailto:${ADDR}`)).toBeInTheDocument();
 		expect(screen.getByText(/It keeps the inherited sp=quarantine as its p=quarantine at pct=25 with adkim=s, so nothing changes for its mail/)).toBeInTheDocument();
 	});
+
+	it('a subdomain\'s own record says the parent\'s failure-report settings (ruf=, fo=) are not carried over, only when the parent has them', async () => {
+		const { unmount } = show({ 'GET /api/domains/1/report-address': inherited({ parent_record: 'v=DMARC1; p=reject; ruf=mailto:f@parent.test; fo=1', policy: 'reject', policy_tag: 'p' }, null) });
+		expect(await screen.findByText(/parent\.test's failure-report settings \(ruf=, fo=\) are not carried over: no failure reports are requested for example\.com\./)).toBeInTheDocument();
+		unmount();
+		show({ 'GET /api/domains/1/report-address': inherited({ parent_record: 'v=DMARC1; p=reject', policy: 'reject', policy_tag: 'p' }, null) });
+		expect(await screen.findByText(/It keeps p=reject/)).toBeInTheDocument();
+		expect(screen.queryByText(/failure-report settings/)).not.toBeInTheDocument();
+	});
 });
+
