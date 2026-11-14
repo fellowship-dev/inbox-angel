@@ -158,6 +158,12 @@ export const aggregateReports = sqliteTable(
 		/** Did the report email pass DMARC-aligned authentication for the reporter's org domain? pass | fail | none; null: not recorded. */
 		reporter_auth: text('reporter_auth'),
 		reporter_auth_domain: text('reporter_auth_domain'),
+		/** Why reporter_auth is not 'pass' (a reason code from src/hosted/reasons.ts), or null. */
+		reporter_auth_reason: text('reporter_auth_reason'),
+		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0011). Null: stored before 0011. */
+		ingest_token: text('ingest_token'),
+		/** Rows stored in report_records for this report. Null: stored before 0011. */
+		record_count: integer('record_count'),
 	},
 	(t) => [
 		unique().on(t.domain_id, t.report_id),
@@ -167,6 +173,7 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_date_end').on(t.date_end),
 		index('idx_agg_reports_created').on(t.created_at),
 		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
+		index('idx_agg_reports_auth').on(t.workspace_id, t.reporter_auth, t.date_begin),
 	],
 );
 
@@ -711,6 +718,7 @@ export const GLOBAL_TABLES = {
 	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any workspace',
 	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
 	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
+	intake_quota: 'instance-wide intake counters per scope and day; a counter, no tenant content',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */
@@ -736,6 +744,8 @@ export const WORKSPACE_OWNED_TABLES = [
 	'cloudflare_connection_blocked_zones',
 	'domain_claims',
 	'intake_usage',
+	'workspace_storage',
+	'intake_failures',
 ] as const;
 
 // ── Trust hardening (0004) ──────────────────────────────────
@@ -773,7 +783,45 @@ export const intakeUsage = sqliteTable(
 		reports: integer('reports').notNull().default(0),
 		bytes: integer('bytes').notNull().default(0),
 	},
-	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] })],
+	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] }), index('idx_intake_usage_day').on(t.day)],
+);
+
+/**
+ * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'u:<domain_id>' (all unproven mail to one address),
+ * 'w:<workspace_id>' and '*' (the instance). A counter, not tenant content (GLOBAL_TABLES).
+ */
+export const intakeQuota = sqliteTable(
+	'intake_quota',
+	{
+		scope: text('scope').notNull(),
+		day: text('day').notNull(),
+		messages: integer('messages').notNull().default(0),
+		records: integer('records').notNull().default(0),
+		bytes: integer('bytes').notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.scope, t.day] }), index('idx_intake_quota_day').on(t.day)],
+);
+
+/** report_records rows a workspace holds right now: what the storage cap compares against. */
+export const workspaceStorage = sqliteTable('workspace_storage', {
+	workspace_id: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+	reports: integer('reports').notNull().default(0),
+	records: integer('records').notNull().default(0),
+	reconciled_at: integer('reconciled_at'),
+});
+
+/** Mail that reached a report address and was not stored: one counter row per domain, UTC day and reason. */
+export const intakeFailures = sqliteTable(
+	'intake_failures',
+	{
+		domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		day: text('day').notNull(),
+		reason: text('reason').notNull(),
+		messages: integer('messages').notNull().default(0),
+		last_at: integer('last_at').notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reason] }), index('idx_intake_failures_day').on(t.day)],
 );
 
 // Explicit delegated access. Existing reports/domains keep their original workspace ownership.

@@ -42,12 +42,28 @@ describe('0008 dns_checked_at', () => {
 		const d = createTestD1();
 		applyMigrations(d.sqlite, { through: '0007_metrics.sql' });
 		d.sqlite.prepare("INSERT INTO domains (domain, rua_address, spf_record, dmarc_policy) VALUES ('acme.com', 'r@x', 'v=spf1 -all', 'none')").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0008_dns_checked_at.sql']);
+		expect(applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' })).toEqual(['0008_dns_checked_at.sql']);
 		expect(d.sqlite.prepare('SELECT spf_record, dmarc_policy, ' + NEW.join(', ') + ' FROM domains').all()).toEqual([
 			{ spf_record: 'v=spf1 -all', dmarc_policy: 'none', dns_checked_at: null, dns_check_attempted_at: null, dns_check_status: null, dmarc_issue: null, dmarc_inherited_from: null, dns_last_good_status: null },
 		]);
 		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name IN (" + NEW.map((n) => `'${n}'`).join(',') + ')').all() as any[];
 		expect(cols.map((c) => c.name).sort()).toEqual([...NEW].sort());
 		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
+	});
+});
+
+describe('0011 intake hardening', () => {
+	it('is additive: existing reports keep their rows, new columns are NULL, new tables are empty', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
+		d.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'r@x')").run();
+		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, reporter_auth) VALUES (1, 'google.com', 'r1', 1, 2, 5, 5, 'pass')").run();
+		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count) VALUES (1, 'old.example', 'r2', 1, 2, 5, 5)").run();
+		expect(applyMigrations(d.sqlite)).toEqual(['0011_intake_hardening.sql']);
+		expect(d.sqlite.prepare('SELECT report_id, reporter_auth, reporter_auth_reason, ingest_token, record_count FROM aggregate_reports ORDER BY report_id').all()).toEqual([
+			{ report_id: 'r1', reporter_auth: 'pass', reporter_auth_reason: null, ingest_token: null, record_count: null },
+			{ report_id: 'r2', reporter_auth: null, reporter_auth_reason: null, ingest_token: null, record_count: null },
+		]);
+		for (const t of ['intake_quota', 'workspace_storage', 'intake_failures']) expect(d.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get()).toEqual({ n: 0 });
 	});
 });
