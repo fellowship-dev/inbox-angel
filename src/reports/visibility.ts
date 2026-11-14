@@ -131,12 +131,12 @@ export function intakeView(failures: FailureRow[], usage: { addressMessagesToday
 }
 
 /** Everything above for one domain: `since` (unix seconds) is the same window the numbers use. */
-export async function reportVisibility(tenant: TenantContext, domainId: number, since: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<ReportVisibility> {
+export async function reportVisibility(tenant: TenantContext, domainId: number, since: number, nowSeconds = Math.floor(Date.now() / 1000), by: 'period' | 'received' = 'period'): Promise<ReportVisibility> {
   const counting = tenant.scope.counting;
   const [unrecognised, uncounted, mix, failures, usage, drops] = await Promise.all([
-    tenant.scope.reports.unrecognised(domainId, since),
-    tenant.scope.reports.uncounted(domainId, since),
-    tenant.scope.reports.counted(domainId, since),
+    tenant.scope.reports.unrecognised(domainId, since, by),
+    tenant.scope.reports.uncounted(domainId, since, by),
+    tenant.scope.reports.counted(domainId, since, by),
     tenant.scope.intake.failures(domainId, day(nowSeconds - FAILURE_WINDOW_DAYS * DAY)),
     tenant.scope.intake.usage(domainId, day(nowSeconds)),
     tenant.scope.intake.drops(domainId, nowSeconds - FAILURE_WINDOW_DAYS * DAY),

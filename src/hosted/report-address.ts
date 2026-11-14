@@ -117,7 +117,8 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
   let visibility: ReportVisibility | null = null;
   if (address) {
     counts = await tenant.scope.intake.reportsAround(domain.id, connected_at);
-    visibility = await reportVisibility(tenant, domain.id, connected_at ?? 0);
+    // Since the connection began, by when we RECEIVED the reports: a report covers the previous day, so its period starts before the connection.
+    visibility = await reportVisibility(tenant, domain.id, connected_at ?? 0, undefined, 'received');
     const lookup = await lookupDmarc(deps.resolver ?? createResolver(), domain.domain);
     const checked_at = Math.floor((deps.now?.() ?? Date.now()) / 1000);
     dns = { checked_at, error: lookup.status === 'error' ? (lookup.error ?? 'DNS lookup failed') : null, plan: planReportAddress(lookup, address) };

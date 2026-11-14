@@ -25,7 +25,7 @@ import { handleTlsRptReport } from '../email/tls-rpt';
 import { track } from '../telemetry';
 import { carrierFromHeaders, guardEnvelope } from '../dmarc/reporter-auth';
 import { readAuthHeaders, trustedResults, type AuthHeaders } from '../email/sender-proof';
-import { attributeReport, chargeUnattributed, peekReportDomain } from './fixed-address';
+import { attributeReport, chargeUnattributed, peekReportDomain, takePeek } from './fixed-address';
 import { hostedConfig, hostedEnabled, intakeLimits } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
@@ -117,9 +117,10 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   if (message.rawSize > limits.maxRawBytes) return refuse('raw_too_large', rawTooLarge(limits.maxRawBytes));
 
   // The FIXED address (rua@, no token) has no workspace until the report names its domain. Its order of work:
-  //   (1) the carrier's authentication result   (2) the sender's UNATTRIBUTED budget, before anything is decompressed
+  //   (1) the carrier's authentication result   (2) one peek against the instance-wide per-minute ceiling (deferred past it)
   //   (3) a capped peek at the report's policy domain (at most the first 64 KiB inflated)   (4) attribution to the verified, connected
-  //   owner (refused here when there is none: no workspace's or instance budget was charged)   then, like a token address: (5) the
+  //   owner; when there is none the mail is charged to the UNATTRIBUTED budget and refused (no workspace's or instance budget is
+  //   touched, and mail for a connected domain never pays for mail for unconnected ones)   then, like a token address: (5) the
   //   attributed caps (chargeIntakeCaps) before the full, capped decompression, (6) the tier decision, (7) the atomic store; the full
   //   parse must name the domain the peek read.
   let raw = message.raw;
@@ -131,10 +132,9 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     raw = afterHeaders;
     const headers = await readAuthHeaders(forHeaders);
     early = { headers, carrier: guardEnvelope(carrierFromHeaders(headers, env), message.from) };
-    const unattributed = await chargeUnattributed(env, early.carrier, message.from, today());
-    if (unattributed) {
-      await globalQueries(env.DB).capObservations.note(unattributed, today()).catch(() => undefined);
-      return refuse(unattributed);
+    if (!(await takePeek(env, early.carrier, Date.now()))) {
+      await globalQueries(env.DB).capObservations.note('fixed_address_busy', today()).catch(() => undefined);
+      throw Object.assign(new Error('The shared report address is busy; the sender should retry'), { reason: 'fixed_address_busy' as ReasonCode });
     }
     const [forPeek, afterPeek] = raw.tee();
     raw = afterPeek;
@@ -142,7 +142,14 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     if (!peek.ok) return refuse(peek.reason);
     peeked = peek.domain;
     target = await attributeReport(env, cfg.intakeDomain, peeked);
-    if (!target) return refuse('domain_not_connected');
+    if (!target) {
+      const over = await chargeUnattributed(env, early.carrier, message.from, today());
+      if (over) {
+        await globalQueries(env.DB).capObservations.note(over, today()).catch(() => undefined);
+        return refuse(over);
+      }
+      return refuse('domain_not_connected');
+    }
   } else {
     if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return refuse('unknown_token');
     const hash = await hashToken(rcpt.tag);

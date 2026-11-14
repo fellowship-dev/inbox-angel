@@ -64,8 +64,9 @@ const CAP_TEXT = {
   cap_uncounted_address_records: 'a report address\'s daily uncounted-records limit (INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY)',
   cap_uncounted_workspace_storage: 'a workspace\'s uncounted-records limit (INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS)',
   cap_uncounted_instance_storage: 'the instance-wide uncounted-records limit (INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS)',
-  cap_unattributed_sender_day: 'one sender\'s daily limit on the shared report address (INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY)',
-  cap_unattributed_total_day: 'the daily limit on the shared report address for senders that are not known reporters (INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY)',
+  cap_unattributed_sender_day: 'one sender\'s daily limit for reports about domains nobody connected (INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY)',
+  cap_unattributed_total_day: 'the daily limit for reports about domains nobody connected (INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY)',
+  fixed_address_busy: 'the shared report address\'s per-minute limit on reports it reads (INTAKE_MAX_FIXED_PEEKS_PER_MINUTE); that mail was deferred, not refused',
 } as const;
 
 /** The setting behind each cap the setup check names. */
@@ -76,6 +77,7 @@ const CAP_SETTING = {
   cap_uncounted_address_records: 'INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY', cap_uncounted_workspace_storage: 'INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS',
   cap_uncounted_instance_storage: 'INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS',
   cap_unattributed_sender_day: 'INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY', cap_unattributed_total_day: 'INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY',
+  fixed_address_busy: 'INTAKE_MAX_FIXED_PEEKS_PER_MINUTE',
 } as const;
 
 /**

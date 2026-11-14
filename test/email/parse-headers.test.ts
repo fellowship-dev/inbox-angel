@@ -14,7 +14,7 @@ describe('parseAuthResults', () => {
   it('parses a fully passing header (Google style)', () => {
     const header = [
       'mx.google.com;',
-      ' dkim=pass header.i=@example.com header.s=selector1 header.b=abc123;',
+      ' dkim=pass header.d=example.com header.i=@example.com header.s=selector1 header.b=abc123;',
       ' spf=pass (google.com: domain of user@example.com designates 1.2.3.4 as permitted) smtp.mailfrom=user@example.com;',
       ' dmarc=pass (p=reject dis=none) header.from=example.com',
     ].join('');
@@ -28,6 +28,8 @@ describe('parseAuthResults', () => {
     expect(result!.spf!.domain).toBe('example.com');
     expect(result!.dmarc!.result).toBe('pass');
     expect(result!.dmarc!.domain).toBe('example.com');
+    // header.i alone is never the DKIM domain
+    expect(parseAuthResults('mx.google.com; dkim=pass header.i=@example.com')!.dkim!.domain).toBeNull();
     expect(result!.dmarc!.policy).toBe('reject');
     expect(result!.dmarc!.disposition).toBe('none');
   });
