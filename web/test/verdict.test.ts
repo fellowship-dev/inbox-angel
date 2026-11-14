@@ -341,3 +341,14 @@ describe('review round 2', () => {
 		expect(keys({ onboarding: ob })).toEqual(['verified:done', 'note:dkim-old']);
 	});
 });
+
+describe('getStartedSteps: a domain that does not resolve', () => {
+	it('is work to do, not "not read yet"', () => {
+		const ok = domainVerdict(domain, summary(), reports(null), null, now);
+		const nx = { ...domain, id: 2, domain: 'nope.example' };
+		const gone = domainVerdict(nx, summary({ domain: 'nope.example', dns_check_status: 'nxdomain', spf_record: null, dmarc_policy: null }), reports(null), null, now);
+		const steps = getStartedSteps({ hosted: false, domains: [domain, nx], claims: 0, summaries: [summary(), summary()], verdicts: [ok, gone], reports: [reports(null), reports(null)] });
+		const publish = steps.find((s) => s.key === 'publish')!;
+		expect(publish).toMatchObject({ state: 'todo', detail: '1 of 2 domains publish both.', action: { label: 'Fix nope.example', to: '/domains/2/settings' } });
+	});
+});

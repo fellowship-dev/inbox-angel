@@ -56,7 +56,8 @@ export function getStartedSteps(i: GetStartedInput): Step[] {
 	// SPF and DMARC published on every domain (level Authenticated or above).
 	const known = i.verdicts.filter((v) => v && v.level !== null);
 	const authenticated = known.filter((v) => (v!.level ?? 0) >= 1).length;
-	const firstGap = i.domains.findIndex((_, k) => i.verdicts[k]?.level === 0);
+	// A domain at level 0, or one known to need attention without a level (it does not resolve), still has work to do.
+	const firstGap = i.domains.findIndex((_, k) => i.verdicts[k]?.level === 0 || (i.verdicts[k]?.level === null && i.verdicts[k]?.status === 'attention'));
 	if (n === 0) steps.push({ key: 'publish', title: 'Publish SPF and DMARC', state: 'todo', detail: 'The domain page shows the exact records to copy.' });
 	else if (authenticated === n) steps.push({ key: 'publish', title: 'Publish SPF and DMARC', state: 'done', detail: n === 1 ? 'Your domain publishes both.' : `All ${n} domains publish both.` });
 	else if (known.length < n && firstGap < 0) steps.push({ key: 'publish', title: 'Publish SPF and DMARC', state: 'unknown', detail: `${authenticated} of ${n} confirmed so far. The rest have not been read from DNS yet.` });
