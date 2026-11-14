@@ -30,6 +30,9 @@ describe('public/_headers', () => {
 	it('keeps the cache rules', () => {
 		expect(get('/assets/*', 'Cache-Control')).toContain('immutable');
 		expect(get('/index.html', 'Cache-Control')).toBe('no-cache');
+		// Fixed-name fonts for the server-rendered agent pages: cached long, but not immutable (the name never changes).
+		expect(get('/fonts/*', 'Cache-Control')).toMatch(/^public, max-age=2592000\b/);
+		expect(get('/fonts/*', 'Cache-Control')).not.toContain('immutable');
 	});
 
 	it('has a CSP without unsafe script sources', () => {

@@ -28,8 +28,11 @@ describe('LeadsPage', () => {
 
 	it('says when the sequence is off', async () => {
 		renderApp(<LeadsPage />, { routes: { 'GET /api/leads': { leads: [], counts: {}, delivery: delivery({ enabled: false, can_send: false, blockers: ['The sequence is off (self-host: set ONBOARDING_SEQUENCE_ENABLED=1)'] }) } } });
-		expect(await screen.findByText('The onboarding sequence is off')).toBeInTheDocument();
+		expect(await screen.findByText('Follow-up emails are off')).toBeInTheDocument();
 		expect(screen.getByText('No leads yet')).toBeInTheDocument();
+		// Plain words for the person reading; the setting name lives in the linked guide (F19).
+		expect(document.body.textContent).not.toContain('ONBOARDING_SEQUENCE_ENABLED');
+		expect(screen.getByRole('link', { name: 'How to turn them on' })).toHaveAttribute('href', expect.stringContaining('docs/email-funnel.md'));
 	});
 
 	it('explains a 403 for anyone but the instance owner', async () => {
