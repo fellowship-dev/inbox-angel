@@ -5,6 +5,7 @@ import { api, ApiError, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { TalkToMax } from '../../components/TalkToMax';
 import { AuthLayout, Field } from './AuthLayout';
+import { useHumanCheck } from './Turnstile';
 
 /** How long the emailed link works (src/auth/welcome.ts VERIFICATION_LINK_HOURS). */
 export const LINK_HOURS = 24;
@@ -19,6 +20,7 @@ export function WelcomePage() {
 	const { token = '' } = useParams();
 	const { signedIn } = useSession();
 	const navigate = useNavigate();
+	const [name, setName] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
 	const [error, setError] = useState('');
@@ -32,7 +34,7 @@ export function WelcomePage() {
 		if (password !== confirm) return setError('Passwords do not match.');
 		setBusy(true);
 		try {
-			await api('/api/auth/welcome', { method: 'POST', body: { token, password } });
+			await api('/api/auth/welcome', { method: 'POST', body: { token, password, ...(name.trim() ? { name: name.trim() } : {}) } });
 			await signedIn();
 			navigate('/', { replace: true });
 		} catch (err) {
@@ -64,8 +66,11 @@ export function WelcomePage() {
 	return (
 		<AuthLayout title="Choose your password" description="Saving it confirms your email and signs you in.">
 			<form onSubmit={submit} className="space-y-4">
+				<Field id="name" label="Your name (optional)" hint="Shown to people you invite to your workspace.">
+					<Input id="name" autoFocus autoComplete="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} aria-describedby="name-hint" />
+				</Field>
 				<Field id="password" label="Password" hint="At least 8 characters.">
-					<Input id="password" type="password" required autoFocus autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
+					<Input id="password" type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
 				</Field>
 				<Field id="confirm" label="Confirm password">
 					<Input id="confirm" type="password" required autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
@@ -84,17 +89,22 @@ function NewLink({ expired }: { expired: boolean }) {
 	const [email, setEmail] = useState('');
 	const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
 	const [error, setError] = useState('');
+	const { status } = useSession();
+	const check = useHumanCheck(status?.turnstile_site_key);
 
-	async function send(e: FormEvent) {
+	async function send(e: FormEvent<HTMLFormElement>) {
 		e.preventDefault();
 		setError('');
 		setState('sending');
+		const cf = check.token;
 		try {
-			await api('/api/auth/resend-verification', { method: 'POST', body: { email } });
+			await api('/api/auth/resend-verification', { method: 'POST', body: { email, ...(cf ? { cf_turnstile_token: cf } : {}) } });
 			setState('sent');
 		} catch (err) {
 			setError(errorMessage(err));
 			setState('idle');
+		} finally {
+			check.reset(); // a token is single use
 		}
 	}
 
@@ -111,8 +121,9 @@ function NewLink({ expired }: { expired: boolean }) {
 					<Field id="email" label="Email">
 						<Input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
 					</Field>
+					{check.widget}
 					{error ? <FieldError>{error}</FieldError> : null}
-					<Button type="submit" className="w-full" loading={state === 'sending'}>
+					<Button type="submit" className="w-full" loading={state === 'sending'} disabled={!check.ready}>
 						Send me a new link
 					</Button>
 				</form>

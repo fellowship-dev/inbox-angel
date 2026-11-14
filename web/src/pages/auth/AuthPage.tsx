@@ -7,7 +7,7 @@ import { useSession } from '../../lib/session';
 import { TalkToMax } from '../../components/TalkToMax';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
-import { Turnstile, turnstileToken } from './Turnstile';
+import { useHumanCheck } from './Turnstile';
 import { HostedAlternative } from '../../components/HostedAlternative';
 
 const PROVIDER_LABELS: Record<string, string> = { github: 'GitHub', google: 'Google' };
@@ -34,6 +34,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [busy, setBusy] = useState(false);
 	/** Set when the server wants the address verified before it opens a session. */
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
+	const check = useHumanCheck(status?.turnstile_site_key);
 
 	if (!status) return null;
 	// Older servers said signin_available: false when hosted bot protection was missing. Current servers always let existing
@@ -64,10 +65,9 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 		if (mode === 'setup' && bootstrapProof.length < 32) return setError('Installer proof must be at least 32 characters.');
 		setBusy(true);
 		try {
-			const cf = status?.turnstile_site_key ? turnstileToken(e.currentTarget) : undefined;
-			const turnstile = cf ? { cf_turnstile_token: cf } : {};
+			const turnstile = check.token ? { cf_turnstile_token: check.token } : {};
 			const endpoint = mode === 'setup' ? '/api/auth/setup' : mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-			const body = mode === 'setup' ? { name, email, password, telemetry, ...turnstile } : mode === 'signup' ? { name, email, ...turnstile } : { email, password, ...turnstile };
+			const body = mode === 'setup' ? { name, email, password, telemetry, ...turnstile } : mode === 'signup' ? { email, ...turnstile } : { email, password, ...turnstile };
 			if (mode === 'signup') bindSignupDomainToEmail(email);
 			const res = await api<{ verification_required?: boolean; has_domain?: boolean }>(endpoint, { method: 'POST', body, ...(mode === 'setup' ? { headers: { 'X-Ready-Set-Mail-Bootstrap': bootstrapProof } } : {}) });
 			setBootstrapProof('');
@@ -85,6 +85,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			else setError(errorMessage(err));
 		} finally {
 			setBusy(false);
+			check.reset(); // a token is single use
 		}
 	}
 
@@ -121,7 +122,8 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 			) : null}
 			<form onSubmit={submit} className="space-y-4" noValidate={false}>
 				{mode === 'setup' ? <Field id="bootstrap-proof" label="Installer proof" hint="The BOOTSTRAP_SECRET value set on the Worker before its first start. The setup guide keeps it in a private file, such as ~/.config/ready-set-mail/bootstrap-proof. It works once. Never paste it into an agent chat."><Input id="bootstrap-proof" type="password" required minLength={32} autoComplete="off" value={bootstrapProof} onChange={e => setBootstrapProof(e.target.value)} /></Field> : null}
-				{registering ? (
+				{/* Hosted sign-up asks for no name: one typed before the address is proven could be anyone's; the welcome page asks. */}
+				{mode === 'setup' ? (
 					<Field id="name" label="Your name (optional)">
 						<Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Jane Smith" />
 					</Field>
@@ -148,9 +150,9 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 						</Label>
 					</div>
 				) : null}
-				{status.turnstile_site_key ? <Turnstile siteKey={status.turnstile_site_key} /> : null}
+				{check.widget}
 				{error ? <FieldError>{error}</FieldError> : null}
-				<Button type="submit" className="w-full" loading={busy}>
+				<Button type="submit" className="w-full" loading={busy} disabled={!check.ready}>
 					{mode === 'signin' ? 'Sign in' : 'Create account'}
 				</Button>
 			</form>

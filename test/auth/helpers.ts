@@ -26,7 +26,7 @@ export function req(method: string, path: string, opts: { key?: string; body?: u
   if (opts.key) headers['x-api-key'] = opts.key;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
   let body = opts.body;
-  if (/^\/api\/auth\/(signup|login|setup)$/.test(path) && body && typeof body === 'object' && !('cf_turnstile_token' in body)) body = { ...body, cf_turnstile_token: 'ok' };
+  if (/^\/api\/auth\/(signup|login|setup|resend-verification)$/.test(path) && body && typeof body === 'object' && !('cf_turnstile_token' in body)) body = { ...body, cf_turnstile_token: 'ok' };
   return new Request(`${BASE}${path}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
 }
 

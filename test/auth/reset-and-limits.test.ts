@@ -124,7 +124,8 @@ describe('rate limits', () => {
     const blocked = await attempt(ip);
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get('retry-after')).toBeTruthy();
-    expect((await attempt(freshIp())).status).toBe(401);
+    // another IP is not limited by this one (a different address: this one has also reached its per-address failure throttle)
+    expect((await call(env, 'POST', '/api/auth/login', { ip: freshIp(), body: { email: 'someone-else@example.com', password: 'wrong-password' } })).status).toBe(401);
     // and even the right password is refused while limited
     expect((await call(env, 'POST', '/api/auth/login', { ip, body: { email: 'owner@example.com', password: 'correct-horse-battery' } })).status).toBe(429);
   });

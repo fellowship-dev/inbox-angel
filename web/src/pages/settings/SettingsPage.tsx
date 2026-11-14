@@ -1,3 +1,4 @@
+import { cleanName } from '../../lib/names';
 import { Badge, Button, Card, CardContent, FieldError, Input, PageHeader, Skeleton, toast } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Moon, Sun } from 'lucide-react';
@@ -52,7 +53,7 @@ export function SettingsPage() {
 				<Card>
 					<CardContent className="py-2">
 						<dl className="divide-y divide-line">
-							<Row label="Name">{me?.user?.name ?? 'Instance API key'}</Row>
+							<Row label="Name">{me?.user ? cleanName(me.user.name) || me.user.email : 'Instance API key'}</Row>
 							<Row label="Email">{me?.user?.email ?? 'Not tied to a user'}</Row>
 							<Row label="Role">{role ? <Badge variant="brand">{role}</Badge> : null}</Row>
 						</dl>

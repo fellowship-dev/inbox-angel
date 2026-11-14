@@ -108,7 +108,7 @@ import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, demoteOrphanedSubdomains, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
-import { isClaimProof, needsPctRecheck, recheckStoredDns, recordFirstDnsCheck } from '../domains/first-check';
+import { isClaimProof, needsPctRecheck, recheckStoredDns, recordFirstDnsCheck, reservePctRecheck } from '../domains/first-check';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitResponse } from '../hosted/plan-limits';
@@ -381,7 +381,8 @@ async function getDomainCheckSummary(tenant: TenantContext, domainId: string, ct
   const [summary, visibility] = await Promise.all([tenant.scope.reports.checkSummary(id, since), reportVisibility(tenant, id, since)]);
   if (!summary) return err('check summary not found', 404);
   // Stored before pct= was recorded: the level stands (marked not re-checked); this view starts the refresh that records it.
-  if (ctx && needsPctRecheck(summary)) ctx.waitUntil(recheckStoredDns(tenant, id, domain.domain));
+  // Several views at once: the first to reserve it runs the one refresh.
+  if (ctx && needsPctRecheck(summary) && (await reservePctRecheck(tenant, id))) ctx.waitUntil(recheckStoredDns(tenant, id, domain.domain));
 
   return json({ ...summary, ...visibility });
 }

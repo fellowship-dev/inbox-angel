@@ -89,8 +89,7 @@ describe('the sign-up form', () => {
 	it('records the email it was submitted with on the remembered domain', async () => {
 		rememberSignupDomain('acme.io');
 		renderApp(<AuthPage initialMode="signup" />, { role: null, status: { signup_open: true }, routes: { 'POST /api/auth/signup': { verification_required: true } } });
-		await userEvent.type(await screen.findByLabelText('Your name (optional)'), 'New Person');
-		await userEvent.type(screen.getByLabelText('Email'), 'New@Example.com');
+		await userEvent.type(await screen.findByLabelText('Email'), 'New@Example.com');
 		await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 		await screen.findByText(/Check your email/i);
 		expect(stored()).toMatchObject({ domain: 'acme.io', email: 'new@example.com' });

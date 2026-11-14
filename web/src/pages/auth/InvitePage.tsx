@@ -4,6 +4,7 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useHosted, useSession } from '../../lib/session';
+import { cleanName } from '../../lib/names';
 import { hashFor, workspaceStore } from '../../lib/workspace';
 import { CheckEmail } from './CheckEmail';
 import { AuthLayout, Field } from './AuthLayout';
@@ -42,7 +43,7 @@ export function InvitePage() {
 		}
 		setBusy(true);
 		try {
-			const res = await api<{ verification_required?: boolean }>(`/api/invites/${token}`, { method: 'POST', body: hosted ? { name: name.trim() } : { name: name.trim(), password } });
+			const res = await api<{ verification_required?: boolean }>(`/api/invites/${token}`, { method: 'POST', body: hosted ? {} : { name: name.trim(), password } });
 			if (res.verification_required) {
 				setVerifyFor(invite.data?.email ?? '');
 				return;
@@ -89,7 +90,7 @@ export function InvitePage() {
 		);
 	}
 	const info = invite.data;
-	const workspaceLabel = info.workspace_name ?? 'a workspace';
+	const workspaceLabel = cleanName(info.workspace_name) || 'a workspace';
 	const description = (
 		<>
 			<strong>{info.invited_by}</strong> invited you to join <strong>{workspaceLabel}</strong> on Ready Set Mail as <Badge variant="brand">{info.role}</Badge>
@@ -107,13 +108,13 @@ export function InvitePage() {
 				{info.email}
 			</p>
 			<form onSubmit={submit} className="space-y-4">
-				<Field id="name" label="Your name">
-					<Input id="name" required autoFocus autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
-				</Field>
 				{hosted ? (
-					<p className="text-sm text-ink-2">We'll email {info.email} a link to confirm it. It opens a page where you choose your password.</p>
+					<p className="text-sm text-ink-2">We'll email {info.email} a link to confirm it. It opens a page where you choose your password and your name.</p>
 				) : (
 					<>
+						<Field id="name" label="Your name">
+							<Input id="name" required autoFocus autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+						</Field>
 						<Field id="password" label="Password" hint="At least 8 characters.">
 							<Input id="password" type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby="password-hint" />
 						</Field>

@@ -50,7 +50,7 @@ describe('email verification', () => {
 		expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
 		expect(screen.getByLabelText('Verification email address')).toHaveTextContent('new@example.com');
 		await user.click(screen.getByRole('button', { name: 'Resend verification email' }));
-		expect(await screen.findByText(/Verification email sent/)).toBeInTheDocument();
+		expect(await screen.findByText('If this address is waiting to be confirmed, a new link is on its way. It can take a minute to arrive.')).toBeInTheDocument();
 		expect(calls.find((c) => c.path === '/api/auth/resend-verification')?.body).toEqual({ email: 'new@example.com' });
 	});
 

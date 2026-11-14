@@ -190,9 +190,20 @@ session and signs the person in. The token then refuses ("already used"); until 
 any device and after any number of opens, for its whole lifetime: 24 hours (`VERIFICATION_LINK_SECONDS`, the number the mail and
 the pages state). An expired or used link gets a page that offers a new link (or sign-in and a reset). Links in the old shape
 (`GET /api/auth/verify-email?token=…`) get a page that moves the token into the fragment (no `Location`, `Referrer-Policy:
-no-referrer`) and change nothing. Verification mail is capped per address across every route that sends it (sign-up, resend, a
-sign-in of an unverified account, a hosted invitee): 3 an hour and 10 a day; over the cap nothing is sent and every answer is
-unchanged, so the cap reveals nothing about which addresses exist. An invite link alone does not grant membership: the invitee gives
+no-referrer`) and change nothing. Verification mail is capped per address in two separate allowances, so a flood of one cannot spend the other: a
+bot-checked sign-up (new, repeated for an address still unconfirmed, which sends a fresh link, or a hosted invitee) gets 2 an hour
+and 4 a day; a resend or a sign-in of an unconfirmed account gets 3 an hour and 10 a day. A resend passes the same bot check as
+sign-up (and is closed when sign-up is). Over a cap nothing is sent and every answer is unchanged, so neither cap reveals which
+addresses exist. Names typed before the address was proven (at sign-up, or by whoever holds an invite link) are not kept:
+sign-up asks for no name, and when the welcome page verifies the account it sets the display name to the one given there (else
+the email address) and the sign-up workspace's name from it (else from the email's domain). Names are stored and shown without
+control or invisible format characters, at most 80 characters.
+
+**Sign-in throttle.** Besides the per-IP limits, failed sign-ins are counted per address (a hash of it): after 10 in 15 minutes,
+attempts for that address answer `429` "Too many sign-in attempts for this address. Try again in N minutes, or reset your
+password to sign in now." with `Retry-After`, until the 15-minute window ends, whether or not the bot check is configured.
+Addresses with no account are counted the same way, so the answer reveals nothing. A password reset, or choosing the password
+from the emailed link, clears it at once; a successful sign-in clears it too. An invite link alone does not grant membership: the invitee gives
 a name, uses the same welcome link, and accepts while signed in as the invited address. First OAuth link ends the user's other sessions.
 
 **Bot check (required for sign-up).** Hosted sign-up fails closed (503) unless both `TURNSTILE_SECRET_KEY` and `TURNSTILE_SITE_KEY` (the public key served to the sign-up page) are set.

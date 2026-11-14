@@ -13,6 +13,7 @@ import { APIError } from 'better-auth/api';
 import { authLookups, forWorkspace, forImplicitWorkspace, globalQueries, IMPLICIT_WORKSPACE_ID, type MembershipRole } from '@ready-set-mail/db';
 import { isSaas, type AuthEnv } from './config';
 import { hostedSignupClosed, SIGNUP_CLOSED_MESSAGE } from './bot-protection';
+import { defaultWorkspaceName } from './names';
 
 export type SignupIntent =
   | { kind: 'external' }
@@ -100,7 +101,8 @@ export async function provisionUser(
     return fail('invite not found or expired');
   } else if (isSaas(env)) {
     const workspaceId = `ws_${crypto.randomUUID().replace(/-/g, '')}`;
-    await globalQueries(db).workspaces.create(workspaceId, `${user.name || user.email}'s workspace`);
+    // Hosted sign-up gives no name (it is asked for after the address is proven), so this starts from the email's domain.
+    await globalQueries(db).workspaces.create(workspaceId, defaultWorkspaceName(user.name === user.email ? '' : user.name, user.email));
     await forWorkspace(db, workspaceId).team.addMember(user.id, 'owner');
     placed = { workspaceId, role: 'owner' };
   } else {

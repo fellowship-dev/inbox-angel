@@ -13,7 +13,9 @@ import { baseUrl, isSaas, oauthProviders, trustedOrigins, type AuthEnv } from '.
 import { sendPasswordResetEmail, sendVerificationEmail } from './mail';
 import { d1RateLimitStorage } from './rate-limit';
 import { authSecret } from './secret';
-import { VERIFICATION_LINK_SECONDS, verificationMailAllowed, welcomeLink } from './welcome';
+import { VERIFICATION_LINK_SECONDS, verificationMailAllowed, welcomeLink, type MailPool } from './welcome';
+import { cleanName } from './names';
+import { signJWT } from 'better-auth/crypto';
 import { assertMaySignUp, provisionUser, type SignupIntent } from './signup-policy';
 
 export const AUTH_BASE_PATH = '/api/auth';
@@ -31,6 +33,14 @@ export async function createAuth(
   const db = env.DB as D1Database;
   const providers = oauthProviders(env);
   const saas = isSaas(env);
+
+  async function sendLink(user: { email: string; name: string }, token: string, pool: MailPool): Promise<void> {
+    if (!(await verificationMailAllowed(env, user.email, pool))) {
+      console.warn('[auth] verification email not sent: per-address limit reached');
+      return;
+    }
+    await sendVerificationEmail(env, user, welcomeLink(origin, token));
+  }
 
   return betterAuth({
     appName: 'Ready Set Mail',
@@ -57,6 +67,13 @@ export async function createAuth(
       sendResetPassword: async ({ user, token }) => {
         await sendPasswordResetEmail(env, user, `${origin}/#/reset/${token}`);
       },
+      // Hosted: signing up again with an address whose account is still unconfirmed sends a fresh link (from the sign-up
+      // allowance), so a person whose address someone else registered first still gets their own link from the sign-up form.
+      // A confirmed account gets nothing; the answer is the same either way.
+      onExistingUserSignUp: async ({ user }) => {
+        if (!saas || user.emailVerified) return;
+        await sendLink(user, await signJWT({ email: user.email.toLowerCase() }, await authSecret(env), VERIFICATION_LINK_SECONDS), 'signup');
+      },
     },
 
     emailVerification: {
@@ -67,14 +84,9 @@ export async function createAuth(
       autoSignInAfterVerification: false,
       afterEmailVerification: async (user) => { opts.onEmailVerified?.({ id: user.id, email: user.email }); },
       expiresIn: VERIFICATION_LINK_SECONDS,
-      sendVerificationEmail: async ({ user, token }) => {
-        // Every route that sends this mail comes through here, so the per-address cap counts them all.
-        if (!(await verificationMailAllowed(env, user.email))) {
-          console.warn('[auth] verification email not sent: per-address limit reached');
-          return;
-        }
-        await sendVerificationEmail(env, user, welcomeLink(origin, token));
-      },
+      // Every route that sends this mail comes through here, so the per-address caps count them all. A sign-up (or a hosted
+      // invitee) spends the sign-up allowance; a resend or a sign-in of an unconfirmed account spends the other.
+      sendVerificationEmail: async ({ user, token }) => sendLink(user, token, intent.kind === 'signup' || intent.kind === 'invitee' ? 'signup' : 'other'),
     },
 
     socialProviders: providers,
@@ -93,6 +105,8 @@ export async function createAuth(
         create: {
           before: async (user) => {
             await assertMaySignUp(env, intent, user.email.toLowerCase(), user.emailVerified === true);
+            // Every account's name is stored clean, whatever created it (a form, an OAuth profile).
+            return { data: { ...user, name: cleanName(user.name) || user.email } };
           },
           after: async (user) => {
             await provisionUser(env, intent, { id: user.id, email: user.email.toLowerCase(), name: user.name, emailVerified: user.emailVerified === true });

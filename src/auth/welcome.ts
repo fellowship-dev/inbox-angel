@@ -10,11 +10,12 @@
 // session of the account ends, then the person is signed in. Once the account is verified with a password chosen this way,
 // the token is refused ("already used"): it can set a password once.
 import { verifyJWT } from 'better-auth/crypto';
-import { globalQueries } from '@ready-set-mail/db';
+import { authLookups, forWorkspace, globalQueries, workspaceLifecycle } from '@ready-set-mail/db';
 import { hashPassword } from '../api/password';
 import type { AuthEnv } from './config';
 import { d1RateLimitStorage } from './rate-limit';
 import { authSecret } from './secret';
+import { cleanName, defaultWorkspaceName } from './names';
 
 /** How long a verification link works. The emailed text and the pages state this same number. */
 export const VERIFICATION_LINK_SECONDS = 24 * 3600;
@@ -61,7 +62,7 @@ export async function welcomeAttemptAllowed(env: AuthEnv, token: string, ip: str
  * by the earlier link design and never got a password, stored as '!'); two simultaneous posts of one token: exactly one wins.
  * On a win every session of the account ends. Returns the user id, or the refusal.
  */
-export async function completeWelcome(env: AuthEnv, email: string, password: string): Promise<{ userId: string } | { refused: WelcomeRefusal }> {
+export async function completeWelcome(env: AuthEnv, email: string, password: string, name?: string): Promise<{ userId: string } | { refused: WelcomeRefusal }> {
   const db = env.DB as D1Database;
   const user = await globalQueries(db).users.byEmail(email);
   if (!user) return { refused: 'link_invalid' };
@@ -79,7 +80,52 @@ export async function completeWelcome(env: AuthEnv, email: string, password: str
   }
   if (!won) return { refused: 'link_used' };
   await globalQueries(db).sessions.revokeAll(user.id);
+  await resetUnprovenNames(db, user.id, email, name ?? '');
   return { userId: user.id };
+}
+
+/**
+ * Names typed before the address was proven belong to whoever typed them (possibly someone who registered this address to
+ * plant text in the real owner's dashboard). At verification they are replaced: the display name by the one given on the
+ * welcome page, else the email address; the workspace sign-up made (owned by this account alone) by one derived from that
+ * name, else from the email's domain. Workspaces the account was invited into are not touched.
+ */
+async function resetUnprovenNames(db: D1Database, userId: string, email: string, name: string): Promise<void> {
+  const given = cleanName(name);
+  await db.prepare('UPDATE users SET name = ?1 WHERE id = ?2').bind(given || email, userId).run();
+  const workspaceName = defaultWorkspaceName(given, email);
+  for (const m of await authLookups(db).membershipsOf(userId)) {
+    if (m.role !== 'owner') continue;
+    // Only a workspace this account alone is in: the one sign-up made (an unproven account can have done nothing else).
+    if ((await forWorkspace(db, m.workspace_id).team.list()).length !== 1) continue;
+    await workspaceLifecycle(db).rename(m.workspace_id, workspaceName);
+  }
+}
+
+/** Clear the per-address sign-in failure count (a password chosen or reset). */
+export async function clearSigninFailures(env: AuthEnv, email: string): Promise<void> {
+  await (env.DB as D1Database).prepare('DELETE FROM auth_rate_limits WHERE key = ?1').bind(signinFailureKey(email)).run();
+}
+
+/** Sign-in failures per address: 10 in 15 minutes, then attempts for that address wait out the rest of the window. */
+export const SIGNIN_FAILURE_LIMIT = 10;
+export const SIGNIN_FAILURE_WINDOW_SECONDS = 15 * 60;
+const signinFailureKey = (email: string) => `signin-fail:${addressKey(email)}`;
+
+/**
+ * Seconds this address must wait before a password is checked again, or 0. Counted the same for addresses that have no account,
+ * so the answer reveals nothing about which do.
+ */
+export async function signinWait(env: AuthEnv, email: string, now = Date.now()): Promise<number> {
+  const row = await (env.DB as D1Database).prepare('SELECT count, last_request FROM auth_rate_limits WHERE key = ?1').bind(signinFailureKey(email)).first<{ count: number; last_request: number }>();
+  if (!row) return 0;
+  const end = row.last_request + SIGNIN_FAILURE_WINDOW_SECONDS * 1000;
+  return row.count >= SIGNIN_FAILURE_LIMIT && now < end ? Math.max(1, Math.ceil((end - now) / 1000)) : 0;
+}
+
+/** Count one failed sign-in for this address (window starts at the first failure, as for every limit kept in D1). */
+export async function recordSigninFailure(env: AuthEnv, email: string): Promise<void> {
+  await d1RateLimitStorage(env.DB as D1Database).consume(signinFailureKey(email), { window: SIGNIN_FAILURE_WINDOW_SECONDS, max: SIGNIN_FAILURE_LIMIT });
 }
 
 /**
@@ -104,7 +150,7 @@ export async function legacyVerifyLinkPage(): Promise<Response> {
 
 /** A short key for an address (FNV-1a, two lanes): the rate-limit table never holds the address itself. Synchronous on purpose:
  *  the cap runs inside the mail callback, before the send. */
-function addressKey(email: string): string {
+export function addressKey(email: string): string {
   const s = email.toLowerCase().trim();
   let a = 0x811c9dc5, b = 0x050c5d1f;
   for (let i = 0; i < s.length; i++) {
@@ -116,15 +162,24 @@ function addressKey(email: string): string {
 }
 
 /**
- * Per-address cap on verification mail, counted across every route that sends one (sign-up, resend, a sign-in of an unverified
- * account, a hosted invitee): 3 an hour and 10 a day. Over the cap the mail is simply not sent; the routes answer exactly as
- * before, so nothing reveals whether the address exists. Keys hold a hash, never the address.
+ * Which allowance a verification mail spends. `signup`: a bot-checked sign-up (new, repeated, or a hosted invitee): 2 an hour
+ * and 4 a day per address. `other`: a resend (bot-checked too) or a sign-in of an unverified account: 3 an hour and 10 a day.
+ * Separate pools, so a flood of resends cannot use up the mail the real owner's own sign-up sends, and repeated sign-ups cannot
+ * flood a mailbox either.
  */
-export async function verificationMailAllowed(env: AuthEnv, email: string): Promise<boolean> {
+export type MailPool = 'signup' | 'other';
+export const MAIL_CAPS: Readonly<Record<MailPool, { hour: number; day: number }>> = Object.freeze({ signup: { hour: 2, day: 4 }, other: { hour: 3, day: 10 } });
+
+/**
+ * Per-address cap on verification mail, per pool. Over the cap the mail is simply not sent; every route answers exactly as it
+ * would have, so nothing reveals whether the address exists or is capped. Keys hold a hash, never the address.
+ */
+export async function verificationMailAllowed(env: AuthEnv, email: string, pool: MailPool = 'other'): Promise<boolean> {
   const limiter = d1RateLimitStorage(env.DB as D1Database);
   const k = addressKey(email);
-  const hour = await limiter.consume(`verify-mail:h:${k}`, { window: 3600, max: 3 });
+  const cap = MAIL_CAPS[pool];
+  const hour = await limiter.consume(`verify-mail:${pool}:h:${k}`, { window: 3600, max: cap.hour });
   if (!hour.allowed) return false;
-  const day = await limiter.consume(`verify-mail:d:${k}`, { window: 86400, max: 10 });
+  const day = await limiter.consume(`verify-mail:${pool}:d:${k}`, { window: 86400, max: cap.day });
   return day.allowed;
 }

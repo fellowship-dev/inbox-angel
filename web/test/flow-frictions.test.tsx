@@ -31,10 +31,11 @@ describe('1. one password, chosen once', () => {
 		await user.type(await screen.findByLabelText('Email'), 'new@example.com');
 		expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
 		expect(screen.queryByLabelText('Confirm password')).not.toBeInTheDocument();
+		expect(screen.queryByLabelText('Your name (optional)')).not.toBeInTheDocument(); // asked on the welcome page, after the address is proven
 		expect(screen.getByText("We'll email you a link. It opens a page where you choose your password and are signed in.")).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Create account' }));
 		expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
-		expect(calls.find((c) => c.path === '/api/auth/signup')?.body).toEqual({ name: '', email: 'new@example.com' });
+		expect(calls.find((c) => c.path === '/api/auth/signup')?.body).toEqual({ email: 'new@example.com' });
 		expect(screen.getByText('Open the link we sent. It confirms your email and opens a page where you choose your password.')).toBeInTheDocument();
 		expect(screen.getByText(/The link works on any device until you save a password, for 24 hours\. Saving the password signs you in\./)).toBeInTheDocument();
 	});
@@ -112,11 +113,13 @@ describe('1. one password, chosen once', () => {
 			},
 		);
 		const user = userEvent.setup();
-		await user.type(await screen.findByLabelText('Your name'), 'New');
+		await screen.findByRole('button', { name: 'Accept invite' });
+		// no name and no password before the address is proven: both are given on the welcome page
+		expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument();
 		expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Accept invite' }));
 		expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
-		expect(calls.find((c) => c.method === 'POST' && c.path === '/api/invites/t1')?.body).toEqual({ name: 'New' });
+		expect(calls.find((c) => c.method === 'POST' && c.path === '/api/invites/t1')?.body).toEqual({});
 	});
 });
 
