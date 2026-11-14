@@ -1,6 +1,7 @@
 // Central intake for the hosted service (MODE=saas, SAAS_ENABLED=1).
 //
-//   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → workspace + domain
+//   rua@rua.inboxangel.io               DMARC aggregate report, the report's domain → the workspace that proved it and connected reports
+//   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → workspace + domain (hosted records)
 //   tls-rpt+<token>@rua.inboxangel.io   TLS-RPT report
 //   check+<token>@canary.inboxangel.io  anonymous free check (src/hosted/canary.ts), only when CANARY_DOMAIN is set
 //
@@ -12,7 +13,7 @@
 // A database that isn't migrated yet throws instead (index.ts), so the sender retries later.
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, intakeLookups, type IntakeTarget } from '@inbox-angel/db';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport } from '../email/dmarc-report';
 import { handleTlsRptReport } from '../email/tls-rpt';
@@ -22,6 +23,8 @@ import { readAuthHeaders } from '../email/sender-proof';
 import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES, WELL_KNOWN_REPORTERS } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
+import { fixedReportAddress, peekPolicyDomain, reportDomainCandidates } from './fixed-address';
+import { ReportTooLargeError } from '../dmarc/extract-report';
 
 /** A message whose setReject also logs why, so every rejection leaves a reason in the logs. */
 export function withRejectLog(message: ForwardableEmailMessage, fields: Record<string, unknown>): ForwardableEmailMessage {
@@ -65,11 +68,29 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   const kind = rcpt.base;
 
   if (message.rawSize > MAX_REPORT_BYTES) return reject(message, { ...base, kind }, 'Report is larger than 25 MiB');
-  if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return reject(message, { ...base, kind }, 'Unknown intake token');
 
-  const hash = await hashToken(rcpt.tag);
-  const target = await intakeLookups(env.DB).resolveToken(hash, Math.floor(Date.now() / 1000));
-  if (!target) return reject(message, { ...base, kind, token: hash.slice(0, 8) }, 'Unknown intake token');
+  let raw = message.raw;
+  let target: IntakeTarget | null;
+  if (kind === 'rua' && !rcpt.tag) {
+    // The fixed address (src/hosted/fixed-address.ts): the report's own domain picks the target, before any allowance is used.
+    const [forPeek, after] = raw.tee();
+    raw = after;
+    let policyDomain: string | null;
+    try {
+      policyDomain = await peekPolicyDomain(forPeek);
+    } catch (e) {
+      return reject(message, { ...base, kind }, e instanceof ReportTooLargeError ? 'Report is larger than 25 MiB once decompressed' : 'Invalid DMARC report: the attachment could not be read');
+    }
+    if (!policyDomain) return reject(message, { ...base, kind }, 'Invalid DMARC report: no policy_published domain');
+    target = await intakeLookups(env.DB).connectedForReport(reportDomainCandidates(policyDomain), fixedReportAddress(cfg.intakeDomain));
+    // Nobody proved this domain and connected its reports here: refused for good, nothing stored, no allowance touched.
+    if (!target) return reject(message, { ...base, kind }, `Unknown domain ${policyDomain}: reports for it are not connected here`);
+  } else {
+    if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return reject(message, { ...base, kind }, 'Unknown intake token');
+    const hash = await hashToken(rcpt.tag);
+    target = await intakeLookups(env.DB).resolveToken(hash, Math.floor(Date.now() / 1000));
+    if (!target) return reject(message, { ...base, kind, token: hash.slice(0, 8) }, 'Unknown intake token');
+  }
 
   const fields = { ...base, kind, workspace: target.workspace_id, domain_id: target.domain_id };
   const guarded = withRejectLog(message, fields);
@@ -81,7 +102,7 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   // AUTHSERV_HEADER are set nothing is proven and every report is accepted, flagged and charged this way.
   const limits = intakeLimits(env);
   const day = new Date().toISOString().slice(0, 10);
-  const [forHeaders, rest] = message.raw.tee();
+  const [forHeaders, rest] = raw.tee();
   const authHeaders = await readAuthHeaders(forHeaders);
   const reporter = provenReporter(authHeaders, env);
   const intake = forWorkspace(env.DB, target.workspace_id).intake;

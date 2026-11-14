@@ -5,7 +5,7 @@ import { ConnectReports } from '../src/components/reports/ConnectReports';
 import { READ_ONLY_REASON } from '../src/lib/session';
 import { fail, renderApp } from './render';
 
-const ADDR = 'rua+abcdefghijklmnopqrstuvwxyz234567@rua.example.net';
+const ADDR = 'rua@rua.example.net';
 const domain = { id: 1, domain: 'example.com' };
 const NOW = Math.floor(Date.now() / 1000);
 const view = (over: Record<string, unknown> = {}) => ({
@@ -13,19 +13,16 @@ const view = (over: Record<string, unknown> = {}) => ({
 	domain_id: 1,
 	domain: 'example.com',
 	managed_by: null,
-	can_issue: true,
+	can_connect: true,
 	refusal: null,
 	address: null,
-	issued_at: null,
-	rotated_at: null,
-	previous_valid_until: null,
 	last_report_at: null,
-	state: 'not_issued',
+	state: 'not_connected',
 	dns: null,
 	...over,
 });
 const issued = (plan: unknown, over: Record<string, unknown> = {}) =>
-	view({ address: ADDR, issued_at: NOW - 60, state: 'not_published', dns: { checked_at: NOW, error: null, plan }, ...over });
+	view({ address: ADDR, state: 'not_published', dns: { checked_at: NOW, error: null, plan }, ...over });
 const ON = { 'GET /api/hosted/config': { enabled: true, reports: true, records: false } };
 
 const show = (routes: Record<string, unknown>, role: 'owner' | 'admin' | 'member' = 'owner') => renderApp(<ConnectReports domain={domain} />, { role, routes: { ...ON, ...routes } });
@@ -45,7 +42,7 @@ describe('ConnectReports visibility', () => {
 });
 
 describe('Connect reports', () => {
-	it('issues the address, then shows the live record with it added and the state', async () => {
+	it('connects, then shows the live record with it added and the state', async () => {
 		let current: unknown = view();
 		const plan = { kind: 'add', name: '_dmarc.example.com', current: 'v=DMARC1; p=reject; rua=mailto:a@example.com', record: `v=DMARC1; p=reject; rua=mailto:a@example.com,mailto:${ADDR}`, created: false };
 		const { calls } = show({
@@ -58,7 +55,7 @@ describe('Connect reports', () => {
 		});
 		expect(await screen.findByText('Reports not connected yet')).toBeInTheDocument();
 		await userEvent.click(await screen.findByRole('button', { name: 'Connect reports' }));
-		expect(await screen.findByText('Address issued, record not published yet')).toBeInTheDocument();
+		expect(await screen.findByText('Connected, record not published yet')).toBeInTheDocument();
 		expect(screen.getByText(ADDR)).toBeInTheDocument();
 		expect(screen.getByText(plan.record)).toBeInTheDocument();
 		expect(screen.getByText('Only rua= changes: the policy and every other tag stay as they are.')).toBeInTheDocument();
@@ -115,9 +112,9 @@ describe('Connect reports', () => {
 
 	it('a failed lookup reads as unknown, never as "not published"', async () => {
 		show({ 'GET /api/domains/1/report-address': issued(null, { state: 'unknown', dns: { checked_at: NOW, error: 'SERVFAIL', plan: null } }) });
-		expect(await screen.findByText('Address issued, DNS check failed')).toBeInTheDocument();
+		expect(await screen.findByText('Connected, DNS check failed')).toBeInTheDocument();
 		expect(screen.getByText(/that does not mean the record is missing/)).toBeInTheDocument();
-		expect(screen.queryByText('Address issued, record not published yet')).not.toBeInTheDocument();
+		expect(screen.queryByText('Connected, record not published yet')).not.toBeInTheDocument();
 	});
 
 	it('published, then receiving with the time of the last report', async () => {
@@ -132,29 +129,24 @@ describe('Connect reports', () => {
 		expect(screen.getByRole('link', { name: 'Open the reports' })).toHaveAttribute('href', '/domains/1/reports');
 	});
 
-	it('rotate and disconnect each ask first, then call the API', async () => {
+	it('disconnect asks first, then calls the API', async () => {
 		const plan = { kind: 'published', name: '_dmarc.example.com', record: 'x' };
 		let current: unknown = issued(plan, { state: 'waiting' });
 		const { calls } = show({
 			'GET /api/domains/1/report-address': () => current,
-			'POST /api/domains/1/report-address/rotate': () => (current = issued(plan, { previous_valid_until: NOW + 72 * 3600 })),
 			'DELETE /api/domains/1/report-address': () => (current = view()),
 			'GET /api/domains': { domains: [] },
 		});
-		await userEvent.click(await screen.findByRole('button', { name: 'New address' }));
-		const d1 = within(await screen.findByRole('dialog'));
-		expect(d1.getByText(/keeps working for 72 hours/)).toBeInTheDocument();
-		await userEvent.click(d1.getByRole('button', { name: 'Issue a new address' }));
-		expect(await screen.findByText(/The previous address keeps working until/)).toBeInTheDocument();
-		await userEvent.click(screen.getByRole('button', { name: 'Disconnect reports' }));
-		const d2 = within(await screen.findByRole('dialog'));
-		expect(d2.getByText(/stops working now/)).toBeInTheDocument();
-		await userEvent.click(d2.getByRole('button', { name: 'Disconnect reports' }));
+		expect(screen.queryByRole('button', { name: 'New address' })).not.toBeInTheDocument();
+		await userEvent.click(await screen.findByRole('button', { name: 'Disconnect reports' }));
+		const d = within(await screen.findByRole('dialog'));
+		expect(d.getByText(/From now on, reports about example\.com are refused/)).toBeInTheDocument();
+		await userEvent.click(d.getByRole('button', { name: 'Disconnect reports' }));
 		expect(await screen.findByText('Reports not connected yet')).toBeInTheDocument();
-		expect(calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/domains/1/report-address/rotate', 'DELETE /api/domains/1/report-address']);
+		expect(calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`)).toEqual(['DELETE /api/domains/1/report-address']);
 	});
 
-	it('a read-only member sees the state; issue, rotate and disconnect are disabled and say why', async () => {
+	it('a read-only member sees the state; connect and disconnect are disabled and say why', async () => {
 		const { unmount, calls } = show({ 'GET /api/domains/1/report-address': view() }, 'member');
 		const connect = await screen.findByRole('button', { name: 'Connect reports' });
 		await waitFor(() => expect(connect).toBeDisabled());
@@ -162,21 +154,20 @@ describe('Connect reports', () => {
 		unmount();
 		show({ 'GET /api/domains/1/report-address': issued({ kind: 'published', name: 'n', record: 'x' }, { state: 'waiting' }) }, 'member');
 		expect(await screen.findByText('Published, waiting for the first report')).toBeInTheDocument();
-		await waitFor(() => expect(screen.getByRole('button', { name: 'New address' })).toBeDisabled());
-		expect(screen.getByRole('button', { name: 'Disconnect reports' })).toBeDisabled();
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Disconnect reports' })).toBeDisabled());
 		expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
 	});
 
 	it('a refused domain says why instead of offering the action; hosted-records domains point there', async () => {
-		const { unmount } = show({ 'GET /api/domains/1/report-address': view({ can_issue: false, refusal: 'example.com was added before ownership checks.' }) });
+		const { unmount } = show({ 'GET /api/domains/1/report-address': view({ can_connect: false, refusal: 'example.com was added before ownership checks.' }) });
 		expect(await screen.findByText('example.com was added before ownership checks.')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Connect reports' })).not.toBeInTheDocument();
 		unmount();
-		show({ 'GET /api/domains/1/report-address': view({ managed_by: 'hosted_records', can_issue: false }) });
+		show({ 'GET /api/domains/1/report-address': view({ managed_by: 'hosted_records', can_connect: false }) });
 		expect(await screen.findByText('Reports for example.com come through its hosted records.')).toBeInTheDocument();
 	});
 
-	it('an issue that fails says so and keeps the button', async () => {
+	it('a connect that fails says so and keeps the button', async () => {
 		show({ 'GET /api/domains/1/report-address': view(), 'POST /api/domains/1/report-address': fail(403, 'example.com was added before ownership checks.') });
 		await userEvent.click(await screen.findByRole('button', { name: 'Connect reports' }));
 		expect(await screen.findByText('Could not connect reports')).toBeInTheDocument();
@@ -195,7 +186,7 @@ describe('Connect reports', () => {
 		});
 		await userEvent.click(await screen.findByRole('button', { name: 'Connect reports' }));
 		expect(screen.queryByText('Reports not connected yet')).not.toBeInTheDocument();
-		expect(await screen.findByText('Address issued, record not published yet')).toBeInTheDocument();
+		expect(await screen.findByText('Connected, record not published yet')).toBeInTheDocument();
 		expect(screen.queryByRole('heading', { name: 'DMARC reports' })).not.toBeInTheDocument();
 	});
 });

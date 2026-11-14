@@ -34,7 +34,7 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
-| `INTAKE_DOMAIN` | `rua.inboxangel.io` | report intake. With it set (and `MODE`, `SAAS_ENABLED`), owners and admins can give a verified domain its report address (see [Report address without hosted records](#report-address-without-hosted-records)); it does not need `CANARY_DOMAIN` or the `HOSTED_RECORDS_*` settings |
+| `INTAKE_DOMAIN` | `rua.inboxangel.io` | report intake. With it set (and `MODE`, `SAAS_ENABLED`), owners and admins can connect a verified domain's reports to `rua@<INTAKE_DOMAIN>` (see [Report address without hosted records](#report-address-without-hosted-records)); it does not need `CANARY_DOMAIN` or the `HOSTED_RECORDS_*` settings |
 | `CANARY_DOMAIN` | `canary.inboxangel.io` | optional: the free check. Without it `POST /api/check-sessions` answers `404` and report intake is unaffected |
 | `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
@@ -201,21 +201,23 @@ Notes for the customer:
 
 ### Report address without hosted records
 
-The simplest way to receive reports, and the only one that needs no records zone: `POST /api/domains/:id/report-address` (dashboard: **Connect reports** on the domain page).
+The simplest way to receive reports, and the only one that needs no records zone and no Email Routing sub-addressing: every customer publishes the same address, `rua@<INTAKE_DOMAIN>`.
+Nothing is issued. **Connect reports** on the domain page (`POST /api/domains/:id/report-address`) records that the workspace wants this domain's reports filed here by setting `domains.rua_address` to that address.
 It needs `MODE=saas`, `SAAS_ENABLED=1` and `INTAKE_DOMAIN`, an owner or admin, and a verified domain (never a pending or lost claim, an evicted row, or a `legacy` row from before ownership checks).
-It issues `rua+<token>@<INTAKE_DOMAIN>` (the same 160-bit token as hosted records, stored only as its SHA-256 in `intake_tokens`) and keeps the address itself in `domains.rua_address`, which reveals nothing: the customer publishes it in their own DMARC record.
 
-The customer then edits their own `_dmarc` TXT record. `GET /api/domains/:id/report-address` reads it live and says what to publish:
+Filing (`src/hosted/fixed-address.ts`, `src/hosted/intake.ts`): mail to `rua@<INTAKE_DOMAIN>` carries no token, so the Worker first reads only `policy_published/domain` from the decompressed report (same 25 MiB cap), before any allowance, parse or enrichment. Among that domain and its parents up to the organizational domain, the most specific live, proven domain decides: its workspace owns the report. It is filed under that domain if it connected reports, else under the nearest parent of the same workspace that did; another workspace's parent never receives it. Anything else is refused for good and nothing is stored. From there it is the token path: the same per-domain daily allowance, then the full parse, which again requires the report's domain to be that domain or a subdomain of it. `DELETE /api/domains/:id/report-address` disconnects: the address is cleared and the domain's reports are refused from then on (a token address of the domain stops too). Moving a domain to another workspace needs no DNS change: the new verified owner connects and its reports follow.
 
-* their current record with the address added to `rua=`, every other tag and the policy unchanged;
+`GET /api/domains/:id/report-address` reads the live `_dmarc` record and says what to publish:
+
+* the current record with the address added to `rua=`, every other tag and the policy unchanged;
 * when the record already lists two addresses (receivers only have to honour two, RFC 7489 §6.2), a choice of which one to replace, or to add a third knowingly; nothing is dropped without that choice;
 * for a subdomain that follows its organizational domain's record: where the record lives, and a record of its own that keeps the policy it gets today (`sp=`, else `p=`) and the parent's addresses;
 * for a domain with no DMARC record: `v=DMARC1; p=none; rua=mailto:<address>`;
 * several DMARC records at one name: no proposal (receivers ignore them all);
 * a failed lookup: `plan: null` and `state: "unknown"`, never "no record".
 
-`state` is `not_issued`, `not_published`, `waiting` (the record lists the address, no report yet), `receiving` (`last_report_at` is the newest report stored since the address was first issued) or `unknown`.
-`POST …/report-address/rotate` issues a new address; the previous one keeps working for 72 hours, then is refused. `DELETE …/report-address` stops both at once; stored reports stay.
+`state` comes from evidence: `not_connected`, `not_published` (connected, the live record does not list the address), `waiting` (listed, no report stored), `receiving` (`last_report_at` is the newest stored report) or `unknown`.
+Token addresses (`rua+<token>@…`) keep working: hosted records issue them, and an operator-issued one shows as connected while its token is current. `tls-rpt@` without a token is refused: TLS-RPT still needs a token address.
 A domain with hosted records keeps its address there: these routes report `managed_by: "hosted_records"` and refuse to change it (`409`).
 Receivers outside the customer's organization only send to the address once the [authorisation record](#4-the-records-zone) `*._report._dmarc.<INTAKE_DOMAIN>` exists.
 
@@ -223,6 +225,7 @@ Receivers outside the customer's organization only send to the address once the 
 
 **Inbound mail** (`src/hosted/intake.ts`): the Worker parses `base+tag@host`.
 
+1. `rua@` (no tag) at `INTAKE_DOMAIN`: the report's own domain picks the workspace, see [Report address without hosted records](#report-address-without-hosted-records).
 1. `rua+`/`tls-rpt+` at `INTAKE_DOMAIN`: the tag is hashed and looked up (`intake_tokens`); it resolves to workspace + domain. The `TenantContext` is built for that workspace. **There is no default-workspace fallback in `saas`**: `resolveInboundWorkspace` throws.
 2. The report is parsed with the existing parsers (gzip, zip, plain), capped at 25 MiB for the message and 25 MiB decompressed. Inflation runs in ~1 KB input slices with the running total checked after each, so a hostile gzip is stopped near the cap instead of after a full inflate. A zip must hold at most 2 entries; only its first `.xml`/`.json` entry is read.
 3. The report's own domain (`policy_published.domain`, TLS-RPT `policy-domain`) must be the **token's domain or one of its subdomains** (registrable-domain aware; a public suffix never matches) and is filed under the token's domain (or under the subdomain's own row when the same workspace has it verified). Any other domain is rejected for good and nothing is stored, **including another domain of the same workspace**. Subdomains need no registration of their own.
@@ -279,14 +282,13 @@ Enabling is all-or-nothing: if Cloudflare fails part-way, the records already wr
 
 `GET /api/hosted/config` (any signed-in caller) returns `{ enabled, reports, records }`: hosted mode, report addresses (`INTAKE_DOMAIN`), hosted records (`HOSTED_RECORDS_ZONE`).
 
-Report addresses (see [above](#report-address-without-hosted-records); `404` outside hosted mode; writes need an owner/admin):
+Connecting reports (see [above](#report-address-without-hosted-records); `404` outside hosted mode; writes need an owner/admin):
 
 | Method & path | Response |
 |---------------|----------|
-| `GET /api/domains/:id/report-address` | `{ available: false }` without `INTAKE_DOMAIN`, else `{ available, domain_id, domain, managed_by, can_issue, refusal, address, issued_at, rotated_at, previous_valid_until, last_report_at, state, dns: { checked_at, error, plan } \| null }` |
-| `POST /api/domains/:id/report-address` | `201` with the status; `200` and the unchanged status when an address exists; `403` for a `legacy` row; `409` with hosted records |
-| `POST /api/domains/:id/report-address/rotate` | the status, with `previous_valid_until`; `409` without an address |
-| `DELETE /api/domains/:id/report-address` | the status (`not_issued`) |
+| `GET /api/domains/:id/report-address` | `{ available: false }` without `INTAKE_DOMAIN`, else `{ available, domain_id, domain, managed_by, can_connect, refusal, address, last_report_at, state, dns: { checked_at, error, plan } \| null }` |
+| `POST /api/domains/:id/report-address` | connect: `201` with the status; `200` and the unchanged status when already connected; `403` for a `legacy` row; `409` with hosted records |
+| `DELETE /api/domains/:id/report-address` | disconnect: the status (`not_connected`) |
 
 ## Data retention
 

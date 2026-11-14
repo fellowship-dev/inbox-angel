@@ -1,20 +1,19 @@
-// /api/domains/:id/report-address — a domain's DMARC report address without hosted records (MODE=saas only; see
+// /api/domains/:id/report-address — connect a domain's DMARC reports on the hosted service (MODE=saas only; see
 // src/hosted/report-address.ts). Tenant-scoped like every other route: the domain is looked up through the caller's
 // workspace, so another workspace's id is a 404. Writes need an owner or admin (the router refuses members first).
 //
 //   GET    /api/domains/:id/report-address          status: { available: false }, or the address, its state and what to publish
-//   POST   /api/domains/:id/report-address          issue (201; 200 with the current status when one exists)
-//   POST   /api/domains/:id/report-address/rotate   new address; the previous one keeps working for 72 h
-//   DELETE /api/domains/:id/report-address          revoke at once
+//   POST   /api/domains/:id/report-address          connect (201; 200 with the current status when already connected)
+//   DELETE /api/domains/:id/report-address          disconnect at once
 
 import type { TenantContext } from '../tenancy/context';
 import { hostedEnabled } from './config';
-import { issueReportAddress, reportAddressStatus, ReportAddressError, revokeReportAddress, rotateReportAddress, type ReportAddressDeps } from './report-address';
+import { connectReports, disconnectReports, reportAddressStatus, ReportAddressError, type ReportAddressDeps } from './report-address';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const err = (message: string, status: number) => json({ error: message }, status);
 
-const ROUTE = /^\/api\/domains\/([^/]+)\/report-address(?:\/(rotate))?$/;
+const ROUTE = /^\/api\/domains\/([^/]+)\/report-address$/;
 
 export async function handleReportAddressRoutes(
   request: Request,
@@ -35,13 +34,12 @@ export async function handleReportAddressRoutes(
   if (!domain) return err('domain not found', 404);
 
   try {
-    if (!m[2] && method === 'GET') return json(await reportAddressStatus(tenant, domain, deps));
-    if (!m[2] && method === 'POST') {
-      const { created, status } = await issueReportAddress(tenant, domain, deps, actor, ctx);
+    if (method === 'GET') return json(await reportAddressStatus(tenant, domain, deps));
+    if (method === 'POST') {
+      const { created, status } = await connectReports(tenant, domain, deps, actor, ctx);
       return json(status, created ? 201 : 200);
     }
-    if (!m[2] && method === 'DELETE') return json(await revokeReportAddress(tenant, domain, deps, actor, ctx));
-    if (m[2] === 'rotate' && method === 'POST') return json(await rotateReportAddress(tenant, domain, deps, actor, ctx));
+    if (method === 'DELETE') return json(await disconnectReports(tenant, domain, deps, actor, ctx));
     return err('method not allowed', 405);
   } catch (e) {
     if (e instanceof ReportAddressError) return err(e.message, e.status);

@@ -19,14 +19,14 @@ import { RadioCard } from '../wizard/RadioCard';
 import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
 
 /**
- * Hosted only: connect a domain's DMARC reports. Issues the domain's report address, then shows exactly what to
- * publish (the live DMARC record with the address added, never a weaker policy) and how far it has got: issued, published,
- * receiving. Renders nothing, and requests nothing, unless this deployment issues report addresses
+ * Hosted only: connect a domain's DMARC reports. One action connects the domain to the hosted report address, then the
+ * panel shows exactly what to publish (the live DMARC record with the address added, never a weaker policy) and how far
+ * it has got from live DNS and stored reports: connected, published, receiving. Renders nothing, and requests nothing, unless this deployment takes hosted reports
  * (GET /api/hosted/config `reports: true`), so self-hosted instances are unchanged.
  *
  * Integration: `<ConnectReports domain={domain} />` anywhere a domain is known (`{ id, domain }`). `bare` is for a
  * container that already says reports are not connected (ReportsNotConnected, a wizard step): no section heading, and
- * before an address exists only the action itself.
+ * before reports are connected only the action itself.
  */
 export function ConnectReports({ domain, bare = false }: { domain: { id: number; domain: string }; bare?: boolean }) {
 	const enabled = useReportIntakeEnabled();
@@ -42,18 +42,17 @@ export function ConnectReports({ domain, bare = false }: { domain: { id: number;
 }
 
 const STATE_DOT: Record<ReportAddressState, { status: StatusDotStatus; label: string }> = {
-	not_issued: { status: 'unknown', label: 'Reports not connected yet' },
-	not_published: { status: 'warn', label: 'Address issued, record not published yet' },
+	not_connected: { status: 'unknown', label: 'Reports not connected yet' },
+	not_published: { status: 'warn', label: 'Connected, record not published yet' },
 	waiting: { status: 'info', label: 'Published, waiting for the first report' },
 	receiving: { status: 'ok', label: 'Receiving reports' },
-	unknown: { status: 'unknown', label: 'Address issued, DNS check failed' },
+	unknown: { status: 'unknown', label: 'Connected, DNS check failed' },
 };
 
 function Panel({ domainId, domainName, bare }: { domainId: number; domainName: string; bare: boolean }) {
 	const q = useReportAddress(domainId);
 	const m = useReportAddressMutations(domainId);
-	const [rotateOpen, setRotateOpen] = useState(false);
-	const [revokeOpen, setRevokeOpen] = useState(false);
+	const [disconnectOpen, setDisconnectOpen] = useState(false);
 
 	if (q.isPending) return <ListSkeleton rows={1} label="Loading the report address" />;
 	if (q.isError) return <LoadError error={q.error} onRetry={() => void q.refetch()} title="Could not load the report address" />;
@@ -66,82 +65,61 @@ function Panel({ domainId, domainName, bare }: { domainId: number; domainName: s
 
 	if (!s.address) {
 		return (
-			<div className={bare ? 'space-y-3' : 'space-y-3 rounded-lg border border-line bg-surface-1 p-4'} data-state="not_issued">
+			<div className={bare ? 'space-y-3' : 'space-y-3 rounded-lg border border-line bg-surface-1 p-4'} data-state="not_connected">
 				{bare ? null : (
 					<>
-						<StatusDot status={STATE_DOT.not_issued.status} label={STATE_DOT.not_issued.label} className="font-semibold" />
+						<StatusDot status={STATE_DOT.not_connected.status} label={STATE_DOT.not_connected.label} className="font-semibold" />
 						<p className="text-sm text-ink-2">
-							Mail servers send DMARC reports to the addresses listed in a domain&apos;s DMARC record. Connect reports to get an address for{' '}
-							<Mono>{domainName}</Mono>; you then see the exact record to publish.
+							Mail servers send DMARC reports to the addresses listed in a domain&apos;s DMARC record. Connect reports to have the reports for{' '}
+							<Mono>{domainName}</Mono> filed here; you then see the exact record to publish.
 						</p>
 					</>
 				)}
-				{s.can_issue ? (
-					<WriteButton onClick={() => m.issue.mutate()} disabled={m.issue.isPending} reasonVisible>
-						{m.issue.isPending ? 'Connecting…' : 'Connect reports'}
+				{s.can_connect ? (
+					<WriteButton onClick={() => m.connect.mutate()} disabled={m.connect.isPending} reasonVisible>
+						{m.connect.isPending ? 'Connecting…' : 'Connect reports'}
 					</WriteButton>
 				) : (
 					<p className="text-sm text-ink-2">{s.refusal}</p>
 				)}
-				{m.issue.isError ? (
+				{m.connect.isError ? (
 					<Alert variant="danger" title="Could not connect reports">
-						{errorMessage(m.issue.error)}
+						{errorMessage(m.connect.error)}
 					</Alert>
 				) : null}
 			</div>
 		);
 	}
 
-	const rotateErr = m.rotate.isError ? errorMessage(m.rotate.error) : null;
-	const revokeErr = m.revoke.isError ? errorMessage(m.revoke.error) : null;
+	const disconnectErr = m.disconnect.isError ? errorMessage(m.disconnect.error) : null;
 	return (
 		<div className="space-y-4 rounded-lg border border-line bg-surface-1 p-4" data-state={s.state}>
 			<StateLine s={s} />
 			<CopyField label="Report address" value={s.address} />
-			{s.previous_valid_until ? (
-				<p className="text-sm text-ink-2">The previous address keeps working until {formatDateTime(s.previous_valid_until)}. After that, reports sent to it are refused.</p>
-			) : null}
 			{s.dns?.plan ? <PlanView plan={s.dns.plan} domain={domainName} /> : null}
 			<div className="flex flex-wrap gap-2">
 				<Button variant="secondary" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
 					<RefreshCw aria-hidden />
 					{q.isFetching ? 'Checking…' : 'Check again'}
 				</Button>
-				<WriteButton variant="secondary" size="sm" onClick={() => setRotateOpen(true)}>
-					New address
-				</WriteButton>
-				<WriteButton variant="danger" size="sm" onClick={() => setRevokeOpen(true)}>
+				<WriteButton variant="danger" size="sm" onClick={() => setDisconnectOpen(true)}>
 					Disconnect reports
 				</WriteButton>
 			</div>
 			<ConfirmDialog
-				open={rotateOpen}
+				open={disconnectOpen}
 				onOpenChange={(o) => {
-					setRotateOpen(o);
-					if (!o) m.rotate.reset();
-				}}
-				title="Replace the report address?"
-				description={`${domainName} gets a new report address. The current one keeps working for 72 hours, so publish the new record within that time. After that, reports sent to the current address are refused.`}
-				confirmLabel="Issue a new address"
-				busyLabel="Issuing…"
-				busy={m.rotate.isPending}
-				error={rotateErr}
-				onConfirm={() => m.rotate.mutate(undefined, { onSuccess: () => setRotateOpen(false) })}
-			/>
-			<ConfirmDialog
-				open={revokeOpen}
-				onOpenChange={(o) => {
-					setRevokeOpen(o);
-					if (!o) m.revoke.reset();
+					setDisconnectOpen(o);
+					if (!o) m.disconnect.reset();
 				}}
 				title={`Disconnect reports for ${domainName}?`}
-				description="The address stops working now: reports sent to it are refused. Reports already received stay. Remove the address from your DMARC record too."
+				description={`From now on, reports about ${domainName} are refused. Reports already received stay. Remove the address from your DMARC record too.`}
 				confirmLabel="Disconnect reports"
 				busyLabel="Disconnecting…"
 				variant="danger"
-				busy={m.revoke.isPending}
-				error={revokeErr}
-				onConfirm={() => m.revoke.mutate(undefined, { onSuccess: () => setRevokeOpen(false) })}
+				busy={m.disconnect.isPending}
+				error={disconnectErr}
+				onConfirm={() => m.disconnect.mutate(undefined, { onSuccess: () => setDisconnectOpen(false) })}
 			/>
 		</div>
 	);
@@ -151,9 +129,9 @@ function StateLine({ s }: { s: ReportAddressView }) {
 	const dot = STATE_DOT[s.state];
 	let detail: ReactNode = null;
 	if (s.state === 'not_published') {
-		detail = <>Checked in live DNS {s.dns ? timeAgo(s.dns.checked_at) : 'just now'}: the DMARC record does not list this address yet. Publish the record below.</>;
+		detail = <>Checked in live DNS {s.dns ? timeAgo(s.dns.checked_at) : 'just now'}: the DMARC record does not list the report address yet. Publish the record below.</>;
 	} else if (s.state === 'waiting') {
-		detail = <>Your DMARC record lists this address. Receivers send reports about once a day, so the first one can take a day or two.</>;
+		detail = <>Your DMARC record lists the report address. Receivers send reports about once a day, so the first one can take a day or two.</>;
 	} else if (s.state === 'receiving' && s.last_report_at) {
 		detail = (
 			<>
@@ -161,7 +139,7 @@ function StateLine({ s }: { s: ReportAddressView }) {
 			</>
 		);
 	} else if (s.state === 'unknown') {
-		detail = <>We could not read the DMARC record just now, so we cannot say whether it lists this address. The lookup failed; that does not mean the record is missing.</>;
+		detail = <>We could not read the DMARC record just now, so we cannot say whether it lists the report address. The lookup failed; that does not mean the record is missing.</>;
 	}
 	return (
 		<div className="space-y-1">

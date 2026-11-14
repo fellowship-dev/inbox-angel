@@ -4,11 +4,11 @@ import { domainKeys, invalidateDomain } from './domain-queries';
 import { HOSTED_CONFIG_KEY } from './hosted';
 
 /**
- * A domain's DMARC report address on the hosted service (GET/POST/DELETE /api/domains/:id/report-address, and
- * POST …/rotate). Dormant unless GET /api/hosted/config says `reports: true` (MODE=saas with INTAKE_DOMAIN).
+ * Connecting a domain's DMARC reports on the hosted service (GET/POST/DELETE /api/domains/:id/report-address): one
+ * fixed address for every domain. Dormant unless GET /api/hosted/config says `reports: true` (MODE=saas with INTAKE_DOMAIN).
  * Every field mirrors src/hosted/report-address.ts; the plan comes from packages/dns-checks/src/dmarc-rua.ts.
  */
-export type ReportAddressState = 'not_issued' | 'not_published' | 'waiting' | 'receiving' | 'unknown';
+export type ReportAddressState = 'not_connected' | 'not_published' | 'waiting' | 'receiving' | 'unknown';
 
 export interface RecordOption {
 	replaces: string | null;
@@ -30,12 +30,9 @@ export interface ReportAddressView {
 	domain_id: number;
 	domain: string;
 	managed_by: 'hosted_records' | null;
-	can_issue: boolean;
+	can_connect: boolean;
 	refusal: string | null;
 	address: string | null;
-	issued_at: number | null;
-	rotated_at: number | null;
-	previous_valid_until: number | null;
 	last_report_at: number | null;
 	state: ReportAddressState;
 	dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | null } | null;
@@ -72,8 +69,7 @@ export function useReportAddressMutations(domainId: number) {
 		qc.setQueryData(reportAddressKey(domainId), s);
 		void invalidateDomain(qc, domainId);
 	};
-	const issue = useMutation({ mutationFn: () => api<ReportIntakeStatus>(base, { method: 'POST', body: {} }), onSuccess: settle });
-	const rotate = useMutation({ mutationFn: () => api<ReportIntakeStatus>(`${base}/rotate`, { method: 'POST', body: {} }), onSuccess: settle });
-	const revoke = useMutation({ mutationFn: () => api<ReportIntakeStatus>(base, { method: 'DELETE' }), onSuccess: settle });
-	return { issue, rotate, revoke };
+	const connect = useMutation({ mutationFn: () => api<ReportIntakeStatus>(base, { method: 'POST', body: {} }), onSuccess: settle });
+	const disconnect = useMutation({ mutationFn: () => api<ReportIntakeStatus>(base, { method: 'DELETE' }), onSuccess: settle });
+	return { connect, disconnect };
 }

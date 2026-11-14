@@ -4,7 +4,7 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, gte, isNull, max, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, max, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
 import { aggregateReports, domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
@@ -19,22 +19,6 @@ export function intakeQueries(db: Db, workspaceId: string) {
 	const mine = eq(intakeTokens.workspace_id, workspaceId);
 	const forDomain = (id: number) => and(mine, eq(intakeTokens.domain_id, id));
 	const mine_usage = () => eq(intakeUsage.workspace_id, workspaceId);
-	// The first write creates the row; a later one rotates, keeping the previous hash valid for the grace period.
-	const upsert = (domainId: number, tokenHash: string, nowSeconds: number) =>
-		db
-			.insert(intakeTokens)
-			.values({ domain_id: domainId, workspace_id: workspaceId, token_hash: tokenHash })
-			.onConflictDoUpdate({
-				target: intakeTokens.domain_id,
-				// An upsert must never move a row to another workspace.
-				setWhere: mine,
-				set: {
-					prev_token_hash: sql`${intakeTokens.token_hash}`,
-					prev_expires_at: nowSeconds + TOKEN_ROTATION_GRACE_SECONDS,
-					token_hash: sql`excluded.token_hash`,
-					rotated_at: nowSeconds,
-				},
-			});
 
 	return {
 		get(domainId: number) {
@@ -46,39 +30,21 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		 * stays valid for TOKEN_ROTATION_GRACE_SECONDS.
 		 */
 		set(domainId: number, tokenHash: string, nowSeconds: number) {
-			return upsert(domainId, tokenHash, nowSeconds).run();
-		},
-
-		/**
-		 * Issue (or rotate) a domain's report address without hosted records, in one batch: the token hash (a rotation keeps
-		 * the previous one valid for TOKEN_ROTATION_GRACE_SECONDS) and the address itself in `domains.rua_address`. The
-		 * address holds the token in clear on purpose: in this mode the customer publishes it in their DMARC record, so it
-		 * is public anyway, and the dashboard must be able to show it again. Only a live domain of this workspace changes.
-		 */
-		issueAddress(domainId: number, tokenHash: string, address: string, nowSeconds: number) {
-			return db.batch([
-				upsert(domainId, tokenHash, nowSeconds),
-				db.update(domains).set({ rua_address: address, updated_at: sql`unixepoch()` })
-					.where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId), isNull(domains.evicted_at))),
-			]);
-		},
-
-		/** Revoke a domain's report address at once: the token row (current and previous hash) goes, and the address is cleared. */
-		revokeAddress(domainId: number) {
-			return db.batch([
-				db.delete(intakeTokens).where(forDomain(domainId)),
-				db.update(domains).set({ rua_address: '', updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
-			]);
-		},
-
-		/** When the newest aggregate report for the domain was stored, counting only reports stored at or after `sinceSeconds`; null when none. */
-		lastReportSince(domainId: number, sinceSeconds: number) {
 			return db
-				.select({ at: max(aggregateReports.created_at) })
-				.from(aggregateReports)
-				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId), gte(aggregateReports.created_at, sinceSeconds)))
-				.get()
-				.then((r) => r?.at ?? null);
+				.insert(intakeTokens)
+				.values({ domain_id: domainId, workspace_id: workspaceId, token_hash: tokenHash })
+				.onConflictDoUpdate({
+					target: intakeTokens.domain_id,
+					// An upsert must never move a row to another workspace.
+					setWhere: mine,
+					set: {
+						prev_token_hash: sql`${intakeTokens.token_hash}`,
+						prev_expires_at: nowSeconds + TOKEN_ROTATION_GRACE_SECONDS,
+						token_hash: sql`excluded.token_hash`,
+						rotated_at: nowSeconds,
+					},
+				})
+				.run();
 		},
 
 		/**
@@ -147,6 +113,30 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		delete(domainId: number) {
 			return db.delete(intakeTokens).where(forDomain(domainId)).run();
 		},
+
+		/** Set a live domain's report address (the hosted fixed address when reports are connected, '' when not). */
+		setAddress(domainId: number, address: string) {
+			return db.update(domains).set({ rua_address: address, updated_at: sql`unixepoch()` })
+				.where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId), isNull(domains.evicted_at))).run();
+		},
+
+		/** Disconnect in one batch: the address is cleared and any token of the domain (current and previous hash) stops working. */
+		disconnect(domainId: number) {
+			return db.batch([
+				db.delete(intakeTokens).where(forDomain(domainId)),
+				db.update(domains).set({ rua_address: '', updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
+			]);
+		},
+
+		/** When the newest aggregate report for the domain was stored; null when none. */
+		lastReportAt(domainId: number) {
+			return db
+				.select({ at: max(aggregateReports.created_at) })
+				.from(aggregateReports)
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId)))
+				.get()
+				.then((r) => r?.at ?? null);
+		},
 	};
 }
 
@@ -206,6 +196,30 @@ export function intakeLookups(dbLike: DbLike) {
 				)
 				.get()
 				.then((r) => r ?? null),
+
+		/**
+		 * The fixed hosted address (`rua@<intake domain>`) carries no token, so the report's own domain picks the target.
+		 * `candidates` are the report's domain and its parents up to the organizational domain (built by the caller). The
+		 * most specific live, proven (not 'legacy') domain among them decides: its workspace owns these reports. It is the
+		 * target when it connected reports (`rua_address` is `address`); otherwise the nearest parent of the SAME workspace
+		 * that connected them is. Another workspace's parent never receives them. Names are globally unique.
+		 */
+		async connectedForReport(candidates: string[], address: string): Promise<IntakeTarget | null> {
+			if (candidates.length === 0) return null;
+			const rows = await db
+				.select({ workspace_id: domains.workspace_id, domain_id: domains.id, domain: domains.domain, rua_address: domains.rua_address })
+				.from(domains)
+				.where(
+					/* workspace-scope-exempt: domains.domain is globally unique and identifies the workspace */
+					and(inArray(domains.domain, candidates), isNull(domains.evicted_at), ne(domains.verified_via, 'legacy')),
+				)
+				.all();
+			rows.sort((a, b) => b.domain.length - a.domain.length);
+			const owner = rows[0];
+			if (!owner) return null;
+			const hit = rows.find((r) => r.workspace_id === owner.workspace_id && (r.rua_address ?? '').trim().toLowerCase() === address.toLowerCase());
+			return hit ? { workspace_id: hit.workspace_id, domain_id: hit.domain_id, domain: hit.domain } : null;
+		},
 
 		/** The domain behind an opaque hosted id (the label in `mta-sts.<id>.h.<zone>`). */
 		hostedById: (hostedId: string): Promise<IntakeTarget | null> =>
