@@ -10,7 +10,7 @@
 import { Gunzip, Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate';
 import { normalizeDomain, organizationalDomain } from '@inbox-angel/dns-checks';
 import type { BoundEnv } from '../index';
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace, intakeLookups, type IntakeTarget } from '@inbox-angel/db';
 import { extractAttachmentBytes } from '../email/mime-extract';
 
 export const fixedReportAddress = (intakeDomain: string): string => `rua@${intakeDomain}`;
@@ -19,7 +19,10 @@ export const fixedReportAddress = (intakeDomain: string): string => `rua@${intak
 export const isFixedReportAddress = (address: string | null | undefined, intakeDomain: string): boolean =>
   (address ?? '').trim().toLowerCase() === fixedReportAddress(intakeDomain);
 
-/** The most decompressed bytes the peek reads. policy_published comes right after report_metadata, well inside this. */
+/**
+ * The most decompressed bytes the peek inflates AND scans (inflation stops here; well under the 1 MiB ceiling set for
+ * unauthenticated decompression). policy_published comes right after report_metadata, well inside this.
+ */
 export const PEEK_BYTES = 64 * 1024;
 /** Compressed bytes fed per step: deflate expands at most ~1032:1, so one step yields at most ~66 KB. */
 const PEEK_SLICE = 64;
@@ -132,6 +135,28 @@ export function scanPolicyDomain(xml: string): string | null {
 export async function peekPolicyDomain(raw: ReadableStream<Uint8Array>): Promise<string | null> {
   const prefix = reportPrefix(await extractAttachmentBytes(raw));
   return scanPolicyDomain(new TextDecoder().decode(prefix));
+}
+
+/** The peek as a step of the intake: the domain, or the reason to refuse the message. */
+export async function peekReportDomain(raw: ReadableStream<Uint8Array>): Promise<{ ok: true; domain: string } | { ok: false; reason: string }> {
+  let domain: string | null;
+  try {
+    domain = await peekPolicyDomain(raw);
+  } catch {
+    return { ok: false, reason: 'Invalid DMARC report: the attachment could not be read' };
+  }
+  return domain ? { ok: true, domain } : { ok: false, reason: 'Invalid DMARC report: no policy_published domain' };
+}
+
+/**
+ * Attribution: the workspace and domain that own reports about `policyDomain` on the fixed address (the most specific
+ * proven owner that connected them; see connectedForReport), when HOSTED_CONNECT_REPORTS admits that workspace. Null:
+ * refuse.
+ */
+export async function attributeReport(env: Pick<BoundEnv, 'HOSTED_CONNECT_REPORTS' | 'OWNER_EMAIL'> & { DB: D1Database }, intakeDomain: string, policyDomain: string): Promise<IntakeTarget | null> {
+  const target = await intakeLookups(env.DB).connectedForReport(reportDomainCandidates(policyDomain), fixedReportAddress(intakeDomain));
+  if (!target || !(await workspaceMayConnectReports(env, target.workspace_id))) return null;
+  return target;
 }
 
 /**

@@ -23,7 +23,7 @@ import { readAuthHeaders } from '../email/sender-proof';
 import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES, WELL_KNOWN_REPORTERS } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
-import { fixedReportAddress, peekPolicyDomain, reportDomainCandidates, workspaceMayConnectReports } from './fixed-address';
+import { attributeReport, peekReportDomain } from './fixed-address';
 
 /** A message whose setReject also logs why, so every rejection leaves a reason in the logs. */
 export function withRejectLog(message: ForwardableEmailMessage, fields: Record<string, unknown>): ForwardableEmailMessage {
@@ -72,21 +72,18 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
   let target: IntakeTarget | null;
   let peeked: string | null = null;
   if (kind === 'rua' && !rcpt.tag) {
-    // The fixed address (src/hosted/fixed-address.ts): the report's own domain picks the target, before any allowance is used.
+    // The fixed address (src/hosted/fixed-address.ts): the report's own domain picks the target, before any allowance is
+    // used. Each step is one named function, so the order can become: authentication results → instance caps → capped
+    // peek → attribution → per-domain caps → full parse, once the instance-wide caps exist.
     const [forPeek, after] = raw.tee();
     raw = after;
-    try {
-      peeked = await peekPolicyDomain(forPeek);
-    } catch {
-      return reject(message, { ...base, kind }, 'Invalid DMARC report: the attachment could not be read');
-    }
-    if (!peeked) return reject(message, { ...base, kind }, 'Invalid DMARC report: no policy_published domain');
-    target = await intakeLookups(env.DB).connectedForReport(reportDomainCandidates(peeked), fixedReportAddress(cfg.intakeDomain));
+    const peek = await peekReportDomain(forPeek);
+    if (!peek.ok) return reject(message, { ...base, kind }, peek.reason);
+    peeked = peek.domain;
+    target = await attributeReport(env, cfg.intakeDomain, peeked);
     // Nobody proved this domain and connected its reports here (or, under HOSTED_CONNECT_REPORTS=owner, the workspace is
     // not the instance owner's): refused for good, nothing stored, no allowance touched.
-    if (!target || !(await workspaceMayConnectReports(env, target.workspace_id))) {
-      return reject(message, { ...base, kind }, `Unknown domain ${peeked}: reports for it are not connected here`);
-    }
+    if (!target) return reject(message, { ...base, kind }, `Unknown domain ${peeked}: reports for it are not connected here`);
   } else {
     if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return reject(message, { ...base, kind }, 'Unknown intake token');
     const hash = await hashToken(rcpt.tag);

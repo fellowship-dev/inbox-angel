@@ -257,9 +257,16 @@ describe('policy_published must be the token’s domain or a subdomain', () => {
 
   it('files a subdomain under its own row when it is a verified domain of the same workspace', async () => {
     const w = await twoWorkspaces();
-    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x')").run();
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x', 'txt')").run();
     expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-2'))).setReject).not.toHaveBeenCalled();
     expect(filed(w)).toEqual([{ domain_id: 3, report_id: 'sub-2' }]);
+  });
+
+  it('never files under an unproven (legacy) subdomain row: the report goes to the token’s domain', async () => {
+    const w = await twoWorkspaces();
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x', 'legacy')").run();
+    expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-legacy'))).setReject).not.toHaveBeenCalled();
+    expect(filed(w)).toEqual([{ domain_id: 1, report_id: 'sub-legacy' }]);
   });
 
   it('does not use a subdomain verified in a different workspace', async () => {
