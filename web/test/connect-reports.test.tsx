@@ -182,4 +182,20 @@ describe('Connect reports', () => {
 		expect(await screen.findByText('Could not connect reports')).toBeInTheDocument();
 		expect(screen.getByText('example.com was added before ownership checks.')).toBeInTheDocument();
 	});
+
+	it('bare (inside a "not connected" container): only the action before an address exists, the full state after', async () => {
+		let current: unknown = view();
+		renderApp(<ConnectReports domain={domain} bare />, {
+			routes: {
+				...ON,
+				'GET /api/domains/1/report-address': () => current,
+				'POST /api/domains/1/report-address': () => (current = issued({ kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=none; rua=mailto:${ADDR}`, created: true })),
+				'GET /api/domains': { domains: [] },
+			},
+		});
+		await userEvent.click(await screen.findByRole('button', { name: 'Connect reports' }));
+		expect(screen.queryByText('Reports not connected yet')).not.toBeInTheDocument();
+		expect(await screen.findByText('Address issued, record not published yet')).toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'DMARC reports' })).not.toBeInTheDocument();
+	});
 });

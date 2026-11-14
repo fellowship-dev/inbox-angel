@@ -24,13 +24,14 @@ import { ListSkeleton, LoadError, Section, WriteButton } from '../states';
  * receiving. Renders nothing, and requests nothing, unless this deployment issues report addresses
  * (GET /api/hosted/config `reports: true`), so self-hosted instances are unchanged.
  *
- * Integration: `<ConnectReports domain={domain} />` anywhere a domain is known (`{ id, domain }`). `bare` drops the
- * section heading, for use inside a card or a wizard step that already has one.
+ * Integration: `<ConnectReports domain={domain} />` anywhere a domain is known (`{ id, domain }`). `bare` is for a
+ * container that already says reports are not connected (ReportsNotConnected, a wizard step): no section heading, and
+ * before an address exists only the action itself.
  */
 export function ConnectReports({ domain, bare = false }: { domain: { id: number; domain: string }; bare?: boolean }) {
 	const enabled = useReportIntakeEnabled();
 	if (!enabled) return null;
-	const body = <Panel domainId={domain.id} domainName={domain.domain} />;
+	const body = <Panel domainId={domain.id} domainName={domain.domain} bare={bare} />;
 	return bare ? (
 		<div data-testid="connect-reports">{body}</div>
 	) : (
@@ -48,7 +49,7 @@ const STATE_DOT: Record<ReportAddressState, { status: StatusDotStatus; label: st
 	unknown: { status: 'unknown', label: 'Address issued, DNS check failed' },
 };
 
-function Panel({ domainId, domainName }: { domainId: number; domainName: string }) {
+function Panel({ domainId, domainName, bare }: { domainId: number; domainName: string; bare: boolean }) {
 	const q = useReportAddress(domainId);
 	const m = useReportAddressMutations(domainId);
 	const [rotateOpen, setRotateOpen] = useState(false);
@@ -65,12 +66,16 @@ function Panel({ domainId, domainName }: { domainId: number; domainName: string 
 
 	if (!s.address) {
 		return (
-			<div className="space-y-3 rounded-lg border border-line bg-surface-1 p-4" data-state="not_issued">
-				<StatusDot status={STATE_DOT.not_issued.status} label={STATE_DOT.not_issued.label} className="font-semibold" />
-				<p className="text-sm text-ink-2">
-					Mail servers send DMARC reports to the addresses listed in a domain&apos;s DMARC record. Connect reports to get an address for{' '}
-					<Mono>{domainName}</Mono>; you then see the exact record to publish.
-				</p>
+			<div className={bare ? 'space-y-3' : 'space-y-3 rounded-lg border border-line bg-surface-1 p-4'} data-state="not_issued">
+				{bare ? null : (
+					<>
+						<StatusDot status={STATE_DOT.not_issued.status} label={STATE_DOT.not_issued.label} className="font-semibold" />
+						<p className="text-sm text-ink-2">
+							Mail servers send DMARC reports to the addresses listed in a domain&apos;s DMARC record. Connect reports to get an address for{' '}
+							<Mono>{domainName}</Mono>; you then see the exact record to publish.
+						</p>
+					</>
+				)}
 				{s.can_issue ? (
 					<WriteButton onClick={() => m.issue.mutate()} disabled={m.issue.isPending} reasonVisible>
 						{m.issue.isPending ? 'Connecting…' : 'Connect reports'}
