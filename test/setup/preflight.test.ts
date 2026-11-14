@@ -32,8 +32,8 @@ describe('instance preflight', () => {
 
  it('hosted mode needs the bot check and a mail sender to open sign-up, and a booking link for the follow-up email', async () => {
   const hosted = env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN });
-  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'action:rate_limits', 'note:booking_link']);
-  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max' });
+  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'action:rate_limits', 'action:intake', 'note:booking_link']);
+  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max' });
   (ready.DB as unknown as TestDb).sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'example.com')").run();
   expect(await ids(ready)).toEqual([]);
  });
@@ -100,5 +100,47 @@ describe('routes', () => {
   const ready = makeEnv(undefined, { BETTER_AUTH_URL: ORIGIN, OAUTH_KV: kv });
   const t = await setupOwner(ready);
   expect(await (await call(ready, 'GET', '/api/agents/status', { key: t })).json()).toEqual({ available: true, server_url: `${ORIGIN}/mcp` });
+ });
+});
+
+describe('report intake findings in the setup check', () => {
+ const hosted = (extra: Record<string, unknown> = {}) => env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max', ...extra });
+ const withSender = (e: BoundEnv) => { (e.DB as unknown as TestDb).sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'example.com')").run(); return e; };
+ const today = () => new Date().toISOString().slice(0, 10);
+ const note = (e: BoundEnv, scope: string, n = 1) => (e.DB as unknown as TestDb).sqlite.prepare('INSERT INTO intake_quota (scope, day, messages) VALUES (?, ?, ?)').run(scope, today(), n);
+ const intake = async (e: BoundEnv) => (await instancePreflight(e, ORIGIN)).items.filter(i => i.id === 'intake');
+
+ it('1. AUTHSERV_ID / AUTHSERV_HEADER missing', async () => {
+  const items = await intake(withSender(hosted()));
+  expect(items).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID, AUTHSERV_HEADER', message: 'AUTHSERV_ID and AUTHSERV_HEADER are not both set, so no inbound report can be counted: every report is stored but left out of the numbers. Set both from the authserv-id logged for a real report email.' }]);
+ });
+
+ it('2. configured, but inbound mail carries no authentication results', async () => {
+  const e = withSender(hosted({ AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }));
+  note(e, 'auth:absent', 4);
+  expect(await intake(e)).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_HEADER', message: 'Inbound report mail arrived without any authentication results, so no report can be counted. Check that Email Routing adds Authentication-Results (or ARC-Authentication-Results, then set AUTHSERV_HEADER to arc).' }]);
+ });
+
+ it('3. configured, but the results name another authserv-id', async () => {
+  const e = withSender(hosted({ AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }));
+  note(e, 'auth:foreign', 2);
+  expect(await intake(e)).toEqual([{ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID to the authserv-id logged for a real report email.' }]);
+ });
+
+ it('4. a storage or daily cap stopped mail recently', async () => {
+  const e = withSender(hosted({ AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }));
+  note(e, 'auth:ok', 9);
+  note(e, 'cap:cap_instance_storage', 3);
+  note(e, 'cap:cap_address_day', 1);
+  const [item] = await intake(e);
+  expect(item).toMatchObject({ severity: 'note', setting: 'INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY, INTAKE_MAX_INSTANCE_RECORDS' });
+  expect(item.message).toBe('In the last 3 days report mail was stopped by a report address\'s daily message limit (INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY); the instance-wide stored-records limit (INTAKE_MAX_INSTANCE_RECORDS). Mail from known reporters was accepted and dropped; other senders were refused. Raise the limit if this is legitimate traffic.');
+ });
+
+ it('says nothing when authentication works and no cap was hit, and nothing for a self-host server that counts every report', async () => {
+  const e = withSender(hosted({ AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' }));
+  note(e, 'auth:ok', 9);
+  expect(await intake(e)).toEqual([]);
+  expect(await intake(env({ OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail }))).toEqual([]); // self-host: REPORT_COUNTING defaults to all
  });
 });

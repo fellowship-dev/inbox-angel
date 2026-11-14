@@ -35,6 +35,9 @@ const today = () => new Date().toISOString().slice(0, 10);
 interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 'counted' | 'unknown' | 'unauthenticated' | null; reporter: string | null; dkim_org: string | null; from_org: string | null; email_matched: boolean | null; dedup: 'new' | 'duplicate' | 'superseded' | null; records: number | null }
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
+/** The caps the instance owner is told about: storage and daily limits at address, workspace and instance level. */
+export const SETUP_CAPS: ReadonlySet<ReasonCode> = new Set<ReasonCode>(['cap_address_day', 'cap_workspace_day', 'cap_instance_day', 'cap_address_records', 'cap_workspace_storage', 'cap_instance_storage']);
+
 type IntakeQueries = ReturnType<typeof forWorkspace>['intake'];
 
 /**
@@ -139,8 +142,11 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   await globals.authObservations.note(carrier.authenticated ? 'ok' : carrier.presence, day).catch(() => undefined);
 
   const registryId = carrier.candidates[0]?.id ?? null;
+  /** Instance-wide counter of the storage and daily caps that stopped mail (the owner's setup check reads it); best effort. */
+  const noteCap = (reason: ReasonCode) => (SETUP_CAPS.has(reason) ? globals.capObservations.note(reason, day).catch(() => undefined) : undefined);
   /** A registry reporter over a cap is accepted and dropped, not refused: whether Google/Microsoft stop sending after a 5xx is unverified. */
   const overCap = async (reason: ReasonCode): Promise<Verdict> => {
+    await noteCap(reason);
     if (carrier.class !== 'registry') return refuseAndMark(reason);
     await q.markFailure(target.domain_id, day, 'over_cap_accepted_dropped', now()).catch(() => 0);
     seen.reporter = registryId;
@@ -176,6 +182,7 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
   // Refused after the address was known (a cap on stored records, a report too big): tell the owner.
   if (result.outcome === 'refused' && OWNER_VISIBLE.has(result.reason) && !result.reason.startsWith('storage_failed')) {
     await q.markFailure(target.domain_id, day, result.reason, now()).catch(() => 0);
+    await noteCap(result.reason);
   }
   return { outcome: result.outcome, reason: result.reason };
 }

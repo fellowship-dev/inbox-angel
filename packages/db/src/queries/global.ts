@@ -208,6 +208,17 @@ export function globalQueries(dbLike: DbLike) {
 				db.all<{ scope: string; messages: number }>(sql`SELECT scope, SUM(messages) AS messages FROM intake_quota WHERE scope LIKE 'auth:%' AND day >= ${sinceDay} GROUP BY scope`),
 		},
 
+		/**
+		 * Instance-wide counters of the storage and daily caps that stopped mail (reason codes such as `cap_instance_day`), one row per reason and day
+		 * in `intake_quota` (scope `cap:<reason>`): no address, no customer. Read by the owner's setup check.
+		 */
+		capObservations: {
+			note: (reason: string, day: string) =>
+				db.run(sql`INSERT INTO intake_quota (scope, day, messages) VALUES (${'cap:' + reason}, ${day}, 1) ON CONFLICT(scope, day) DO UPDATE SET messages = messages + 1`),
+			since: (sinceDay: string) =>
+				db.all<{ scope: string; messages: number }>(sql`SELECT scope, SUM(messages) AS messages FROM intake_quota WHERE scope LIKE 'cap:%' AND day >= ${sinceDay} GROUP BY scope`),
+		},
+
 		ipInfo: {
 			/** Cached rows for many IPs in ONE D1 query (chunks of json_each, in one batch), whatever their age. */
 			getMany: async (ips: readonly string[]): Promise<Map<string, IpInfoRow>> => {
