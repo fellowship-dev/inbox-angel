@@ -6,7 +6,7 @@ import { REPORT_TOKENS, tokenDrift } from '../src/tokens';
 
 const css = readFileSync(new URL('../../ui/src/styles/tokens.css', import.meta.url), 'utf8');
 
-describe('report tokens vs @inbox-angel/ui tokens.css', () => {
+describe('report tokens vs @ready-set-mail/ui tokens.css', () => {
   it('every copied light and dark value equals tokens.css', () => {
     expect(tokenDrift(css)).toEqual([]);
   });

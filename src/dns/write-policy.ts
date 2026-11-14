@@ -89,10 +89,10 @@ export function assertDnsWriteAllowed(w: DnsWrite): void {
       }
       if (name.startsWith('_dmarc.') || name.startsWith('_mta-sts.') || name.startsWith('_smtp._tls.')) return;
       if (REPORT_AUTH.test(name) && /^v=DMARC1/i.test(content)) return;
-      return refuse(w, `TXT ${name} is not a record Inbox Angel manages`);
+      return refuse(w, `TXT ${name} is not a record Ready Set Mail manages`);
     }
     case 'CNAME': {
-      if (!name.startsWith('mta-sts.')) return refuse(w, `CNAME ${name} is not a record Inbox Angel manages`);
+      if (!name.startsWith('mta-sts.')) return refuse(w, `CNAME ${name} is not a record Ready Set Mail manages`);
       if (content === undefined || !(w.cnameTargets ?? []).some(t => norm(t) === norm(content))) refuse(w, `CNAME ${name} may only point at the MTA-STS policy host`);
       return;
     }
@@ -103,7 +103,7 @@ export function assertDnsWriteAllowed(w: DnsWrite): void {
       return;
     }
     default:
-      return refuse(w, `${type} records are not managed by Inbox Angel`);
+      return refuse(w, `${type} records are not managed by Ready Set Mail`);
   }
 }
 

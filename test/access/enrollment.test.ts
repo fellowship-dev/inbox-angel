@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forWorkspace } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
 import { TenantContext } from '../../src/tenancy/context';
 import { resolveAccessSubject, authorizeResource } from '../../src/access/resolve';
 import { commitVerifiedDomain, enrollDomain, assertAgentEnrollmentSafe } from '../../src/domains/service';

@@ -11,7 +11,7 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
 import worker from '../../src/index';
 import { parseDmarcEmail } from '../../src/dmarc/parse-email';
-import { storeStatements } from '@inbox-angel/db';
+import { storeStatements } from '@ready-set-mail/db';
 import { toTuple } from '../../src/dmarc/store-report';
 import { fakeMessage, mimeWithAttachment } from '../helpers/mail';
 import { reportWithDistinctIps } from '../helpers/big-report';
@@ -46,7 +46,7 @@ describe.runIf(N !== undefined)('measure', () => {
 
     // Whole path through email(), against the in-memory SQLite test D1 (its SQL execution is in-process here, remote in production).
     const w = await twoWorkspaces({ INTAKE_MAX_RECORDS_PER_REPORT: '100000', INTAKE_MAX_DECOMPRESSED_BYTES: String(25 * 1048576) });
-    const m = fakeMessage(`rua+${w.tokenA}@rua.inboxangel.io`, mimeWithAttachment(gz, 'r.xml.gz', 'application/gzip'), { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com' } });
+    const m = fakeMessage(`rua+${w.tokenA}@rua.readysetmail.com`, mimeWithAttachment(gz, 'r.xml.gz', 'application/gzip'), { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com' } });
     const t0 = performance.now(), c0 = cpu();
     await worker.email(m, w.env as any, ctx);
     out.emailWallMs = Math.round(performance.now() - t0); out.emailCpuMs = Math.round(cpu() - c0);

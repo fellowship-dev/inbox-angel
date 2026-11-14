@@ -1,4 +1,4 @@
-import { Badge } from '@inbox-angel/ui';
+import { Badge } from '@ready-set-mail/ui';
 import { CircleDashed } from 'lucide-react';
 import { ReportsNotConnected } from '../../../components/ReportsNotConnected';
 import { StepCard } from '../../../components/wizard/StepCard';

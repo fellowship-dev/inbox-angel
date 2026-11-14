@@ -1,4 +1,4 @@
-import { Button } from '@inbox-angel/ui';
+import { Button } from '@ready-set-mail/ui';
 import { ArrowLeft } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class {} }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import type { BoundEnv } from '../../src/index';
 import { runCronForWorkspaces } from '../../src/cron';
 import { loadTenant } from '../../src/tenancy/load';

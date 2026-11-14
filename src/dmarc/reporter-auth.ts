@@ -20,7 +20,7 @@
 // CONDITION 2, REGISTRY (src/dmarc/known-reporters.ts): the passing DKIM organisation, the From address and the report's own
 // report_metadata/email together match one entry. org_name, Submitter and subject never decide anything.
 
-import { organizationalDomain } from '@inbox-angel/dns-checks';
+import { organizationalDomain } from '@ready-set-mail/dns-checks';
 import { parseAuthResults } from '../email/parse-headers';
 import { readAuthHeaders, trustedResults, type AuthHeaders } from '../email/sender-proof';
 import { registryCandidates, reportEmailAccepted, type KnownReporter, type RegistryEnv } from './known-reporters';

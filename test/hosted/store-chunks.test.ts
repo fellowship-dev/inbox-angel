@@ -3,7 +3,7 @@
 // report an operator can allow.
 import { describe, it, expect } from 'vitest';
 import { SQLiteAsyncDialect } from 'drizzle-orm/sqlite-core';
-import { byteLength, chunkJson, JSON_PARAM_MAX_BYTES, storeStatements, type RecordTuple, SQL_MAX_BYTES } from '@inbox-angel/db';
+import { byteLength, chunkJson, JSON_PARAM_MAX_BYTES, storeStatements, type RecordTuple, SQL_MAX_BYTES } from '@ready-set-mail/db';
 
 const dialect = new SQLiteAsyncDialect();
 const D1_MAX_VALUE_BYTES = 2_000_000;

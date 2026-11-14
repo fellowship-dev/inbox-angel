@@ -35,7 +35,7 @@ export interface StepCopy {
   fromName?: string;
 }
 
-const SIGN_OFF = 'Inbox Angel';
+const SIGN_OFF = 'Ready Set Mail';
 
 /** One plain line in the free-check reply, next to the unsubscribe link. Must stay true to what the sequence does. */
 export const DISCLOSURE = "You will also get a few short emails from us on fixing it, keeping it fixed, and getting your logo into the inbox (BIMI).";
@@ -181,13 +181,13 @@ export function stepCopy(index: number, c: CopyContext): StepCopy {
       return {
         subject: `Want me to look at ${d} with you?`,
         needsBookingUrl: true,
-        fromName: 'Max at Inbox Angel',
+        fromName: 'Max at Ready Set Mail',
         blocks: [
           `A short note from me. You checked ${d} two weeks ago, and I wanted to ask directly: would it help if I looked at it with you?`,
           'It is a conversation of about half an hour. I will tell you what I see, what I would fix first, and what it would take. If it turns out you can handle it yourselves, I will say so.',
           { cta: { label: 'Pick a time', url: c.bookingUrl ?? '' } },
           'If now is not the time, no problem. This is the last email in this series.',
-          'Max at Inbox Angel',
+          'Max at Ready Set Mail',
         ],
       };
   }

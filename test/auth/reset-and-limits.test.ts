@@ -15,7 +15,7 @@ vi.mock('../../src/env-utils', async (importOriginal) => {
 });
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, freshIp } from './helpers';
 
 const rows = (db: ReturnType<typeof createMigratedD1>, sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
@@ -42,7 +42,7 @@ describe('password reset', () => {
     expect(send).toHaveBeenCalledTimes(1);
     const mail = send.mock.calls[0][0];
     expect(mail.to).toEqual(['owner@example.com']);
-    expect(mail.from).toEqual({ name: 'InboxAngel', email: 'noreply@reports.example.com' });
+    expect(mail.from).toEqual({ name: 'Ready Set Mail', email: 'noreply@reports.example.com' });
     expect(mail.text).toContain('https://ia.example.com/#/reset/');
   });
 

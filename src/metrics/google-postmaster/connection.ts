@@ -1,4 +1,4 @@
-import type { WorkspaceScope } from '@inbox-angel/db';
+import type { WorkspaceScope } from '@ready-set-mail/db';
 import { envelopeAad, TokenCrypto, type TokenMaterial } from '../../connections/crypto';
 import { exchangeGoogleToken, GoogleProviderError, type GoogleOAuthConfig } from './client';
 /** Connection management callers must enforce human owner policy before calling these methods. */

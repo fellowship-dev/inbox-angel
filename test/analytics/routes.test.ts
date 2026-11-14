@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 
 const dns = vi.hoisted(() => ({ dmarc: undefined as string | null | undefined }));
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forWorkspace } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
 import { call, makeEnv, inviteAndAccept, setupOwner } from '../auth/helpers';
 import { handleAnalyticsRoutes } from '../../src/analytics/routes';
 import { makeTenant } from '../helpers/tenant';
@@ -22,8 +22,8 @@ async function world() {
 }
 
 // The live DMARC lookup is a network call: tests stub it through the same seam the route exposes.
-vi.mock('@inbox-angel/dns-checks', async (orig) => ({
-  ...(await orig<typeof import('@inbox-angel/dns-checks')>()),
+vi.mock('@ready-set-mail/dns-checks', async (orig) => ({
+  ...(await orig<typeof import('@ready-set-mail/dns-checks')>()),
   // undefined = the lookup failed; null = no record; a string = that record.
   createResolver: () => ({ txt: async () => (dns.dmarc === undefined ? { status: 'error', records: [], error: 'offline' } : { status: 'ok', records: dns.dmarc === null ? [] : [dns.dmarc] }) }),
 }));

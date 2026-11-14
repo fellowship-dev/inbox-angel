@@ -1,6 +1,6 @@
 // The daily retention job, against a real in-memory D1 and a fixed clock.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { retentionPolicy, rawXmlRetentionDays } from '../../src/lifecycle/config';
 import { runRetention } from '../../src/lifecycle/retention';
 import { LIFECYCLE_CRON, runCronForWorkspaces, runDataLifecycle } from '../../src/cron';

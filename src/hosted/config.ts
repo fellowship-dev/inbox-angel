@@ -51,11 +51,11 @@ export function hostedEnabled(env: Pick<HostedEnv, 'MODE' | 'SAAS_ENABLED'>): bo
 const clean = (v: string | undefined): string | undefined => v?.trim().toLowerCase().replace(/^\.+|\.+$/g, '') || undefined;
 
 export interface HostedConfig {
-  /** Domain of the central report address, e.g. rua.inboxangel.io. */
+  /** Domain of the central report address, e.g. rua.readysetmail.com. */
   intakeDomain?: string;
-  /** Domain of the anonymous free-check address, e.g. canary.inboxangel.io. */
+  /** Domain of the anonymous free-check address, e.g. canary.readysetmail.com. */
   canaryDomain?: string;
-  /** Zone that holds the hosted records, e.g. inboxangel.io. */
+  /** Zone that holds the hosted records, e.g. readysetmail.com. */
   recordsZone?: string;
   /** The single label under the zone that every hosted record lives below, e.g. h. */
   recordsLabel: string;
@@ -70,7 +70,7 @@ export function hostedConfig(env: HostedEnv): HostedConfig {
   };
 }
 
-/** Apex of everything the hosted-records writer may touch: `h.inboxangel.io`. */
+/** Apex of everything the hosted-records writer may touch: `h.readysetmail.com`. */
 export function hostedApex(cfg: HostedConfig): string | undefined {
   return cfg.recordsZone ? `${cfg.recordsLabel}.${cfg.recordsZone}` : undefined;
 }

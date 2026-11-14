@@ -1,4 +1,4 @@
-# Hosted InboxAngel (`MODE=saas`)
+# Hosted Ready Set Mail (`MODE=saas`)
 
 How the hosted service routes reports, hands out records and verifies customers. Everything here applies only when
 `MODE=saas` **and** `SAAS_ENABLED=1`. Self-host (`rua@reports.<base>`, your own Email Routing) is untouched.
@@ -11,13 +11,13 @@ Contents: [Overview](#overview) · [Operator setup](#operator-setup) · [Custome
 
 | Piece | Address / name | Lives in |
 |-------|----------------|----------|
-| DMARC aggregate reports | `rua+<token>@rua.inboxangel.io` | Email Routing → this Worker |
-| TLS-RPT reports | `tls-rpt+<token>@rua.inboxangel.io` | Email Routing → this Worker |
-| Free check ("canary") | `check+<token>@canary.inboxangel.io` | Email Routing → this Worker |
-| Hosted DMARC | `<id>._dmarc.h.inboxangel.io` TXT | the records zone |
-| Hosted SPF (flattened) | `<id>._spf.h.inboxangel.io` TXT | the records zone |
-| Hosted TLS-RPT | `<id>._tlsrpt.h.inboxangel.io` TXT | the records zone |
-| Hosted MTA-STS | `mta-sts.<id>.h.inboxangel.io` TXT (`v=STSv1; id=…`) + proxied AAAA (policy host) | the records zone |
+| DMARC aggregate reports | `rua+<token>@rua.readysetmail.com` | Email Routing → this Worker |
+| TLS-RPT reports | `tls-rpt+<token>@rua.readysetmail.com` | Email Routing → this Worker |
+| Free check ("canary") | `check+<token>@canary.readysetmail.com` | Email Routing → this Worker |
+| Hosted DMARC | `<id>._dmarc.h.readysetmail.com` TXT | the records zone |
+| Hosted SPF (flattened) | `<id>._spf.h.readysetmail.com` TXT | the records zone |
+| Hosted TLS-RPT | `<id>._tlsrpt.h.readysetmail.com` TXT | the records zone |
+| Hosted MTA-STS | `mta-sts.<id>.h.readysetmail.com` TXT (`v=STSv1; id=…`) + proxied AAAA (policy host) | the records zone |
 
 `<id>` is 16 random base32 characters, stored per domain and **never derived from the customer's domain**.
 The token is 160 random bits (32 base32 characters), per domain, stored only as a SHA-256, rotatable.
@@ -34,9 +34,9 @@ In `wrangler.jsonc` `vars` (or the dashboard):
 |----------|-------|-|
 | `MODE` | `saas` | |
 | `SAAS_ENABLED` | `1` | explicit opt-in; without it the API answers 503 and inbound mail is **deferred** (the Worker throws, senders retry) |
-| `INTAKE_DOMAIN` | `rua.inboxangel.io` | |
-| `CANARY_DOMAIN` | `canary.inboxangel.io` | |
-| `HOSTED_RECORDS_ZONE` | `inboxangel.io` | zone that holds the hosted records |
+| `INTAKE_DOMAIN` | `rua.readysetmail.com` | |
+| `CANARY_DOMAIN` | `canary.readysetmail.com` | |
+| `HOSTED_RECORDS_ZONE` | `readysetmail.com` | zone that holds the hosted records |
 | `HOSTED_RECORDS_LABEL` | `h` | the single label every hosted record lives under (default `h`) |
 | `INTAKE_MAX_REPORTS_PER_DAY` | `50` | reports per intake token **per registry reporter** per UTC day |
 | `INTAKE_MAX_BYTES_PER_DAY` | `52428800` | raw message bytes per token per registry reporter per UTC day (50 MiB) |
@@ -78,16 +78,16 @@ Apply the current migrations with `npm run migrate` before enabling anything. Ho
 Subdomains cannot have a catch-all, so each base address gets **one rule**; the `+<token>` part is sub-addressing
 that the Worker reads itself.
 
-1. Enable Email Routing for the **subdomains** `rua.inboxangel.io` and `canary.inboxangel.io` (Email Routing → Settings → add subdomain; this adds their MX/SPF records).
+1. Enable Email Routing for the **subdomains** `rua.readysetmail.com` and `canary.readysetmail.com` (Email Routing → Settings → add subdomain; this adds their MX/SPF records).
 2. Create custom addresses with action **Send to a Worker** → this Worker:
 
    | Address | |
    |---------|-|
-   | `rua@rua.inboxangel.io` | DMARC |
-   | `tls-rpt@rua.inboxangel.io` | TLS-RPT |
-   | `check@canary.inboxangel.io` | free check |
+   | `rua@rua.readysetmail.com` | DMARC |
+   | `tls-rpt@rua.readysetmail.com` | TLS-RPT |
+   | `check@canary.readysetmail.com` | free check |
 
-3. Check it: send a mail to `rua+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@rua.inboxangel.io` and look for
+3. Check it: send a mail to `rua+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@rua.readysetmail.com` and look for
    `{"evt":"intake",…,"outcome":"refused","reason":"unknown_token",…}` in the Worker logs (`wrangler tail --format json`). If nothing arrives, Email Routing is not matching
    `+` sub-addresses for you; the rules above are then not enough and this needs revisiting (it cannot be tested from the repo).
 
@@ -98,24 +98,24 @@ Create it at *My Profile → API Tokens → Custom token*:
 
 * **Zone → DNS → Edit**
 * **Zone → Zone → Read** (the Worker looks the zone up by name)
-* Zone Resources: **Include → Specific zone → `inboxangel.io`** (nothing else; no account permissions)
+* Zone Resources: **Include → Specific zone → `readysetmail.com`** (nothing else; no account permissions)
 
-The writer refuses any record name outside `*.h.inboxangel.io` (and any type other than TXT/AAAA) before it makes a request, and
+The writer refuses any record name outside `*.h.readysetmail.com` (and any type other than TXT/AAAA) before it makes a request, and
 re-reads a record before changing or deleting it to be sure it sits at the expected hosted name. The token scope is the second fence, not the only one.
 
 ### 4. The records zone
 
-* `inboxangel.io` on **Cloudflare Pro** (3,500 records; see [limits](#limits-and-quotas)). A free zone created since September 2024 holds only **200** records, which is about 40 domains with MTA-STS (5 records each) or 66 without (3 each) before the zone's existing records are counted, so it is not an option. (Free zones created earlier may still have the old 1,000-record limit; do not rely on it.)
-* One-time authorisation record so receivers will send reports for *any* customer domain to `rua.inboxangel.io` (RFC 7489 §7.1, external destination verification).
+* `readysetmail.com` on **Cloudflare Pro** (3,500 records; see [limits](#limits-and-quotas)). A free zone created since September 2024 holds only **200** records, which is about 40 domains with MTA-STS (5 records each) or 66 without (3 each) before the zone's existing records are counted, so it is not an option. (Free zones created earlier may still have the old 1,000-record limit; do not rely on it.)
+* One-time authorisation record so receivers will send reports for *any* customer domain to `rua.readysetmail.com` (RFC 7489 §7.1, external destination verification).
   A wildcard covers every customer:
 
   ```
-  *._report._dmarc.rua.inboxangel.io.   TXT   "v=DMARC1"
+  *._report._dmarc.rua.readysetmail.com.   TXT   "v=DMARC1"
   ```
 
-  Put it in the zone for `inboxangel.io` (outside `*.h.`, so the writer never touches it).
-* MTA-STS policy hosts: the Worker serves `https://mta-sts.<id>.h.inboxangel.io/.well-known/mta-sts.txt` and
-  `https://mta-sts.<customer domain>/.well-known/mta-sts.txt`. Add a Worker route `*.h.inboxangel.io/*`, and for the customer-hostname form
+  Put it in the zone for `readysetmail.com` (outside `*.h.`, so the writer never touches it).
+* MTA-STS policy hosts: the Worker serves `https://mta-sts.<id>.h.readysetmail.com/.well-known/mta-sts.txt` and
+  `https://mta-sts.<customer domain>/.well-known/mta-sts.txt`. Add a Worker route `*.h.readysetmail.com/*`, and for the customer-hostname form
   use Cloudflare for SaaS (custom hostnames with a fallback origin) so `mta-sts.customer.com` gets a certificate.
 
 ### 5. Crons
@@ -124,7 +124,7 @@ The daily hosted job runs inside the existing `0 11 * * *` trigger (after the pe
 
 1. **Zone reconcile**: lists the whole records zone, stores the record count (quota), warns at 3,200, and diffs it against the database:
    expected records that are missing and records under `*.h.` that no domain owns are **reported, never fixed or deleted**.
-   Records outside `*.h.` are only counted and fingerprinted; a change since yesterday is logged (`records outside h.inboxangel.io changed`). The job issues only `GET`s.
+   Records outside `*.h.` are only counted and fingerprinted; a change since yesterday is logged (`records outside h.readysetmail.com changed`). The job issues only `GET`s.
 2. **MTA-STS MX refresh** for hosted domains (never publishes a policy with no MX hosts).
 3. **SPF refresh**: re-flattens every hosted SPF from its stored source and updates the record if the providers' ranges moved. A source that cannot be fully resolved leaves the current record alone.
 4. **Pointer verification** for every hosted domain.
@@ -191,7 +191,7 @@ is marked verified at setup.
 **Domain ownership.** A domain a workspace adds is a *claim* (`domain_claims`) until proven; it is not in `domains`, so
 it has no reports, stats, check results, hosted records or DNS writes, and it never blocks another workspace. It is
 verified by any of: (a) its zone is on the allow-list of one of the workspace's active Cloudflare connections, (b) the
-workspace already verified a parent domain, (c) the TXT record `_inboxangel.<domain>` holds `inboxangel-verify=<token>`
+workspace already verified a parent domain, (c) the TXT record `_readysetmail.<domain>` holds `readysetmail-verify=<token>`
 (the "Verify" button re-checks). The first workspace to verify owns the name; other pending claims on it become `lost`. A claim that became a domain is kept, hidden, for one day (`settled_at`), so a repeat of its verify answers `200` with the domain; the daily retention job deletes it after that.
 A workspace may hold 25 pending claims. Domains that existed before this feature are `verified_via=legacy`: they keep working for their holder, but never block a verified claim — a successful TXT, Cloudflare or parent proof evicts the legacy holder (audit-logged as `domain.evicted`), and a legacy domain proves nothing about its subdomains. The Cloudflare proof re-checks the zone with Cloudflare at verify time (must still be active and have the same name).
 
@@ -214,19 +214,19 @@ published in the hosted records. Then the customer adds pointers in their own DN
 
 | Record | Name | Value |
 |--------|------|-------|
-| CNAME | `_dmarc.customer.com` | `<id>._dmarc.h.inboxangel.io` |
-| TXT (edit the existing SPF) | `customer.com` | add `include:<id>._spf.h.inboxangel.io` |
-| CNAME | `_smtp._tls.customer.com` | `<id>._tlsrpt.h.inboxangel.io` |
-| CNAME *(only if MTA-STS is hosted)* | `_mta-sts.customer.com` | `mta-sts.<id>.h.inboxangel.io` |
-| CNAME *(only if MTA-STS is hosted)* | `mta-sts.customer.com` | `mta-sts.<id>.h.inboxangel.io` |
+| CNAME | `_dmarc.customer.com` | `<id>._dmarc.h.readysetmail.com` |
+| TXT (edit the existing SPF) | `customer.com` | add `include:<id>._spf.h.readysetmail.com` |
+| CNAME | `_smtp._tls.customer.com` | `<id>._tlsrpt.h.readysetmail.com` |
+| CNAME *(only if MTA-STS is hosted)* | `_mta-sts.customer.com` | `mta-sts.<id>.h.readysetmail.com` |
+| CNAME *(only if MTA-STS is hosted)* | `mta-sts.customer.com` | `mta-sts.<id>.h.readysetmail.com` |
 
 Notes for the customer:
 
-* **SPF:** keep a single `v=spf1` record. Replace the includes InboxAngel flattened with `include:<id>._spf.h.inboxangel.io`; the hosted record is built from the SPF
+* **SPF:** keep a single `v=spf1` record. Replace the includes Ready Set Mail flattened with `include:<id>._spf.h.readysetmail.com`; the hosted record is built from the SPF
   the domain published when hosting was enabled (or the `spf_record` given then) and carries no DNS lookups of its own beyond what could not be flattened.
 * **DMARC:** the hosted record starts at the domain's stored policy (`p=none` by default). Moving a hosted domain through the rollout steps (`rollout-advance`) does not rewrite the hosted record yet.
 * A `CNAME` cannot sit next to other records at the same name. If `_dmarc.customer.com` already has a TXT, remove it when adding the CNAME.
-* InboxAngel checks the pointers daily and on demand (`POST …/hosted/verify`). Each is `ok`, `missing`, `wrong` (something else is there) or `error` (could not be read; the previous status is kept).
+* Ready Set Mail checks the pointers daily and on demand (`POST …/hosted/verify`). Each is `ok`, `missing`, `wrong` (something else is there) or `error` (could not be read; the previous status is kept).
   A hosted record counts toward the domain's **Level** only once its pointer is `ok` (`level_inputs` in the status response).
 * Token rotation (`POST …/hosted/rotate-token`) edits the hosted records; the customer changes nothing. The previous token keeps being accepted for 72 hours.
 
@@ -325,7 +325,7 @@ One JSON line per inbound message, `console.log` for accepted, `console.warn` fo
 
 ### Hostile input
 
-Refused with a reason, nothing stored: gzip/zip bombs (inflation stops at the decompression cap of the carrier class, 1 MiB for anyone but a registry reporter; a zip's declared sizes are not trusted; more than 2 entries), a gzip inside a gzip (the inner stream is not inflated), DOCTYPE/ENTITY, invalid UTF-8, fields over their limits (org_name and report_id 256, domains 253, IP 45, other strings 512), XML nested deeper than 20 levels or with more than 20 elements per allowed record, control characters, a report whose period ends more than 2 days in the future, ends before it begins, spans more than 31 days or begins before 2012, a count above 2³¹−1 (clamped), a domain the token does not own (hosted answers "Report is for a domain this address does not belong to" and never echoes the sender's domain; self-host keeps "Unknown domain X — not a registered InboxAngel inbox"), a gzip header over 1 KiB. A duplicate report id is accepted once and never counted twice.
+Refused with a reason, nothing stored: gzip/zip bombs (inflation stops at the decompression cap of the carrier class, 1 MiB for anyone but a registry reporter; a zip's declared sizes are not trusted; more than 2 entries), a gzip inside a gzip (the inner stream is not inflated), DOCTYPE/ENTITY, invalid UTF-8, fields over their limits (org_name and report_id 256, domains 253, IP 45, other strings 512), XML nested deeper than 20 levels or with more than 20 elements per allowed record, control characters, a report whose period ends more than 2 days in the future, ends before it begins, spans more than 31 days or begins before 2012, a count above 2³¹−1 (clamped), a domain the token does not own (hosted answers "Report is for a domain this address does not belong to" and never echoes the sender's domain; self-host keeps "Unknown domain X — not a registered Ready Set Mail inbox"), a gzip header over 1 KiB. A duplicate report id is accepted once and never counted twice.
 
 ### Measured limits
 
@@ -376,7 +376,7 @@ On `GET /api/domains/:id/stats`, `/check-summary` and `/analytics` (and `section
 
 Self-host has one tenant and a private address (`rua@reports.<base>`), no tokens, no daily or per-tenant caps. What applies everywhere: the records cap (default 2,500), the decompressed cap (1.25 MiB), the raw cap (2 MiB; the same 128 MB isolate, so the measured worst case is +84 MB), the fixed query budget, atomic storage, specific refusals, the date/field/DOCTYPE checks, and the structured log line. `REPORT_COUNTING` defaults to **`all`**. Justification: every existing self-hosted install has `AUTHSERV_*` unset, so nothing can be authenticated and `registry` would zero every dashboard on upgrade; and the one sender of a self-hosted server's reports is its own mail provider. With `all`, nothing about numbers, dashboards, caps, IP lookups or retention changes on upgrade (tier restrictions are not applied, unauthenticated reports keep the 13-month window), legacy rows keep counting, and `unrecognised` says how many counted reports come from senders the registry does not know. **What does change on upgrade:** reports that are not from a counted sender are stored under `<identity>|<report id>` (a re-delivered old report is still recognised as a duplicate), the new columns are added (additive migration `0011`), and the log line gains the tier fields. To defend a self-hosted server set `AUTHSERV_*` (see below) and then `REPORT_COUNTING=registry`; the tier limits and the 30-day retention of unauthenticated reports then apply.
 
-**Canary:** `POST /api/check-sessions` issues `check+<token>@canary.inboxangel.io`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
+**Canary:** `POST /api/check-sessions` issues `check+<token>@canary.readysetmail.com`, valid for 1 hour and one email (hash stored). The email resolves to an anonymous session (`__anonymous__`, no workspace, no rows),
 the fixed free-check reply is sent, and the result lands in the global `check_results` where the browser polls it by the same token (`GET /api/check-sessions/:token`).
 Free-check senders are also enrolled in the onboarding sequence and every non-transactional email carries an unsubscribe link: see [email-funnel.md](email-funnel.md).
 Rate limits (shared `auth_rate_limits` counters, 1-hour windows): 5 per **authenticated** sender domain (a passing DMARC/DKIM/SPF result in the `Authentication-Results` header Cloudflare adds, reduced to its registrable domain), 20 for senders that authenticate as nothing (one shared bucket), and 500 overall. The `From` header is never used as a key, so a spoofed From cannot use up a real domain's allowance; the cost of that is that unauthenticated senders compete for one small bucket.
@@ -403,8 +403,8 @@ All under `/api/domains/:id/hosted`, authenticated like every other route and sc
   "enabled": true,
   "hosted_id": "k3j2h4g5f6d7s8a9",
   "mta_sts": true,
-  "records": { "dmarc": "<id>._dmarc.h.inboxangel.io", "spf": "…", "tls_rpt": "…", "mta_sts": "mta-sts.<id>.h.inboxangel.io" },
-  "pointers": [ { "purpose": "dmarc", "type": "CNAME", "name": "_dmarc.customer.com", "value": "<id>._dmarc.h.inboxangel.io" }, … ],
+  "records": { "dmarc": "<id>._dmarc.h.readysetmail.com", "spf": "…", "tls_rpt": "…", "mta_sts": "mta-sts.<id>.h.readysetmail.com" },
+  "pointers": [ { "purpose": "dmarc", "type": "CNAME", "name": "_dmarc.customer.com", "value": "<id>._dmarc.h.readysetmail.com" }, … ],
   "pointer_status": { "dmarc": "ok", "spf": "missing", "mta_sts": null, "tls_rpt": "wrong", "checked_at": 1800000000 },
   "level_inputs": { "dmarc_published": true, "spf_published": false, "mta_sts_published": false }
 }

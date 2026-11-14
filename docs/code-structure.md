@@ -1,6 +1,6 @@
 # Code Structure
 
-Architecture and module responsibilities for Inbox Angel (repo `fellowship-dev/inbox-angel`; the Cloudflare Worker script is still named `inbox-angel-worker` by default).
+Architecture and module responsibilities for Ready Set Mail (repo `fellowship-dev/ready-set-mail`; the Cloudflare Worker script is still named `ready-set-mail-worker` by default).
 
 ---
 
@@ -25,7 +25,7 @@ Exports the `Env` interface that describes every Cloudflare binding and secret t
 | `BOOTSTRAP_SECRET` | secret | Installer-held single-use first-owner proof |
 | `TOKEN_ENCRYPTION_KEY` | secret | Encrypts Cloudflare and Google provider credentials |
 | `GOOGLE_POSTMASTER_CLIENT_ID`, `GOOGLE_POSTMASTER_CLIENT_SECRET` | vars / private secret | Separate Google Postmaster read connection |
-| `WORKER_NAME` | var | Defaults to `"inbox-angel-worker"` |
+| `WORKER_NAME` | var | Defaults to `"ready-set-mail-worker"` |
 | `MODE` | var (optional) | `selfhost` (default) or `saas` |
 
 Three handlers are exported:
@@ -56,7 +56,7 @@ Keyed on `event.cron` (the expression string from `wrangler.jsonc`):
 | `0 4 * * *` | 4am UTC daily | Data lifecycle: retry failed Cloudflare revocations, then retention sweeps (own invocation) |
 | `0 8 * * *` | 8am UTC daily (default) | Monitor check + SPF lookup count refresh + rollback regression check + MTA-STS MX refresh |
 
-All handlers run `assertSchemaReady(env.DB)` (from `@inbox-angel/db`) before business logic: the Worker no longer changes the schema, it only checks that `npm run migrate` has been run. Schema, migrations and queries live in `packages/db`.
+All handlers run `assertSchemaReady(env.DB)` (from `@ready-set-mail/db`) before business logic: the Worker no longer changes the schema, it only checks that `npm run migrate` has been run. Schema, migrations and queries live in `packages/db`.
 
 ---
 
@@ -81,13 +81,13 @@ Everything one request (or one cron workspace) needs is built per request and th
 | Env | Purpose |
 |-----|---------|
 | `MODE` | `selfhost` (default) or `saas` |
-| `WORKER_NAME` | Worker script name; defaults to `inbox-angel-worker` (existing installs) |
+| `WORKER_NAME` | Worker script name; defaults to `ready-set-mail-worker` (existing installs) |
 
 ---
 
 ### `src/connections/` — Cloudflare connections (OAuth + pasted tokens)
 
-One Inbox Angel workspace holds several Cloudflare connections; each domain is linked to the one that manages its zone. `crypto.ts` seals tokens (AES-GCM, versioned key id), `oauth.ts` is the PKCE protocol and signed state, `service.ts` stores, refreshes, restricts (zone allow-list) and revokes, `routes.ts` is `/api/cloudflare/*` and `PUT /api/domains/:id/connection`, `relay.ts` is the optional self-host redirect relay (inert unless configured). `TenantContext.cfFor(domain)` is how the rest of the Worker gets a client. See [cloudflare-oauth.md](cloudflare-oauth.md).
+One Ready Set Mail workspace holds several Cloudflare connections; each domain is linked to the one that manages its zone. `crypto.ts` seals tokens (AES-GCM, versioned key id), `oauth.ts` is the PKCE protocol and signed state, `service.ts` stores, refreshes, restricts (zone allow-list) and revokes, `routes.ts` is `/api/cloudflare/*` and `PUT /api/domains/:id/connection`, `relay.ts` is the optional self-host redirect relay (inert unless configured). `TenantContext.cfFor(domain)` is how the rest of the Worker gets a client. See [cloudflare-oauth.md](cloudflare-oauth.md).
 
 ### `src/hosted/` — Hosted (SaaS) intake and records
 
@@ -145,4 +145,4 @@ Public Suffix List data comes from the `tldts` dependency; update it with `npm u
 
 ## Agent and reporting modules
 
-`src/access/` owns finite principals/grants, exact resource resolution and owner administration. `src/mcp/` and `src/auth/mcp-issuer.ts` adapt installation-owned OAuth and tools to that policy. `src/reports/service.ts` combines fresh DNS, captured DMARC/TLS evidence, Google cache and shared remediation for HTTP, dashboard and MCP. `src/metrics/` owns the separate Google Postmaster owner connection and explicit sync. `plugins/inbox-angel/` contains public client guidance; `tools/configure-agent-plugin.mjs` creates an endpoint-specific copy without credentials. See [operator setup and acceptance](agent-operations.md).
+`src/access/` owns finite principals/grants, exact resource resolution and owner administration. `src/mcp/` and `src/auth/mcp-issuer.ts` adapt installation-owned OAuth and tools to that policy. `src/reports/service.ts` combines fresh DNS, captured DMARC/TLS evidence, Google cache and shared remediation for HTTP, dashboard and MCP. `src/metrics/` owns the separate Google Postmaster owner connection and explicit sync. `plugins/ready-set-mail/` contains public client guidance; `tools/configure-agent-plugin.mjs` creates an endpoint-specific copy without credentials. See [operator setup and acceptance](agent-operations.md).

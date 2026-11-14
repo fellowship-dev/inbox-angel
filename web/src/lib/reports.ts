@@ -1,4 +1,4 @@
-import type { CheckStatus } from '@inbox-angel/ui';
+import type { CheckStatus } from '@ready-set-mail/ui';
 import type { AnomalySource, CheckResult, ReportSource } from './types';
 
 /** Pure helpers for the report, source, email-check and audit screens. */

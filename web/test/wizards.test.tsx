@@ -202,7 +202,7 @@ describe('DMARC graduation wizard', () => {
 		...extra,
 	});
 
-	it('manual path advances with NO API call and says Inbox Angel will detect the change', async () => {
+	it('manual path advances with NO API call and says Ready Set Mail will detect the change', async () => {
 		const { calls } = renderApp(ui, { route: '/domains/3/dmarc-wizard', routes: routesFor() });
 		expect(await screen.findByText('Step 1: switch to quarantine')).toBeInTheDocument();
 		expect(screen.getByText(/Confirming makes no change on our side/)).toBeInTheDocument();

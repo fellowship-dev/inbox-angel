@@ -1,4 +1,4 @@
-import { Alert, Button } from '@inbox-angel/ui';
+import { Alert, Button } from '@ready-set-mail/ui';
 import { useEffect, useRef } from 'react';
 import type { HostedAddresses } from '../../lib/hosted';
 import { CopyField } from '../domain/CopyField';

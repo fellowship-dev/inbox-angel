@@ -6,8 +6,8 @@
 // The window (`days`, default 30, at most 90) shapes the trend and the inventory. Fixes and readiness always
 // judge the last 30 days, so the advice does not flip when someone switches the chart to 7 days.
 
-import { createResolver, isDmarcRecord } from '@inbox-angel/dns-checks';
-import type { SenderRow, TrendRow } from '@inbox-angel/db';
+import { createResolver, isDmarcRecord } from '@ready-set-mail/dns-checks';
+import type { SenderRow, TrendRow } from '@ready-set-mail/db';
 import { parseDmarcTags } from '../dmarc/rollout';
 import type { TenantContext } from '../tenancy/context';
 import { buildFixes, fixScore, type Fix } from '../analytics/fixes';

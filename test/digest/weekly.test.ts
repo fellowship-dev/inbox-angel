@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildDigestBody, sendWeeklyDigests } from '../../src/digest/weekly';
-import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import type { DomainWeeklyStat, FailingSource } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { makeTenant } from '../helpers/tenant';
 
 // ── Fixtures ──────────────────────────────────────────────────
@@ -34,48 +34,48 @@ const SOURCE: FailingSource = { source_ip: '1.2.3.4', total: 20, header_from: 'm
 
 describe('buildDigestBody', () => {
   it('includes recipient name in greeting', () => {
-    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('Hi Acme');
   });
 
   it('includes domain name and policy', () => {
-    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('Domain: acme.com');
     expect(body).toContain('reject ✅');
   });
 
   it('shows message counts and pass percentage', () => {
-    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_GOOD], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('1,000');
     expect(body).toContain('98%');
   });
 
   it('shows top failing sources when present', () => {
     const sources = new Map([[1, [SOURCE]]]);
-    const body = buildDigestBody('Acme', [STAT_GOOD], sources, 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_GOOD], sources, 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('1.2.3.4');
     expect(body).toContain('mail.acme.com');
   });
 
   it('shows rua hint for domains with no reports', () => {
-    const body = buildDigestBody('Acme', [STAT_NO_REPORTS], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_NO_REPORTS], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('No reports received');
-    expect(body).toContain('rua=mailto:rua@reports.inboxangel.io');
+    expect(body).toContain('rua=mailto:rua@reports.readysetmail.com');
   });
 
   it('includes CTA for domains with weak policy', () => {
-    const body = buildDigestBody('Acme', [STAT_NONE], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_NONE], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('not enforcing DMARC');
-    expect(body).toContain('inboxangel.io');
+    expect(body).toContain('readysetmail.com');
   });
 
   it('no CTA when all domains have reject policy', () => {
-    const body = buildDigestBody('Acme', [STAT_CLEAN], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_CLEAN], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).not.toContain('not enforcing DMARC');
   });
 
   it('handles multiple domains', () => {
-    const body = buildDigestBody('Acme', [STAT_GOOD, STAT_CLEAN], new Map(), 'Mar 3, 2026', 'rua@reports.inboxangel.io', 'reports.inboxangel.io');
+    const body = buildDigestBody('Acme', [STAT_GOOD, STAT_CLEAN], new Map(), 'Mar 3, 2026', 'rua@reports.readysetmail.com', 'reports.readysetmail.com');
     expect(body).toContain('acme.com');
     expect(body).toContain('acme.io');
   });
@@ -97,7 +97,7 @@ function seedAdmin(db: TestDb, admin: { email: string; name: string } | null = A
 /** Insert a domain with one aggregate report in the last 7 days matching `stat`, plus failing-source records. */
 function seedDomain(db: TestDb, stat: DomainWeeklyStat, failingSources: FailingSource[] = []) {
   db.sqlite
-    .prepare("INSERT INTO domains (id, domain, rua_address, dmarc_policy) VALUES (?, ?, 'rua@reports.inboxangel.io', ?)")
+    .prepare("INSERT INTO domains (id, domain, rua_address, dmarc_policy) VALUES (?, ?, 'rua@reports.readysetmail.com', ?)")
     .run(stat.domain_id, stat.domain, stat.dmarc_policy);
   if (stat.report_count === 0) return;
   // report_count reports; the first carries all the counts
@@ -129,7 +129,7 @@ function makeEnv(db: TestDb, extra: Record<string, unknown> = {}) {
   return makeTenant({
     db,
     env: extra as any,
-    settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'noreply@reports.inboxangel.io' },
+    settings: { reportsDomain: 'reports.readysetmail.com', fromEmail: 'noreply@reports.readysetmail.com' },
   });
 }
 
@@ -215,7 +215,7 @@ describe('sendWeeklyDigests', () => {
     await sendWeeklyDigests(makeEnv(db, { SEND_EMAIL: sendEmail, RESEND_API_KEY: 're_x', PUBLIC_BASE_URL: 'https://app.example.io', BETTER_AUTH_SECRET: 's', POSTAL_ADDRESS: '1 Main St' }), NOW_MS);
     expect(sendEmail.send).toHaveBeenCalledOnce();
     const arg = sendEmail.send.mock.calls[0][0];
-    expect(arg.from.email).toBe('noreply@reports.inboxangel.io');
+    expect(arg.from.email).toBe('noreply@reports.readysetmail.com');
     expect(arg.headers['List-Unsubscribe']).toMatch(/^<https:\/\/app\.example\.io\/api\/unsubscribe\?t=/);
     expect(arg.text).toContain('1 Main St');
     expect(resendFetch.mock.calls.filter(c => String(c[0]).includes('resend.com'))).toEqual([]);

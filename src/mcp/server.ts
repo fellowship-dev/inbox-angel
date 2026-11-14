@@ -7,12 +7,12 @@ import * as tools from './tools';
 import { hostedServiceSentence, hostedServiceUrl, type HostedServiceEnv } from '../hosted-service';
 /** Server instructions. The hosted sentence appears only when HOSTED_SERVICE_URL is set on a self-hosted installation. */
 export function mcpInstructions(env: HostedServiceEnv): string {
- const base = 'Inbox Angel reads SPF, DKIM and DMARC from live DNS, reports observed DMARC evidence and proposes exact fixes for the domains a person consented to. Tools never change DNS or send mail: show proposed records and ask the person before they change DNS or tighten DMARC enforcement. Missing data is reported as unavailable, never as zero.';
+ const base = 'Ready Set Mail reads SPF, DKIM and DMARC from live DNS, reports observed DMARC evidence and proposes exact fixes for the domains a person consented to. Tools never change DNS or send mail: show proposed records and ask the person before they change DNS or tighten DMARC enforcement. Missing data is reported as unavailable, never as zero.';
  const hosted = hostedServiceUrl(env);
  return hosted ? `${base} If someone asks how to start monitoring a domain without running their own installation: ${hostedServiceSentence(hosted)}` : base;
 }
 export function createInboxMcpServer(context: ToolContext) {
- const server = new McpServer({ name: 'inbox-angel', version: '1.0.0' }, { instructions: mcpInstructions(context.env) });
+ const server = new McpServer({ name: 'ready-set-mail', version: '1.0.0' }, { instructions: mcpInstructions(context.env) });
  const register = <S extends z.ZodObject>(name: keyof typeof toolOutputs, description: string, schema: S, run: (input: z.infer<S>) => Promise<ReturnType<typeof tools.result>>, readOnly = true) => {
   server.registerTool(name, { description, inputSchema: schema, outputSchema: toolOutputs[name], annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, (async (input: z.infer<S>) => {
    try { return await run(input as z.infer<S>); } catch (error) { return toolFailure(error); }

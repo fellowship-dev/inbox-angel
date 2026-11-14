@@ -2,7 +2,7 @@
 // All templates use inline CSS (no <style> blocks) for email-client compatibility.
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
-import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
+import type { DomainWeeklyStat, FailingSource } from '@ready-set-mail/db';
 import { uncountedNotice } from '../reports/visibility';
 import { CheckSummary, DO_IT_FOR_YOU, doItForYouUrl, fixSteps, HELP_LINE, OverallStatus, retentionSentence, SHARE_IT, shareLinks } from './report-formatter';
 import { DomainChange } from '../monitor/check';
@@ -50,7 +50,7 @@ function htmlLayout(title: string, bodyHtml: string, brand: Brand): string {
   const accent = esc(brand.color);
   const logo = brand.logoUrl;
   const logoHtml = logo
-    ? `<img src="${esc(logo)}" alt="InboxAngel" style="height:32px;vertical-align:middle;margin-right:8px;">`
+    ? `<img src="${esc(logo)}" alt="Ready Set Mail" style="height:32px;vertical-align:middle;margin-right:8px;">`
     : '';
 
   return `<!DOCTYPE html>
@@ -61,13 +61,13 @@ function htmlLayout(title: string, bodyHtml: string, brand: Brand): string {
 <tr><td align="center" style="padding:24px 8px;">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:6px;overflow:hidden;max-width:600px;">
   <tr><td style="background:${accent};padding:16px 24px;">
-    <span style="color:#fff;font-size:16px;font-weight:700;">${logoHtml}InboxAngel</span>
+    <span style="color:#fff;font-size:16px;font-weight:700;">${logoHtml}Ready Set Mail</span>
   </td></tr>
   <tr><td style="padding:24px;">
     ${bodyHtml}
   </td></tr>
   <tr><td style="padding:12px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;text-align:center;">
-    InboxAngel — automated email security monitoring
+    Ready Set Mail — automated email security monitoring
   </td></tr>
 </table>
 </td></tr>
@@ -167,7 +167,7 @@ export function buildWeeklyDigestHtml(p: WeeklyDigestHtmlParams): string {
   if (weak.length > 0) {
     body += `<p style="background:#fef9c3;border:1px solid #fde047;border-radius:4px;padding:12px;margin:16px 0;">
 <strong>${esc(weak.map(s => s.domain).join(', '))}</strong> ${weak.length === 1 ? 'is' : 'are'} not enforcing DMARC.
-<br>Want us to fix it? <a href="https://${esc(p.reportsDomain.replace(/^reports\./, ''))}">Sign up for InboxAngel</a>.
+<br>Want us to fix it? <a href="https://${esc(p.reportsDomain.replace(/^reports\./, ''))}">Sign up for Ready Set Mail</a>.
 </p>`;
   }
 
@@ -331,7 +331,7 @@ export function buildDnsAlertHtml(p: DnsAlertHtmlParams): string {
   if (hasDegraded) {
     body += `<p style="background:#fef2f2;border:1px solid #fecaca;border-radius:4px;padding:12px;margin:0 0 12px;">
 Some changes may leave your domain exposed to spoofing.
-<a href="https://${esc(p.reportsDomain.replace(/^reports\./, ''))}" style="color:${esc(accent)};">Fix it with InboxAngel →</a>
+<a href="https://${esc(p.reportsDomain.replace(/^reports\./, ''))}" style="color:${esc(accent)};">Fix it with Ready Set Mail →</a>
 </p>`;
   } else {
     body += `<p style="color:#6b7280;font-size:13px;">No action required — these look like improvements or routine updates.</p>`;

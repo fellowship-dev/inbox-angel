@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, CheckResult, CheckResultList, FieldHint, IconButton, toast } from '@inbox-angel/ui';
+import { Alert, Badge, Button, CheckResult, CheckResultList, FieldHint, IconButton, toast } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useState } from 'react';
@@ -9,8 +9,8 @@ import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepFooter, StepNav } from '../../../components/wizard/StepNav';
 import { api, errorMessage } from '../../../lib/api';
-import { SPF_PROVIDERS, detectProviders } from '@inbox-angel/dns-checks/email-service-providers';
-import { buildSpfRecord, existingQualifier, extractIncludes, extractOtherMechanisms, type SpfQualifier } from '@inbox-angel/dns-checks/spf-record';
+import { SPF_PROVIDERS, detectProviders } from '@ready-set-mail/dns-checks/email-service-providers';
+import { buildSpfRecord, existingQualifier, extractIncludes, extractOtherMechanisms, type SpfQualifier } from '@ready-set-mail/dns-checks/spf-record';
 import type { OnboardingStatus } from '../../../lib/types';
 import { RadioCard } from '../../../components/wizard/RadioCard';
 import { useDebouncedValue, setupKeys } from './hooks';
@@ -202,7 +202,7 @@ function SpfEditor({ status, onNext, onSkip }: StepProps) {
 			{removeAll ? <Alert variant="warning" title="Nothing selected">Select at least one provider to build a record. We never remove your SPF record from here.</Alert> : null}
 
 			{!hasChanges && severity === 'good' && !applied ? (
-				<p className="text-sm text-ink-2">Your SPF record is healthy. Inbox Angel checks it daily and warns you if it drifts toward the lookup limit.</p>
+				<p className="text-sm text-ink-2">Your SPF record is healthy. Ready Set Mail checks it daily and warns you if it drifts toward the lookup limit.</p>
 			) : null}
 
 			{hasChanges && preview ? (

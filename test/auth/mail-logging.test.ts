@@ -1,6 +1,6 @@
 import { inspect } from 'node:util';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { sendPasswordResetEmail, sendVerificationEmail } from '../../src/auth/mail';
 import type { AuthEnv } from '../../src/auth/config';
 

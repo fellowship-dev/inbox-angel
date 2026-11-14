@@ -1,8 +1,8 @@
 // Central intake for the hosted service (MODE=saas, SAAS_ENABLED=1).
 //
-//   rua+<token>@rua.inboxangel.io       DMARC aggregate report, token → workspace + domain
-//   tls-rpt+<token>@rua.inboxangel.io   TLS-RPT report
-//   check+<token>@canary.inboxangel.io  anonymous free check (src/hosted/canary.ts)
+//   rua+<token>@rua.readysetmail.com       DMARC aggregate report, token → workspace + domain
+//   tls-rpt+<token>@rua.readysetmail.com   TLS-RPT report
+//   check+<token>@canary.readysetmail.com  anonymous free check (src/hosted/canary.ts)
 //
 // Subdomains can't have a catch-all, so one Email Routing rule per base address (`rua@`, `tls-rpt@`,
 // `check@`) delivers every `+token` variant here. The token picks the workspace; the report's own
@@ -15,7 +15,7 @@
 // Every message leaves one JSON log line (src/hosted/intake-log.ts).
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, globalQueries, intakeLookups } from '@inbox-angel/db';
+import { forWorkspace, globalQueries, intakeLookups } from '@ready-set-mail/db';
 import type { Carrier } from '../dmarc/reporter-auth';
 import { loadTenant } from '../tenancy/load';
 import { handleDmarcReport, StorageFailure, type ReportResult } from '../email/dmarc-report';

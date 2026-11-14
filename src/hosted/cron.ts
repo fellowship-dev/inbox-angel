@@ -9,13 +9,13 @@
 // It piggybacks on the existing 11:00 UTC schedule, so no new trigger is needed in wrangler.jsonc.
 
 import type { BoundEnv } from '../index';
-import { globalQueries, intakeLookups, forWorkspace } from '@inbox-angel/db';
+import { globalQueries, intakeLookups, forWorkspace } from '@ready-set-mail/db';
 import { mapLimit } from '../cron';
 import { hostedApex, hostedConfig, hostedEnabled } from './config';
 import { hostedNames, openHostedZone } from './records';
 import { assessQuota, configuredZones, type ZoneQuota } from './zones';
 import { mergePointerReport, verifyPointers } from './pointers';
-import { createResolver, type Resolver } from '@inbox-angel/dns-checks';
+import { createResolver, type Resolver } from '@ready-set-mail/dns-checks';
 import { flattenSource } from './spf';
 import { discoverMxHosts } from '../email/mta-sts';
 import { nextPolicyId } from './service';

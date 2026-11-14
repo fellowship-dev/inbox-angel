@@ -1,8 +1,8 @@
 // The functions PR 150 (the single-address intake) calls, exercised directly: their documented contracts.
 import { describe, it, expect } from 'vitest';
 import { gzipSync, strToU8 } from 'fflate';
-import { forWorkspace } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { chargeIntakeCaps } from '../../src/hosted/intake';
 import { intakeLimits } from '../../src/hosted/config';
 import { authenticateCarrier } from '../../src/dmarc/reporter-auth';

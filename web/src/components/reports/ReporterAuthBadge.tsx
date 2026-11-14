@@ -1,4 +1,4 @@
-import { Badge } from '@inbox-angel/ui';
+import { Badge } from '@ready-set-mail/ui';
 import { ShieldAlert } from 'lucide-react';
 
 export const UNKNOWN_SENDER_TIP = 'The report email was authenticated, but its sender is not on the list of known reporters, so the report is stored and not counted.';

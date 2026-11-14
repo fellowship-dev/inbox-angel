@@ -11,7 +11,7 @@ const PERSIST = process.env.E2E_PERSIST_TO ?? '/tmp/ia-e2e';
 export function runSql(sql: string): void {
 	const file = join(mkdtempSync(join(tmpdir(), 'ia-sql-')), 'q.sql');
 	writeFileSync(file, sql);
-	execFileSync('npx', ['wrangler', 'd1', 'execute', 'inbox-angel', '--local', '--persist-to', PERSIST, '--file', file], { stdio: 'pipe' });
+	execFileSync('npx', ['wrangler', 'd1', 'execute', 'ready-set-mail', '--local', '--persist-to', PERSIST, '--file', file], { stdio: 'pipe' });
 }
 
 /** The id of `domain` in the owner's workspace, adding it first if needed. */

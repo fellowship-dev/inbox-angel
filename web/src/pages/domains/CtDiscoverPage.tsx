@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, EmptyState, FieldHint, Input, Label, PageHeader } from '@inbox-angel/ui';
+import { Alert, Button, Checkbox, EmptyState, FieldHint, Input, Label, PageHeader } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Search } from 'lucide-react';
 import { useState, type FormEvent } from 'react';

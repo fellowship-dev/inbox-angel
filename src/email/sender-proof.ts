@@ -14,7 +14,7 @@
 //     (a shared sending service passes it for anyone), and a DMARC pass for the From header says nothing about the
 //     envelope sender.
 
-import { organizationalDomain } from '@inbox-angel/dns-checks';
+import { organizationalDomain } from '@ready-set-mail/dns-checks';
 import { parseAuthResults } from './parse-headers';
 
 const MAX_HEADER_BYTES = 128 * 1024;

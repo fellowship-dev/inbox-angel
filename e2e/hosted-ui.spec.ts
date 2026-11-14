@@ -11,11 +11,11 @@ const DOMAIN = 'hosted-e2e.test';
 const ID = 'k3j2h4g5f6d7s8a9';
 const status = (over: Record<string, unknown> = {}) => ({
 	enabled: true, hosted_id: ID, mta_sts: false,
-	records: { dmarc: `${ID}._dmarc.h.inboxangel.io`, spf: `${ID}._spf.h.inboxangel.io`, tls_rpt: `${ID}._tlsrpt.h.inboxangel.io`, mta_sts: null },
+	records: { dmarc: `${ID}._dmarc.h.readysetmail.com`, spf: `${ID}._spf.h.readysetmail.com`, tls_rpt: `${ID}._tlsrpt.h.readysetmail.com`, mta_sts: null },
 	pointers: [
-		{ purpose: 'dmarc', type: 'CNAME', name: `_dmarc.${DOMAIN}`, value: `${ID}._dmarc.h.inboxangel.io` },
-		{ purpose: 'spf', type: 'TXT', name: DOMAIN, value: `include:${ID}._spf.h.inboxangel.io` },
-		{ purpose: 'tls_rpt', type: 'CNAME', name: `_smtp._tls.${DOMAIN}`, value: `${ID}._tlsrpt.h.inboxangel.io` },
+		{ purpose: 'dmarc', type: 'CNAME', name: `_dmarc.${DOMAIN}`, value: `${ID}._dmarc.h.readysetmail.com` },
+		{ purpose: 'spf', type: 'TXT', name: DOMAIN, value: `include:${ID}._spf.h.readysetmail.com` },
+		{ purpose: 'tls_rpt', type: 'CNAME', name: `_smtp._tls.${DOMAIN}`, value: `${ID}._tlsrpt.h.readysetmail.com` },
 	],
 	pointer_status: { dmarc: 'missing', spf: 'missing', mta_sts: null, tls_rpt: 'missing', checked_at: null },
 	level_inputs: { dmarc_published: false, spf_published: false, mta_sts_published: false },
@@ -32,7 +32,7 @@ test('enable hosted records, copy the pointers, verify, and the addresses are no
 	await page.route(`**/api/domains/${domain.id}/hosted`, async (r) => {
 		if (r.request().method() === 'POST') {
 			enabled = true;
-			return r.fulfill({ status: 201, json: { hosted: status(), addresses: { rua: `rua+${'a'.repeat(32)}@rua.inboxangel.io`, tls_rpt: `tls-rpt+${'a'.repeat(32)}@rua.inboxangel.io` } } });
+			return r.fulfill({ status: 201, json: { hosted: status(), addresses: { rua: `rua+${'a'.repeat(32)}@rua.readysetmail.com`, tls_rpt: `tls-rpt+${'a'.repeat(32)}@rua.readysetmail.com` } } });
 		}
 		return r.fulfill({ json: enabled ? status(verified ? { pointer_status: { dmarc: 'ok', spf: 'wrong', mta_sts: null, tls_rpt: 'error', checked_at: Math.floor(Date.now() / 1000) } } : {}) : { enabled: false } });
 	});
@@ -52,7 +52,7 @@ test('enable hosted records, copy the pointers, verify, and the addresses are no
 	// Addresses once, with copy; the pointers to add as copyable record blocks.
 	const addresses = page.getByTestId('hosted-addresses');
 	await expect(addresses).toContainText('shown once');
-	await expect(addresses).toContainText('@rua.inboxangel.io');
+	await expect(addresses).toContainText('@rua.readysetmail.com');
 	const pointers = page.getByRole('list', { name: 'Pointer records' });
 	await expect(pointers).toContainText(`_dmarc.${DOMAIN}`);
 	await expect(pointers.getByRole('button', { name: 'Copy value' }).first()).toBeVisible();
@@ -67,5 +67,5 @@ test('enable hosted records, copy the pointers, verify, and the addresses are no
 	await expect(addresses).toHaveCount(0);
 	await page.reload();
 	await expect(page.getByRole('list', { name: 'Pointer records' })).toBeVisible();
-	await expect(page.getByText('@rua.inboxangel.io')).toHaveCount(0);
+	await expect(page.getByText('@rua.readysetmail.com')).toHaveCount(0);
 });

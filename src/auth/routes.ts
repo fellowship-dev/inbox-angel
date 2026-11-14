@@ -6,7 +6,7 @@
 // Auth's own endpoints (OAuth, sessions, change-password) is exposed as-is under /api/auth/;
 // everything else (notably /sign-up/email, which would bypass the sign-up policy) is not.
 import type { BoundEnv as Env } from '../index';
-import { authLookups, forWorkspace, globalQueries, workspaceLifecycle, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { authLookups, forWorkspace, globalQueries, workspaceLifecycle, IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 import { logAudit, type AuditEntry } from '../audit/log';
 import { track } from '../telemetry';
 import { TenantContext } from '../tenancy/context';
@@ -131,7 +131,7 @@ const turnstileSiteKey = async (env: Env) => (isSaas(env) && env.TURNSTILE_SITE_
 
 /**
  * Bot check. A configured Turnstile secret (hosted: TURNSTILE_SECRET_KEY; else the platform setting) requires a valid
- * token. Hosted fails closed: without a secret nobody can sign up, so a misconfiguration cannot turn InboxAngel into
+ * token. Hosted fails closed: without a secret nobody can sign up, so a misconfiguration cannot turn Ready Set Mail into
  * an open mail relay. Returns the refusal, or null to carry on.
  */
 async function botCheck(env: Env, request: Request, token: string | undefined): Promise<Response | null> {
@@ -224,7 +224,7 @@ export async function handleAuthRoute(
     if (!isSetup && !isSaas(env)) return err('sign-up is closed — ask an owner for an invite', 403);
     if (isSetup && (await platform(env).team.hasOwner())) return err('already configured — use /api/auth/login', 409);
 
-    const bootstrapProof = request.headers.get('x-inbox-angel-bootstrap') ?? '';
+    const bootstrapProof = request.headers.get('x-ready-set-mail-bootstrap') ?? '';
     if (isSetup && !(await verifyBootstrapProof(env, bootstrapProof))) return err('installer proof required', 403);
     const body = await readJson<{ name?: string; email?: string; password?: string; telemetry?: boolean; cf_turnstile_token?: string }>(request);
     if (!body.email || !body.password) return err('email and password are required', 400);

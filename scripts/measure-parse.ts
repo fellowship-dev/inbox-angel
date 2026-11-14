@@ -6,7 +6,7 @@
 import { gzipSync, strToU8 } from 'fflate';
 import { randomBytes } from 'node:crypto';
 import { parseDmarcEmail } from '../src/dmarc/parse-email';
-import { storeStatements } from '@inbox-angel/db';
+import { storeStatements } from '@ready-set-mail/db';
 import { toTuple } from '../src/dmarc/store-report';
 
 const n = Number(process.argv[2] ?? 1000);

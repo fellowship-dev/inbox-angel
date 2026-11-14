@@ -1,4 +1,4 @@
-// Worker-side adapter over @inbox-angel/dns-checks (packages/dns-checks), which holds all
+// Worker-side adapter over @ready-set-mail/dns-checks (packages/dns-checks), which holds all
 // DNS logic. This file only binds the package to the global fetch and keeps the
 // `T | null` call shape the worker uses.
 //
@@ -21,9 +21,9 @@ import {
   type DmarcRecord as PkgDmarcRecord,
   type SpfAnalysis,
   type SpfRecord as PkgSpfRecord,
-} from '@inbox-angel/dns-checks';
+} from '@ready-set-mail/dns-checks';
 
-export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '@inbox-angel/dns-checks';
+export { parseSpfRecord, parseDkimRecord, parseDmarcRecord } from '@ready-set-mail/dns-checks';
 export type { DkimRecord };
 
 /** Joins the competing records of a multiple-record permerror into one `raw` (SPF and DMARC). */

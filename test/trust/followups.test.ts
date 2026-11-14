@@ -1,6 +1,6 @@
 // Follow-ups: evicting a legacy domain holder safely, and invitees who sign up through an invite.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, signupVerified, ctx } from '../auth/helpers';
 import { handleApi } from '../../src/api/router';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
@@ -23,7 +23,7 @@ async function world() {
   };
   const A = await mk('a@example.com', 'reports.a.test');
   const B = await mk('b@example.com', 'reports.b.test');
-  const cf = stubCloudflare(new FakeCloudflare({ 'inboxangel.io': { id: 'zone-h' } }));
+  const cf = stubCloudflare(new FakeCloudflare({ 'readysetmail.com': { id: 'zone-h' } }));
   send.mockClear();
   return { db, env, send, rows, A, B, cf };
 }
@@ -36,10 +36,10 @@ describe('evicting a legacy holder', () => {
     w.db.sqlite.prepare("INSERT INTO report_records (report_id, source_ip, count, disposition, workspace_id) VALUES (500, '1.2.3.4', 5, 'none', ?)").run(w.A.ws);
     w.db.sqlite.prepare("INSERT INTO intake_tokens (domain_id, workspace_id, token_hash) VALUES (50, ?, 'h')").run(w.A.ws);
     w.db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key, dmarc_record_id) VALUES (50, ?, 'hid', 'z1', 'rec-dmarc')").run(w.A.ws);
-    w.db.sqlite.prepare("INSERT INTO hosted_zones (zone_key, zone_id, zone_name, record_count) VALUES ('z1', 'zone-h', 'inboxangel.io', 3)").run();
-    w.cf.seed('zone-h', { id: 'rec-dmarc', type: 'TXT', name: 'hid._dmarc.h.inboxangel.io', content: 'v=DMARC1; p=none' });
+    w.db.sqlite.prepare("INSERT INTO hosted_zones (zone_key, zone_id, zone_name, record_count) VALUES ('z1', 'zone-h', 'readysetmail.com', 3)").run();
+    w.cf.seed('zone-h', { id: 'rec-dmarc', type: 'TXT', name: 'hid._dmarc.h.readysetmail.com', content: 'v=DMARC1; p=none' });
     const { claim } = await json(await call(w.env, 'POST', '/api/domains', { key: w.B.token, body: { domain: 'acme.com' } }));
-    w.cf.doh['_inboxangel.acme.com'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [claim.txt_value];
     const res = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.B.token, body: {} });
     await new Promise(r => setTimeout(r, 30));
     return { w, res };
@@ -90,7 +90,7 @@ describe('evicting a legacy holder', () => {
     w.cf.failWith = { status: 500, message: 'down' };
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { claim } = await json(await call(w.env, 'POST', '/api/domains', { key: w.B.token, body: { domain: 'acme.com' } }));
-    w.cf.doh['_inboxangel.acme.com'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [claim.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.B.token, body: {} })).status).toBe(201);
     await new Promise(r => setTimeout(r, 30));
     expect(w.rows("SELECT meta FROM audit_log WHERE action = 'domain.evicted'").map(r => JSON.parse(r.meta).hosted_cleanup)).toEqual(['failed']);
@@ -126,7 +126,7 @@ describe('signing up through an invite (hosted)', () => {
 describe('detached (evicted) domains are invisible everywhere except export', () => {
   async function withEvicted() {
     const w = await world();
-    const { forWorkspace } = await import('@inbox-angel/db');
+    const { forWorkspace } = await import('@ready-set-mail/db');
     const ins = w.db.sqlite.prepare('INSERT INTO domains (id, domain, rua_address, workspace_id, verified_via, evicted_at, evicted_name) VALUES (?, ?, ?, ?, ?, ?, ?)');
     ins.run(60, 'live.com', 'x', w.A.ws, 'txt', null, null);
     ins.run(61, 'evicted-61.invalid', 'x', w.A.ws, 'legacy', 1700000000, 'gone.com');
@@ -160,7 +160,7 @@ describe('detached (evicted) domains are invisible everywhere except export', ()
 
   it('but the export still has them (that is what the 30 days are for)', async () => {
     const { w } = await withEvicted();
-    const { exportQueries } = await import('@inbox-angel/db');
+    const { exportQueries } = await import('@ready-set-mail/db');
     const rows = await exportQueries(w.env.DB as any, w.A.ws).paged.domains(0, 100);
     expect(rows.map((r: any) => r.evicted_name ?? r.domain).sort()).toEqual(['gone.com', 'live.com']);
   });
@@ -172,10 +172,10 @@ describe('subdomains go with an evicted parent', () => {
     const ins = w.db.sqlite.prepare("INSERT INTO domains (id, domain, rua_address, workspace_id, verified_via, parent_id) VALUES (?, ?, 'x', ?, 'legacy', ?)");
     ins.run(70, 'acme.com', w.A.ws, null); ins.run(71, 'mail.acme.com', w.A.ws, 70); ins.run(72, 'eu.mail.acme.com', w.A.ws, 71);
     w.db.sqlite.prepare("INSERT INTO hosted_domains (domain_id, workspace_id, hosted_id, zone_key, dmarc_record_id) VALUES (71, ?, 'hid71', 'z1', 'rec-71')").run(w.A.ws);
-    w.db.sqlite.prepare("INSERT INTO hosted_zones (zone_key, zone_id, zone_name, record_count) VALUES ('z1', 'zone-h', 'inboxangel.io', 1)").run();
-    w.cf.seed('zone-h', { id: 'rec-71', type: 'TXT', name: 'hid71._dmarc.h.inboxangel.io', content: 'v=DMARC1; p=none' });
+    w.db.sqlite.prepare("INSERT INTO hosted_zones (zone_key, zone_id, zone_name, record_count) VALUES ('z1', 'zone-h', 'readysetmail.com', 1)").run();
+    w.cf.seed('zone-h', { id: 'rec-71', type: 'TXT', name: 'hid71._dmarc.h.readysetmail.com', content: 'v=DMARC1; p=none' });
     const { claim } = await json(await call(w.env, 'POST', '/api/domains', { key: w.B.token, body: { domain: 'acme.com' } }));
-    w.cf.doh['_inboxangel.acme.com'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [claim.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.B.token, body: {} })).status).toBe(201);
     await new Promise(r => setTimeout(r, 30));
     expect(w.rows('SELECT id, evicted_at IS NOT NULL AS gone FROM domains WHERE id IN (70, 71, 72) ORDER BY id')).toEqual([{ id: 70, gone: 1 }, { id: 71, gone: 1 }, { id: 72, gone: 1 }]);

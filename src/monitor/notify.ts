@@ -37,7 +37,7 @@ function buildEmailBody(domain: string, changes: DomainChange[], rd: string): st
   }
 
   lines.push('—');
-  lines.push('InboxAngel domain monitoring');
+  lines.push('Ready Set Mail domain monitoring');
   lines.push(`To manage alerts for ${domain}: open your dashboard → Domains → ${domain} → Settings.`);
 
   return lines.join('\n');
@@ -66,7 +66,7 @@ export async function sendChangeNotification(
 
   // Alerts are non-transactional: suppression check, unsubscribe link and headers, postal footer.
   const out = await sendNonTransactional(tenant.env, mailer, {
-    from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
+    from: { name: 'Ready Set Mail', email: tenant.settings.fromEmail! },
     to: email,
     subject,
     text: body,
@@ -87,7 +87,7 @@ export async function notifyConnectionBroken(
   const to = team.filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.email);
   const subject = `Cloudflare connection "${info.label}" needs attention`;
   const body = [
-    `Inbox Angel can no longer use your Cloudflare connection "${info.label}".`,
+    `Ready Set Mail can no longer use your Cloudflare connection "${info.label}".`,
     '',
     info.detail,
     '',
@@ -95,7 +95,7 @@ export async function notifyConnectionBroken(
     'open your dashboard → Settings → Cloudflare and reconnect it.',
     '',
     '—',
-    'InboxAngel',
+    'Ready Set Mail',
   ].join('\n');
 
   if (!tenant.env.SEND_EMAIL || !tenant.settings.fromEmail || to.length === 0) {
@@ -104,7 +104,7 @@ export async function notifyConnectionBroken(
   }
   for (const email of to) {
     try {
-      await tenant.env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: tenant.settings.fromEmail }, to: [email], subject, text: body });
+      await tenant.env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: tenant.settings.fromEmail }, to: [email], subject, text: body });
     } catch (e) {
       console.error(`[connections] alert to ${email} failed:`, e instanceof Error ? e.name : 'error');
     }

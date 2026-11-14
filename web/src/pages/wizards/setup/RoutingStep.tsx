@@ -1,4 +1,4 @@
-import { Alert, Button, CheckResult, CheckResultList } from '@inbox-angel/ui';
+import { Alert, Button, CheckResult, CheckResultList } from '@ready-set-mail/ui';
 import { useMutation } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
@@ -59,7 +59,7 @@ export function RoutingStep({ status, onNext, onSkip, onRetry, retrying }: StepP
 					/>
 				) : routing.mx_found ? (
 					<CheckResult status="pass" statusLabel="Found" title="MX records">
-						MX records found for <Code>{rd}</Code>, so reports can reach Inbox Angel.
+						MX records found for <Code>{rd}</Code>, so reports can reach Ready Set Mail.
 					</CheckResult>
 				) : (
 					<CheckResult
@@ -67,11 +67,11 @@ export function RoutingStep({ status, onNext, onSkip, onRetry, retrying }: StepP
 						title="MX records"
 						summary={
 							<>
-								No MX records found for <Code>{rd ?? 'your reports domain'}</Code>. Email routing must be set up so DMARC reports can reach Inbox Angel.
+								No MX records found for <Code>{rd ?? 'your reports domain'}</Code>. Email routing must be set up so DMARC reports can reach Ready Set Mail.
 							</>
 						}
 					>
-						<p className="text-ink-2">This creates MX records for your reports subdomain and a catch-all routing rule that forwards incoming reports to the Inbox Angel worker.</p>
+						<p className="text-ink-2">This creates MX records for your reports subdomain and a catch-all routing rule that forwards incoming reports to the Ready Set Mail worker.</p>
 						<WriteButton className="mt-2" loading={setup.isPending} onClick={() => setup.mutate()}>
 							Set up email routing
 						</WriteButton>
@@ -89,7 +89,7 @@ export function RoutingStep({ status, onNext, onSkip, onRetry, retrying }: StepP
 						title="Email destination"
 						summary={
 							<>
-								<Code>{routing.admin_email ?? 'Your email'}</Code> must be a Cloudflare Email Routing destination so Inbox Angel can send you alerts and password resets.
+								<Code>{routing.admin_email ?? 'Your email'}</Code> must be a Cloudflare Email Routing destination so Ready Set Mail can send you alerts and password resets.
 							</>
 						}
 					>

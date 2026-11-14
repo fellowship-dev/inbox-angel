@@ -5,7 +5,7 @@
 // (domains and DNS records, Cloudflare access revoked, all data). A workspace with other members blocks the
 // deletion until its ownership is transferred (POST /api/workspaces/:id/transfer-ownership) or it is deleted.
 // Typed confirmation: the body must carry the account's email address.
-import { IMPLICIT_WORKSPACE_ID, lifecycleQueries, workspaceLifecycle } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, lifecycleQueries, workspaceLifecycle } from '@ready-set-mail/db';
 import type { AuthContext } from '../api/auth';
 import { logAudit } from '../audit/log';
 import { eraseWorkspace, preflightWorkspace, type WorkspaceDeps } from '../workspaces/routes';

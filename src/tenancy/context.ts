@@ -7,7 +7,7 @@
 // workspaces in one isolate cannot see each other's data.
 
 import type { BoundEnv } from '../index';
-import { forWorkspace, type WorkspaceScope } from '@inbox-angel/db';
+import { forWorkspace, type WorkspaceScope } from '@ready-set-mail/db';
 import { reportCounting } from '../dmarc/counting';
 import { CfClient, CfNotConfiguredError, CfZoneNotFoundError, zoneCandidates, type CfZone } from './cf-client';
 import { ConnectionService } from '../connections/service';
@@ -17,7 +17,7 @@ import { getMode, type Mode } from './mode';
 import type { ResolvedWorkspace } from './resolver';
 
 /** Script name of existing installs; also the default for new ones. */
-export const DEFAULT_WORKER_NAME = 'inbox-angel-worker';
+export const DEFAULT_WORKER_NAME = 'ready-set-mail-worker';
 
 export function workerName(env: { WORKER_NAME?: string }): string {
   return env.WORKER_NAME || DEFAULT_WORKER_NAME;

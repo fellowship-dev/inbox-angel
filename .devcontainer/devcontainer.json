@@ -1,7 +1,7 @@
 {
-  "name": "inbox-angel",
+  "name": "ready-set-mail",
   "build": { "context": ".", "dockerfile": "Dockerfile" },
-  "workspaceFolder": "/workspaces/inbox-angel",
+  "workspaceFolder": "/workspaces/ready-set-mail",
   "remoteUser": "vscode",
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "22" },

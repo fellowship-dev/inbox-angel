@@ -8,7 +8,7 @@
 // that as "unauthenticated".
 
 import type { Env } from '../index';
-import { IMPLICIT_WORKSPACE_ID, globalQueries, intakeLookups, workspaceLifecycle } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, globalQueries, intakeLookups, workspaceLifecycle } from '@ready-set-mail/db';
 import { getMode } from './mode';
 import { sessionWorkspaceResolver } from '../auth/resolver';
 

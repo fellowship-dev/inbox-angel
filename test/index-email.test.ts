@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createTestD1, createMigratedD1 } from '@inbox-angel/db/testing';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { createTestD1, createMigratedD1 } from '@ready-set-mail/db/testing';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 const handleEmail = vi.fn().mockResolvedValue(undefined);
 vi.mock('../src/email/handler', () => ({ handleEmail: (...a: unknown[]) => handleEmail(...a) }));

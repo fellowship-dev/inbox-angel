@@ -1,4 +1,4 @@
-import { forImplicitWorkspace } from '@inbox-angel/db';
+import { forImplicitWorkspace } from '@ready-set-mail/db';
 import type { AuthEnv } from './config';
 import { hashApiKey } from './api-keys';
 

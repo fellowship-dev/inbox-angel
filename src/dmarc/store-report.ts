@@ -4,7 +4,7 @@
 
 import { AggregateReport, ReportRecord as ParserRecord } from './types';
 import type { TenantContext } from '../tenancy/context';
-import type { RecordTuple } from '@inbox-angel/db';
+import type { RecordTuple } from '@ready-set-mail/db';
 import { rawXmlRetentionDays } from '../lifecycle/config';
 import { sendFirstReportNotification } from '../notifications/first-report';
 import type { ReporterInfo } from './reporter-auth';

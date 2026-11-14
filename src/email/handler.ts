@@ -5,7 +5,7 @@ import { logIntake, type IntakeKind } from '../hosted/intake-log';
 import type { ReasonCode } from '../hosted/reasons';
 import { handleTlsRptReport } from './tls-rpt';
 import { track } from '../telemetry';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { hashToken, isTokenShaped, parseRecipient } from '../hosted/tokens';
 
 // Routes inbound email by recipient address local part:

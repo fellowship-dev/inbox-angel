@@ -3,14 +3,14 @@
 // Streamed section by section, a page of rows at a time, so a big workspace never has to fit in memory.
 // What is left out is decided in packages/db/src/queries/export.ts (secrets, hashes, raw report payloads).
 
-import { exportQueries } from '@inbox-angel/db';
+import { exportQueries } from '@ready-set-mail/db';
 
 const PAGE = 5000;
 /** Rows in the big tables beyond which one invocation cannot read the workspace (D1 query budget and time). */
 export const EXPORT_MAX_ROWS = 250_000;
 
 const NOTES = [
-  'Everything this workspace holds in Inbox Angel, as of exported_at.',
+  'Everything this workspace holds in Ready Set Mail, as of exported_at.',
   'Left out: password hashes, session and invite tokens, API-key hashes, stored Cloudflare tokens, secret settings, and the raw report XML/JSON (the parsed rows below are what it contained).',
   'Timestamps are unix seconds (UTC).',
 ] as const;
@@ -76,7 +76,7 @@ export async function streamWorkspaceExport(db: D1Database, workspaceId: string,
   return new Response(exportStream(db, workspaceId, requestedBy), {
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'content-disposition': `attachment; filename="inbox-angel-${workspaceId}-export.json"`,
+      'content-disposition': `attachment; filename="ready-set-mail-${workspaceId}-export.json"`,
       'cache-control': 'no-store',
     },
   });

@@ -1,7 +1,7 @@
 // Invites when the email already has a login: accepting adds a membership, never a second user.
 import { describe, it, expect, vi } from 'vitest';
 import { delegatedKey } from '../auth/grant-fixture';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept } from '../auth/helpers';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));

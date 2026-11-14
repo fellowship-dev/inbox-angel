@@ -7,7 +7,7 @@
 // Never the default workspace in saas: an unknown host is a 404.
 
 import type { Env } from '../index';
-import { intakeLookups } from '@inbox-angel/db';
+import { intakeLookups } from '@ready-set-mail/db';
 import { getMode } from '../tenancy/mode';
 import { resolveDomainOwner } from '../tenancy/resolver';
 import { hostedApex, hostedConfig } from './config';
@@ -15,7 +15,7 @@ import { isHostedIdShaped } from './tokens';
 
 export interface PolicyHost { workspaceId: string; domain: string }
 
-/** `mta-sts.<id>` + `.h.inboxangel.io` → <id>, or null if the hostname isn't one of ours. */
+/** `mta-sts.<id>` + `.h.readysetmail.com` → <id>, or null if the hostname isn't one of ours. */
 export function hostedIdFromHost(env: Env, hostname: string): string | null {
   const apex = hostedApex(hostedConfig(env));
   const host = hostname.toLowerCase();

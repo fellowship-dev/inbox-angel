@@ -2,7 +2,7 @@
 // the report address and could not be stored. These are API fields; the dashboard, the digest and agents render them. They exist so the
 // UI never shows "no reports" (or a healthy-looking 100%) while reports were received and left out or lost.
 
-import type { UncountedSummary, CountingMode, FailureRow } from '@inbox-angel/db';
+import type { UncountedSummary, CountingMode, FailureRow } from '@ready-set-mail/db';
 import type { TenantContext } from '../tenancy/context';
 import { intakeLimits } from '../hosted/config';
 import { hostedEnabled } from '../hosted/config';

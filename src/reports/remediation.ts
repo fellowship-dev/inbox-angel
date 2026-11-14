@@ -1,4 +1,4 @@
-import type { ReportModel } from '@inbox-angel/report';
+import type { ReportModel } from '@ready-set-mail/report';
 import type { Fix } from '../analytics/fixes';
 import type { Remediation } from './contracts';
 

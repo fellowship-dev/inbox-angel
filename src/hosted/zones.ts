@@ -10,7 +10,7 @@
 // instructions), without touching the writer, the quota logic or existing domains.
 
 import type { BoundEnv } from '../index';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { hostedConfig } from './config';
 
 export const PRO_RECORD_LIMIT = 3500;
@@ -31,7 +31,7 @@ export function assessQuota(count: number, adding = 0, limit = PRO_RECORD_LIMIT,
 export interface ZoneSlot {
   /** Stable id stored on each hosted domain. */
   key: string;
-  /** Zone name, e.g. inboxangel.io. */
+  /** Zone name, e.g. readysetmail.com. */
   name: string;
 }
 

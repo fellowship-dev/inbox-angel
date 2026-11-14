@@ -1,4 +1,4 @@
-import { Badge } from '@inbox-angel/ui';
+import { Badge } from '@ready-set-mail/ui';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
 /** "SPF pass" / "DKIM fail": icon and word, never colour alone. */

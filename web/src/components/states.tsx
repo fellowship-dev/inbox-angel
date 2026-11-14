@@ -1,7 +1,7 @@
-import { Alert, Button, Skeleton, cn } from '@inbox-angel/ui';
+import { Alert, Button, Skeleton, cn } from '@ready-set-mail/ui';
 import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
 import { Lock } from 'lucide-react';
-import type { ButtonProps } from '@inbox-angel/ui';
+import type { ButtonProps } from '@ready-set-mail/ui';
 import { forwardRef, useId, type ReactNode } from 'react';
 import { ApiError, errorMessage } from '../lib/api';
 import { READ_ONLY_REASON, useSession } from '../lib/session';

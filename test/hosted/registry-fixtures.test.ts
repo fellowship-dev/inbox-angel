@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { forWorkspace, resetSchemaReadyCache } from '@inbox-angel/db';
+import { forWorkspace, resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -19,7 +19,7 @@ import { fakeMessage } from '../helpers/mail';
 import { nxdomain, quiet, twoWorkspaces } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const ID = 'mx.cloudflare.net';
 const NOW = Math.floor(Date.now() / 1000);
 

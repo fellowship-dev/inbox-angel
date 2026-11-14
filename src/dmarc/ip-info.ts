@@ -176,7 +176,7 @@ const ENRICH_CONCURRENCY = 5;
 export async function enrichIps(db: D1Database | undefined, ips: readonly string[], maxNew: number | undefined, weight: (ip: string) => number = () => 0): Promise<Map<string, IpInfo>> {
   const out = new Map<string, IpInfo>();
   const g = db ? globals(db) : null;
-  let cached = new Map<string, import('@inbox-angel/db').IpInfoRow>();
+  let cached = new Map<string, import('@ready-set-mail/db').IpInfoRow>();
   if (g) {
     try { cached = await g.ipInfo.getMany(ips); } catch (e) { console.warn('ip-info: cache read failed, enriching without it:', e instanceof Error ? e.message : e); }
   }

@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Card, CardContent, EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from '@inbox-angel/ui';
+import { Alert, Badge, Button, Card, CardContent, EmptyState, PageHeader, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from '@ready-set-mail/ui';
 import { useHosted } from '../../lib/session';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Download, PauseCircle, PlayCircle, Star } from 'lucide-react';
@@ -250,7 +250,7 @@ function Settings({ domain }: { domain: Domain }) {
 						{hasReportAddress(domain.rua_address) ? (
 							<CopyField label="RUA address" value={`rua=mailto:${domain.rua_address.trim()}`} />
 						) : (
-							<Info label="RUA address">{hosted ? 'Reports not connected yet: this domain has no Inbox Angel report address.' : 'No reports address is configured for this domain.'}</Info>
+							<Info label="RUA address">{hosted ? 'Reports not connected yet: this domain has no Ready Set Mail report address.' : 'No reports address is configured for this domain.'}</Info>
 						)}
 						<LiveDmarcRecord domain={domain} />
 					</CardContent>

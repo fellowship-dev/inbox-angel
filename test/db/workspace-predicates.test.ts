@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { WORKSPACE_OWNED_TABLES, GLOBAL_TABLES } from '@inbox-angel/db';
+import { WORKSPACE_OWNED_TABLES, GLOBAL_TABLES } from '@ready-set-mail/db';
 
 /**
  * Static guard: every query on a tenant-owned table, in the Worker (src/) and the

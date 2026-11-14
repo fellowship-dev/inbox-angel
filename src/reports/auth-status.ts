@@ -1,7 +1,7 @@
 // Can any report be counted right now? A pure decision over what inbound report mail carried (counters, no address), plus the loader.
 // Exposed so the setup check (src/setup/preflight.ts) can call `describeAuthStatus` later without reading D1 itself.
 
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 
 export type AuthStatusKind = 'ok' | 'no_traffic' | 'unconfigured' | 'no_results' | 'foreign_authserv' | 'unauthenticated_only';
 

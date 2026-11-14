@@ -92,8 +92,8 @@ describe("PageHeader / LogoMark", () => {
 	it("LogoMark is decorative by default and named when titled", () => {
 		const { container, rerender } = render(<LogoMark />);
 		expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
-		rerender(<LogoMark title="Inbox Angel" />);
-		expect(screen.getByRole("img", { name: "Inbox Angel" })).toBeInTheDocument();
+		rerender(<LogoMark title="Ready Set Mail" />);
+		expect(screen.getByRole("img", { name: "Ready Set Mail" })).toBeInTheDocument();
 	});
 });
 
@@ -101,7 +101,7 @@ const nav = [{ items: [{ label: "Overview", href: "/", icon: <Inbox />, current:
 
 describe("AppShell", () => {
 	const shell = () => (
-		<AppShell brand={<span>Inbox Angel</span>} nav={nav} topbarEnd={<Button size="sm">Account</Button>}>
+		<AppShell brand={<span>Ready Set Mail</span>} nav={nav} topbarEnd={<Button size="sm">Account</Button>}>
 			<PageHeader title="Hello" />
 		</AppShell>
 	);

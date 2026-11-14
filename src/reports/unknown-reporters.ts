@@ -8,7 +8,7 @@
 //       What inbound report mail carries (the last 3 days) and what that means: `intakeAuthStatus` (src/reports/auth-status.ts).
 
 import type { BoundEnv } from '../index';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { effectiveRegistry, parseOperatorEntries } from '../dmarc/known-reporters';
 import { intakeAuthStatus } from './auth-status';
 

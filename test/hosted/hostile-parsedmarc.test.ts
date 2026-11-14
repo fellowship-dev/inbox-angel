@@ -3,7 +3,7 @@
 // nothing. The advisory IDs are the names of the classes.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { gzipSync, strToU8 } from 'fflate';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.setConfig({ testTimeout: 60_000 });
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
@@ -14,7 +14,7 @@ import { fakeMessage, gzipReportMime, mimeWithAttachment } from '../helpers/mail
 import { nxdomain, quiet, twoWorkspaces } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
 const NOW = Math.floor(Date.now() / 1000);
 

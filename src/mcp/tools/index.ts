@@ -1,6 +1,6 @@
-import { forWorkspace } from '@inbox-angel/db';
-import { checkDomain, createResolver, DOH_ENDPOINTS } from '@inbox-angel/dns-checks';
-import { buildReport } from '@inbox-angel/report';
+import { forWorkspace } from '@ready-set-mail/db';
+import { checkDomain, createResolver, DOH_ENDPOINTS } from '@ready-set-mail/dns-checks';
+import { buildReport } from '@ready-set-mail/report';
 import { authorizeResource, authorizedDomains } from '../../access/resolve';
 import { getDomainReport } from '../../reports/service';
 import { enrollDomain, commitVerifiedDomain, assertAgentEnrollmentSafe } from '../../domains/service';
@@ -12,12 +12,12 @@ import { ToolError } from '../errors';
 import { spendDnsCheck } from '../rate-limit';
 
 export function result(summary: string, data: Record<string, unknown>, evidence: { href: string; label: string }[] = []) {
- const structuredContent = { schema: 'inbox-angel-tool/v1' as const, summary, data, evidence };
+ const structuredContent = { schema: 'ready-set-mail-tool/v1' as const, summary, data, evidence };
  return { content: [{ type: 'text' as const, text: summary }], structuredContent };
 }
 export async function whoami(context: ToolContext) {
  const subject = await freshSubject(context);
- return result('Authenticated Inbox Angel identity and explicit consent.', { installation: mcpInstallation(context.env).resource, principalId: subject.principalId, kind: subject.kind, grants: subject.grants.map(({ workspaceId, productId, domain, actions, expiresAt }) => ({ workspaceId, productId, domain, actions, expiresAt })) });
+ return result('Authenticated Ready Set Mail identity and explicit consent.', { installation: mcpInstallation(context.env).resource, principalId: subject.principalId, kind: subject.kind, grants: subject.grants.map(({ workspaceId, productId, domain, actions, expiresAt }) => ({ workspaceId, productId, domain, actions, expiresAt })) });
 }
 export async function listResources(context: ToolContext, input: { workspaceId?: string; productId?: string }, products: boolean) {
  const subject = await freshSubject(context);

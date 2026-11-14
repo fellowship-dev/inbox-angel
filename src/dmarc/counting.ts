@@ -7,7 +7,7 @@
 //                  (every existing install) nothing can be authenticated at all.
 // Hosted is weakened only by an explicit operator choice (REPORT_COUNTING=authenticated|all). A value that is not one of the three falls back to the default.
 
-import type { CountingMode } from '@inbox-angel/db';
+import type { CountingMode } from '@ready-set-mail/db';
 import { getMode } from '../tenancy/mode';
 
 export function reportCounting(env: { REPORT_COUNTING?: string; MODE?: string }): CountingMode {

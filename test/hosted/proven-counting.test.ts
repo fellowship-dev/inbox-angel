@@ -2,8 +2,8 @@
 // dashboard and agents share, the digest, and the "latest N" list are held to it. A forger with a public token must not move a
 // pass rate, a failing-sender list, an anomaly, a level or "safe to enforce".
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { forWorkspace, resetSchemaReadyCache, type CountingMode } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { forWorkspace, resetSchemaReadyCache, type CountingMode } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));

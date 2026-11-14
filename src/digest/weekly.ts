@@ -7,15 +7,15 @@
 // Falls back to console.log if binding is absent (wrangler dev has no local send_email support).
 
 import type { TenantContext } from '../tenancy/context';
-import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
+import type { DomainWeeklyStat, FailingSource } from '@ready-set-mail/db';
 import { buildWeeklyDigestHtml } from '../email/html-templates';
 import { sendNonTransactional } from '../mail/compliance';
 import { ownerMailer } from '../mail/mailer';
 import { version } from '../../package.json';
 import { uncountedNotice } from '../reports/visibility';
 
-const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
-const RELEASE_URL = 'https://github.com/fellowship-dev/inbox-angel/releases/latest';
+const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/ready-set-mail/main/package.json';
+const RELEASE_URL = 'https://github.com/fellowship-dev/ready-set-mail/releases/latest';
 
 async function fetchLatestVersion(): Promise<string | null> {
   try {
@@ -114,7 +114,7 @@ export function buildDigestBody(
   }
 
   lines.push('—');
-  lines.push('InboxAngel weekly digest');
+  lines.push('Ready Set Mail weekly digest');
 
   return lines.join('\n');
 }
@@ -136,7 +136,7 @@ async function sendDigest(
 
   // Digests are non-transactional: suppression check, unsubscribe link and headers, postal footer.
   const out = await sendNonTransactional(tenant.env, mailer, {
-    from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
+    from: { name: 'Ready Set Mail', email: tenant.settings.fromEmail! },
     to: email,
     subject,
     text: body,

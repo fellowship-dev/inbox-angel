@@ -1,5 +1,5 @@
 // Free email security check handler.
-// Triggered when an email arrives at check-{token}@reports.inboxangel.io.
+// Triggered when an email arrives at check-{token}@reports.readysetmail.com.
 // The token ties the inbound email to a browser session for front-end polling.
 // Parses auth headers, does live DNS lookup, replies with plain-English report, stores result in D1.
 //
@@ -105,7 +105,7 @@ interface Report {
 
 /** Deliver the report; true when reply() or the outbound send accepted it. Never throws: the check result is stored either way. */
 async function deliverReport(message: ForwardableEmailMessage, tenant: TenantContext, r: Report): Promise<boolean> {
-  const sender = { name: 'InboxAngel', addr: r.from };
+  const sender = { name: 'Ready Set Mail', addr: r.from };
   try {
     const raw = buildReplyRaw(sender, r.to, r.subject, r.text, r.html, r.inReplyTo, r.headers, r.replyTo);
     await message.reply(new EmailMessage(r.from, r.to, raw));

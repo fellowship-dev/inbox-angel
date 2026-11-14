@@ -66,28 +66,28 @@ describe('assertDnsWriteAllowed', () => {
 });
 
 describe('assertHostedDnsWrite', () => {
-  const cfg = { recordsZone: 'inboxangel.io', recordsLabel: 'h' };
-  const h = (o: Partial<DnsWrite>) => ({ method: 'POST', zoneName: 'inboxangel.io', ...o });
+  const cfg = { recordsZone: 'readysetmail.com', recordsLabel: 'h' };
+  const h = (o: Partial<DnsWrite>) => ({ method: 'POST', zoneName: 'readysetmail.com', ...o });
   it.each([
-    ['TXT', { type: 'TXT', name: 'abc._dmarc.h.inboxangel.io' }],
-    ['AAAA', { type: 'AAAA', name: 'mta-sts.abc.h.inboxangel.io' }],
-    ['CNAME', { type: 'CNAME', name: 'abc._dmarc.h.inboxangel.io' }],
+    ['TXT', { type: 'TXT', name: 'abc._dmarc.h.readysetmail.com' }],
+    ['AAAA', { type: 'AAAA', name: 'mta-sts.abc.h.readysetmail.com' }],
+    ['CNAME', { type: 'CNAME', name: 'abc._dmarc.h.readysetmail.com' }],
     ['PATCH content', { method: 'PATCH', patchKeys: ['content'] }],
     ['DELETE', { method: 'DELETE' }],
   ])('allows %s', (_t, o) => expect(() => assertHostedDnsWrite(h(o), cfg)).not.toThrow());
   it.each([
-    ['the label apex', { type: 'TXT', name: 'h.inboxangel.io' }],
-    ['the zone apex', { type: 'TXT', name: 'inboxangel.io' }],
-    ['another name in the zone', { type: 'TXT', name: 'www.inboxangel.io' }],
-    ['a lookalike label', { type: 'TXT', name: 'x.hh.inboxangel.io' }],
-    ['A', { type: 'A', name: 'x.h.inboxangel.io' }],
-    ['MX', { type: 'MX', name: 'x.h.inboxangel.io' }],
-    ['NS', { type: 'NS', name: 'x.h.inboxangel.io' }],
-    ['another zone', { type: 'TXT', name: 'x.h.inboxangel.io', zoneName: 'evil.com' }],
-    ['an unknown zone', { type: 'TXT', name: 'x.h.inboxangel.io', zoneName: undefined }],
-    ['a PATCH that renames out', { method: 'PATCH', patchKeys: ['name', 'type'], type: 'TXT', name: 'www.inboxangel.io' }],
+    ['the label apex', { type: 'TXT', name: 'h.readysetmail.com' }],
+    ['the zone apex', { type: 'TXT', name: 'readysetmail.com' }],
+    ['another name in the zone', { type: 'TXT', name: 'www.readysetmail.com' }],
+    ['a lookalike label', { type: 'TXT', name: 'x.hh.readysetmail.com' }],
+    ['A', { type: 'A', name: 'x.h.readysetmail.com' }],
+    ['MX', { type: 'MX', name: 'x.h.readysetmail.com' }],
+    ['NS', { type: 'NS', name: 'x.h.readysetmail.com' }],
+    ['another zone', { type: 'TXT', name: 'x.h.readysetmail.com', zoneName: 'evil.com' }],
+    ['an unknown zone', { type: 'TXT', name: 'x.h.readysetmail.com', zoneName: undefined }],
+    ['a PATCH that renames out', { method: 'PATCH', patchKeys: ['name', 'type'], type: 'TXT', name: 'www.readysetmail.com' }],
   ])('refuses %s', (_t, o) => expect(() => assertHostedDnsWrite(h(o as Partial<DnsWrite>), cfg)).toThrow(CfRecordNotAllowedError));
   it('refuses everything when no zone is configured', () => {
-    expect(() => assertHostedDnsWrite(h({ type: 'TXT', name: 'x.h.inboxangel.io' }), { recordsLabel: 'h' })).toThrow(CfRecordNotAllowedError);
+    expect(() => assertHostedDnsWrite(h({ type: 'TXT', name: 'x.h.readysetmail.com' }), { recordsLabel: 'h' })).toThrow(CfRecordNotAllowedError);
   });
 });

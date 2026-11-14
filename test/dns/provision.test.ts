@@ -3,10 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { provisionDomain, deprovisionDomain, DnsProvisionError } from '../../src/dns/provision';
 import { makeTenant } from '../helpers/tenant';
 
-/** A tenant whose reports domain (reports.inboxangel.io) sits in the already-known zone-abc. */
+/** A tenant whose reports domain (reports.readysetmail.com) sits in the already-known zone-abc. */
 const ENV = makeTenant({
   cfToken: 'test-token',
-  settings: { reportsDomain: 'reports.inboxangel.io', zoneId: 'zone-abc', zoneName: 'inboxangel.io' },
+  settings: { reportsDomain: 'reports.readysetmail.com', zoneId: 'zone-abc', zoneName: 'readysetmail.com' },
 });
 
 function mockFetch(status: number, body: unknown): void {
@@ -25,7 +25,7 @@ describe('provisionDomain', () => {
     mockFetch(200, { success: true, result: { id: 'dns-record-1' } });
     const result = await provisionDomain(ENV, 'acme.com');
     expect(result.recordId).toBe('dns-record-1');
-    expect(result.recordName).toBe('acme.com._report._dmarc.reports.inboxangel.io');
+    expect(result.recordName).toBe('acme.com._report._dmarc.reports.readysetmail.com');
   });
 
   it('POSTs to the correct CF API endpoint', async () => {
@@ -44,7 +44,7 @@ describe('provisionDomain', () => {
     await provisionDomain(ENV, 'example.com');
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.type).toBe('TXT');
-    expect(body.name).toBe('example.com._report._dmarc.reports.inboxangel.io');
+    expect(body.name).toBe('example.com._report._dmarc.reports.readysetmail.com');
     expect(body.content).toBe('v=DMARC1;');
   });
 

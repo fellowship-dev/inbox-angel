@@ -1,4 +1,4 @@
-import { Badge, RecordBlock, cn, type DnsRecord } from '@inbox-angel/ui';
+import { Badge, RecordBlock, cn, type DnsRecord } from '@ready-set-mail/ui';
 import type { ReactNode } from 'react';
 
 /** A TXT value with a caption and an optional badge ("12 / 10 lookups"). */

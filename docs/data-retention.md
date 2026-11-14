@@ -1,6 +1,6 @@
 # Data retention and deletion
 
-What Inbox Angel keeps, for how long, and how it goes away. This is the page the privacy policy and the DPA cite: if a window changes
+What Ready Set Mail keeps, for how long, and how it goes away. This is the page the privacy policy and the DPA cite: if a window changes
 here, the policy changes with it. The windows are enforced by a daily job (`src/lifecycle/retention.ts`), not by convention.
 
 ## Retention windows
@@ -51,7 +51,7 @@ records the privacy policy describes for the website and for sales prospecting.
 `DELETE /api/workspaces/:id` (owners; `?confirm=<name>` when it has domains). In order:
 
 1. Cloudflare is checked for every domain; if it cannot be reached nothing is deleted.
-2. Each domain is deleted through the normal delete (DNS records Inbox Angel added are removed).
+2. Each domain is deleted through the normal delete (DNS records Ready Set Mail added are removed).
 3. **Every Cloudflare connection is disconnected, which revokes OAuth grants at Cloudflare.**
    If Cloudflare does not confirm a revocation the deletion still goes ahead, the failure is logged, and a *tombstone* keeps the sealed (encrypted) token
    so the daily job can retry; the tombstone is written *before* the connection is deleted, and if it cannot be written (or the connections cannot be listed) the deletion stops with `502 revoke_failed` and nothing more is removed.

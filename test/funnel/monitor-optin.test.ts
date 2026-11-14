@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { hashEmail } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { hashEmail } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv } from '../auth/helpers';
 import { expireUnconfirmedMonitors, runFunnelCron } from '../../src/funnel/cron';
 import { signToken } from '../../src/mail/tokens';
@@ -13,12 +13,12 @@ afterEach(() => vi.restoreAllMocks());
 function world(extra: Record<string, unknown> = {}) {
   const db = createMigratedD1();
   const send = vi.fn().mockResolvedValue({ messageId: 'm1' });
-  const env = makeEnv(db, { BETTER_AUTH_SECRET: 's3cret', PUBLIC_BASE_URL: 'https://app.inboxangel.io', SEND_EMAIL: { send }, ...extra }) as any;
+  const env = makeEnv(db, { BETTER_AUTH_SECRET: 's3cret', PUBLIC_BASE_URL: 'https://app.readysetmail.com', SEND_EMAIL: { send }, ...extra }) as any;
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
   const seedCheck = (token: string, domain = 'acme.com') =>
     db.sqlite.prepare("INSERT INTO check_results (from_email, from_domain, spf_record, dmarc_policy, dmarc_record, session_token, overall_status) VALUES (?, ?, 'v=spf1 -all', 'none', 'v=DMARC1; p=none', ?, 'exposed')").run(`x@${domain}`, domain, token);
   const subscribe = (email: string, token = 'tok1', ip?: string) => call(env, 'POST', '/api/monitor', { body: { email, session_token: token }, ip });
-  const linkFrom = (i = 0) => (send.mock.calls[i][0].text as string).match(/https:\/\/\S+\/api\/monitor\/confirm\?t=\S+/)![0].replace('https://app.inboxangel.io', '');
+  const linkFrom = (i = 0) => (send.mock.calls[i][0].text as string).match(/https:\/\/\S+\/api\/monitor\/confirm\?t=\S+/)![0].replace('https://app.readysetmail.com', '');
   return { db, env, send, rows, seedCheck, subscribe, linkFrom, tenant: () => makeTenant({ db, env }) };
 }
 
@@ -169,12 +169,12 @@ describe('POST /api/monitor double opt-in', () => {
   });
 
   it('with only Resend configured, the confirmation goes from MAIL_FROM over Resend', async () => {
-    const w = world({ SEND_EMAIL: undefined, RESEND_API_KEY: 're_x', MAIL_FROM: 'max@inboxangel.io' });
+    const w = world({ SEND_EMAIL: undefined, RESEND_API_KEY: 're_x', MAIL_FROM: 'max@readysetmail.com' });
     w.seedCheck('tok1');
     const f = vi.fn(async () => new Response(JSON.stringify({ id: 'r1' }), { status: 200 }));
     vi.stubGlobal('fetch', f);
     expect((await w.subscribe('user@example.com')).status).toBe(202);
-    expect(JSON.parse((f.mock.calls[0] as any)[1].body)).toMatchObject({ from: 'Inbox Angel <max@inboxangel.io>', to: ['user@example.com'] });
+    expect(JSON.parse((f.mock.calls[0] as any)[1].body)).toMatchObject({ from: 'Ready Set Mail <max@readysetmail.com>', to: ['user@example.com'] });
     vi.unstubAllGlobals();
   });
 

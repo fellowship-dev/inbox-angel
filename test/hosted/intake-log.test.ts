@@ -1,7 +1,7 @@
 // G7: one structured JSON line per inbound message (no contents, no tokens, no addresses), specific refusals for mail that is not a
 // DMARC report, and the authserv-id discovery log.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.setConfig({ testTimeout: 30_000 });
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
@@ -15,7 +15,7 @@ import { nxdomain, twoWorkspaces } from './world';
 import { strToU8, gzipSync } from 'fflate';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
 
 let logs: string[] = [];
@@ -74,7 +74,7 @@ describe('one structured line per message', () => {
     const w = await twoWorkspaces();
     await deliver(w, `tls-rpt+${w.tokenA}@${RUA}`, tlsRptMime(tlsRptJson('a-corp.com')));
     expect(lines()[0]).toMatchObject({ kind: 'tls-rpt', outcome: 'accepted', ws: 'ws_a', dom: 1 });
-    await deliver(w, 'check+nope@canary.inboxangel.io', 'Subject: x\r\n\r\nx');
+    await deliver(w, 'check+nope@canary.readysetmail.com', 'Subject: x\r\n\r\nx');
     expect(lines()[1]).toMatchObject({ kind: 'canary', outcome: 'refused' });
   });
 });
@@ -124,9 +124,9 @@ describe('deferred (the delivery fails so the sender retries) is for deployment 
     expect(lines()[0]).toMatchObject({ outcome: 'deferred', reason: 'not_configured' });
   });
   it('schema not migrated', async () => {
-    const { createTestD1 } = await import('@inbox-angel/db/testing');
+    const { createTestD1 } = await import('@ready-set-mail/db/testing');
     const m = fakeMessage(`rua+${generateToken()}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
-    await expect(worker.email(m, { DB: createTestD1(), MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, CANARY_DOMAIN: 'canary.inboxangel.io' } as any, ctx)).rejects.toThrow(/out of date/);
+    await expect(worker.email(m, { DB: createTestD1(), MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, CANARY_DOMAIN: 'canary.readysetmail.com' } as any, ctx)).rejects.toThrow(/out of date/);
     expect(lines()[0]).toMatchObject({ outcome: 'deferred', reason: 'schema_not_ready' });
   });
 });

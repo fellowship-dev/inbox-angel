@@ -40,10 +40,10 @@ describe('ensureEmailRouting', () => {
     expect(mx).toHaveLength(3);
   });
 
-  it('defaults the catch-all target to inbox-angel-worker', async () => {
+  it('defaults the catch-all target to ready-set-mail-worker', async () => {
     const { rules } = routingWorld({ 'acme.com': { id: 'zone-acme' } });
     await ensureEmailRouting(makeTenant({ cfToken: 'tok', settings: { reportsDomain: 'reports.acme.com', zoneId: 'zone-acme', zoneName: 'acme.com' } }));
-    expect(rules['zone-acme']).toMatchObject({ actions: [{ type: 'worker', value: ['inbox-angel-worker'] }] });
+    expect(rules['zone-acme']).toMatchObject({ actions: [{ type: 'worker', value: ['ready-set-mail-worker'] }] });
   });
 
   it('is skipped without a token or without a zone for the reports domain', async () => {

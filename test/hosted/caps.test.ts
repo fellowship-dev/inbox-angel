@@ -2,7 +2,7 @@
 // retention sweep of the counters. Over-cap mail is refused for good (5xx in the SMTP session: no backscatter, and a retry the same
 // day cannot succeed), counted for the owner, and costs a bounded number of queries.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { forWorkspace, resetSchemaReadyCache, lifecycleQueries, sweepLimits } from '@inbox-angel/db';
+import { forWorkspace, resetSchemaReadyCache, lifecycleQueries, sweepLimits } from '@ready-set-mail/db';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -18,7 +18,7 @@ import { countingD1 } from '../helpers/counting-d1';
 import { nxdomain, quiet, twoWorkspaces, NOW } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
 // An authenticated sender that is not in the registry (tier unknown): over a cap it is refused with a 5xx. A registry reporter (GOOGLE) over a cap is accepted and dropped.
 const OTHER = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=other.example header.s=s1' }, from: 'noreply-dmarc-support@other.example' };

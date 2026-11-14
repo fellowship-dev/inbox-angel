@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { gzipSync, strToU8 } from 'fflate';
-import { intakeLookups, forWorkspace, resetSchemaReadyCache } from '@inbox-angel/db';
-import { createTestD1 } from '@inbox-angel/db/testing';
+import { intakeLookups, forWorkspace, resetSchemaReadyCache } from '@ready-set-mail/db';
+import { createTestD1 } from '@ready-set-mail/db/testing';
 import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
 import { coversDomain } from '../../src/hosted/scope';
@@ -18,7 +18,7 @@ const fakeMessage = (to: string, raw: string, o: Parameters<typeof rawFakeMessag
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -34,8 +34,8 @@ describe('tokens', () => {
     expect(isTokenShaped(t)).toBe(true);
     expect(isTokenShaped('short')).toBe(false);
     expect(parseRecipient(intakeAddress('rua', t, RUA))).toEqual({ base: 'rua', tag: t, host: RUA });
-    expect(parseRecipient(`RUA+${t.toUpperCase()}@RUA.InboxAngel.io`)).toEqual({ base: 'rua', tag: t, host: RUA });
-    expect(parseRecipient('rua@rua.inboxangel.io')).toEqual({ base: 'rua', host: RUA });
+    expect(parseRecipient(`RUA+${t.toUpperCase()}@RUA.ReadySetMail.com`)).toEqual({ base: 'rua', tag: t, host: RUA });
+    expect(parseRecipient('rua@rua.readysetmail.com')).toEqual({ base: 'rua', host: RUA });
   });
 
   it('resolve to workspace + domain; only the hash is stored', async () => {
@@ -263,7 +263,7 @@ describe('saas has no default workspace', () => {
 
   it('a database that is not migrated yet throws (the sender retries) instead of rejecting', async () => {
     const m = fakeMessage(`rua+${generateToken()}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com')));
-    const env = { DB: createTestD1(), MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, CANARY_DOMAIN: 'canary.inboxangel.io' } as any;
+    const env = { DB: createTestD1(), MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, CANARY_DOMAIN: 'canary.readysetmail.com' } as any;
     await expect(worker.email(m, env, ctx)).rejects.toThrow(/out of date/);
     expect(m.setReject).not.toHaveBeenCalled();
   });

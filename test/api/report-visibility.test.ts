@@ -2,8 +2,8 @@
 // reached the report address and could not be stored. A page must never be able to show "no reports" while either exists.
 import { describe, it, expect, vi } from 'vitest';
 import type { Env } from '../../src/index';
-import { createMigratedD1, type TestD1 } from '@inbox-angel/db/testing';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { createMigratedD1, type TestD1 } from '@ready-set-mail/db/testing';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 vi.mock('../../src/api/auth', () => ({
   requireAuth: vi.fn().mockResolvedValue({ userId: 'org_test', workspaceId: 'ws_default', role: 'owner', kind: 'instance', user: null }),
@@ -22,8 +22,8 @@ const day = (ago = 0) => new Date((NOW - ago * 86400) * 1000).toISOString().slic
 
 function world(extra: Record<string, string> = {}) {
   const DB: TestD1 = createMigratedD1();
-  seedSettings(DB, { reports_domain: 'reports.inboxangel.io', from_email: 'check@reports.inboxangel.io' });
-  DB.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, ?, 'acme.com', 'rua@reports.inboxangel.io')").run(IMPLICIT_WORKSPACE_ID);
+  seedSettings(DB, { reports_domain: 'reports.readysetmail.com', from_email: 'check@reports.readysetmail.com' });
+  DB.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, ?, 'acme.com', 'rua@reports.readysetmail.com')").run(IMPLICIT_WORKSPACE_ID);
   const begin = Math.floor((NOW - 2 * 86400) / 86400) * 86400;
   // tier: counted (authenticated + registry), unknown (authenticated, not in the registry), unauthenticated
   const rep = (id: number, tier: 'counted' | 'unknown' | 'unauthenticated', total: number, org: string) => DB.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth, reporter_tier) VALUES (?, 1, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)").run(id, org, `r${id}`, begin, begin + 86399, total, total, IMPLICIT_WORKSPACE_ID, tier === 'unauthenticated' ? 'none' : 'pass', tier);

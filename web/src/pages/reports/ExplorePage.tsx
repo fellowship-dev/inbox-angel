@@ -1,4 +1,4 @@
-import { Badge, Button, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Badge, Button, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Inbox } from 'lucide-react';
@@ -82,7 +82,7 @@ export function ExplorePage() {
 					<EmptyState
 						icon={<Inbox />}
 						title={`No sources in the last ${days} days`}
-						description="No DMARC reports received yet. Reports arrive daily from mail providers once your DMARC record points to Inbox Angel."
+						description="No DMARC reports received yet. Reports arrive daily from mail providers once your DMARC record points to Ready Set Mail."
 						action={days < 90 ? <Button variant="secondary" onClick={() => setDays(90)}>Look back 90 days</Button> : undefined}
 					/>
 				)

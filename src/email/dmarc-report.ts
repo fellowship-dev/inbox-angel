@@ -21,11 +21,11 @@ import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { intakeLimits } from '../hosted/config';
 import { getMode } from '../tenancy/mode';
 import { reportCounting } from '../dmarc/counting';
-import { normalizeDomain } from '@inbox-angel/dns-checks';
+import { normalizeDomain } from '@ready-set-mail/dns-checks';
 import { storeReport } from '../dmarc/store-report';
 import { carrierFromHeaders, decideTier, reporterInfo, type Carrier, type ReporterTier, type TierDecision } from '../dmarc/reporter-auth';
 import type { ReporterInfo } from '../dmarc/store-report';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
 import { logReporterCandidate } from '../hosted/intake-log';
 import { rawXmlRetentionDays } from '../lifecycle/config';
@@ -151,7 +151,7 @@ export async function handleDmarcReport(
     // Self-host keeps its message (one tenant, the sender is its own mail provider). Hosted does not echo the sender's text back into the
     // SMTP response: it is attacker-chosen (up to 253 characters), may be copied into bounce mail by an intermediate server, and the hosted
     // answer must not hint at what a domain is registered as. Same text for an unregistered domain and one another workspace owns.
-    if (!domain) throw new ParseStop('refused', 'domain_not_owned', opts.token ? REASONS.domain_not_owned : `Unknown domain ${info.policy_domain} — not a registered InboxAngel inbox`);
+    if (!domain) throw new ParseStop('refused', 'domain_not_owned', opts.token ? REASONS.domain_not_owned : `Unknown domain ${info.policy_domain} — not a registered Ready Set Mail inbox`);
     const decision = decideTier(carrier, { email: info.report_email });
     dec.v = decision;
     // Dedup AFTER the sender is classified, keyed on (domain, reporter identity, report id): a forger cannot squat a real reporter's id, and

@@ -1,4 +1,4 @@
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 import { AuthError, type Principal } from '../auth/session';
 import { authorizeResource } from './resolve';
 import type { AccessAction } from './grant';

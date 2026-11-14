@@ -1,7 +1,7 @@
 // Better Auth rate-limit storage on D1. Workers isolates share no memory, so the default
 // in-memory limiter would not limit anything. A single atomic upsert (globalQueries.rateLimit.hit)
 // both counts the request and tells us the count, so concurrent requests cannot all slip under the limit.
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 
 export function d1RateLimitStorage(db: D1Database) {
   return {

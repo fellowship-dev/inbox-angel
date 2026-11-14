@@ -1,4 +1,4 @@
-// Adapter: the free check's single DNS lookup (dns-check.ts) -> @inbox-angel/report findings and catalog fixes.
+// Adapter: the free check's single DNS lookup (dns-check.ts) -> @ready-set-mail/report findings and catalog fixes.
 //
 // The free check looks up SPF, DMARC, the message's DKIM selector and MX, once, on one resolver. This builds the
 // package's DomainReport input from that: SPF and DMARC as observed, MX for mailbox-provider detection, and every other
@@ -11,8 +11,8 @@ import {
   type DomainReport,
   type SpfAnalysis,
   type SpfIssue,
-} from '@inbox-angel/dns-checks';
-import { factsOf, fill, findingsOf, type Fix } from '@inbox-angel/report';
+} from '@ready-set-mail/dns-checks';
+import { factsOf, fill, findingsOf, type Fix } from '@ready-set-mail/report';
 import { RECORDS_SEPARATOR, type DnsCheckResult } from './dns-check';
 
 /** The catalog findings a free check can observe: DNS-record problems of SPF and DMARC. */

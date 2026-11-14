@@ -46,7 +46,7 @@ export class CfNotConfiguredError extends Error {
     this.name = 'CfNotConfiguredError';
   }
 }
-/** The connection's owner did not allow Inbox Angel to manage this zone (or Cloudflare account). */
+/** The connection's owner did not allow Ready Set Mail to manage this zone (or Cloudflare account). */
 export class CfZoneNotAllowedError extends Error {
   /**
    * kind 'shadow': `domain` falls inside `zone`, a child zone of an allowed zone that is not on the list. Writing it
@@ -61,7 +61,7 @@ export class CfZoneNotAllowedError extends Error {
     this.name = 'CfZoneNotAllowedError';
   }
 }
-/** A DNS write (or other write) that is not one Inbox Angel makes: wrong type, name, content, path or method. Refused before sending. */
+/** A DNS write (or other write) that is not one Ready Set Mail makes: wrong type, name, content, path or method. Refused before sending. */
 export class CfRecordNotAllowedError extends Error {
   readonly code = 'cf_record_not_allowed';
   constructor(readonly reason: string, readonly request?: { method?: string; type?: string; name?: string; path?: string }) {

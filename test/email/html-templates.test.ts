@@ -5,7 +5,7 @@ import {
   buildFreeCheckHtml,
   buildDnsAlertHtml,
 } from '../../src/email/html-templates';
-import type { DomainWeeklyStat, FailingSource } from '@inbox-angel/db';
+import type { DomainWeeklyStat, FailingSource } from '@ready-set-mail/db';
 import type { CheckSummary } from '../../src/email/report-formatter';
 import type { DomainChange } from '../../src/monitor/check';
 import type { DnsCheckResult } from '../../src/email/dns-check';
@@ -176,19 +176,19 @@ describe('buildFreeCheckHtml', () => {
   });
 
   it('shows CTA for non-protected status, linking the configured site', () => {
-    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, siteUrl: 'https://inboxangel.io' });
-    expect(html).toContain('href="https://inboxangel.io"');
+    const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL, siteUrl: 'https://readysetmail.com' });
+    expect(html).toContain('href="https://readysetmail.com"');
   });
 
-  it('no site URL: no marketing link and never inboxangel.com', () => {
+  it('no site URL: no marketing link and never readysetmail.com', () => {
     const html = buildFreeCheckHtml({ fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: DNS_FULL });
     expect(html).not.toContain('<a ');
-    expect(html).not.toContain('inboxangel.com');
+    expect(html).not.toContain('readysetmail.com');
     expect(html).not.toContain('No data about your domain is stored');
   });
 
   const bodyText = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
-  const LAYOUT_FOOTER = 'InboxAngel — automated email security monitoring';
+  const LAYOUT_FOOTER = 'Ready Set Mail — automated email security monitoring';
 
   it('the body ends with the help line, after the disclosure', () => {
     for (const status of ['protected', 'at_risk', 'exposed'] as const) {
@@ -229,8 +229,8 @@ describe('buildFreeCheckHtml', () => {
 
   it('"or we do it for you" links BOOKING_URL, else SITE_URL/pricing, else is plain text', () => {
     const p = { fromEmail: 'user@acme.com', summary: makeSummary('exposed'), auth: null, dns: NO_DMARC };
-    expect(buildFreeCheckHtml({ ...p, bookingUrl: 'https://cal.example/max', siteUrl: 'https://inboxangel.io' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/cal\.example\/max"/);
-    expect(buildFreeCheckHtml({ ...p, siteUrl: 'https://inboxangel.io' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/inboxangel\.io\/pricing"/);
+    expect(buildFreeCheckHtml({ ...p, bookingUrl: 'https://cal.example/max', siteUrl: 'https://readysetmail.com' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/cal\.example\/max"/);
+    expect(buildFreeCheckHtml({ ...p, siteUrl: 'https://readysetmail.com' })).toMatch(/Or we do it for you[^<]*<a href="https:\/\/readysetmail\.com\/pricing"/);
     const plain = buildFreeCheckHtml(p);
     expect(plain).toContain('Or we do it for you');
     expect(plain).not.toContain('<a ');

@@ -1,6 +1,6 @@
 // Roles and invites, and what the hosted service switches off.
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept } from '../auth/helpers';
 
 const json = async (r: Response) => await r.json() as any;

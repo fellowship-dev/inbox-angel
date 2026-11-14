@@ -7,7 +7,7 @@
 //   - a report row written without its records when the budget ran out between the two inserts,
 //   - a storage error that was logged and swallowed while the mail was accepted.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.setConfig({ testTimeout: 60_000 });
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
@@ -21,7 +21,7 @@ import { countingD1 } from '../helpers/counting-d1';
 import { nxdomain, quiet, twoWorkspaces } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const D1_PAID_LIMIT = 1000;
 const D1_FREE_LIMIT = 50;
 /** The budget this change commits to for ANY allowed report (docs/hosted.md, "Query budget"): fixed, not per record. */

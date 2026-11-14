@@ -1,4 +1,4 @@
-import { StatusDot, cn } from '@inbox-angel/ui';
+import { StatusDot, cn } from '@ready-set-mail/ui';
 import { hasReportAddress } from '../lib/dmarc-record';
 import { useDomains } from '../lib/queries';
 import { useHosted } from '../lib/session';
@@ -31,7 +31,7 @@ export function ReportsNotConnected({ domain, className }: { domain?: string; cl
 			<StatusDot status="unknown" label="Reports not connected yet" className="font-semibold" />
 			<p className="text-sm text-ink-2">
 				Mail servers send DMARC reports to the address listed in a domain&apos;s DMARC record. {domain ? <strong className="font-mono font-medium text-ink-1 [overflow-wrap:anywhere]">{domain}</strong> : 'Your domains'}{' '}
-				{domain ? 'has' : 'have'} no Inbox Angel report address yet, so no reports arrive here. Until they do, nobody can confirm that every sender passes: pass rates, failing
+				{domain ? 'has' : 'have'} no Ready Set Mail report address yet, so no reports arrive here. Until they do, nobody can confirm that every sender passes: pass rates, failing
 				senders and whether it is safe to enforce cannot be shown.
 			</p>
 			<p className="text-sm text-ink-2">Still checked from live DNS: your SPF, DKIM and DMARC records, each domain&apos;s level, and the exact records to fix.</p>

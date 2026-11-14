@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { ANONYMOUS_AGENT_LIMITS, DNS_CHECK_LIMITS, limitAnonymousAgentRequest, limitBrowserRequest, limitMcpRequest, MCP_REQUEST_LIMITS, MCP_REQUEST_WINDOW_SECONDS, RateLimitedError, spendDnsCheck } from '../../src/mcp/rate-limit';
 import { toolFailure } from '../../src/mcp/errors';
 import type { AccessSubject } from '../../src/access/principal';

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Env } from '../../src/index';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
@@ -13,7 +13,7 @@ vi.mock('../../src/api/auth', () => ({
 
 // Mock DNS provisioning so tests don't hit Cloudflare
 vi.mock('../../src/dns/provision', () => ({
-  provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', recordName: 'test._report._dmarc.reports.inboxangel.io', manual: false }),
+  provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', recordName: 'test._report._dmarc.reports.readysetmail.com', manual: false }),
   deprovisionDomain: vi.fn().mockResolvedValue(undefined),
   DnsProvisionError: class DnsProvisionError extends Error {
     constructor(msg: string) { super(msg); this.name = 'DnsProvisionError'; }
@@ -27,7 +27,7 @@ import * as authMod from '../../src/api/auth';
 
 // ── Helpers ───────────────────────────────────────────────────
 
-const BASE = 'https://api.inboxangel.com';
+const BASE = 'https://api.readysetmail.com';
 
 type TestDb = ReturnType<typeof createMigratedD1>;
 type AuditRow = Record<string, any>;
@@ -53,8 +53,8 @@ function makeEnv(db: TestDb): Env {
     DB: db as unknown as D1Database,
     ASSETS: { fetch: vi.fn() } as unknown as Fetcher,
     API_KEY: 'test-key',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-    FROM_EMAIL: 'check@reports.inboxangel.io',
+    REPORTS_DOMAIN: 'reports.readysetmail.com',
+    FROM_EMAIL: 'check@reports.readysetmail.com',
   };
 }
 

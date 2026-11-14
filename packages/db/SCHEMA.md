@@ -1,4 +1,4 @@
-# InboxAngel database schema
+# Ready Set Mail database schema
 
 `src/schema.ts` is the source of truth; `/migrations/*.sql` is what `wrangler d1 migrations apply` runs, and the drift tests
 keep the two identical. The history was squashed into one baseline before the first release (see `UPGRADING.md`).
@@ -29,7 +29,7 @@ Every workspace-owned table has `workspace_id TEXT NOT NULL DEFAULT 'ws_default'
 | `intake_tokens` | ✔ | per-domain report token (SHA-256 only, rotatable, previous hash valid 72 h); looked up by hash before the workspace is known (`queries/intake.ts`) |
 | `hosted_domains` | ✔ | a domain's opaque `hosted_id`, its records in the hosted zone, and the last pointer verification |
 | `cloudflare_connections` | ✔ | a connected Cloudflare account (OAuth or pasted token); the token only as an AES-GCM envelope. `cf_account_id` is the **Cloudflare** account |
-| `cloudflare_connection_zones` | ✔ | the zones Inbox Angel may manage through a connection (owner-picked allow-list) |
+| `cloudflare_connection_zones` | ✔ | the zones Ready Set Mail may manage through a connection (owner-picked allow-list) |
 | `cloudflare_connection_blocked_zones` | ✔ | child zones of an allowed zone that are not on the list (their names are refused, not written to the parent) |
 | `hosted_zones`, `canary_tokens` | global | record counts of the operator's hosted-records zone; expiring single-use free-check addresses |
 

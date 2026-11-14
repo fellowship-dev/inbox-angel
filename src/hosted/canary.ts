@@ -1,18 +1,18 @@
 // Canary (Check Email): the anonymous free check on the hosted service.
 //
-//   check+<token>@canary.inboxangel.io
+//   check+<token>@canary.readysetmail.com
 //
 // The token is issued by POST /api/check-sessions, stored hashed with an expiry, and good for one
 // email. It resolves to an anonymous check session, never to a workspace: results land in
 // check_results (global) and the browser polls them by the same token.
 
 import type { BoundEnv } from '../index';
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import { TenantContext } from '../tenancy/context';
 import { track } from '../telemetry';
 import { hostedConfig } from './config';
 import { extractAuthResults } from '../email/parse-headers';
-import { organizationalDomain } from '@inbox-angel/dns-checks';
+import { organizationalDomain } from '@ready-set-mail/dns-checks';
 import { generateToken, hashToken, isTokenShaped, type ParsedRecipient } from './tokens';
 
 /** How long a canary address works after it is handed out. */

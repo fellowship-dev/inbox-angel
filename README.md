@@ -1,6 +1,6 @@
-# Inbox Angel
+# Ready Set Mail
 
-Cloudflare Workers backend for [InboxAngel](https://github.com/Fellowship-dev/inbox-angel).
+Cloudflare Workers backend for [Ready Set Mail](https://github.com/Fellowship-dev/ready-set-mail).
 Self-hostable email authentication platform — DMARC monitoring, SPF management, MTA-STS provisioning, and TLS-RPT reporting, all running on your own Cloudflare account.
 
 **Coding agents:** asked to "set up DMARC monitoring for my domain" or to "self-host this"? Read [docs/coding-agents.md](docs/coding-agents.md) first: what running it takes, what it costs, and the exact steps.
@@ -11,11 +11,11 @@ Self-hostable email authentication platform — DMARC monitoring, SPF management
 
 Most domains start at `p=none` — DMARC is watching but not protecting. Getting to `p=reject` means spoofed email claiming to be from your domain gets blocked at delivery. But you can't flip that switch blindly: you need to know that all your legitimate senders are properly authenticated first.
 
-InboxAngel collects DMARC aggregate reports from receiving mail servers worldwide and shows you exactly what's passing, what's failing, and where it's coming from. The dashboard combines observed sender alignment, coverage and readiness before proposing an enforcement change. From there you can go further — SPF flattening, MTA-STS, TLS-RPT — but the core value is getting you from "I don't know" to `p=reject` without breaking your email.
+Ready Set Mail collects DMARC aggregate reports from receiving mail servers worldwide and shows you exactly what's passing, what's failing, and where it's coming from. The dashboard combines observed sender alignment, coverage and readiness before proposing an enforcement change. From there you can go further — SPF flattening, MTA-STS, TLS-RPT — but the core value is getting you from "I don't know" to `p=reject` without breaking your email.
 
 ### DMARC monitoring
 
-Mail servers that receive email from your domain send daily XML reports back to InboxAngel. The Worker parses them, stores them in D1, and the dashboard shows trends, failing sources, pass rates, and policy guidance.
+Mail servers that receive email from your domain send daily XML reports back to Ready Set Mail. The Worker parses them, stores them in D1, and the dashboard shows trends, failing sources, pass rates, and policy guidance.
 
 ```
 Receiving mail servers → XML aggregate report → rua@reports.yourdomain.com
@@ -28,13 +28,13 @@ The dashboard shows observed alignment and readiness with their source windows a
 
 ### SPF management
 
-SPF has a hard limit of 10 DNS lookups. Add a third mail provider and you're over — receiving servers return `permerror` and your mail looks unauthenticated. InboxAngel tracks your lookup depth and can flatten your SPF record automatically: it walks the full include chain, resolves everything to raw IPs, and keeps the Cloudflare DNS record up to date daily.
+SPF has a hard limit of 10 DNS lookups. Add a third mail provider and you're over — receiving servers return `permerror` and your mail looks unauthenticated. Ready Set Mail tracks your lookup depth and can flatten your SPF record automatically: it walks the full include chain, resolves everything to raw IPs, and keeps the Cloudflare DNS record up to date daily.
 
 ### MTA-STS / TLS-RPT
 
-MTA-STS (RFC 8461) lets you publish a policy that tells sending MTAs to require TLS when delivering to your domain — no opportunistic downgrade. InboxAngel provisions the three required DNS records, serves the policy file at the required `mta-sts.yourdomain.com/.well-known/mta-sts.txt` HTTPS endpoint via Cloudflare Workers, and manages the mode lifecycle: always starts in `testing` (non-enforcing, just signaling), and the dashboard surfaces a graduation prompt once you're ready for `enforce`.
+MTA-STS (RFC 8461) lets you publish a policy that tells sending MTAs to require TLS when delivering to your domain — no opportunistic downgrade. Ready Set Mail provisions the three required DNS records, serves the policy file at the required `mta-sts.yourdomain.com/.well-known/mta-sts.txt` HTTPS endpoint via Cloudflare Workers, and manages the mode lifecycle: always starts in `testing` (non-enforcing, just signaling), and the dashboard surfaces a graduation prompt once you're ready for `enforce`.
 
-TLS-RPT (RFC 8460) is the reporting side: sending MTAs email JSON reports to `tls-rpt@reports.yourdomain.com` when they encounter TLS failures. InboxAngel parses and stores these, and the MTA-STS card in the dashboard shows a 30-day success/failure count so you know whether enforcement is actually breaking anything.
+TLS-RPT (RFC 8460) is the reporting side: sending MTAs email JSON reports to `tls-rpt@reports.yourdomain.com` when they encounter TLS failures. Ready Set Mail parses and stores these, and the MTA-STS card in the dashboard shows a 30-day success/failure count so you know whether enforcement is actually breaking anything.
 
 ```
 Sending MTA → attempts TLS → policy says "enforce" → must succeed or reject
@@ -63,7 +63,7 @@ Self-hosting runs the whole product on your own Cloudflare account and makes you
 The Worker needs a token at runtime to manage Email Routing rules and DNS records.
 
 1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **My Profile** → **API Tokens** → **Create Token** → **Create Custom Token**
-2. Give it a name (e.g. `inbox-angel-runtime`)
+2. Give it a name (e.g. `ready-set-mail-runtime`)
 3. Set these permissions:
 
 | Scope | Resource | Permission |
@@ -85,7 +85,7 @@ The Worker needs a token at runtime to manage Email Routing rules and DNS record
 
 **Option A — one click (recommended):**
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/fellowship-dev/inbox-angel)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/fellowship-dev/ready-set-mail)
 
 The button starts the Worker/D1 deployment and prompts for the runtime API token. Before first-owner setup, also complete the installation-owned OAuth namespace, canonical HTTPS origin and private installer-proof steps in [the operator guide](docs/agent-operations.md#installer-setup). Do not treat a successful deployment as completed setup.
 
@@ -145,7 +145,7 @@ Auth is [Better Auth](https://www.better-auth.com) on D1 (sessions, logins and r
 * **Roles** are per workspace. Owners/admins can perform permitted domain operations; members read. Product grants, credential administration and Google Postmaster connections require a browser **owner**, not merely an admin. Delegated principals remain constrained by their current finite grants.
 * **Workspaces:** one login can belong to several workspaces, each with its own domains, reports, members and roles. Switch from the top of the sidebar. Only the self-host instance owner creates further workspaces; only the default workspace uses the server's Cloudflare token. See [workspaces](docs/workspaces.md).
 * **GitHub / Google sign-in** appears when its separate credentials are configured (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`). Callbacks are `https://<your-worker>/api/auth/callback/github` and `…/google`. An invited self-host user must satisfy the existing account/invite policy; social login is not bootstrap proof.
-* **Interactive agents:** use this installation's HTTPS `/mcp` endpoint, browser sign-in and exact resource/action/expiry consent. The dashboard lists personal connected agents and supports revocation. See [agent setup](docs/agent-operations.md#first-useful-report) and [plugin setup](plugins/inbox-angel/SETUP.md).
+* **Interactive agents:** use this installation's HTTPS `/mcp` endpoint, browser sign-in and exact resource/action/expiry consent. The dashboard lists personal connected agents and supports revocation. See [agent setup](docs/agent-operations.md#first-useful-report) and [plugin setup](plugins/ready-set-mail/SETUP.md).
 * **Product credentials:** owners create named products, domain mappings, service principals and finite grants in Settings. One-time `ias_…` credentials are stored as hashes and cannot create stronger credentials or administer users. Rotation issues a replacement before owner acknowledgement revokes the previous key. Shared sending domains retain shared-domain telemetry coverage.
 * **Legacy credentials:** old `ia_…` keys and `API_KEY` env authority are retired. `POST /api/keys` answers `410`; old `/keys` bookmarks go to Settings. Migration `0006_access_grants.sql` revokes broad keys without resetting users, domains or report history. [Convert each integration deliberately](docs/agent-operations.md#upgrade-from-broad-prelaunch-keys).
 * **Password reset** uses the configured outbound path. On self-host, Cloudflare Email Routing requires a verified destination; verify and test delivery to the owner separately. First-owner account verification does not prove mail delivery. An installation without a working outbound path has no email-based self-service recovery; preserve owner password/session custody. [Recovery limits](docs/agent-operations.md#owner-recovery-and-acceptance-boundaries) are explicit; the consumed bootstrap proof does not reopen ownership.
@@ -158,7 +158,7 @@ Google Postmaster uses a separate owner-approved read connection and explicit 1�
 
 The schema is managed by `packages/db` migrations; the Worker no longer changes it at runtime.
 
-1. Back up D1: `wrangler d1 export inbox-angel --remote --output backup.sql`
+1. Back up D1: `wrangler d1 export ready-set-mail --remote --output backup.sql`
 2. Run `npm run migrate` before serving the new Worker. The wrapper applies unapplied migration files through Wrangler.
 3. Convert retired broad credentials to owner-issued finite grants and credentials. Current access/metrics migrations are additive; no data reset is required. Preserve a database/Worker backup pair for rollback.
 
@@ -185,7 +185,7 @@ The deployable Worker stays at the repo root so the Deploy to Cloudflare button 
 | Path | What |
 |---|---|
 | `src/`, `web/`, `migrations/`, `test/`, `e2e/`, `scripts/`, `wrangler.jsonc`, `deploy.json` | The Worker app (root `package.json`) |
-| `packages/*` | Workspace packages. `@inbox-angel/dns-checks` (pure SPF/DKIM/DMARC/MTA-STS/BIMI checks) is imported by name from the app and bundled by wrangler |
+| `packages/*` | Workspace packages. `@ready-set-mail/dns-checks` (pure SPF/DKIM/DMARC/MTA-STS/BIMI checks) is imported by name from the app and bundled by wrangler |
 | `tools/*` | Offline tooling (`tools/audit-fleet`) |
 
 **Why npm workspaces, not pnpm:** the Deploy button and most self-hosters already run `npm install` against a `package-lock.json`. npm needs no extra tool or corepack step, so it carries the least risk. pnpm can be revisited later.
@@ -242,7 +242,7 @@ Remove the `rua@reports.yourdomain.com` address from each domain's `_dmarc` TXT 
 
 ```bash
 wrangler delete                   # removes the Worker and its routes
-wrangler d1 delete inbox-angel    # permanently deletes the D1 database
+wrangler d1 delete ready-set-mail    # permanently deletes the D1 database
 ```
 
 **5. Clean up email routing**

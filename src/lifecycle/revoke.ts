@@ -4,7 +4,7 @@
 // Now every connection is disconnected first (which revokes OAuth grants remotely). When Cloudflare cannot be
 // reached the purge still goes ahead, but a tombstone keeps the sealed token so the daily cron can retry.
 
-import { forWorkspace, lifecycleQueries } from '@inbox-angel/db';
+import { forWorkspace, lifecycleQueries } from '@ready-set-mail/db';
 import { TokenCrypto } from '../connections/crypto';
 import { revokeSealedGrant } from '../connections/service';
 import type { TenantContext } from '../tenancy/context';

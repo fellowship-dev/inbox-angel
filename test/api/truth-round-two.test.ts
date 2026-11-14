@@ -13,13 +13,13 @@ vi.mock('../../src/dns/provision', () => ({
   deprovisionDomain: vi.fn(),
   DnsProvisionError: class DnsProvisionError extends Error {},
 }));
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { seedSettings } from '../helpers/tenant';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const get = (path: string) => new Request(`https://api.inboxangel.com${path}`, { method: 'GET' });
+const get = (path: string) => new Request(`https://api.readysetmail.com${path}`, { method: 'GET' });
 
 function makeEnv(rua: string, token?: string): Env {
   const db = createMigratedD1();

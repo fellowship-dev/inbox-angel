@@ -43,7 +43,7 @@ import * as storeReportMod from '../../src/dmarc/store-report';
 const DOMAIN: Domain = {
   id: 1,
   domain: 'acme.com',
-  rua_address: 'rua@reports.inboxangel.io',
+  rua_address: 'rua@reports.readysetmail.com',
   dmarc_policy: 'reject',
   dmarc_pct: 100,
   spf_record: null,
@@ -83,7 +83,7 @@ function makeMessage(overrides: Partial<{
 }> = {}): ForwardableEmailMessage {
   return {
     from: overrides.from ?? 'dmarc-reports@google.com',
-    to: overrides.to ?? 'rua@reports.inboxangel.com',
+    to: overrides.to ?? 'rua@reports.readysetmail.com',
     headers: new Headers(),
     raw: overrides.raw ?? makeStream(),
     rawSize: 100,
