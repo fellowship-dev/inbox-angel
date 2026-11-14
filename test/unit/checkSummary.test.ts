@@ -38,7 +38,7 @@ describe('reports.checkSummary', () => {
     const { q, id } = await seed();
     const rep = await q.reports.insertAggregate({
       domain_id: id, org_name: 'microsoft', report_id: 'r2', date_begin: NOW - 3600, date_end: NOW,
-      total_count: 300, pass_count: 290, fail_count: 10, raw_xml: null,
+      total_count: 300, pass_count: 290, fail_count: 10, raw_xml: null, reporter_auth: 'pass', reporter_tier: 'counted',
     });
     await q.reports.insertRecords([
       { report_id: Number(rep.meta.last_row_id), source_ip: '3.3.3.3', count: 100, disposition: 'none', dkim_result: 'pass', spf_result: 'fail', dkim_domain: null, spf_domain: null, header_from: 'example.com' },
