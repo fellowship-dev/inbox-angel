@@ -20,8 +20,10 @@ const view = (over: Record<string, unknown> = {}) => ({
 	address: null,
 	connected_at: null,
 	last_report_at: null,
+	counted_since_connect: 0,
 	reports_since_connect: 0,
 	reports_before_connect: 0,
+	visibility: null,
 	state: 'not_connected',
 	dns: null,
 	...over,
@@ -129,9 +131,9 @@ describe('Connect reports', () => {
 		expect(await screen.findByText('Published, waiting for the first report')).toBeInTheDocument();
 		expect(screen.getByText(/Receivers send reports about once a day/)).toBeInTheDocument();
 		unmount();
-		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'receiving', last_report_at: NOW - 3600, reports_since_connect: 2, reports_before_connect: 3 }) });
+		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'receiving', last_report_at: NOW - 3600, counted_since_connect: 2, reports_since_connect: 2, reports_before_connect: 3 }) });
 		expect(await screen.findByText('Reports received')).toBeInTheDocument();
-		expect(screen.getByText(/Last report received .*\(1 hour ago\)/)).toBeInTheDocument();
+		expect(screen.getByText(/Last counted report received .*\(1 hour ago\)/)).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'Open the reports' })).toHaveAttribute('href', '/domains/1/reports');
 		expect(screen.getByText('3 reports received before this connection.')).toBeInTheDocument();
 	});
@@ -249,8 +251,24 @@ describe('Connect reports', () => {
 	it('reports received before connecting, or while the record is not published, are a note, not "received"', async () => {
 		show({ 'GET /api/domains/1/report-address': issued({ kind: 'add', name: '_dmarc.example.com', current: null, record: 'x', created: true }, { reports_since_connect: 1, reports_before_connect: 2 }) });
 		expect(await screen.findByText('Connected, record not published yet')).toBeInTheDocument();
-		expect(screen.getByText('1 report received since connecting.')).toBeInTheDocument();
 		expect(screen.getByText('2 reports received before this connection.')).toBeInTheDocument();
+		expect(screen.queryByText('Reports received')).not.toBeInTheDocument();
+	});
+
+	it('published, only uncounted reports since connecting: still waiting, with the shared notices (uncounted, dropped, counting basis)', async () => {
+		const pub = { kind: 'published', name: '_dmarc.example.com', record: `v=DMARC1; p=reject; rua=mailto:${ADDR}` };
+		const visibility = {
+			report_counting: 'registry',
+			counting_note: null,
+			uncounted: { reports: 3, messages: 3, latest_at: NOW, unknown: 1, unauthenticated: 2, by_reporter: [] },
+			intake: { status: 'limited', limit: 'counted_storage_dropped', notice: null, dropped: [{ reporter: 'google', label: 'Google', since: '2026-11-14T03:12:00Z', last_at: '2026-11-14T04:00:00Z', messages: 2, text: '' }], not_processed: { messages: 0, last_at: null, reasons: [] } },
+		};
+		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'waiting', reports_since_connect: 3, counted_since_connect: 0, visibility }) });
+		expect(await screen.findByText('Published, waiting for the first report')).toBeInTheDocument();
+		const notices = screen.getAllByTestId('reports-notice').map((n) => n.textContent);
+		expect(notices[0]).toMatch(/^Report storage limit reached; reports from Google since .* were not stored$/);
+		expect(notices).toContain('1 report from a sender we do not recognise is not counted. 2 reports from senders that could not be authenticated are not counted.');
+		expect(screen.getByText('Only reports from known reporters are counted.')).toBeInTheDocument();
 		expect(screen.queryByText('Reports received')).not.toBeInTheDocument();
 	});
 

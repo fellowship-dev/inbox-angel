@@ -62,8 +62,11 @@ describe('tokenizer: grammar', () => {
     expect(bad('mx.example.net; dkim=pass header.d=a.example header.d=google.com').detail).toMatch(/duplicate/);
   });
 
-  it('a method is only read at the start of a result: "dkim=pass" after other properties is unreadable, header.d= after them is that method\'s property', () => {
-    expect(bad('mx.example.net; spf=pass smtp.mailfrom=a@b.com dkim=pass').ok).toBe(false);
+  it('a method is only read at the start of a result: "dkim=pass" after other properties is never a method, header.d= after them is that method\'s property', () => {
+    // A bare word=value is a receiver extension now (see TOLERANCE in src/email/auth-results.ts): skipped with the rest of its resinfo, never a method.
+    const skipped = ok('mx.example.net; spf=pass smtp.mailfrom=a@b.com dkim=pass');
+    expect(skipped.results.map((r) => [r.method, r.skipped ?? false])).toEqual([['spf', true]]);
+    expect(authProof(parseAuthResults('mx.example.net; spf=pass smtp.mailfrom=a@b.com dkim=pass')).dkimPassOrgs).toEqual([]);
     const t = ok('mx.example.net; spf=pass smtp.mailfrom=a@b.com header.d=google.com');
     expect(t.results).toHaveLength(1);
     expect(t.results[0].method).toBe('spf');
@@ -87,11 +90,15 @@ describe('tokenizer: fails closed', () => {
     ['no result', 'mx.example.net; dkim'],
     ['missing =', 'mx.example.net; dkim pass'],
     ['text after authserv-id', 'mx.example.net dkim=pass'],
-    ['property without dot', 'mx.example.net; dkim=pass header=a'],
     ['no authserv-id', '; dkim=pass header.d=a.example'],
     ['deep nesting', `mx.example.net; spf=pass ${'('.repeat(40)}${')'.repeat(40)}`],
   ];
   it.each(cases)('%s', (_n, h) => { expect(bad(h).ok).toBe(false); });
+
+  it('a property without a dot ("header=a") is a bare extension: skipped, the result kept, nothing created', () => {
+    const t = ok('mx.example.net; dkim=pass header=a');
+    expect(t.results.map((r) => [r.method, r.result, r.props, r.skipped])).toEqual([['dkim', 'pass', {}, true]]);
+  });
 
   it('a header over the length cap', () => {
     const t = bad(`mx.example.net; dkim=pass header.d=a.example (${'x'.repeat(MAX_HEADER_CHARS)})`);

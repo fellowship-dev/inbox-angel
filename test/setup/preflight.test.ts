@@ -104,7 +104,7 @@ describe('routes', () => {
 });
 
 describe('report intake findings in the setup check', () => {
- const hosted = (extra: Record<string, unknown> = {}) => env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max', ...extra });
+ const hosted = (extra: Record<string, unknown> = {}) => env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max', INTAKE_DOMAIN: 'rua.example.com', HOSTED_CONNECT_REPORTS: 'all', ...extra });
  const withSender = (e: BoundEnv) => { (e.DB as unknown as TestDb).sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'example.com')").run(); return e; };
  const today = () => new Date().toISOString().slice(0, 10);
  const note = (e: BoundEnv, scope: string, n = 1) => (e.DB as unknown as TestDb).sqlite.prepare('INSERT INTO intake_quota (scope, day, messages) VALUES (?, ?, ?)').run(scope, today(), n);
