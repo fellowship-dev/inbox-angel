@@ -14,8 +14,8 @@
 //     (a shared sending service passes it for anyone), and a DMARC pass for the From header says nothing about the
 //     envelope sender.
 
-import { organizationalDomain } from '@ready-set-mail/dns-checks';
-import { parseAuthResults } from './parse-headers';
+import { domainOfValue, tokenizeAuthResults, type AuthResultsFailure } from './auth-results';
+import { authProof, parseAuthResults } from './parse-headers';
 
 const MAX_HEADER_BYTES = 128 * 1024;
 
@@ -24,6 +24,18 @@ export interface AuthHeaders {
   ar: string | null;
   /** Value of the topmost ARC-Authentication-Results header, unfolded (starts with `i=N;`). */
   arc: string | null;
+  /** The From header's single address, lowercased; null when the message has no From, more than one, or an address list. */
+  from?: string | null;
+}
+
+/** The one address in a From header value (`Name <a@b.c>` or `a@b.c`), lowercased, or null when it is not exactly one address. */
+export function singleAddress(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const bare = value.replace(/"(?:\\.|[^"\\])*"/g, '').replace(/\([^)]*\)/g, '');
+  const angle = [...bare.matchAll(/<([^<>]*)>/g)];
+  if (angle.length > 1 || bare.includes(',') || bare.includes(';')) return null;
+  const addr = (angle.length === 1 ? angle[0][1] : bare).trim().toLowerCase();
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(addr) ? addr : null;
 }
 
 /** The topmost Authentication-Results and ARC-Authentication-Results of a raw message. Nulls if absent or unreadable. */
@@ -50,46 +62,58 @@ export async function readAuthHeaders(raw: ReadableStream<Uint8Array> | null | u
     reader.cancel().catch(() => {});
   }
   const block = text.split(/\r?\n\r?\n/)[0].replace(/\r?\n[ \t]+/g, ' ');
-  const out: AuthHeaders = { ar: null, arc: null };
+  const out: AuthHeaders = { ar: null, arc: null, from: null };
+  let froms = 0;
   for (const line of block.split(/\r?\n/)) {
+    const from = line.match(/^from:\s*(.*)$/i);
+    if (from && ++froms === 1) out.from = singleAddress(from[1]);
     const ar = line.match(/^authentication-results:\s*(.*)$/i);
     if (ar && out.ar === null) out.ar = ar[1];
     const arc = line.match(/^arc-authentication-results:\s*(.*)$/i);
     if (arc && out.arc === null) out.arc = arc[1];
   }
+  if (froms > 1) out.from = null; // two From headers: the one DMARC judged is not knowable
   return out;
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-/** True when a DKIM pass aligned with `addressDomain`, or a DMARC pass for it, is in `results` (a header value, authserv-id first). */
+/** True when a DKIM pass aligned with `addressDomain`, or a DMARC pass for it, is in `results` (a header value, authserv-id first). Any dkim=pass counts, not only the last. */
 export function provesDomain(results: string | null, addressDomain: string): boolean {
   if (!results) return false;
-  const auth = parseAuthResults(results);
-  const org = (d: string | null | undefined) => (d ? organizationalDomain(d) ?? d.toLowerCase() : null);
-  const target = org(addressDomain);
-  if (!auth || !target) return false;
-  return (auth.dkim?.result === 'pass' && org(auth.dkim.domain) === target) || (auth.dmarc?.result === 'pass' && org(auth.dmarc.domain) === target);
+  const proof = authProof(parseAuthResults(results));
+  return proof.dkimAligned(addressDomain) || proof.dmarcAligned(addressDomain);
 }
 
 export type SenderProof = { ok: true; via: 'ar' | 'arc' } | { ok: false; reason: string };
 
-/**
- * The receiver's own results, as one header value with the authserv-id first, or null when AUTHSERV_ID / AUTHSERV_HEADER
- * are not configured or no header of the configured kind names AUTHSERV_ID (the rules at the top of this file).
- */
-export function trustedResults(headers: AuthHeaders, authservId: string | undefined, only: string | undefined): string | null {
-  if (!authservId?.trim()) return null;
+/** Which header of the configured kind, if any, is the receiver's: its value (authserv-id first), foreign (names another server / none), or unreadable. */
+export type TrustedSelection = { kind: 'ok'; value: string } | { kind: 'foreign' } | { kind: 'malformed'; failure: AuthResultsFailure; detail: string };
+
+export function selectTrusted(headers: AuthHeaders, authservId: string | undefined, only: string | undefined): TrustedSelection {
   const mode = only?.trim().toLowerCase();
-  const want = norm(authservId);
-  if (mode === 'ar' && headers.ar && norm(headers.ar.split(';')[0]) === want) return headers.ar;
-  if (mode === 'arc' && headers.arc) {
-    const [hop, id, ...rest] = headers.arc.split(';');
-    if (/^\s*i\s*=\s*1\s*$/i.test(hop) && norm(id ?? '') === want) return [id, ...rest].join(';');
+  const want = authservId?.trim() ? norm(authservId) : null;
+  let value: string | null = null;
+  if (mode === 'ar') value = headers.ar;
+  else if (mode === 'arc' && headers.arc) {
+    // ARC-Authentication-Results: i=N; authserv-id; resinfo ... Only instance 1 is the receiver's own.
+    const hop = headers.arc.match(/^\s*i\s*=\s*1\s*;/i);
+    value = hop ? headers.arc.slice(hop[0].length) : null;
   }
-  return null;
+  if (!want || !value) return { kind: 'foreign' };
+  const t = tokenizeAuthResults(value);
+  if (!t.ok) return { kind: 'malformed', failure: t.failure, detail: t.detail };
+  return norm(t.authservId) === want ? { kind: 'ok', value } : { kind: 'foreign' };
 }
 
+/**
+ * The receiver's own results, as one header value with the authserv-id first, or null when AUTHSERV_ID / AUTHSERV_HEADER
+ * are not configured, no header of the configured kind names AUTHSERV_ID, or the header cannot be tokenized (the rules at the top of this file).
+ */
+export function trustedResults(headers: AuthHeaders, authservId: string | undefined, only: string | undefined): string | null {
+  const sel = selectTrusted(headers, authservId, only);
+  return sel.kind === 'ok' ? sel.value : null;
+}
 /** Decide whether the sender proved `addressDomain`. Fails closed, with the reason (for the log; it never names the sender). */
 export function proveSender(headers: AuthHeaders, addressDomain: string, authservId: string | undefined, only: string | undefined): SenderProof {
   if (!authservId?.trim()) return { ok: false, reason: 'AUTHSERV_ID is not set' };
@@ -111,13 +135,11 @@ export function proveSender(headers: AuthHeaders, addressDomain: string, authser
  */
 export function spfPassesFor(trusted: string | null, envelopeDomain: string): boolean {
   if (!trusted) return false;
-  const body = trusted.slice(trusted.indexOf(';') + 1).replace(/\([^)]*\)/g, '');
-  // Fail closed unless there is exactly one spf result: a second one can only come from a sender-controlled value the
-  // receiver echoed (e.g. a domain-literal header.from), and the first clause would otherwise win.
-  const clauses = body.split(';').map(c => c.trim()).filter(c => /^spf\s*=/i.test(c));
-  if (clauses.length !== 1 || (body.match(/(?:^|;)\s*spf\s*=/gi)?.length ?? 0) !== 1) return false;
-  const clause = clauses[0];
-  if (!/^spf\s*=\s*pass\b/i.test(clause)) return false;
-  const mailfrom = clause.match(/(?:^|\s)smtp\.mailfrom=([^\s;]+)/i)?.[1];
-  return !!mailfrom && norm(mailfrom.split('@').pop() ?? '') === norm(envelopeDomain);
+  const t = tokenizeAuthResults(trusted);
+  if (!t.ok) return false;
+  // Fail closed unless there is exactly one spf result.
+  const spf = t.results.filter((r) => r.method === 'spf');
+  if (spf.length !== 1 || spf[0].result !== 'pass') return false;
+  const mailfrom = domainOfValue(spf[0].props['smtp.mailfrom']);
+  return !!mailfrom && mailfrom === norm(envelopeDomain);
 }

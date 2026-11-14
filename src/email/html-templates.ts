@@ -3,6 +3,7 @@
 // Plain-text versions are generated separately and passed alongside HTML in multipart/alternative.
 
 import type { DomainWeeklyStat, FailingSource } from '@ready-set-mail/db';
+import { uncountedNotice } from '../reports/visibility';
 import { CheckSummary, DO_IT_FOR_YOU, doItForYouUrl, fixSteps, HELP_LINE, OverallStatus, retentionSentence, SHARE_IT, shareLinks } from './report-formatter';
 import { DomainChange } from '../monitor/check';
 import { DnsCheckResult } from './dns-check';
@@ -111,6 +112,9 @@ function domainSection(
   let html = `<h3 style="margin:20px 0 8px;font-size:15px;color:#111827;">${esc(stat.domain)}</h3>`;
   html += `<p style="margin:0 0 8px;">DMARC policy: ${policyBadge(stat.dmarc_policy)}</p>`;
 
+  if (stat.total_messages === 0 && stat.uncounted_reports > 0) {
+    return html + `<p style="color:#6b7280;">No counted reports this week. ${esc(uncountedNotice(stat.uncounted_reports))}</p>`;
+  }
   if (stat.total_messages === 0) {
     html += `<p style="color:#6b7280;">No reports received this week. Verify <code>rua=mailto:${esc(ruaAddress)}</code> is in your DMARC record.</p>`;
     return html;
@@ -122,6 +126,7 @@ function domainSection(
 <td style="color:#16a34a;">${stat.pass_messages.toLocaleString()} (${pct(stat.pass_messages, stat.total_messages)})</td>
 <td style="color:#dc2626;">${stat.fail_messages.toLocaleString()} (${pct(stat.fail_messages, stat.total_messages)})</td></tr>
 </table>`;
+  if (stat.uncounted_reports > 0) html += `<p style="color:#6b7280;margin:0 0 8px;">${esc(uncountedNotice(stat.uncounted_reports))}</p>`;
 
   if (sources.length > 0) {
     html += `<p style="font-weight:600;margin:8px 0 4px;">Top failing sources:</p>

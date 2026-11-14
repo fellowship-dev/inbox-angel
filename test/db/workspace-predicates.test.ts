@@ -21,7 +21,8 @@ import { WORKSPACE_OWNED_TABLES, GLOBAL_TABLES } from '@ready-set-mail/db';
 const ROOT = join(import.meta.dirname, '../..');
 const OWNED = new Set<string>(WORKSPACE_OWNED_TABLES);
 const GLOBAL = new Set<string>(Object.keys(GLOBAL_TABLES));
-const BOOKKEEPING = new Set(['d1_migrations', '_migrations']);
+// json_each is SQLite's table-valued function over a bound JSON text (batched report storage), not a table.
+const BOOKKEEPING = new Set(['d1_migrations', '_migrations', 'json_each']);
 const KEYWORDS = new Set(['where', 'on', 'set', 'values', 'select', 'group', 'order', 'limit', 'left', 'inner', 'join', 'using', 'as', 'returning', 'and', 'or', 'cross']);
 
 const TABLE_VARS: Record<string, string> = {
@@ -57,6 +58,7 @@ export function checkSql(lit: string): Hit[] {
 		for (const m of stmt.matchAll(re)) {
 			const kw = m[1].toUpperCase();
 			const table = m[2].toLowerCase();
+			if (kw === 'UPDATE' && table === 'set' && /DO\s+$/i.test(stmt.slice(0, m.index!))) continue; // ON CONFLICT … DO UPDATE SET
 			let alias = m[3]?.toLowerCase();
 			if (alias && KEYWORDS.has(alias)) alias = undefined;
 			if (BOOKKEEPING.has(table) || GLOBAL.has(table)) continue;
@@ -182,7 +184,7 @@ describe('every query on tenant data carries a workspace predicate (per statemen
 
 	it('the allow-list matches the schema', () => {
 		for (const t of GLOBAL) expect(OWNED.has(t)).toBe(false);
-		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'ip_info', 'leads', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'suppression', 'users', 'verifications', 'workspaces']);
+		expect([...GLOBAL].sort()).toEqual(['auth_accounts', 'auth_rate_limits', 'canary_tokens', 'check_results', 'hosted_zones', 'intake_quota', 'ip_info', 'leads', 'password_reset_tokens', 'revocation_tombstones', 'sessions', 'suppression', 'users', 'verifications', 'workspaces']);
 	});
 });
 

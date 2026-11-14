@@ -160,6 +160,18 @@ export const aggregateReports = sqliteTable(
 		/** Did the report email pass DMARC-aligned authentication for the reporter's org domain? pass | fail | none; null: not recorded. */
 		reporter_auth: text('reporter_auth'),
 		reporter_auth_domain: text('reporter_auth_domain'),
+		/** Why reporter_auth is not 'pass' (a reason code from src/hosted/reasons.ts), or null. */
+		reporter_auth_reason: text('reporter_auth_reason'),
+		/** What the intake decided: 'counted' (authenticated and a known reporter), 'unknown' (authenticated, not known), 'unauthenticated'. Null: stored before 0010. */
+		reporter_tier: text('reporter_tier'),
+		/** Organisation of the known-reporters entry that matched, for 'counted'. */
+		reporter_known_as: text('reporter_known_as'),
+		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>' (every tier; a plain id is a legacy row). Null: stored before 0010. */
+		reporter_identity: text('reporter_identity'),
+		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0010). Null: stored before 0010. */
+		ingest_token: text('ingest_token'),
+		/** Rows stored in report_records for this report. Null: stored before 0010. */
+		record_count: integer('record_count'),
 	},
 	(t) => [
 		unique().on(t.domain_id, t.report_id),
@@ -169,6 +181,7 @@ export const aggregateReports = sqliteTable(
 		index('idx_agg_reports_date_end').on(t.date_end),
 		index('idx_agg_reports_created').on(t.created_at),
 		index('idx_agg_reports_raw_xml').on(t.created_at).where(sql`${t.raw_xml} IS NOT NULL`),
+		index('idx_agg_reports_tier').on(t.workspace_id, t.reporter_tier, t.date_begin),
 	],
 );
 
@@ -713,6 +726,7 @@ export const GLOBAL_TABLES = {
 	canary_tokens: 'anonymous free-check (canary) addresses, expiring, not tied to any workspace',
 	leads: 'free-check senders in the onboarding sequence: platform marketing data, not tenant data',
 	suppression: 'hashed addresses that must not get non-transactional mail, honoured platform-wide',
+	intake_quota: 'instance-wide intake counters per scope and day; a counter, no tenant content',
 } as const;
 
 /** Tables that must carry an `workspace_id` column. */
@@ -738,6 +752,10 @@ export const WORKSPACE_OWNED_TABLES = [
 	'cloudflare_connection_blocked_zones',
 	'domain_claims',
 	'intake_usage',
+	'workspace_storage',
+	'intake_drops',
+	'intake_failures',
+	'reporter_candidate_days',
 ] as const;
 
 // ── Trust hardening (0004) ──────────────────────────────────
@@ -779,7 +797,77 @@ export const intakeUsage = sqliteTable(
 		reports: integer('reports').notNull().default(0),
 		bytes: integer('bytes').notNull().default(0),
 	},
-	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] })],
+	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reporter] }), index('idx_intake_usage_day').on(t.day)],
+);
+
+/**
+ * Counters per scope and UTC day: 'a:<domain_id>' (one report address), 'k:<domain_id>' (all mail from unknown reporters to one address),
+ * 'w:<workspace_id>' and '*' (the instance). A counter, not tenant content (GLOBAL_TABLES).
+ */
+export const intakeQuota = sqliteTable(
+	'intake_quota',
+	{
+		scope: text('scope').notNull(),
+		day: text('day').notNull(),
+		messages: integer('messages').notNull().default(0),
+		records: integer('records').notNull().default(0),
+		bytes: integer('bytes').notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.scope, t.day] }), index('idx_intake_quota_day').on(t.day)],
+);
+
+/** Authenticated senders that are not in the registry, per day and workspace: candidates the instance owner may add by hand (no content, no customer address). */
+export const reporterCandidateDays = sqliteTable(
+	'reporter_candidate_days',
+	{
+		dkim_org: text('dkim_org').notNull(),
+		from_address: text('from_address').notNull(),
+		report_email: text('report_email').notNull(),
+		workspace_id: text('workspace_id').notNull(),
+		day: text('day').notNull(),
+		reports: integer('reports').notNull().default(0),
+		org_name: text('org_name'),
+	},
+	(t) => [primaryKey({ columns: [t.dkim_org, t.from_address, t.report_email, t.workspace_id, t.day] }), index('idx_reporter_candidate_days_day').on(t.day)],
+);
+
+/** report_records rows a workspace holds right now, as two budgets: counted (and legacy) reports, and uncounted ones (tier 'unknown'/'unauthenticated'), each with its own cap. */
+export const workspaceStorage = sqliteTable('workspace_storage', {
+	workspace_id: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+	reports: integer('reports').notNull().default(0),
+	records: integer('records').notNull().default(0),
+	uncounted_reports: integer('uncounted_reports').notNull().default(0),
+	uncounted_records: integer('uncounted_records').notNull().default(0),
+	reconciled_at: integer('reconciled_at'),
+});
+
+/** Counted reports accepted but not stored because the counted budget was full: one row per domain and reporter, with the first drop time. */
+export const intakeDrops = sqliteTable(
+	'intake_drops',
+	{
+		domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+		reporter: text('reporter').notNull(),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		label: text('label').notNull(),
+		first_at: integer('first_at').notNull(),
+		last_at: integer('last_at').notNull(),
+		messages: integer('messages').notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.domain_id, t.reporter] })],
+);
+
+/** Mail that reached a report address and was not stored: one counter row per domain, UTC day and reason. */
+export const intakeFailures = sqliteTable(
+	'intake_failures',
+	{
+		domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		day: text('day').notNull(),
+		reason: text('reason').notNull(),
+		messages: integer('messages').notNull().default(0),
+		last_at: integer('last_at').notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.domain_id, t.day, t.reason] }), index('idx_intake_failures_day').on(t.day)],
 );
 
 // Explicit delegated access. Existing reports/domains keep their original workspace ownership.

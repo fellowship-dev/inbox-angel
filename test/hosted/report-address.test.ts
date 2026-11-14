@@ -23,6 +23,8 @@ const FIXED = `rua@${RUA}`;
 /** Report intake only: no records zone, no records token, no free-check domain. */
 const INTAKE_ONLY = { MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar', OWNER_EMAIL: 'a-owner@example.com', HOSTED_CONNECT_REPORTS: 'all' };
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
+/** A registry reporter's carrier (Google), so the report is COUNTED. */
+const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
 
 /** Live DNS for the router's resolver: TXT answers by name; anything else (and IP enrichment) is NXDOMAIN. */
 let txt: Record<string, string[] | 'SERVFAIL'> = {};
@@ -65,12 +67,13 @@ async function world(extra: Record<string, string> = {}) {
   };
   const disconnect = (id: number, key = A.token) => call(env, 'DELETE', `/api/domains/${id}/report-address`, { key });
   const status = async (id: number, key = A.token) => (await call(env, 'GET', `/api/domains/${id}/report-address`, { key })).json() as Promise<any>;
-  const deliver = async (to: string, policyDomain: string, reportId: string) => {
-    const m = fakeMessage(to, gzipReportMime(dmarcXml(policyDomain, reportId)));
+  const deliver = async (to: string, policyDomain: string, reportId: string, opts: Parameters<typeof fakeMessage>[2] = {}) => {
+    const m = fakeMessage(to, gzipReportMime(dmarcXml(policyDomain, reportId)), opts);
     await handleHostedEmail(m, env as any);
     return m;
   };
-  const stored = () => rows('SELECT workspace_id, domain_id, report_id FROM aggregate_reports ORDER BY id');
+  /** Stored reports; the id without its reporter-identity prefix (`google|…`, `~unauth|…`). */
+  const stored = () => rows("SELECT workspace_id, domain_id, substr(report_id, instr(report_id, '|') + 1) AS report_id FROM aggregate_reports ORDER BY id");
   return { db, env, rows, A, B, connect, disconnect, status, deliver, stored };
 }
 
@@ -98,11 +101,15 @@ describe('connecting reports (G1, fixed address)', () => {
     txt['_dmarc.a-corp.com'] = [`v=DMARC1; p=quarantine; rua=mailto:${FIXED.toUpperCase()}`];
     expect(await w.status(1)).toMatchObject({ state: 'waiting', last_report_at: null, dns: { plan: { kind: 'published' } } });
 
-    const m = fakeMessage(FIXED, gzipReportMime(dmarcXml('a-corp.com', 'first-report')));
+    // An uncounted report (no authentication) does not make it "received"; a counted one does.
+    expect((await w.deliver(FIXED, 'a-corp.com', 'uncounted-first')).setReject).not.toHaveBeenCalled();
+    expect(await w.status(1)).toMatchObject({ state: 'waiting', counted_since_connect: 0, reports_since_connect: 1 });
+    const m = fakeMessage(FIXED, gzipReportMime(dmarcXml('a-corp.com', 'first-report')), GOOGLE);
     await worker.email(m, w.env as any, ctx);
     expect(m.setReject).not.toHaveBeenCalled();
     expect(await w.status(1)).toMatchObject({ state: 'receiving', last_report_at: expect.any(Number) });
-    expect(w.stored()).toEqual([{ workspace_id: w.A.ws, domain_id: 1, report_id: 'first-report' }]);
+    expect(w.stored()).toEqual([{ workspace_id: w.A.ws, domain_id: 1, report_id: 'uncounted-first' }, { workspace_id: w.A.ws, domain_id: 1, report_id: 'first-report' }]);
+    expect(w.rows("SELECT reporter_tier FROM aggregate_reports ORDER BY id").map((r) => r.reporter_tier)).toEqual(['unauthenticated', 'counted']);
   });
 
   it('a failed DNS lookup is "unknown", never "not published"', async () => {
@@ -131,9 +138,8 @@ describe('connecting reports (G1, fixed address)', () => {
     expect(await del.json()).toMatchObject({ state: 'not_connected', address: null });
     expect(w.rows('SELECT rua_address FROM domains WHERE id = 1')).toEqual([{ rua_address: '' }]);
     const late = await w.deliver(FIXED, 'a-corp.com', 'late');
-    expect(late.setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain a-corp\.com/));
+    expect(late.setReject).toHaveBeenCalledWith('Report is for a domain whose reports are not connected to this address');
     expect(w.stored().map(r => r.report_id)).toEqual(['kept']);
-    expect(w.rows('SELECT * FROM intake_usage')).toEqual([{ domain_id: 1, workspace_id: w.A.ws, day: expect.any(String), reporter: expect.any(String), reports: 1, bytes: expect.any(Number) }]); // the refused one used no allowance
   });
 });
 
@@ -153,7 +159,7 @@ describe('the fixed address files by verified ownership', () => {
     w.db.sqlite.prepare(`UPDATE domains SET rua_address = ? WHERE id IN (3, 4)`).run(FIXED); // even if they somehow carried the address
     for (const d of ['nobody.example', 'b-corp.org', 'pending-a.com', 'legacy-a.com', 'evicted-4.invalid']) {
       const m = await w.deliver(FIXED, d, `x-${d}`);
-      expect(m.setReject, d).toHaveBeenCalledWith(expect.stringMatching(/^Unknown domain/));
+      expect(m.setReject, d).toHaveBeenCalledWith('Report is for a domain whose reports are not connected to this address');
     }
     expect(w.stored()).toEqual([]);
     expect(w.rows('SELECT * FROM intake_usage')).toEqual([]);
@@ -172,7 +178,7 @@ describe('the fixed address files by verified ownership', () => {
     await w.connect(1);
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (7, ?, 'shop.a-corp.com', '', 'txt')").run(w.B.ws);
     const m = await w.deliver(FIXED, 'shop.a-corp.com', 'b-sub');
-    expect(m.setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain shop\.a-corp\.com/)); // B owns it and has not connected
+    expect(m.setReject).toHaveBeenCalledWith('Report is for a domain whose reports are not connected to this address'); // B owns it and has not connected
     await w.connect(7, w.B.token);
     expect((await w.deliver(FIXED, 'shop.a-corp.com', 'b-sub-2')).setReject).not.toHaveBeenCalled();
     expect(w.stored()).toEqual([{ workspace_id: w.B.ws, domain_id: 7, report_id: 'b-sub-2' }]);
@@ -362,7 +368,7 @@ describe('review blockers (fixed address)', () => {
     await handleHostedEmail(m, w.env as any);
     const ms = performance.now() - t0;
     console.info(`[measure] quadratic input: ${hostile.length} B gzip, refused in ${ms.toFixed(1)} ms`);
-    expect(m.setReject).toHaveBeenCalledWith('Invalid DMARC report: no policy_published domain');
+    expect(m.setReject).toHaveBeenCalledWith('The report does not name the domain it is about');
     expect(ms).toBeLessThan(250); // was 28.9 s; a few ms in practice, with headroom for a loaded CI runner
     // The scanner alone, on a full 64 KiB of the same pattern, stays linear.
     const t1 = performance.now();
@@ -420,7 +426,7 @@ describe('review blockers (fixed address)', () => {
     await w.connect(5);
     w.db.sqlite.prepare('DELETE FROM domains WHERE id = 1').run(); // bypasses the demotion
     expect(w.rows('SELECT verified_via FROM domains WHERE id = 5')).toEqual([{ verified_via: 'parent' }]);
-    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'orphan')).setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain mail\.a-corp\.com/));
+    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'orphan')).setReject).toHaveBeenCalledWith('Report is for a domain whose reports are not connected to this address');
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (9, ?, 'a-corp.com', ?, 'txt')").run(w.B.ws, FIXED);
     expect((await w.deliver(FIXED, 'mail.a-corp.com', 'to-b')).setReject).not.toHaveBeenCalled();
     expect(w.stored()).toEqual([{ workspace_id: w.B.ws, domain_id: 9, report_id: 'to-b' }]);
@@ -446,8 +452,8 @@ describe('review blockers (fixed address)', () => {
     const tenant = await loadTenant(w.env as any, { workspaceId: w.A.ws });
     const mm = fakeMessage(FIXED, gzipReportMime(dmarcXml('a-corp.com', 'mismatch')));
     await handleDmarcReport(mm, tenant, { token: { id: 1, domain: 'a-corp.com' }, expectedDomain: 'mail.a-corp.com' });
-    expect(mm.setReject).toHaveBeenCalledWith('Invalid DMARC report: the policy domain could not be read consistently');
-    expect(w.rows("SELECT * FROM aggregate_reports WHERE report_id = 'mismatch'")).toEqual([]);
+    expect(mm.setReject).toHaveBeenCalledWith('The report names the domain it is about inconsistently');
+    expect(w.rows("SELECT * FROM aggregate_reports WHERE report_id LIKE '%mismatch'")).toEqual([]);
   });
 
   it('4. a record about another domain (header_from) refuses the whole report, on the fixed address and on token addresses', async () => {
@@ -456,7 +462,7 @@ describe('review blockers (fixed address)', () => {
     const xml = xmlWith('<domain>a-corp.com</domain>', record('a-corp.com') + record('b-corp.org'));
     const m = fakeMessage(FIXED, gzipReportMime(xml));
     await handleHostedEmail(m, w.env as any);
-    expect(m.setReject).toHaveBeenCalledWith('Invalid DMARC report: a record is about b-corp.org, not a-corp.com');
+    expect(m.setReject).toHaveBeenCalledWith('Report contains records about a domain other than its own');
     const token = generateToken();
     await forWorkspace(w.env.DB as any, w.A.ws).intake.set(5, await hashToken(token), Math.floor(Date.now() / 1000));
     const t = fakeMessage(`rua+${token}@${RUA}`, gzipReportMime(xmlWith('<domain>mail.a-corp.com</domain>', record('b-corp.org'))));
@@ -480,8 +486,10 @@ describe('review blockers (fixed address)', () => {
     expect(await w.status(1)).toMatchObject({ state: 'not_published', reports_since_connect: 0, reports_before_connect: 1, last_report_at: null });
     txt['_dmarc.a-corp.com'] = [`v=DMARC1; p=none; rua=mailto:${FIXED}`];
     expect(await w.status(1)).toMatchObject({ state: 'waiting', reports_before_connect: 1 });
-    expect((await w.deliver(FIXED, 'a-corp.com', 'after')).setReject).not.toHaveBeenCalled();
-    expect(await w.status(1)).toMatchObject({ state: 'receiving', reports_since_connect: 1, reports_before_connect: 1 });
+    expect((await w.deliver(FIXED, 'a-corp.com', 'after-uncounted')).setReject).not.toHaveBeenCalled();
+    expect(await w.status(1)).toMatchObject({ state: 'waiting', reports_since_connect: 1, counted_since_connect: 0, reports_before_connect: 1 });
+    expect((await w.deliver(FIXED, 'a-corp.com', 'after', GOOGLE)).setReject).not.toHaveBeenCalled();
+    expect(await w.status(1)).toMatchObject({ state: 'receiving', reports_since_connect: 2, counted_since_connect: 1, reports_before_connect: 1 });
   });
 
   it('6. HOSTED_CONNECT_REPORTS=owner (the default): only the instance owner’s workspaces connect or receive', async () => {
@@ -492,7 +500,7 @@ describe('review blockers (fixed address)', () => {
     expect(b.body.error).toBe("On this server, only the operator's workspaces can connect reports.");
     expect(await w.status(2, w.B.token)).toMatchObject({ can_connect: false, refusal: "On this server, only the operator's workspaces can connect reports." });
     w.db.sqlite.prepare('UPDATE domains SET rua_address = ? WHERE id = 2').run(FIXED); // even if B were connected
-    expect((await w.deliver(FIXED, 'b-corp.org', 'b-blocked')).setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain b-corp\.org/));
+    expect((await w.deliver(FIXED, 'b-corp.org', 'b-blocked')).setReject).toHaveBeenCalledWith('Report is for a domain whose reports are not connected to this address');
     expect((await w.deliver(FIXED, 'a-corp.com', 'a-ok')).setReject).not.toHaveBeenCalled();
     const none = await world({ HOSTED_CONNECT_REPORTS: 'owner', OWNER_EMAIL: '' });
     expect((await none.connect(1)).res.status).toBe(403);
@@ -501,10 +509,11 @@ describe('review blockers (fixed address)', () => {
   it('6b. the setup check names the intake settings, never their values', () => {
     const env = (e: Record<string, string>) => ({ MODE: 'saas', SAAS_ENABLED: '1', ...e }) as any;
     expect(reportIntakePreflightItems(env({})).map(i => i.setting)).toEqual(['INTAKE_DOMAIN']);
-    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'everyone' })).map(i => [i.severity, i.setting])).toEqual([
-      ['action', 'HOSTED_CONNECT_REPORTS'], ['action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL'], ['note', 'AUTHSERV_ID, AUTHSERV_HEADER'], ['note', 'INTAKE_MAX_RECORDS_PER_REPORT'],
+    // Authentication, caps and dropped reports are PR 151's intake findings (intakeSetupFindings): not repeated here.
+    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'everyone' })).map(i => [i.id, i.severity, i.setting])).toEqual([
+      ['intake', 'action', 'HOSTED_CONNECT_REPORTS'], ['intake', 'action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL'],
     ]);
-    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'all', AUTHSERV_ID: 'x', AUTHSERV_HEADER: 'ar', INTAKE_MAX_RECORDS_PER_REPORT: '900' }))).toEqual([]);
+    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'all' }))).toEqual([]);
     expect(JSON.stringify(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, OWNER_EMAIL: 'secret-owner@x.test' })))).not.toContain('secret-owner');
     expect(reportIntakePreflightItems({ MODE: 'selfhost' } as any)).toEqual([]);
   });

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { Db } from '../client';
+import { counted, type CountingMode } from './counting';
 
 /** How far back "first seen" can see. Older history is not scanned, so a sender first seen earlier reads as this old at most. */
 export const FIRST_SEEN_HORIZON_DAYS = 180;
@@ -40,8 +41,9 @@ export interface TrendRow {
  * Read-only aggregates behind the analytics pages. Every statement is bound to the workspace, and `domainId`
  * (when given) is checked against the workspace's own domains by the join, so a foreign id yields no rows.
  */
-export function analyticsQueries(db: Db, workspaceId: string) {
+export function analyticsQueries(db: Db, workspaceId: string, counting: CountingMode = 'registry') {
 	const A = sql`${workspaceId}`;
+	const C = (alias: string) => counted(alias, counting);
 	const scope = (domainId: number | null) => (domainId === null ? sql`` : sql`AND ar.domain_id = ${domainId}`);
 
 	return {
@@ -68,7 +70,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 				FROM report_records rr
 				JOIN aggregate_reports ar ON ar.id = rr.report_id
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
-				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A}
+				WHERE ar.workspace_id = ${A} AND rr.workspace_id = ${A} AND ${C('ar')}
 				  AND ar.date_begin >= ${horizon} AND ar.date_begin <= ${now} ${scope(domainId)}
 				GROUP BY rr.source_ip, d.id, rr.header_from, rr.spf_domain, rr.spf_result, rr.dkim_domain, rr.dkim_result
 				HAVING messages > 0 OR advice_messages > 0
@@ -86,7 +88,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					SUM(ar.fail_count)  AS failed
 				FROM aggregate_reports ar
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
-				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${since} AND ar.date_begin <= ${until} ${scope(domainId)}
+				WHERE ar.workspace_id = ${A} AND ${C('ar')} AND ar.date_begin >= ${since} AND ar.date_begin <= ${until} ${scope(domainId)}
 				GROUP BY day
 				ORDER BY day ASC
 			`);
@@ -99,7 +101,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 				SELECT MIN(ar.date_begin) AS first
 				FROM aggregate_reports ar
 				JOIN domains d ON d.id = ar.domain_id AND d.workspace_id = ${A} AND d.evicted_at IS NULL
-				WHERE ar.workspace_id = ${A} AND ar.date_begin >= ${horizon} AND ar.date_begin <= ${now} ${scope(domainId)}
+				WHERE ar.workspace_id = ${A} AND ${C('ar')} AND ar.date_begin >= ${horizon} AND ar.date_begin <= ${now} ${scope(domainId)}
 			`);
 			return rows[0]?.first ?? null;
 		},
@@ -118,7 +120,7 @@ export function analyticsQueries(db: Db, workspaceId: string) {
 					COALESCE(SUM(r.pass_count), 0) AS passed,
 					COUNT(DISTINCT date(datetime(r.date_begin, 'unixepoch'))) AS days_with_reports
 				FROM domains d
-				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND r.date_begin <= ${until}
+				LEFT JOIN aggregate_reports r ON r.domain_id = d.id AND r.workspace_id = ${A} AND r.date_begin >= ${since} AND r.date_begin <= ${until} AND ${C('r')}
 				WHERE d.workspace_id = ${A} AND d.evicted_at IS NULL
 				GROUP BY d.id, d.domain, d.dmarc_policy, d.dmarc_pct, d.spf_record, d.spf_lookup_count
 				ORDER BY d.domain

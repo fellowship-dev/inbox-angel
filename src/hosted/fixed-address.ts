@@ -12,6 +12,7 @@ import { normalizeDomain, organizationalDomain } from '@ready-set-mail/dns-check
 import type { BoundEnv } from '../index';
 import { forWorkspace, intakeLookups, type IntakeTarget } from '@ready-set-mail/db';
 import { extractAttachmentBytes } from '../email/mime-extract';
+import type { Carrier } from '../dmarc/reporter-auth';
 
 export const fixedReportAddress = (intakeDomain: string): string => `rua@${intakeDomain}`;
 
@@ -137,15 +138,49 @@ export async function peekPolicyDomain(raw: ReadableStream<Uint8Array>): Promise
   return scanPolicyDomain(new TextDecoder().decode(prefix));
 }
 
-/** The peek as a step of the intake: the domain, or the reason to refuse the message. */
-export async function peekReportDomain(raw: ReadableStream<Uint8Array>): Promise<{ ok: true; domain: string } | { ok: false; reason: string }> {
+/** The peek as a step of the intake: the domain, or the reason code to refuse the message with (src/hosted/reasons.ts). */
+export async function peekReportDomain(raw: ReadableStream<Uint8Array>): Promise<{ ok: true; domain: string } | { ok: false; reason: 'archive_invalid' | 'report_domain_unreadable' }> {
   let domain: string | null;
   try {
     domain = await peekPolicyDomain(raw);
   } catch {
-    return { ok: false, reason: 'Invalid DMARC report: the attachment could not be read' };
+    return { ok: false, reason: 'archive_invalid' };
   }
-  return domain ? { ok: true, domain } : { ok: false, reason: 'Invalid DMARC report: no policy_published domain' };
+  return domain ? { ok: true, domain } : { ok: false, reason: 'report_domain_unreadable' };
+}
+
+// ── The unattributed budget (before the peek) ───────────────
+
+export const DEFAULT_UNATTRIBUTED_MESSAGES_PER_DAY = 2000;
+export const DEFAULT_UNATTRIBUTED_PER_SENDER_PER_DAY = 100;
+
+export interface UnattributedEnv { INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY?: string; INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY?: string }
+
+const positive = (v: string | undefined, dflt: number): number => {
+  const n = Number(v?.trim());
+  return v && Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt;
+};
+
+export function unattributedLimits(env: UnattributedEnv): { perSender: number; total: number } {
+  return {
+    perSender: positive(env.INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY, DEFAULT_UNATTRIBUTED_PER_SENDER_PER_DAY),
+    total: positive(env.INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY, DEFAULT_UNATTRIBUTED_MESSAGES_PER_DAY),
+  };
+}
+
+/**
+ * Before anything of a message to the fixed address is decompressed, charge the sender's UNATTRIBUTED budget: its own allowance (an
+ * authenticated sender by its DKIM organisation, an unauthenticated one by the envelope-sender domain it claims) and its carrier class's
+ * daily total. This is the only budget mail for a domain nobody connected can use: it is refused right after the peek, before any
+ * workspace's or the instance's own budgets are charged. Registry reporters (authenticated Google, Microsoft…) are not charged: they
+ * cannot be forged, and a flood of anyone else's mail can then never hold them up. Null: proceed; else the reason code to refuse with.
+ */
+export async function chargeUnattributed(env: UnattributedEnv & { DB: D1Database }, carrier: Carrier, envelopeFrom: string | null | undefined, day: string): Promise<'cap_unattributed_sender_day' | 'cap_unattributed_total_day' | null> {
+  if (carrier.class === 'registry') return null;
+  const lim = unattributedLimits(env);
+  const sender = carrier.class === 'authenticated' ? `a:${carrier.dkimOrg ?? carrier.fromOrg ?? ''}` : `u:${envelopeFrom?.split('@').pop()?.trim().toLowerCase() ?? ''}`;
+  const refused = await intakeLookups(env.DB).consumeUnattributed(day, { scope: `f:s:${sender}`, max: lim.perSender }, { scope: `f:${carrier.class}`, max: lim.total });
+  return refused === 'sender' ? 'cap_unattributed_sender_day' : refused === 'total' ? 'cap_unattributed_total_day' : null;
 }
 
 /**

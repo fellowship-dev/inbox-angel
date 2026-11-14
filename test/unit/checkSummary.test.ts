@@ -13,7 +13,7 @@ async function seed() {
   db.sqlite.prepare("UPDATE domains SET spf_record = 'v=spf1 ~all' WHERE id = ?").run(id);
   const rep = await q.reports.insertAggregate({
     domain_id: id, org_name: 'google', report_id: 'r1', date_begin: NOW - 86400, date_end: NOW,
-    total_count: 1000, pass_count: 980, fail_count: 20, raw_xml: null,
+    total_count: 1000, pass_count: 980, fail_count: 20, raw_xml: null, reporter_auth: 'pass', reporter_tier: 'counted',
   });
   await q.reports.insertRecords([
     { report_id: Number(rep.meta.last_row_id), source_ip: '1.1.1.1', count: 950, disposition: 'none', dkim_result: 'pass', spf_result: 'pass', dkim_domain: null, spf_domain: null, header_from: 'example.com' },

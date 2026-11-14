@@ -7,7 +7,8 @@
  * every sweep is idempotent: running it twice deletes nothing the second time.
  */
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
-import { getDb, type DbLike } from '../client';
+import { batchStatements, getDb, type DbLike } from '../client';
+import { STORED_ROW, UNCOUNTED_ROW } from './intake';
 import { apiKeys, auditLog, authAccounts, invites, memberships, passwordResetTokens, sessions, users, verifications } from '../schema';
 
 const changes = (res: unknown): number => Number((res as any)?.meta?.changes ?? (res as any)?.changes ?? 0);
@@ -62,6 +63,20 @@ export function lifecycleQueries(dbLike: DbLike) {
 		return { deleted, truncated: true };
 	}
 	const spend = (limits: SweepLimits) => { limits.budget.left--; };
+	/** Rows a sweep deleted, per workspace and budget: counted (and legacy) or uncounted (tier unknown/unauthenticated). */
+	type Gone = Map<string, { records: number; reports: number; uRecords: number; uReports: number }>;
+	const bump = (m: Gone, w: string) => { let g = m.get(w); if (!g) m.set(w, (g = { records: 0, reports: 0, uRecords: 0, uReports: 0 })); return g; };
+	/** Keep workspace_storage and the two instance totals in step with rows a sweep deleted (one batch; its budget statement was held back). */
+	async function settleStorage(per: Gone): Promise<void> {
+		let records = 0;
+		let uRecords = 0;
+		for (const g of per.values()) { records += g.records; uRecords += g.uRecords; }
+		await batchStatements(db, [
+			...[...per].map(([w, n]) => sql`UPDATE workspace_storage SET records = MAX(0, records - ${n.records}), reports = MAX(0, reports - ${n.reports}), uncounted_records = MAX(0, uncounted_records - ${n.uRecords}), uncounted_reports = MAX(0, uncounted_reports - ${n.uReports}) WHERE workspace_id = ${w}`),
+			...(records ? [sql`UPDATE intake_quota SET records = MAX(0, records - ${records}) WHERE scope = ${STORED_ROW.scope} AND day = ${STORED_ROW.day}`] : []),
+			...(uRecords ? [sql`UPDATE intake_quota SET records = MAX(0, records - ${uRecords}) WHERE scope = ${UNCOUNTED_ROW.scope} AND day = ${UNCOUNTED_ROW.day}`] : []),
+		]);
+	}
 	/** One bounded statement per step (the common case). */
 	const simple = (limits: SweepLimits, run: () => Promise<unknown>) =>
 		loop(limits, async () => {
@@ -75,17 +90,88 @@ export function lifecycleQueries(dbLike: DbLike) {
 		 * Aggregate reports past their window, and their records. Records go first, a bounded number per statement by rowid
 		 * (one report can hold hundreds of thousands); the reports follow once theirs are gone. Returns reports deleted.
 		 */
-		purgeAggregateReports: (cutoff: number, limits: SweepLimits) =>
-			loop(limits, async () => {
+		purgeAggregateReports: async (cutoff: number, limits: SweepLimits, uncountedCutoff?: number): Promise<SweepResult> => {
+			// Past the report window, or (when given) an uncounted-tier report (unknown or unauthenticated) older than its own, shorter, retention.
+			// A reporter an owner promotes becomes tier 'counted' and is no longer matched by the second clause.
+			const old = uncountedCutoff === undefined
+				? sql`(date_end < ${cutoff} OR created_at < ${cutoff})`
+				: sql`(date_end < ${cutoff} OR created_at < ${cutoff} OR (reporter_tier IN ('unknown', 'unauthenticated') AND created_at < ${uncountedCutoff}))`;
+			// One statement of the budget is held back for keeping workspace_storage in step with what was deleted (one batch per run).
+			if (limits.budget.left < 2) return { deleted: 0, truncated: true };
+			spend(limits);
+			const gone: Gone = new Map();
+			// Counters are given back when the REPORT row goes (its records are deleted first, a bounded number per statement): by its record_count, or for a
+			// row stored before 0010 (NULL) by the records this run deleted for it. The budget is the report's tier: uncounted (unknown/unauthenticated) or not.
+			const removed = new Map<number, number>();
+			const result = await loop(limits, async () => {
 				spend(limits);
-				const recs = changes(await db.run(sql`DELETE FROM report_records WHERE rowid IN (
-					SELECT rowid FROM report_records WHERE report_id IN (SELECT id FROM aggregate_reports WHERE date_end < ${cutoff} OR created_at < ${cutoff}) LIMIT ${limits.recordBatch})`));
-				if (recs >= limits.recordBatch) return { n: 0, more: true };
+				const recs = await db.all<{ report_id: number }>(sql`DELETE FROM report_records WHERE rowid IN (
+					SELECT rowid FROM report_records WHERE report_id IN (SELECT id FROM aggregate_reports WHERE ${old}) LIMIT ${limits.recordBatch}) RETURNING report_id`);
+				for (const r of recs) removed.set(r.report_id, (removed.get(r.report_id) ?? 0) + 1);
+				if (recs.length >= limits.recordBatch) return { n: 0, more: true };
 				if (limits.budget.left <= 0) return { n: 0, more: true };
 				spend(limits);
-				const n = changes(await db.run(sql`DELETE FROM aggregate_reports WHERE id IN (SELECT id FROM aggregate_reports WHERE date_end < ${cutoff} OR created_at < ${cutoff} ORDER BY id LIMIT ${limits.batch})`));
-				return { n, more: n >= limits.batch };
-			}),
+				const reps = await db.all<{ id: number; workspace_id: string; unc: number; record_count: number | null }>(sql`DELETE FROM aggregate_reports WHERE id IN (SELECT id FROM aggregate_reports WHERE ${old} ORDER BY id LIMIT ${limits.batch})
+					RETURNING id, workspace_id, COALESCE(reporter_tier, '') IN ('unknown', 'unauthenticated') AS unc, record_count`);
+				for (const r of reps) {
+					const g = bump(gone, r.workspace_id);
+					const records = r.record_count ?? removed.get(r.id) ?? 0;
+					if (r.unc) { g.uReports++; g.uRecords += records; } else { g.reports++; g.records += records; }
+				}
+				return { n: reps.length, more: reps.length >= limits.batch };
+			});
+			if (gone.size) await settleStorage(gone);
+			else limits.budget.left++; // nothing deleted: the held-back statement was not needed
+			return result;
+		},
+
+		/**
+		 * Intake counters of days before `cutoffDay` (YYYY-MM-DD): the per-reporter usage, the per-scope quota (its 'total' row is
+		 * not a date and is never matched) and, with its own longer cutoff, the failure markers the owner reads.
+		 */
+		purgeIntakeCounters: async (cutoffDay: string, limits: SweepLimits): Promise<SweepResult> => {
+			const a = await simple(limits, () => db.run(sql`DELETE FROM intake_usage WHERE rowid IN (SELECT rowid FROM intake_usage WHERE day < ${cutoffDay} LIMIT ${limits.batch})`));
+			const b = await simple(limits, () => db.run(sql`DELETE FROM intake_quota WHERE rowid IN (SELECT rowid FROM intake_quota WHERE day < ${cutoffDay} AND day <> ${STORED_ROW.day} LIMIT ${limits.batch})`));
+			return { deleted: a.deleted + b.deleted, truncated: a.truncated || b.truncated };
+		},
+		/** Registry-candidate rows older than `cutoffDay`. */
+		purgeReporterCandidates: (cutoffDay: string, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM reporter_candidate_days WHERE rowid IN (SELECT rowid FROM reporter_candidate_days WHERE day < ${cutoffDay} LIMIT ${limits.batch})`)),
+
+		/** "Reports from X were not stored" markers whose last drop is before `cutoff` (unix seconds): nothing dropped since, the state is stale. */
+		purgeIntakeDrops: (cutoff: number, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM intake_drops WHERE rowid IN (SELECT rowid FROM intake_drops WHERE last_at < ${cutoff} LIMIT ${limits.batch})`)),
+
+		purgeIntakeFailures: (cutoffDay: string, limits: SweepLimits) =>
+			simple(limits, () => db.run(sql`DELETE FROM intake_failures WHERE rowid IN (SELECT rowid FROM intake_failures WHERE day < ${cutoffDay} LIMIT ${limits.batch})`)),
+
+		/**
+		 * Recount what workspaces hold (workspace_storage and the instance total) for up to `workspaces` of them, least recently
+		 * recounted first: the live counters move with every store and purge, this repairs any drift (and counts data stored before 0010).
+		 */
+		reconcileStorage: async (limits: SweepLimits, workspaces = 5): Promise<SweepResult> => {
+			if (limits.budget.left < 3) return { deleted: 0, truncated: true }; // three statements: pick, recount, instance total
+			spend(limits);
+			const due = await db.all<{ id: string }>(sql`SELECT w.id AS id FROM workspaces w LEFT JOIN workspace_storage s ON s.workspace_id = w.id ORDER BY s.reconciled_at IS NOT NULL, s.reconciled_at, w.id LIMIT ${workspaces}`);
+			if (!due.length) return { deleted: 0, truncated: false };
+			spend(limits);
+			// Uncounted figures come from aggregate_reports.record_count (every uncounted report was stored by 0010 or later, so it is set): no join over report_records.
+			await batchStatements(db, due.map(({ id }) => sql`INSERT INTO workspace_storage (workspace_id, reports, records, uncounted_reports, uncounted_records, reconciled_at)
+				SELECT ${id},
+					(SELECT COUNT(*) FROM aggregate_reports WHERE workspace_id = ${id} AND COALESCE(reporter_tier, '') NOT IN ('unknown', 'unauthenticated')),
+					(SELECT COUNT(*) FROM report_records WHERE workspace_id = ${id}) - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${id} AND reporter_tier IN ('unknown', 'unauthenticated')),
+					(SELECT COUNT(*) FROM aggregate_reports WHERE workspace_id = ${id} AND reporter_tier IN ('unknown', 'unauthenticated')),
+					(SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${id} AND reporter_tier IN ('unknown', 'unauthenticated')), unixepoch() WHERE true
+				ON CONFLICT(workspace_id) DO UPDATE SET reports = excluded.reports, records = MAX(0, excluded.records), uncounted_reports = excluded.uncounted_reports, uncounted_records = excluded.uncounted_records, reconciled_at = excluded.reconciled_at`));
+			spend(limits);
+			await batchStatements(db, [
+				sql`INSERT INTO intake_quota (scope, day, records) SELECT ${STORED_ROW.scope}, ${STORED_ROW.day}, COALESCE(SUM(records), 0) FROM workspace_storage WHERE true
+					ON CONFLICT(scope, day) DO UPDATE SET records = excluded.records`,
+				sql`INSERT INTO intake_quota (scope, day, records) SELECT ${UNCOUNTED_ROW.scope}, ${UNCOUNTED_ROW.day}, COALESCE(SUM(uncounted_records), 0) FROM workspace_storage WHERE true
+					ON CONFLICT(scope, day) DO UPDATE SET records = excluded.records`,
+			]);
+			return { deleted: 0, truncated: false }; // a recount deletes nothing (the sweeps report rows deleted)
+		},
 
 		purgeTlsReports: (cutoff: number, limits: SweepLimits) =>
 			simple(limits, () => db.run(sql`DELETE FROM tls_reports WHERE id IN (SELECT id FROM tls_reports WHERE date_end < ${cutoff} OR created_at < ${cutoff} ORDER BY id LIMIT ${limits.batch})`)),

@@ -9,7 +9,7 @@ let a: ReturnType<typeof forWorkspace>;
 let b: ReturnType<typeof forWorkspace>;
 
 const report = (domain_id: number, report_id = 'r1', over = {}) => ({
-	domain_id, org_name: 'google', report_id, date_begin: 1_000_000, date_end: 1_086_400, total_count: 10, pass_count: 8, fail_count: 2, raw_xml: null, ...over,
+	domain_id, org_name: 'google', report_id, date_begin: 1_000_000, date_end: 1_086_400, total_count: 10, pass_count: 8, fail_count: 2, raw_xml: null, reporter_auth: 'pass', reporter_tier: 'counted', ...over,
 });
 const rec = (report_id: number, ip = '1.1.1.1') => ({
 	report_id, source_ip: ip, count: 10, disposition: 'none', dkim_result: 'fail', dkim_domain: null, spf_result: 'fail', spf_domain: null, header_from: 'acme.com',

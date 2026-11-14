@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { errorMessage } from '../../lib/api';
+import { countingBasisNote, emptyReportsState, storageDropNotices, uncountedNotice } from '../../lib/uncounted';
 import { formatDateTime, timeAgo } from '../../lib/format';
 import {
 	useReportAddress,
@@ -136,19 +137,35 @@ function StateLine({ s }: { s: ReportAddressView }) {
 	} else if (s.state === 'receiving' && s.last_report_at) {
 		detail = (
 			<>
-				Last report received {formatDateTime(s.last_report_at)} ({timeAgo(s.last_report_at)}). <Link to={`/domains/${s.domain_id}/reports`}>Open the reports</Link>
+				Last counted report received {formatDateTime(s.last_report_at)} ({timeAgo(s.last_report_at)}). <Link to={`/domains/${s.domain_id}/reports`}>Open the reports</Link>
 			</>
 		);
 	} else if (s.state === 'unknown') {
 		detail = <>We could not read the DMARC record just now, so we cannot say whether it lists the report address. The lookup failed; that does not mean the record is missing.</>;
 	}
 	const plural = (n: number) => (n === 1 ? '1 report' : `${n} reports`);
+	// What else is true about the reports since connecting, in the dashboard's shared words (web/src/lib/uncounted.ts): reports from
+	// senders we do not recognise are not counted, counted reports dropped for want of storage, and mail that could not be processed.
+	const v = s.visibility ?? null;
+	const empty = s.state === 'receiving' ? 'counted' : emptyReportsState(s.counted_since_connect, v);
+	const notes = [
+		...storageDropNotices(v),
+		uncountedNotice(v),
+		empty === 'not_processed' || empty === 'limited' ? v?.intake?.notice ?? null : null,
+		empty === 'blocked' ? v?.counting_note ?? null : null,
+	].filter((x): x is string => !!x);
+	const basis = countingBasisNote(v?.report_counting);
 	return (
 		<div className="space-y-1">
 			<StatusDot status={dot.status} label={dot.label} className="font-semibold" />
 			{detail ? <p className="text-sm text-ink-2">{detail}</p> : null}
-			{s.state !== 'receiving' && s.reports_since_connect > 0 ? <p className="text-sm text-ink-2">{plural(s.reports_since_connect)} received since connecting.</p> : null}
+			{notes.map((n) => (
+				<p key={n} className="text-sm text-ink-2" data-testid="reports-notice">
+					{n}
+				</p>
+			))}
 			{s.reports_before_connect > 0 ? <p className="text-sm text-ink-2">{plural(s.reports_before_connect)} received before this connection.</p> : null}
+			{basis && s.state !== 'not_connected' ? <p className="text-xs text-ink-2">{basis}</p> : null}
 		</div>
 	);
 }

@@ -8,6 +8,7 @@
 
 import type { BoundEnv } from '../index';
 import { forWorkspace, type WorkspaceScope } from '@ready-set-mail/db';
+import { reportCounting } from '../dmarc/counting';
 import { CfClient, CfNotConfiguredError, CfZoneNotFoundError, zoneCandidates, type CfZone } from './cf-client';
 import { ConnectionService } from '../connections/service';
 import { logAudit } from '../audit/log';
@@ -85,7 +86,7 @@ export class TenantContext {
     this.role = init.role;
     this.mode = init.mode ?? getMode(init.env);
     this.settings = { brandColor: DEFAULT_BRAND_COLOR, ...init.settings };
-    this.scope = forWorkspace(this.db, init.workspaceId);
+    this.scope = forWorkspace(this.db, init.workspaceId, { counting: reportCounting({ ...init.env, MODE: this.mode }) });
     this.#cfToken = init.cfToken;
     this.#fetch = init.fetch;
   }

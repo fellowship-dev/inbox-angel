@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import { domainKeys, invalidateDomain } from './domain-queries';
 import { HOSTED_CONFIG_KEY } from './hosted';
+import type { ReportVisibilityFields } from './uncounted';
 
 /**
  * Connecting a domain's DMARC reports on the hosted service (GET/POST/DELETE /api/domains/:id/report-address): one
@@ -35,9 +36,12 @@ export interface ReportAddressView {
 	refusal: string | null;
 	address: string | null;
 	connected_at: number | null;
+	/** The newest COUNTED report since connecting; counted reports, and all reports, since then; reports before this connection. */
 	last_report_at: number | null;
+	counted_since_connect: number;
 	reports_since_connect: number;
 	reports_before_connect: number;
+	visibility?: ReportVisibilityFields | null;
 	state: ReportAddressState;
 	dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | null } | null;
 	parent?: { domain_id: number; domain: string; connected: boolean } | null;

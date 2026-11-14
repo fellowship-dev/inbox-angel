@@ -16,6 +16,7 @@
 import { createResolver, lookupDmarc, planReportAddress, type InheritedPlan, type ReportAddressPlan, type Resolver } from '@ready-set-mail/dns-checks';
 import type { TenantContext } from '../tenancy/context';
 import { logAudit } from '../audit/log';
+import { reportVisibility, type ReportVisibility } from '../reports/visibility';
 import { hostedConfig, hostedEnabled } from './config';
 import { fixedReportAddress, isFixedReportAddress, workspaceMayConnectReports } from './fixed-address';
 import { isDomainProven } from '../domains/ownership';
@@ -39,9 +40,9 @@ type Actor = { id?: string | null; email?: string | null };
 
 /**
  * not_connected: reports are not connected. not_published: connected, but the live DMARC record does not list the
- * address. waiting: listed, no report stored since connecting. receiving: listed AND at least one report stored since
- * connecting. unknown: connected, but the DNS lookup failed, so nothing can be said about the record.
- * (Once forged-report weighting lands, "receiving" should also require a proven report.)
+ * address. waiting: listed, no COUNTED report since connecting. receiving: listed AND at least one COUNTED report (an authenticated
+ * registry reporter, reporter_tier 'counted') stored since connecting. unknown: connected, but the DNS lookup failed, so nothing can
+ * be said about the record. Uncounted reports never make a domain "received"; they are counted apart and named.
  */
 export type ReportAddressState = 'not_connected' | 'not_published' | 'waiting' | 'receiving' | 'unknown';
 
@@ -59,10 +60,13 @@ export interface ReportAddressView {
   address: string | null;
   /** When the current connection began (null for an older token address). */
   connected_at: number | null;
-  /** The newest report stored since the connection began, and how many; reports stored before it are counted apart. */
+  /** The newest COUNTED report stored since the connection began; how many counted, and all reports (counted or not), since then; reports before it apart. */
   last_report_at: number | null;
+  counted_since_connect: number;
   reports_since_connect: number;
   reports_before_connect: number;
+  /** What the dashboard must say besides the state (uncounted and not-stored reports), over the reports since connecting (src/reports/visibility.ts). */
+  visibility: ReportVisibility | null;
   state: ReportAddressState;
   /** The live DMARC check, made only when connected. `plan` is null when the lookup failed. */
   dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | InheritedPlan | null } | null;
@@ -108,10 +112,12 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
   const address = managed_by || refusal ? null : await connectedAddress(tenant, domain, intakeDomain);
   const connected_at = address ? domain.reports_connected_at ?? null : null;
 
-  let counts = { since: 0, last_since: null as number | null, before: 0 };
+  let counts = { since: 0, counted_since: 0, last_counted_since: null as number | null, before: 0 };
   let dns: ReportAddressView['dns'] = null;
+  let visibility: ReportVisibility | null = null;
   if (address) {
     counts = await tenant.scope.intake.reportsAround(domain.id, connected_at);
+    visibility = await reportVisibility(tenant, domain.id, connected_at ?? 0);
     const lookup = await lookupDmarc(deps.resolver ?? createResolver(), domain.domain);
     const checked_at = Math.floor((deps.now?.() ?? Date.now()) / 1000);
     dns = { checked_at, error: lookup.status === 'error' ? (lookup.error ?? 'DNS lookup failed') : null, plan: planReportAddress(lookup, address) };
@@ -122,18 +128,18 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
     if (row) parent = { domain_id: row.id, domain: row.domain, connected: !!(await connectedAddress(tenant, row, intakeDomain)) };
   }
 
-  // Evidence only: received means published in live DNS AND a report stored since this connection began.
+  // Evidence only: received means published in live DNS AND a COUNTED report stored since this connection began.
   let state: ReportAddressState = 'not_connected';
   if (address) {
     if (!dns?.plan) state = 'unknown';
     else if (dns.plan.kind !== 'published') state = 'not_published';
-    else state = counts.since > 0 ? 'receiving' : 'waiting';
+    else state = counts.counted_since > 0 ? 'receiving' : 'waiting';
   }
 
   return {
     available: true, domain_id: domain.id, domain: domain.domain, managed_by, can_connect: !refusal, refusal, address,
-    connected_at, last_report_at: counts.last_since, reports_since_connect: counts.since, reports_before_connect: counts.before,
-    state, dns, parent,
+    connected_at, last_report_at: counts.last_counted_since, counted_since_connect: counts.counted_since, reports_since_connect: counts.since,
+    reports_before_connect: counts.before, visibility, state, dns, parent,
   };
 }
 

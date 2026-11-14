@@ -1,0 +1,48 @@
+From: reports@fastmaildmarc.com
+To: postmaster@freitagsrunde.org
+Date: Sat, 12 Aug 2023 02:28:35 -0400
+Subject: Report Domain: freitagsrunde.org Submitter: fastmail.com
+ Report-ID:2023.08.12.951224152
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Type: multipart/mixed; boundary=169182171527.2cBaBB2a1.513193
+Message-Id: <20230812062835.7DCD640072@mailuser.nyi.internal>
+
+--169182171527.2cBaBB2a1.513193
+Date: Sat, 12 Aug 2023 02:28:35 -0400
+MIME-Version: 1.0
+Content-Type: text/plain; charset=US-ASCII
+Content-Disposition: inline
+
+
+This is a DMARC aggregate report for freitagsrunde.org
+
+1 records.
+1 passed.
+0 failed.
+
+Submitted by Fastmail Pty Ltd
+Generated with Mail::DMARC 1.20220928
+
+
+--169182171527.2cBaBB2a1.513193
+Date: Sat, 12 Aug 2023 02:28:35 -0400
+MIME-Version: 1.0
+Content-Type: application/gzip;
+ name=fastmail.com!freitagsrunde.org!1691712000!1691798399!951224152.xml.gz
+Content-Transfer-Encoding: base64
+Content-Disposition: inline;
+ filename*0=fastmail.com!freitagsrunde.org!1691712000!1691798399!951224152.xm;
+ filename*1=l.gz
+
+H4sIAJMm12QAA41Uy3LcIBA8r79iy3eLlbx2rBTBOeWUQ/6AYtFoRVk8Amhj/30G0CorP1I+Cbqb
+mZ6GEn181uP2BD4oa75d19Xu+pFd0R6gOwj5xK42dCYZcpScN4h7cNZHriGKTkSB0IZaf+RGaGA/
+RIhaqHH7K75sf8aOkoVKOkgcKxXC934Wd1p4WUmrKSmCLH2OXnBpTRQycmV6y4YYXfhKyPlcOkLw
+zFtlKjD7VB1r7+qm2dd3DSX/wCRB/8C9MMfsbkMPcFQ48H1bf6mb3Q7nLkgmwXSFah9u2xbbmlKE
+rKosLS7yoc6OSr5wNx1GFQaYm1ucwbDeg4riGPxkOqgwLSxYmCRy7PcksHZUBihxGQtrMBTUychq
+dJy+aY8p4C5ngeBbA5iPtL5Y8fZPmTHYyUvgyrH6dlfV+7Zq9vdVUz9gm4XKSmkngw0pKYuMzV3g
+JMYJM8m106AqOBtUTO/H2GT5Epk1T0ozJ0JAMi0LGlw/g2mVe5D3mmDoZQKqOsBYeoXP9XxrJxit
+A957q98Ley3IZwYQHfgPT1zSufmrplRMceAewjTG2cXFTJ+59jQ6jCCj9WvhjQ/iBkNf2CIuveao
+5k1hhkkLw1f8CiqZLvboOefP+5SYHdMpDLSVN//3tNwlJa9ySrLyJPHdLj+iv7QMPiiqBAAA
+
+--169182171527.2cBaBB2a1.513193--

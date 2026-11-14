@@ -16,8 +16,8 @@ describe('capped extraction aborts while inflating', () => {
     let caught: unknown;
     try { extractReport(new Uint8Array(gz), { maxBytes: MAX }); } catch (e) { caught = e; }
     expect(caught).toBeInstanceOf(ReportTooLargeError);
-    // output produced before the abort: the cap plus at most one ~1 KB input slice's worth
-    expect((caught as ReportTooLargeError).produced).toBeLessThan(MAX + 2 * MiB);
+    // output produced before the abort: the cap plus at most one input slice's worth (4 KiB x 1032:1)
+    expect((caught as ReportTooLargeError).produced).toBeLessThan(MAX + 5 * MiB);
   });
 
   it('a zip entry of 200 MB of zeros stops at the cap too, whatever its header claims', () => {
@@ -25,7 +25,7 @@ describe('capped extraction aborts while inflating', () => {
     let caught: unknown;
     try { extractReport(zip, { maxBytes: MAX }); } catch (e) { caught = e; }
     expect(caught).toBeInstanceOf(ReportTooLargeError);
-    expect((caught as ReportTooLargeError).produced).toBeLessThan(MAX + 2 * MiB);
+    expect((caught as ReportTooLargeError).produced).toBeLessThan(MAX + 5 * MiB);
   });
 
   it('rejects a 500-entry zip without inflating any entry', () => {

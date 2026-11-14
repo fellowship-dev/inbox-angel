@@ -1,0 +1,35 @@
+Content-Transfer-Encoding: binary
+Content-Type: multipart/mixed; boundary="_----------=_169054561770753911"
+Date: Fri, 28 Jul 2023 05:00:17 -0700
+From: noreply@dmarc.yahoo.com
+To: postmaster@freitagsrunde.org
+Subject: Report Domain: freitagsrunde.org Submitter: aol.com Report-ID: <1690506150.794636>
+Message-Id: <1690545617.620005@dmarc.yahoo.com>
+
+This is a multi-part message in MIME format.
+
+--_----------=_169054561770753911
+Content-Disposition: inline
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+
+This is an aggregate DMARC report from Yahoo. Your domain freitagsrunde.org has a DMARC record set up. You are receiving this report because your email address is included in the 'rua' tag of that domain.  If you no longer wish to receive these reports, or if you would like them to be sent to a different location, kindly update or remove this record or collaborate with your hosting provider.
+
+Please note that this email address is not monitored, and you will not receive a response if you reply to this email. For any feedback or questions, please reach out to dmarchelp@yahooinc.com.
+--_----------=_169054561770753911
+Content-Disposition: attachment; filename="aol.com!freitagsrunde.org!1690416000!1690502399.xml.gz"
+Content-Transfer-Encoding: base64
+Content-Type: application/gzip; name="aol.com!freitagsrunde.org!1690416000!1690502399.xml.gz"
+
+H4sIANGtw2QAA41UXZOcIBB8Tn7F1r2f6H6YWEW4/I08WSyOK3UKBPCS+/cZFwR395LKk9jTTPe0
+U9KX39O4ewPrpFbfnqqifHphnz7THqA7c/GK592OWjDa+nYCzzvu+RVEWNtLq/gE7AcftKYkvcc6
+TFyOrJu4FQOM5vv7QpNKFEJPlIRqpEYF2bGqbspTWVensvjSHOtDTUkuRjaagNZydVmlEDvDRarr
+7WNVl2VJSUASAdTafH9oGtRXqR+5a5gkbyamRo9SvLdmPo/SDZDtaBxFsd6C9Pzi7Kw6KDAM7Bsq
+kce7VzkxS0k4rKgz/RVcnhEz7OfM0Y+XCigxCRaeVTjZ8gw+P7SEaQptkz2rf+UUnJ6tgFYaVh3K
+ojo2xf5YF/vqKyW5lNhCz8qz04GScEqFqAtvfJwxuy5VljikM9pJjxvFlF4G2CJb4pKC4c4hIwcS
+bGIWoZJT2cx7r4sfLA1JZQcYXC9xqfPNAXgHtu2tnhhG5V3xwefaktbGj90on/3QWnDz6DcK9yP8
+51aEcWEE4bW9ZT9bx58rjGCtbm4E+ZhRfMkx3Xih2wizsb+m8Gjv32KbvSUP0Sz8uIyU5L/KH1jF
+FWp4BAAA
+
+--_----------=_169054561770753911--
+

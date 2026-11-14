@@ -8,6 +8,7 @@ import { loadTenant } from './tenancy/load';
 import { resolveInboundWorkspace } from './tenancy/resolver';
 import { getMode } from './tenancy/mode';
 import { handleHostedEmail } from './hosted/intake';
+import { logIntake } from './hosted/intake-log';
 import { resolvePolicyHost } from './hosted/policy-host';
 import { runHostedCron } from './hosted/cron';
 import { runCronForWorkspaces } from './cron';
@@ -66,16 +67,40 @@ export interface Env {
   CANARY_DOMAIN?: string;        // anonymous free-check address domain, e.g. canary.readysetmail.com
   HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. readysetmail.com
   HOSTED_RECORDS_LABEL?: string; // single label every hosted record lives under (default "h")
-  INTAKE_MAX_REPORTS_PER_DAY?: string; // per intake token and authenticated reporter domain (default 50)
-  INTAKE_MAX_RECORDS_PER_REPORT?: string; // default 20000
-  INTAKE_MAX_BYTES_PER_DAY?: string; // raw message bytes per token and authenticated reporter domain per UTC day (default 50 MiB)
-  INTAKE_MAX_REPORTERS_PER_DAY?: string; // distinct authenticated reporter domains per token per UTC day (default 100)
-  INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string; // messages not proven by the receiver, per claimed sender domain per token per UTC day (default 200)
-  INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string; // raw bytes of that bucket (default 1 GiB)
-  INTAKE_MAX_TOTAL_REPORTS_PER_DAY?: string; // per token per UTC day across all proven reporters that are not well known (default 1000)
-  INTAKE_MAX_TOTAL_BYTES_PER_DAY?: string; // raw bytes of that total (default 1 GiB)
-  INTAKE_MAX_UNAUTH_SENDERS_PER_DAY?: string; // distinct claimed sender domains with their own bucket per token per day; the rest share one (default 50)
-  INTAKE_MAX_NEW_IPS_PER_REPORT?: string; // uncached source IPs enriched per report (default 50)
+  INTAKE_MAX_REPORTS_PER_DAY?: string; // per intake token and registry reporter, per UTC day (default 50)
+  INTAKE_MAX_RECORDS_PER_REPORT?: string; // records in one aggregate report from a registry reporter (default 2000 hosted; selfhost 2500)
+  INTAKE_MAX_BYTES_PER_DAY?: string; // raw message bytes per token and registry reporter per UTC day (default 50 MiB)
+  INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY?: string; // messages to one report address per UTC day (default 500)
+  INTAKE_MAX_ADDRESS_RECORDS_PER_DAY?: string; // records stored per report address per UTC day (default 200000)
+  INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY?: string; // messages to one workspace per UTC day (default 2000)
+  INTAKE_MAX_WORKSPACE_RECORDS?: string; // report records one workspace may hold (default 1000000)
+  INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY?: string; // messages to the whole instance per UTC day (default 50000)
+  INTAKE_MAX_INSTANCE_RECORDS?: string; // report records the whole instance may hold (default 10000000)
+  INTAKE_MAX_DECOMPRESSED_BYTES?: string; // a registry reporter's report once decompressed (default 1 MiB hosted, 1.25 MiB selfhost; at most 25 MiB)
+  INTAKE_MAX_NONREGISTRY_DECOMPRESSED_BYTES?: string; // a report from any other sender once decompressed (default 1 MiB; never above INTAKE_MAX_DECOMPRESSED_BYTES' ceiling)
+  INTAKE_MAX_RAW_BYTES?: string; // the raw message, checked before anything is read (default 2 MiB)
+  INTAKE_MAX_STORAGE_RETRIES_PER_DAY?: string; // storage failures per domain per day after which a failing message is refused instead of retried (default 20)
+  RETENTION_INTAKE_COUNTERS_DAYS?: string; // daily intake counters (default 8)
+  RETENTION_UNCOUNTED_REPORTS_DAYS?: string; // reports that are stored but never counted: tier unknown or unauthenticated (default 30; falls back to RETENTION_UNAUTHENTICATED_REPORTS_DAYS when only that is set)
+  RETENTION_UNAUTHENTICATED_REPORTS_DAYS?: string; // DEPRECATED name of RETENTION_UNCOUNTED_REPORTS_DAYS, still honoured
+  INTAKE_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY?: string; // messages from uncounted senders to one workspace per UTC day (default 100)
+  INTAKE_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY?: string; // the same for the whole instance (default 2000)
+  INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY?: string; // uncounted records stored per report address per UTC day (default 5000)
+  INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS?: string; // uncounted records one workspace may hold (default 20000)
+  INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS?: string; // uncounted records the whole instance may hold (default 500000)
+  RETENTION_INTAKE_FAILURES_DAYS?: string; // "reports we could not store" markers (default 90)
+  INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY?: string; // reports per authenticated sender not in the registry, per report address per UTC day (default 5)
+  INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY?: string; // reports from all such senders together, per report address per UTC day (default 20)
+  INTAKE_MAX_UNKNOWN_RECORDS_PER_REPORT?: string; // records in a report from such a sender (default 1000)
+  INTAKE_MAX_UNKNOWN_NEW_IPS_PER_REPORT?: string; // uncached source IPs enriched in such a report (default 10)
+  INTAKE_MAX_UNAUTH_REPORTS_PER_DAY?: string; // reports from unauthenticated mail, per report address per UTC day (default 5)
+  INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY?: string; // the same, instance-wide per UTC day (default 10)
+  INTAKE_MAX_UNAUTH_BYTES_PER_DAY?: string; // raw bytes of unauthenticated mail per report address per UTC day (default 10 MiB)
+  INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT?: string; // records in an unauthenticated report (default 200; no IP lookups are made for it)
+  INTAKE_KNOWN_REPORTERS?: string; // extra registry entries, "id|label|dkim-org,…|from,…|report-email,…" separated by ; or newline (docs/hosted.md)
+  INTAKE_KNOWN_REPORTERS_DISABLE?: string; // built-in registry ids to switch off, e.g. "yahoo,fastmail"
+  INTAKE_MAX_NEW_IPS_PER_REPORT?: string; // uncached source IPs enriched per registry-reporter report (default 50)
+  REPORT_COUNTING?: string; // registry | authenticated | all: which stored reports feed the numbers (default registry hosted, all self-host)
   HOSTED_MAX_DOMAINS_PER_WORKSPACE?: string; // hosted-records domains per workspace (default 10)
   MAX_WORKSPACES_PER_USER?: string;     // hosted plan cap: workspaces one person may own (default 5; self-host: none)
   MAX_DOMAINS_PER_WORKSPACE?: string;   // hosted plan cap: domains one workspace may hold (default 10; self-host: none)
@@ -154,6 +179,7 @@ export const coreWorker = Object.freeze({
       await assertSchemaReady(env.DB);
     } catch (e) {
       console.error('[email]', e instanceof Error ? e.message : e);
+      logIntake({ kind: 'other', outcome: 'deferred', reason: 'schema_not_ready', size: message.rawSize ?? 0, ms: 0 });
       // Throw (don't return): returning would accept the message and silently drop the report.
       // An uncaught Worker error is a delivery failure, so the sending MTA retries. (setReject()
       // is a permanent 5xx and senders would give up.)
