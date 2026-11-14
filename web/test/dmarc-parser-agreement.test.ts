@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDmarcTags as shared } from '@inbox-angel/dns-checks/dmarc-tags';
+import { parseDmarcTags as shared } from '@ready-set-mail/dns-checks/dmarc-tags';
 import { enforcementLevel, parseDmarcPolicy, parseDmarcSp, parseDmarcTags } from '../src/lib/dmarc-record';
 
 // The dashboard and the server read DMARC records with one parser; the server's cases are in test/email/dns-snapshot.test.ts.

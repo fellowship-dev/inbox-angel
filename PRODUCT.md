@@ -7,14 +7,14 @@
 web
 
 ## Users
-Dashboard users are the website's audience (Max, 2026-11-13): the dashboard is the next step after registering from the Inbox Angel website, so the person signing in is the same person who arrived from the site, there to see and fix email authentication for the domains they send from. Copy, defaults and brand continue the website's; the dashboard does not address a separate operator audience. **Decision (Max, November 13, 2026): a website registrant lands in hosted self-serve** (`MODE=saas`). The hosted registrant is the primary user: the owner of one domain, or an agency or freelancer looking after several client domains (one workspace per client, clients invited as read-only members). A person is available by booking: "Talk to Max" (the `BOOKING_URL` link) is on every hosted screen and at every stuck moment, and paid work is that person doing it.
+Dashboard users are the website's audience (Max, 2026-11-13): the dashboard is the next step after registering from the Ready Set Mail website, so the person signing in is the same person who arrived from the site, there to see and fix email authentication for the domains they send from. Copy, defaults and brand continue the website's; the dashboard does not address a separate operator audience. **Decision (Max, November 13, 2026): a website registrant lands in hosted self-serve** (`MODE=saas`). The hosted registrant is the primary user: the owner of one domain, or an agency or freelancer looking after several client domains (one workspace per client, clients invited as read-only members). A person is available by booking: "Talk to Max" (the `BOOKING_URL` link) is on every hosted screen and at every stuck moment, and paid work is that person doing it.
 
 Self-hosting on one's own Cloudflare account remains a secondary route to the same dashboard (README).
 
 Roles are per workspace (README, Authentication): **owners** and **admins** perform domain operations; **members** read and see every screen with write controls disabled (`web/PARITY.md`). Product credentials and agent connections are managed by a browser owner in Settings. Interactive agents (MCP) act for a signed-in person under finite, consented grants.
 
 ## Product Purpose
-InboxAngel is a self-hostable email authentication platform. It collects DMARC aggregate reports from receiving mail servers, parses them in a Cloudflare Worker, stores them in D1 and shows trends, failing sources, pass rates and policy guidance in the dashboard. It also manages SPF (lookup depth, flattening), MTA-STS provisioning and TLS-RPT reporting, and a five-step domain setup wizard (Domain, SPF, DKIM, DMARC, Routing).
+Ready Set Mail is a self-hostable email authentication platform. It collects DMARC aggregate reports from receiving mail servers, parses them in a Cloudflare Worker, stores them in D1 and shows trends, failing sources, pass rates and policy guidance in the dashboard. It also manages SPF (lookup depth, flattening), MTA-STS provisioning and TLS-RPT reporting, and a five-step domain setup wizard (Domain, SPF, DKIM, DMARC, Routing).
 
 The stated core value is getting an owner "from 'I don't know' to `p=reject` without breaking your email". Success is a domain whose legitimate senders are all authenticated before enforcement is tightened.
 
@@ -40,7 +40,9 @@ Hosted: sign up, prove you own a domain and see from live DNS where it stands an
 - Hosted mode (`MODE=saas`) is the registrant's route (decided November 13, 2026). What it covers today: live DNS checks, levels, fix guidance and records to copy, for one domain or many (one workspace per client). Not connected yet: DMARC report intake, the free email check and alert mail.
 
 ## Brand Commitments
-Shared with the Inbox Angel website (inboxangel.io): the name; the personality **Calm · Competent · Honest** (friendly, technical when needed); the palette roles (navy `#0B1F3A`, halo gold `#FAD172`, blush `#FCA0A4`; see DESIGN.md); Geist Sans and Geist Mono; the halo-envelope `LogoMark`; WCAG AA.
+Name (Max, 2026-11-13): **Ready Set Mail**, formerly Inbox Angel. The repository is `fellowship-dev/ready-set-mail` and the website's is `fellowship-dev/ready-set-mail-website`; the old GitHub URLs redirect.
+
+Shared with the Ready Set Mail website (readysetmail.com): the name; the personality **Calm · Competent · Honest** (friendly, technical when needed); the palette roles (navy `#0B1F3A`, halo gold `#FAD172`, blush `#FCA0A4`; see DESIGN.md); Geist Sans and Geist Mono; the halo-envelope `LogoMark`; WCAG AA.
 
 - The voice names the email, not the protocol ("signup emails", "password reset"), then SPF/DKIM/DMARC.
 - Never promises inbox placement; separates authentication (fixable, verifiable) from reputation (takes weeks).

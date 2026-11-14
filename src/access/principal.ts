@@ -1,4 +1,4 @@
-import type { MembershipRole } from '@inbox-angel/db';
+import type { MembershipRole } from '@ready-set-mail/db';
 import type { AccessGrant } from './grant';
 export interface AccessSubject {
   principalId: string;

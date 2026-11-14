@@ -1,10 +1,10 @@
--- Inbox Angel baseline schema (history squashed before the first release).
+-- Ready Set Mail baseline schema (history squashed before the first release).
 -- Future schema changes are new numbered files in this directory; see packages/db/SCHEMA.md.
 
 CREATE TABLE domains (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   domain TEXT NOT NULL UNIQUE,             -- e.g. "company.com"
-  rua_address TEXT NOT NULL,               -- e.g. "abc123@reports.inboxangel.com"
+  rua_address TEXT NOT NULL,               -- e.g. "abc123@reports.readysetmail.com"
   -- Current DMARC policy (refreshed on each report ingestion)
   dmarc_policy TEXT,                       -- none | quarantine | reject
   dmarc_pct INTEGER,                       -- 0-100

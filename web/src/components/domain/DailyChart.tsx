@@ -1,4 +1,4 @@
-import { EmptyState } from '@inbox-angel/ui';
+import { EmptyState } from '@ready-set-mail/ui';
 import { Link } from 'react-router';
 import { formatNumber } from '../../lib/format';
 import type { DailyStat } from '../../lib/types';

@@ -1,4 +1,4 @@
-import { Alert, Button, Card, CardContent, PageHeader, Skeleton, toast } from '@inbox-angel/ui';
+import { Alert, Button, Card, CardContent, PageHeader, Skeleton, toast } from '@ready-set-mail/ui';
 import { Check, Copy, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -74,7 +74,7 @@ function NotReady() {
 			) : null}
 			<p className="mt-2">
 				The steps are in{' '}
-				<a href="https://github.com/fellowship-dev/inbox-angel/blob/main/docs/agent-operations.md#installer-setup" target="_blank" rel="noreferrer">
+				<a href="https://github.com/fellowship-dev/ready-set-mail/blob/main/docs/agent-operations.md#installer-setup" target="_blank" rel="noreferrer">
 					the operator guide
 				</a>
 				.

@@ -1,5 +1,5 @@
 /**
- * Drizzle schema for InboxAngel on Cloudflare D1 — the single source of truth.
+ * Drizzle schema for Ready Set Mail on Cloudflare D1 — the single source of truth.
  *
  * Keep this file byte-for-byte aligned with what `migrations/*.sql` produce:
  * `test/schema-drift.test.ts` applies every migration to an empty database and
@@ -622,7 +622,7 @@ export type CfAuthType = (typeof CF_AUTH_TYPES)[number];
 export type CfConnectionStatus = (typeof CF_CONNECTION_STATUSES)[number];
 
 /**
- * A Cloudflare account an Inbox Angel workspace has connected (OAuth, or a pasted API token). One workspace
+ * A Cloudflare account a Ready Set Mail workspace has connected (OAuth, or a pasted API token). One workspace
  * can hold several. `token_envelope` is the AES-GCM envelope of {access, refresh, expires_at}
  * (src/connections/crypto.ts): the plaintext token is never stored, and list queries never select the column.
  */
@@ -651,7 +651,7 @@ export const cloudflareConnections = sqliteTable(
 );
 
 /**
- * The zones Inbox Angel may manage through a connection. Cloudflare consent is per Cloudflare account,
+ * The zones Ready Set Mail may manage through a connection. Cloudflare consent is per Cloudflare account,
  * not per zone, so the owner picks the zones here and every call is checked against this list.
  * A connection with no rows may touch no zone.
  */
@@ -747,7 +747,7 @@ export const domainClaims = sqliteTable(
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
 		domain: text('domain').notNull(),
-		/** Value of the TXT record `_inboxangel.<domain>`. */
+		/** Value of the TXT record `_readysetmail.<domain>`. */
 		token: text('token').notNull(),
 		status: text('status').notNull().default('pending'),
 		created_at: integer('created_at').notNull().default(now),

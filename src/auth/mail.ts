@@ -1,4 +1,4 @@
-// Password-reset and verification emails, over the same outbound path as every other InboxAngel email
+// Password-reset and verification emails, over the same outbound path as every other Ready Set Mail email
 // (the SEND_EMAIL Email Routing binding).
 //
 // Self-host limitation: Cloudflare Email Routing only delivers to destination addresses
@@ -6,7 +6,7 @@
 // not an arbitrary teammate. Without SEND_EMAIL (or a sender address) nothing is sent and the Worker log
 // records only a static reason: for reset and verification the link, the recipient and provider errors
 // can carry credentials, so they are never logged.
-import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 import type { AuthEnv } from './config';
 
 /** The platform's sender: the implicit workspace's from_email (set by the setup wizard), else derived from its base domain. */
@@ -21,11 +21,11 @@ export async function sendPasswordResetEmail(
   user: { email: string; name: string },
   resetUrl: string,
 ): Promise<void> {
-  const text = `Hi,\n\nYou requested a password reset for your InboxAngel account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nInboxAngel`;
+  const text = `Hi,\n\nYou requested a password reset for your Ready Set Mail account.\n\nClick the link below to set a new password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, ignore this email — your password won't change.\n\nReady Set Mail`;
   const from = await senderAddress(env);
   if (env.SEND_EMAIL && from) {
     try {
-      await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [user.email], subject: 'Reset your InboxAngel password', text });
+      await env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: from }, to: [user.email], subject: 'Reset your Ready Set Mail password', text });
     } catch {
       console.error('[auth] reset email send failed (provider error not logged)');
     }
@@ -39,11 +39,11 @@ export async function sendVerificationEmail(
   user: { email: string; name: string },
   verifyUrl: string,
 ): Promise<void> {
-  const text = `Hi,\n\nConfirm your email address to finish setting up your InboxAngel account (you will choose your password on the next page):\n${verifyUrl}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.\n\nInboxAngel`;
+  const text = `Hi,\n\nConfirm your email address to finish setting up your Ready Set Mail account (you will choose your password on the next page):\n${verifyUrl}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.\n\nReady Set Mail`;
   const from = await senderAddress(env);
   if (env.SEND_EMAIL && from) {
     try {
-      await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [user.email], subject: 'Confirm your InboxAngel email', text });
+      await env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: from }, to: [user.email], subject: 'Confirm your Ready Set Mail email', text });
     } catch {
       console.error('[auth] verification email send failed (provider error not logged)');
     }
@@ -61,12 +61,12 @@ function unsent(operation: string, env: AuthEnv): void {
 /** Tells a workspace's owners that a domain was taken from it because another workspace proved it controls the domain. */
 export async function sendEvictionNotice(env: AuthEnv, to: string[], domain: string, keepDays: number): Promise<void> {
   if (to.length === 0) return;
-  const text = `Hi,\n\n${domain} was registered in your InboxAngel workspace before domain ownership was verified. Another workspace has now proven that it controls ${domain} (by a DNS record or through its Cloudflare zone), so ${domain} has been removed from yours: monitoring, hosted records and alerts for it have stopped.\n\nYour report history for ${domain} stays available to export for ${keepDays} days, then it is deleted.\n\nIf ${domain} really is yours, add it again and publish the TXT record InboxAngel shows you at _inboxangel.${domain}; if you believe this is a mistake, reply to this email.\n\nInboxAngel`;
+  const text = `Hi,\n\n${domain} was registered in your Ready Set Mail workspace before domain ownership was verified. Another workspace has now proven that it controls ${domain} (by a DNS record or through its Cloudflare zone), so ${domain} has been removed from yours: monitoring, hosted records and alerts for it have stopped.\n\nYour report history for ${domain} stays available to export for ${keepDays} days, then it is deleted.\n\nIf ${domain} really is yours, add it again and publish the TXT record Ready Set Mail shows you at _readysetmail.${domain}; if you believe this is a mistake, reply to this email.\n\nReady Set Mail`;
   const from = await senderAddress(env);
   if (env.SEND_EMAIL && from) {
     for (const address of to) {
       try {
-        await env.SEND_EMAIL.send({ from: { name: 'InboxAngel', email: from }, to: [address], subject: `${domain} was removed from your InboxAngel workspace`, text });
+        await env.SEND_EMAIL.send({ from: { name: 'Ready Set Mail', email: from }, to: [address], subject: `${domain} was removed from your Ready Set Mail workspace`, text });
       } catch (e) {
         console.error('[auth] eviction notice send failed:', e);
       }

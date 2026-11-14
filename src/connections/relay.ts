@@ -1,4 +1,4 @@
-// The OAuth relay (connect.inboxangel.io) — code behind config, not deployed.
+// The OAuth relay (connect.readysetmail.com) — code behind config, not deployed.
 //
 // A public OAuth client has fixed redirect URIs, but a self-hosted instance lives on any hostname. The
 // relay is the one registered redirect URI. It holds no tokens and no per-instance state:
@@ -14,7 +14,7 @@
 //
 //      Why the page is mandatory: `cb` is chosen by whoever builds the /relay/start link. Without the confirmation an
 //      attacker could send a victim relay/start?cb=https://evil.example/x&challenge=<attacker's PKCE challenge>, the
-//      victim would consent to "Inbox Angel" at Cloudflare, and the code would land on the attacker's host, who could
+//      victim would consent to "Ready Set Mail" at Cloudflare, and the code would land on the attacker's host, who could
 //      redeem it with their own verifier. The confirmation page lets the victim see where the code is going. Do not
 //      deploy the relay without it. CF_OAUTH_RELAY_ALLOWED_HOSTS (optional) additionally restricts the hosts.
 //   3. The instance verifies its own state and redeems the code at Cloudflare's token endpoint with the PKCE verifier
@@ -121,9 +121,9 @@ function confirmPage(host: string, origin: string, fields: { state: string; code
 .host{font:600 1.25rem ui-monospace,monospace;background:#fff4d6;border:2px solid #d99a00;padding:.6rem .8rem;border-radius:6px;word-break:break-all}
 button{font:inherit;padding:.6rem 1rem;border-radius:6px;border:0;background:#111;color:#fff;cursor:pointer}p.s{color:#555;font-size:.9rem}</style></head>
 <body><h1>Send your Cloudflare authorization to this site?</h1>
-<p>You just approved <strong>Inbox Angel</strong> at Cloudflare. To finish, the authorization will be handed to:</p>
+<p>You just approved <strong>Ready Set Mail</strong> at Cloudflare. To finish, the authorization will be handed to:</p>
 <p class="host">${h}</p>
-<p>Continue <strong>only if you started this from your own Inbox Angel</strong> at that address. Anyone who receives the authorization can change DNS in the Cloudflare account you approved. If you did not expect this page, close it.</p>
+<p>Continue <strong>only if you started this from your own Ready Set Mail</strong> at that address. Anyone who receives the authorization can change DNS in the Cloudflare account you approved. If you did not expect this page, close it.</p>
 <form method="post" action="/relay/confirm">
 <input type="hidden" name="state" value="${escapeHtml(fields.state)}"><input type="hidden" name="code" value="${escapeHtml(fields.code)}">
 <input type="hidden" name="nonce" value="${escapeHtml(fields.nonce)}"><input type="hidden" name="token" value="${escapeHtml(fields.token)}">

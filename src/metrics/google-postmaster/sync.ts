@@ -1,4 +1,4 @@
-import type { WorkspaceScope } from '@inbox-angel/db';
+import type { WorkspaceScope } from '@ready-set-mail/db';
 import type { TokenCrypto } from '../../connections/crypto';
 import type { MetricWindow } from '../contracts';
 import { getGoogleEvidence } from '../store';

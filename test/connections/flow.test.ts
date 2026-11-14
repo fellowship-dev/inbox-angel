@@ -521,7 +521,7 @@ describe('cross-workspace isolation', () => {
   it('the query layer is scoped too: another workspace\'s id finds, changes and deletes nothing', async () => {
     const w = await world();
     const c = await w.addToken(w.A.token, 'tok-pasted-1234567890abcdef');
-    const { forWorkspace } = await import('@inbox-angel/db');
+    const { forWorkspace } = await import('@ready-set-mail/db');
     const b = forWorkspace(w.env.DB, w.B.ws);
     expect(await b.connections.get(c.id)).toBeNull();
     expect(await b.connections.getSecret(c.id)).toBeNull();

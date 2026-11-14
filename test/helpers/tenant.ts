@@ -1,5 +1,5 @@
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import type { BoundEnv } from '../../src/index';
 import { TenantContext, type TenantSettings } from '../../src/tenancy/context';
 import type { Mode } from '../../src/tenancy/mode';

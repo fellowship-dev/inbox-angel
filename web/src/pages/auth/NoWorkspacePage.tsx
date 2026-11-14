@@ -1,4 +1,4 @@
-import { Alert, Button, Input } from '@inbox-angel/ui';
+import { Alert, Button, Input } from '@ready-set-mail/ui';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, errorMessage } from '../../lib/api';

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse as parseYaml } from 'yaml';
 
-const root = 'plugins/inbox-angel';
+const root = 'plugins/ready-set-mail';
 const json = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 describe('distributable agent setup', () => {
  it('ships matching portable and Codex identities plus three focused skills', () => {
@@ -27,8 +27,8 @@ describe('distributable agent setup', () => {
   const dir=mkdtempSync(join(tmpdir(),'ia-plugin-')), out=join(dir,'configured');
   const result=spawnSync(process.execPath,['tools/configure-agent-plugin.mjs','--endpoint','https://my-install.example/mcp','--out',out],{encoding:'utf8'});
   expect(result.status,result.stderr).toBe(0);
-  expect(json(join(out,'mcp.json')).mcpServers['inbox-angel']).toEqual({type:'streamable-http',url:'https://my-install.example/mcp'});
-  expect(json(join(out,'.mcp.json')).mcpServers['inbox-angel']).toEqual({type:'http',url:'https://my-install.example/mcp'});
+  expect(json(join(out,'mcp.json')).mcpServers['ready-set-mail']).toEqual({type:'streamable-http',url:'https://my-install.example/mcp'});
+  expect(json(join(out,'.mcp.json')).mcpServers['ready-set-mail']).toEqual({type:'http',url:'https://my-install.example/mcp'});
   expect(json(`${root}/mcp.json`).mcpServers).toEqual({});
   expect(existsSync(join(out,'skills/email-health/SKILL.md'))).toBe(true);
   // Reconfiguration cannot overwrite an existing operator package.

@@ -78,7 +78,7 @@ describe('stop conditions', () => {
   it('checks the suppression list before every send, even for a lead enrolled earlier', async () => {
     const w = funnelWorld();
     await w.enroll('a@acme.com');
-    w.db.sqlite.prepare('INSERT INTO suppression (email_hash, reason) VALUES (?, ?)').run(await (await import('@inbox-angel/db')).hashEmail('a@acme.com'), 'complaint');
+    w.db.sqlite.prepare('INSERT INTO suppression (email_hash, reason) VALUES (?, ?)').run(await (await import('@ready-set-mail/db')).hashEmail('a@acme.com'), 'complaint');
     const r = await run(w, T0 + DAY);
     expect(r).toMatchObject({ sent: 0, stopped: 1 });
     expect(w.mailer.sent).toEqual([]);
@@ -161,7 +161,7 @@ describe('errors are not bounces', () => {
   });
 
   it('an unverified domain, a bad key, a quota and an unrecognised error body all count as configuration errors too', async () => {
-    for (const [status, body] of [[403, { name: 'validation_error', message: 'The inboxangel.io domain is not verified.' }], [401, { name: 'missing_api_key', message: 'Missing API key' }], [429, { name: 'daily_quota_exceeded', message: 'quota' }], [400, { message: 'new kind of error' }], [422, 'not json']] as const) {
+    for (const [status, body] of [[403, { name: 'validation_error', message: 'The readysetmail.com domain is not verified.' }], [401, { name: 'missing_api_key', message: 'Missing API key' }], [429, { name: 'daily_quota_exceeded', message: 'quota' }], [400, { message: 'new kind of error' }], [422, 'not json']] as const) {
       const w = funnelWorld();
       await w.enroll('a@acme.com');
       vi.stubGlobal('fetch', vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })));
@@ -197,7 +197,7 @@ describe('errors are not bounces', () => {
     for (const e of ['a@a.com', 'b@b.com']) await w.enroll(e, {}, T0, e.split('@')[1]);
     let reads = 0;
     // MAIL_REPLY_TO is read once for readiness, then while composing the first email: that read throws.
-    Object.defineProperty(w.env, 'MAIL_REPLY_TO', { get() { if (++reads >= 2) throw new Error('boom'); return 'max@inboxangel.io'; }, configurable: true });
+    Object.defineProperty(w.env, 'MAIL_REPLY_TO', { get() { if (++reads >= 2) throw new Error('boom'); return 'max@readysetmail.com'; }, configurable: true });
     expect(await run(w, T0 + DAY)).toMatchObject({ sent: 0, failed: 1 });
     expect(w.mailer.sent).toEqual([]);
     expect(w.rows('SELECT step, status FROM leads')).toEqual(Array(2).fill({ step: 0, status: 'active' }));
@@ -266,13 +266,13 @@ describe('copy', () => {
     expect(DISCLOSURE).toMatch(/keeping it fixed/);
   });
 
-  it('day 14 is from "Max at Inbox Angel" and signed that way', async () => {
+  it('day 14 is from "Max at Ready Set Mail" and signed that way', async () => {
     const w = funnelWorld();
     await w.enroll('a@acme.com');
     for (const d of SEQUENCE_DAYS) await run(w, T0 + d * DAY);
-    expect(w.mailer.sent.map(m => m.from.name)).toEqual(['Inbox Angel', 'Inbox Angel', 'Inbox Angel', 'Inbox Angel', 'Max at Inbox Angel']);
-    expect(w.mailer.sent[4].from.email).toBe('max@inboxangel.io');
-    expect(w.mailer.sent[4].text).toMatch(/Max at Inbox Angel\n/);
+    expect(w.mailer.sent.map(m => m.from.name)).toEqual(['Ready Set Mail', 'Ready Set Mail', 'Ready Set Mail', 'Ready Set Mail', 'Max at Ready Set Mail']);
+    expect(w.mailer.sent[4].from.email).toBe('max@readysetmail.com');
+    expect(w.mailer.sent[4].text).toMatch(/Max at Ready Set Mail\n/);
   });
 });
 
@@ -331,10 +331,10 @@ describe('what goes out', () => {
     await run(w, T0 + DAY);
     const m = w.mailer.sent[0];
     expect(m.to).toBe('a@acme.com');
-    expect(m.from).toEqual({ name: 'Inbox Angel', email: 'max@inboxangel.io' });
-    expect(m.replyTo).toBe('max@inboxangel.io');
+    expect(m.from).toEqual({ name: 'Ready Set Mail', email: 'max@readysetmail.com' });
+    expect(m.replyTo).toBe('max@readysetmail.com');
     const link = m.headers!['List-Unsubscribe'].slice(1, -1);
-    expect(link).toMatch(/^https:\/\/app\.inboxangel\.io\/api\/unsubscribe\?t=/);
+    expect(link).toMatch(/^https:\/\/app\.readysetmail\.com\/api\/unsubscribe\?t=/);
     expect(m.headers!['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
     expect(m.text).toContain(`Unsubscribe: ${link}`);
     expect(m.text).toContain('1 Example Street, Wilmington, DE 19801, USA');
@@ -384,7 +384,7 @@ describe('what goes out', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.resend.com/emails');
     expect((init.headers as Record<string, string>)['Idempotency-Key']).toMatch(/^lead-\d+-step-0$/);
-    expect(JSON.parse(init.body as string)).toMatchObject({ to: ['a@acme.com'], reply_to: 'max@inboxangel.io' });
+    expect(JSON.parse(init.body as string)).toMatchObject({ to: ['a@acme.com'], reply_to: 'max@readysetmail.com' });
     vi.unstubAllGlobals();
   });
 });

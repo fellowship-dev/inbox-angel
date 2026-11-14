@@ -8,7 +8,7 @@ import { dnsFrom, type DnsName } from './dns';
 import { HOSTED_ENV, NOW, quiet, twoWorkspaces } from './world';
 
 const ID = 'abcdefghijklmnop';
-const APEX = 'h.inboxangel.io';
+const APEX = 'h.readysetmail.com';
 const N = hostedNames(ID, APEX);
 
 const inPlace = (): Record<string, DnsName> => ({
@@ -39,7 +39,7 @@ describe('pointer verification', () => {
 
   it('wrong when something else is there', async () => {
     const r = await verifyPointers('a-corp.com', ID, APEX, dnsFrom({
-      '_dmarc.a-corp.com': { CNAME: 'otherid._dmarc.h.inboxangel.io' },        // someone else's hosted id
+      '_dmarc.a-corp.com': { CNAME: 'otherid._dmarc.h.readysetmail.com' },        // someone else's hosted id
       'a-corp.com': { TXT: ['v=spf1 include:_spf.google.com -all'] },            // SPF without our include
       '_mta-sts.a-corp.com': { TXT: ['v=STSv1; id=1'] },                          // a TXT where the CNAME should be
       '_smtp._tls.a-corp.com': { CNAME: 'tls.elsewhere.example' },

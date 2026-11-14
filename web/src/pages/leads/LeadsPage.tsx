@@ -1,4 +1,4 @@
-import { Alert, Badge, EmptyState, PageHeader } from '@inbox-angel/ui';
+import { Alert, Badge, EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { Megaphone } from 'lucide-react';
 import { ListSkeleton, LoadError } from '../../components/states';
@@ -45,7 +45,7 @@ function LeadsTable({ data }: { data: LeadsResponse }) {
 			{!data.delivery.enabled ? (
 				<Alert variant="info" title="Follow-up emails are off">
 					Nobody listed here gets the onboarding emails until they are turned on for this instance.{' '}
-					<a href="https://github.com/fellowship-dev/inbox-angel/blob/main/docs/email-funnel.md" target="_blank" rel="noreferrer">
+					<a href="https://github.com/fellowship-dev/ready-set-mail/blob/main/docs/email-funnel.md" target="_blank" rel="noreferrer">
 						How to turn them on
 					</a>
 				</Alert>

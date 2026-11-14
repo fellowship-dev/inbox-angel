@@ -15,7 +15,7 @@ function world() {
   }));
   cf.mx['acme.com'] = ['10 mx.acme.com.'];
   cf.mx['other-company.org'] = ['10 mx.other-company.org.'];
-  cf.routes['zone-acme'] = [{ pattern: 'inbox.acme.com/*', script: 'inbox-angel-worker' }];
+  cf.routes['zone-acme'] = [{ pattern: 'inbox.acme.com/*', script: 'ready-set-mail-worker' }];
   return cf;
 }
 
@@ -55,7 +55,7 @@ describe('provisionMtaSts', () => {
   it('falls back to {worker}.{account subdomain}.workers.dev, not the bare {worker}.workers.dev', async () => {
     const cf = world();
     await provisionMtaSts(tenant({ workersSubdomain: 'fellowshipdev' }), 'other-company.org');
-    expect(cf.records.get('zone-other')!.find(r => r.type === 'CNAME')!.content).toBe('inbox-angel-worker.fellowshipdev.workers.dev');
+    expect(cf.records.get('zone-other')!.find(r => r.type === 'CNAME')!.content).toBe('ready-set-mail-worker.fellowshipdev.workers.dev');
   });
 
   it('honours a custom WORKER_NAME in the fallback address', async () => {
@@ -73,7 +73,7 @@ describe('provisionMtaSts', () => {
       return original(input, init);
     });
     await provisionMtaSts(tenant(), 'other-company.org');
-    expect(cf.records.get('zone-other')!.find(r => r.type === 'CNAME')!.content).toBe('inbox-angel-worker.looked-up.workers.dev');
+    expect(cf.records.get('zone-other')!.find(r => r.type === 'CNAME')!.content).toBe('ready-set-mail-worker.looked-up.workers.dev');
   });
 
   it('refuses to publish a CNAME that cannot resolve when the subdomain is unknown', async () => {

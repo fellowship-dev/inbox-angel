@@ -1,6 +1,6 @@
 // Enrolment, unsubscribe and manual stops for the onboarding sequence.
 
-import { funnelQueries, type LeadStatus } from '@inbox-angel/db';
+import { funnelQueries, type LeadStatus } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import type { CheckSummary } from '../email/report-formatter';
 import { sequenceEnabled } from './config';

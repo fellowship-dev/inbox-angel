@@ -1,4 +1,4 @@
-import { Button, toast } from '@inbox-angel/ui';
+import { Button, toast } from '@ready-set-mail/ui';
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 

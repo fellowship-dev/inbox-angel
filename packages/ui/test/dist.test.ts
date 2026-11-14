@@ -15,14 +15,14 @@ describe("built package (dist) in Node ESM", () => {
 		expect(existsSync(join(dist, "index.js"))).toBe(true);
 	});
 	it("main entry imports and exports the components", () => {
-		const out = node(`const m = await import("@inbox-angel/ui"); console.log(JSON.stringify(["Button","Dialog","AppShell","LevelCard","RecordBlock","Toaster","buttonVariants","colors"].map(k => typeof m[k])))`);
+		const out = node(`const m = await import("@ready-set-mail/ui"); console.log(JSON.stringify(["Button","Dialog","AppShell","LevelCard","RecordBlock","Toaster","buttonVariants","colors"].map(k => typeof m[k])))`);
 		expect(JSON.parse(out)).toEqual(["object", "function", "function", "object", "object", "function", "function", "object"]);
 	});
 	it("server entry imports and server-renders without a client runtime", () => {
 		const out = node(`
 			import { createElement as h } from "react";
 			import { renderToString } from "react-dom/server";
-			const m = await import("@inbox-angel/ui/server");
+			const m = await import("@ready-set-mail/ui/server");
 			console.log(renderToString(h("div", null, h(m.Badge, { variant: "success" }, "Pass"), h(m.StatusDot, { status: "ok", label: "Healthy" }), h(m.LevelCard, { level: 1, domain: "example.test" }))));
 		`);
 		expect(out).toContain("Pass");
@@ -30,7 +30,7 @@ describe("built package (dist) in Node ESM", () => {
 		expect(out).toContain("Level 1");
 	});
 	it("tokens entry imports", () => {
-		expect(node(`const t = await import("@inbox-angel/ui/tokens"); console.log(t.colors.light.brand)`)).toBe("#0b1f3a");
+		expect(node(`const t = await import("@ready-set-mail/ui/tokens"); console.log(t.colors.light.brand)`)).toBe("#0b1f3a");
 	});
 	it("keeps the \"use client\" directive in the build output of interactive components", () => {
 		for (const f of ["button", "dialog", "select", "toast", "app-shell", "record-block", "check-result", "tooltip", "tabs", "dropdown-menu", "checkbox", "switch", "label", "icon-button"]) {

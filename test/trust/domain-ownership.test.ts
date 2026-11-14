@@ -1,7 +1,7 @@
 // Domain ownership proof (SaaS): a domain is a pending claim until its owner is proven. Pending claims show no
 // reports, check results or stats, trigger no DNS writes, and never block another workspace.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, signupVerified, setupOwner } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from '../hosted/world';
@@ -36,8 +36,8 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     const res = await add(w, w.A, 'acme.com');
     expect(res.status).toBe(202);
     const body = await json(res);
-    expect(body).toMatchObject({ pending: true, domain: null, claim: { domain: 'acme.com', status: 'pending', txt_name: '_inboxangel.acme.com' } });
-    expect(body.claim.txt_value).toMatch(/^inboxangel-verify=[0-9a-f]{32}$/);
+    expect(body).toMatchObject({ pending: true, domain: null, claim: { domain: 'acme.com', status: 'pending', txt_name: '_readysetmail.acme.com' } });
+    expect(body.claim.txt_value).toMatch(/^readysetmail-verify=[0-9a-f]{32}$/);
     expect(w.rows("SELECT * FROM domains WHERE domain = 'acme.com'")).toEqual([]);
     expect(w.rows('SELECT * FROM monitor_subscriptions')).toEqual([]);
     expect(w.cf.calls).toEqual([]);
@@ -68,7 +68,7 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     expect(a).not.toBe(b); // each claim has its own token
     // asking again returns the same claim (instructions stay valid)
     const again = await json(await add(w, w.A, 'acme.com'));
-    expect(again.claim.txt_value).toBe(`inboxangel-verify=${a}`);
+    expect(again.claim.txt_value).toBe(`readysetmail-verify=${a}`);
     expect(w.rows('SELECT * FROM domain_claims')).toHaveLength(2);
   });
 
@@ -82,22 +82,34 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     expect((await json(res)).error).toMatch(/not found yet/);
     expect(w.rows("SELECT last_error FROM domain_claims WHERE id = ?", claim.id)[0].last_error).toMatch(/not found/);
 
-    w.cf.doh['_inboxangel.acme.com'] = ['inboxangel-verify=' + 'f'.repeat(32)]; // someone else's token
+    w.cf.doh['_readysetmail.acme.com'] = ['readysetmail-verify=' + 'f'.repeat(32)]; // someone else's token
     expect((await verify()).status).toBe(422);
     expect(w.rows("SELECT * FROM domains WHERE domain = 'acme.com'")).toEqual([]);
 
-    w.cf.doh['_inboxangel.acme.com'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [claim.txt_value];
     res = await verify();
     expect(res.status).toBe(201);
     expect(w.rows("SELECT workspace_id, verified_via FROM domains WHERE domain = 'acme.com'")).toEqual([{ workspace_id: w.A.ws, verified_via: 'txt' }]);
     expect(w.rows('SELECT * FROM domain_claims WHERE workspace_id = ? AND settled_at IS NULL', w.A.ws)).toEqual([]);
   });
 
+  it('still accepts a claim published under the record name used before the rename to Ready Set Mail', async () => {
+    const w = await world();
+    const { claim } = await json(await add(w, w.A, 'acme.com'));
+    const token = String(claim.txt_value).replace(/^readysetmail-verify=/, '');
+    w.cf.doh['_inboxangel.acme.com'] = ['readysetmail-verify=' + token]; // @legacy-name: new value under the old name proves nothing
+    expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} })).status).toBe(422);
+    w.cf.doh['_inboxangel.acme.com'] = ['inboxangel-verify=' + token]; // @legacy-name
+    const res = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} });
+    expect(res.status).toBe(201);
+    expect(w.rows("SELECT verified_via FROM domains WHERE domain = 'acme.com'")).toEqual([{ verified_via: 'txt' }]);
+  });
+
   it('proves and resumes a domain without configuring an intake hub', async () => {
     const w = await world();
     w.db.sqlite.prepare("DELETE FROM settings WHERE workspace_id = ?").run(w.A.ws);
     const { claim } = await json(await add(w, w.A, 'fresh.example.net'));
-    w.cf.doh['_inboxangel.fresh.example.net'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.fresh.example.net'] = [claim.txt_value];
     const verified = await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.A.token, body: {} });
     expect(verified.status).toBe(201);
     const body = await json(verified);
@@ -115,7 +127,7 @@ describe('a claimed domain stays pending until ownership is proven', () => {
     const a = (await json(await add(w, w.A, 'acme.com'))).claim;
     const b = (await json(await add(w, w.B, 'acme.com'))).claim;
     // B publishes ITS token, A publishes its own; A verifies first.
-    w.cf.doh['_inboxangel.acme.com'] = [a.txt_value, b.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [a.txt_value, b.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${a.id}/verify`, { key: w.A.token, body: {} })).status).toBe(201);
 
     const list = await json(await call(w.env, 'GET', '/api/domains', { key: w.B.token }));
@@ -132,7 +144,7 @@ describe('a claimed domain stays pending until ownership is proven', () => {
   it('a workspace cannot verify, read or drop another workspace’s claim', async () => {
     const w = await world();
     const a = (await json(await add(w, w.A, 'acme.com'))).claim;
-    w.cf.doh['_inboxangel.acme.com'] = [a.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [a.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${a.id}/verify`, { key: w.B.token, body: {} })).status).toBe(404);
     expect((await call(w.env, 'DELETE', `/api/domains/claims/${a.id}`, { key: w.B.token })).status).toBe(404);
     expect(w.rows('SELECT * FROM domains')).toEqual([]);
@@ -214,7 +226,7 @@ describe('other proofs', () => {
     const w = await world();
     const bulk = await json(await call(w.env, 'POST', '/api/domains/bulk-import', { key: w.A.token, body: { domains: 'one.example.net\ntwo.example.net' } }));
     expect(bulk.results.map((r: any) => r.status)).toEqual(['pending', 'pending']);
-    expect(bulk.results[0].claim.txt_name).toBe('_inboxangel.one.example.net');
+    expect(bulk.results[0].claim.txt_name).toBe('_readysetmail.one.example.net');
     const base = await call(w.env, 'POST', '/api/settings/base-domain', { key: w.A.token, body: { domain: 'hub.example.net' } });
     expect(base.status).toBe(202);
     expect(w.rows("SELECT * FROM domains")).toEqual([]);
@@ -278,7 +290,7 @@ describe('legacy rows (domains that existed before verification) never block a p
     expect(res.status).toBe(202); // not 409
     const { claim } = await json(res);
     expect(w.rows("SELECT workspace_id FROM domains WHERE domain = 'acme.com'")).toEqual([{ workspace_id: w.A.ws }]); // not evicted without proof
-    w.cf.doh['_inboxangel.acme.com'] = [claim.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [claim.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${claim.id}/verify`, { key: w.B.token, body: {} })).status).toBe(201);
     expect(w.rows("SELECT workspace_id, verified_via FROM domains WHERE domain = 'acme.com'")).toEqual([{ workspace_id: w.B.ws, verified_via: 'txt' }]);
     await new Promise(r => setTimeout(r, 20));
@@ -303,7 +315,7 @@ describe('concurrent verification', () => {
     const w = await world();
     const a = (await json(await add(w, w.A, 'acme.com'))).claim;
     const b = (await json(await add(w, w.B, 'acme.com'))).claim;
-    w.cf.doh['_inboxangel.acme.com'] = [a.txt_value, b.txt_value];
+    w.cf.doh['_readysetmail.acme.com'] = [a.txt_value, b.txt_value];
     const [ra, rb] = await Promise.all([
       call(w.env, 'POST', `/api/domains/claims/${a.id}/verify`, { key: w.A.token, body: {} }),
       call(w.env, 'POST', `/api/domains/claims/${b.id}/verify`, { key: w.B.token, body: {} }),

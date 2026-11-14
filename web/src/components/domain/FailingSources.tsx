@@ -1,4 +1,4 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@ready-set-mail/ui';
 import { Link } from 'react-router';
 import { formatNumber } from '../../lib/format';
 import type { FailingSource } from '../../lib/types';

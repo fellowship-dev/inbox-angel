@@ -1,4 +1,4 @@
-import { Alert, CheckResult, CheckResultList, RecordBlock, StatusDot, toast } from '@inbox-angel/ui';
+import { Alert, CheckResult, CheckResultList, RecordBlock, StatusDot, toast } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { WriteButton } from '../../../components/states';
@@ -38,7 +38,7 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 	const hostedNoReports = useHosted() && !rua;
 	// What covers this name when it has no record of its own: a parent's policy, nothing, or unknown (lookup failed).
 	const coverage = dmarcCoverage(status, dmarcFailed.length > 0);
-	// Without a report address nothing reaches Inbox Angel, whatever the record says, so it is never "configured".
+	// Without a report address nothing reaches Ready Set Mail, whatever the record says, so it is never "configured".
 	const severity = hostedNoReports
 		? coverage.kind === 'unknown'
 			? 'unknown'
@@ -135,19 +135,19 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 							)}
 							<div className="space-y-1">
 								<StatusDot status="unknown" label="Reports not connected yet" className="font-medium" />
-								<p className="text-sm text-ink-2">No reports reach Inbox Angel for this name, so nobody can confirm yet that every service sending as it passes.</p>
+								<p className="text-sm text-ink-2">No reports reach Ready Set Mail for this name, so nobody can confirm yet that every service sending as it passes.</p>
 							</div>
 						</>
 					) : null}
 					{!rua && !applied && !hostedNoReports ? (
 						<Alert variant="warning" title="Report address not configured yet">
-							This domain has no Inbox Angel report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
+							This domain has no Ready Set Mail report address, so there is no record to copy yet. A DMARC record needs one to send reports here.
 						</Alert>
 					) : null}
 					{rua && !applied && coverage.kind === 'inherited' ? (
 						<p className="text-sm text-ink-2">
 							{inheritedSentence(status.domain, coverage)}
-							{floor ? ` To receive reports here, publish the record below: it keeps ${keptEnforcement(coverage, floor)} and adds Inbox Angel's report address.` : ''}
+							{floor ? ` To receive reports here, publish the record below: it keeps ${keptEnforcement(coverage, floor)} and adds Ready Set Mail's report address.` : ''}
 						</p>
 					) : null}
 					{rua && !applied && coverage.kind === 'unknown' && !dmarc.found ? (
@@ -155,13 +155,13 @@ export function DmarcStep({ status, onNext, onSkip, onRetry }: StepProps) {
 					) : null}
 					{severity === 'error' && rua && !applied && coverage.kind === 'none' ? (
 						<p className="text-sm text-ink-2">
-							Without a DMARC record receiving servers send no reports, so Inbox Angel has nothing to analyse. Create one with <code className="font-mono text-ink-1">p=none</code>{' '}
+							Without a DMARC record receiving servers send no reports, so Ready Set Mail has nothing to analyse. Create one with <code className="font-mono text-ink-1">p=none</code>{' '}
 							(monitor only) so reports start flowing.
 						</p>
 					) : null}
 					{severity === 'warning' && rua && !applied ? (
 						<p className="text-sm text-ink-2">
-							Your DMARC record exists but does not send reports to Inbox Angel. Add <code className="font-mono text-ink-1">rua=mailto:{rua}</code> to receive
+							Your DMARC record exists but does not send reports to Ready Set Mail. Add <code className="font-mono text-ink-1">rua=mailto:{rua}</code> to receive
 							aggregate reports.
 						</p>
 					) : null}

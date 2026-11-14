@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { resolveDomain } from '../../src/email/resolve-domain';
 import { makeTenant } from '../helpers/tenant';
 import type { Domain } from '../../src/db/types';
@@ -9,7 +9,7 @@ import type { Domain } from '../../src/db/types';
 const DOMAIN: Domain = {
   id: 1,
   domain: 'acme.com',
-  rua_address: 'rua@reports.inboxangel.io',
+  rua_address: 'rua@reports.readysetmail.com',
   dmarc_policy: 'quarantine',
   dmarc_pct: 100,
   spf_record: 'v=spf1 -all',
@@ -71,7 +71,7 @@ describe('resolveDomain', () => {
   });
 
   it('returns different domains for different lookups', async () => {
-    const domain2: Domain = { ...DOMAIN, id: 2, domain: 'acme.io', rua_address: 'rua@reports.inboxangel.io' };
+    const domain2: Domain = { ...DOMAIN, id: 2, domain: 'acme.io', rua_address: 'rua@reports.readysetmail.com' };
     const db = makeDb(domain2);
     const result = await resolveDomain(makeTenant({ db }), 'acme.io');
 

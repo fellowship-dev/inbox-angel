@@ -31,7 +31,7 @@ export const dmarcMissing: CatalogFile = {
         "https://support.google.com/a/answer/81126",
         "https://substrate.office.com/ip-domain-management-snds/postmaster"
       ],
-      "optional_next": "Optional next step: if dmarc@ is not a mailbox you read, change it to `rua=mailto:<a mailbox you read>` (or let Inbox Angel receive and read them for you)."
+      "optional_next": "Optional next step: if dmarc@ is not a mailbox you read, change it to `rua=mailto:<a mailbox you read>` (or let Ready Set Mail receive and read them for you)."
     }
   ]
 };

@@ -14,7 +14,7 @@ function makeSendEmail() {
 function makeEnv(sendEmail?: { send: ReturnType<typeof vi.fn> }) {
   return makeTenant({
     env: { SEND_EMAIL: sendEmail as any },
-    settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' },
+    settings: { reportsDomain: 'reports.readysetmail.com', fromEmail: 'check@reports.readysetmail.com' },
   });
 }
 
@@ -31,7 +31,7 @@ describe('sendChangeNotification', () => {
     const env = makeEnv(sendEmail);
     await sendChangeNotification('user@example.com', 'acme.com', [improved], env);
     const arg = sendEmail.send.mock.calls[0][0];
-    expect(arg.from.email).toBe('check@reports.inboxangel.io');
+    expect(arg.from.email).toBe('check@reports.readysetmail.com');
     expect(arg.to).toContain('user@example.com');
   });
 
@@ -64,7 +64,7 @@ describe('sendChangeNotification', () => {
     const env = makeEnv(sendEmail);
     await sendChangeNotification('user@example.com', 'acme.com', [degraded], env);
     const arg = sendEmail.send.mock.calls[0][0];
-    expect(arg.text).toContain('inboxangel.io');
+    expect(arg.text).toContain('readysetmail.com');
   });
 
   it('does not call SEND_EMAIL when binding is absent', async () => {

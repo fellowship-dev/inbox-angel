@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 const NOW = Math.floor(Date.now() / 1000);
 

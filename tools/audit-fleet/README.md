@@ -80,7 +80,7 @@ Shards are round-robin over the sorted, deduped domain list, so every box derive
 ```bash
 N=4
 # 1. bring up N devboxes
-for i in $(seq 1 $N); do pylot devbox up inbox-angel-worker; done
+for i in $(seq 1 $N); do pylot devbox up ready-set-mail-worker; done
 ```
 
 Each devbox needs the same `out/seeds.csv` (it is not in git). Copy it to each, e.g. by `exec` with a heredoc, or rebuild it from the same `out/seeds/raw-*.csv`. Verify with a checksum, since shards only line up if the files are identical:
@@ -91,15 +91,15 @@ sha256sum tools/audit-fleet/out/seeds.csv     # same on every box
 
 ```bash
 # 2. start shard i on devbox i (use whichever of prompt / exec your pylot version supports)
-pylot devbox exec <devbox-i> -- bash -lc 'cd inbox-angel-worker/tools/audit-fleet && nohup node run.ts --in out/seeds.csv --shard i/N > out/run.log 2>&1 &'
+pylot devbox exec <devbox-i> -- bash -lc 'cd ready-set-mail-worker/tools/audit-fleet && nohup node run.ts --in out/seeds.csv --shard i/N > out/run.log 2>&1 &'
 # or: pylot devbox prompt <devbox-i> "cd tools/audit-fleet && node run.ts --in out/seeds.csv --shard i/N, then report the contents of out/run-meta.i-of-N.json"
 
 # 3. watch progress
-pylot devbox exec <devbox-i> -- tail -n 2 inbox-angel-worker/tools/audit-fleet/out/run.log
+pylot devbox exec <devbox-i> -- tail -n 2 ready-set-mail-worker/tools/audit-fleet/out/run.log
 
 # 4. collect (when run-meta.<i>of<N>.json exists), into the local out/
-pylot devbox exec <devbox-i> -- cat inbox-angel-worker/tools/audit-fleet/out/results.<i>of<N>.jsonl > out/results.<i>of<N>.jsonl
-pylot devbox exec <devbox-i> -- cat inbox-angel-worker/tools/audit-fleet/out/run-meta.<i>of<N>.json > out/run-meta.<i>of<N>.json
+pylot devbox exec <devbox-i> -- cat ready-set-mail-worker/tools/audit-fleet/out/results.<i>of<N>.jsonl > out/results.<i>of<N>.jsonl
+pylot devbox exec <devbox-i> -- cat ready-set-mail-worker/tools/audit-fleet/out/run-meta.<i>of<N>.json > out/run-meta.<i>of<N>.json
 
 # 5. merge
 node merge.ts --dir out            # -> out/merged/{results.jsonl,aggregate.json,run-meta.json}

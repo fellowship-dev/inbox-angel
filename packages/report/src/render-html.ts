@@ -31,7 +31,7 @@ const SEV: Record<string, [string, string]> = { high: ['▲', 'High'], medium: [
 const STATE: Record<string, [string, string]> = { done: ['✓', 'Done'], todo: ['○', 'To do'], unknown: ['?', 'Could not check'] };
 const tag = (cls: string, [icon, word]: [string, string]) => `<span class="tag ${cls}"><span aria-hidden="true">${icon}</span> ${E(word)}</span>`;
 
-/** The halo-envelope mark (`LogoMark` in @inbox-angel/ui): navy square, gold halo, gold envelope with a navy flap. */
+/** The halo-envelope mark (`LogoMark` in @ready-set-mail/ui): navy square, gold halo, gold envelope with a navy flap. */
 const LOGO = '<svg class="mark" viewBox="0 0 100 100" width="32" height="32" aria-hidden="true">'
   + '<rect width="100" height="100" rx="12" fill="#0b1f3a"/>'
   + '<ellipse cx="50" cy="23" rx="19" ry="5.5" fill="none" stroke="#fad172" stroke-width="4.5"/>'
@@ -170,11 +170,11 @@ export function renderHtml(m: ReportModel, { blocks = [] }: RenderHtmlOptions = 
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<meta name="robots" content="noindex, nofollow, noarchive"><meta name="referrer" content="no-referrer">'
     + "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; img-src data:; base-uri 'none'; form-action 'none'\">"
-    + `<title>Email check for ${E(d)} · Inbox Angel</title>`
+    + `<title>Email check for ${E(d)} · Ready Set Mail</title>`
     + `<style>${fontFace('Geist Variable', GEIST_SANS_WOFF2)}${fontFace('Geist Mono Variable', GEIST_MONO_WOFF2)}${tokenCss()}${CSS}</style></head><body><main>`
-    + `<header class="top">${LOGO}<span class="brand">Inbox Angel</span><span class="dom">Email check · ${E(d)}</span></header>`
+    + `<header class="top">${LOGO}<span class="brand">Ready Set Mail</span><span class="dom">Email check · ${E(d)}</span></header>`
     + body.join('')
-    + `<footer>Prepared for ${E(d)} by Inbox Angel. Read from public DNS only; nothing was logged into.${link} `
+    + `<footer>Prepared for ${E(d)} by Ready Set Mail. Read from public DNS only; nothing was logged into.${link} `
     + 'This page is private to whoever got the link, is not indexed, and has no trackers or analytics.</footer>'
     + `</main><script>${JS}</script></body></html>`;
 }

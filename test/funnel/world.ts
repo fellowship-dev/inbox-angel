@@ -1,6 +1,6 @@
 // Shared setup for the email-funnel tests.
 import { vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import type { BoundEnv } from '../../src/index';
 import type { Mailer, MailMessage, SendResult } from '../../src/mail/mailer';
 import { enrollLead } from '../../src/funnel/enroll';
@@ -17,9 +17,9 @@ export const FUNNEL_ENV = {
   AUTHSERV_ID: 'mx.cloudflare.net',
   AUTHSERV_HEADER: 'ar',
   RESEND_API_KEY: 're_test',
-  MAIL_FROM: 'max@inboxangel.io',
-  MAIL_REPLY_TO: 'max@inboxangel.io',
-  PUBLIC_BASE_URL: 'https://app.inboxangel.io',
+  MAIL_FROM: 'max@readysetmail.com',
+  MAIL_REPLY_TO: 'max@readysetmail.com',
+  PUBLIC_BASE_URL: 'https://app.readysetmail.com',
   POSTAL_ADDRESS: '1 Example Street\nWilmington, DE 19801, USA',
   BOOKING_URL: 'https://cal.example.com/max/30min',
   SERVICE_PRICES: JSON.stringify({ fix: '$FIX', keepFixed: '$KEEP/mo', bimi: '$BIMI' }),

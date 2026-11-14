@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import { makeTenant } from '../helpers/tenant';
 import { getGoogleEvidence } from '../../src/metrics/store';
 import { getDomainReport } from '../../src/reports/service';
-import { createResolver } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 it('a fresh report reads precise missing provider evidence locally without a provider grant',async()=>{
  const tenant=makeTenant();const domainId=Number((await tenant.scope.domains.insert({domain:'example.com',rua_address:''})).meta.last_row_id);

@@ -1,6 +1,6 @@
 // The browser session lives in an HttpOnly cookie; bearer tokens are for scripts and API keys.
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, BASE } from '../auth/helpers';
 
 const setCookies = (r: Response) => (r.headers as any).getSetCookie() as string[];

@@ -17,12 +17,12 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 import { seedSettings } from '../helpers/tenant';
 import { loadTenant } from '../../src/tenancy/load';
 
-const BASE = 'https://api.inboxangel.com';
+const BASE = 'https://api.readysetmail.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
 function req(method: string, path: string, body?: unknown): Request {

@@ -6,7 +6,7 @@
 // generic). A fix is `exact` when every record value is fully determined by what was observed: nothing is left for the
 // customer to copy from a provider dashboard. Only exact fixes may be written inline in a first email.
 
-import type { DetectedProvider, DnsHost } from '@inbox-angel/dns-checks';
+import type { DetectedProvider, DnsHost } from '@ready-set-mail/dns-checks';
 import { CATALOG, DNS_HOST_STEPS, type CatalogEntry, type CatalogFile, type DnsHostCatalog } from './catalog/index';
 import type { Facts, Finding } from './findings';
 

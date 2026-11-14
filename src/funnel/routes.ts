@@ -7,10 +7,10 @@
 //   GET  /api/leads                         leads, counts, and whether the sequence can send
 //   POST /api/leads/:id/stop                {reason: replied|booked|converted}
 
-import { funnelQueries } from '@inbox-angel/db';
+import { funnelQueries } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import { getMode } from '../tenancy/mode';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 import { funnelMailer } from '../mail/mailer';
 import { verifyToken } from '../mail/tokens';
 import { bookingUrl, publicBaseUrl } from './config';
@@ -45,7 +45,7 @@ export async function handlePublicFunnelRoute(request: Request, env: BoundEnv): 
     const p = await verifyToken(env, url.searchParams.get('t') ?? '');
     if (!p || p.p !== 'unsub') return method === 'POST' ? new Response('invalid token', { status: 400 }) : page('This link is not valid', 'The unsubscribe link is incomplete or has been altered. Reply to the email you received and we will remove you by hand.', 400);
     await unsubscribeEmail(env, p.e);
-    return method === 'POST' ? new Response('unsubscribed', { status: 200 }) : page('You are unsubscribed', 'You will not get any more emails of this kind from Inbox Angel. Any follow-up series and change alerts for this address have been removed.');
+    return method === 'POST' ? new Response('unsubscribed', { status: 200 }) : page('You are unsubscribed', 'You will not get any more emails of this kind from Ready Set Mail. Any follow-up series and change alerts for this address have been removed.');
   }
 
   if (url.pathname === '/api/monitor/confirm' && (method === 'GET' || method === 'POST')) {

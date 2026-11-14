@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookupDmarc, parseDmarcRecord, type DmarcLookup, type TxtResult } from '@inbox-angel/dns-checks';
+import { lookupDmarc, parseDmarcRecord, type DmarcLookup, type TxtResult } from '@ready-set-mail/dns-checks';
 import { dmarcFactsFor, dmarcFactsFromLookup, spfFromTxt } from '../../src/email/dns-snapshot';
 
 const found = (raw: string, inherited: boolean): DmarcLookup => ({
@@ -82,7 +82,7 @@ describe('spfFromTxt', () => {
   });
 });
 
-// The same RFC 7489 tag rules as web/src/lib/dmarc-record.ts (both use parseDmarcTags from @inbox-angel/dns-checks).
+// The same RFC 7489 tag rules as web/src/lib/dmarc-record.ts (both use parseDmarcTags from @ready-set-mail/dns-checks).
 describe('stored effective policy from raw TXT: whitespace, case, invalid sp=', () => {
   const ok = (...records: string[]): TxtResult => ({ status: 'ok', records });
   const resolverWith = (parent: TxtResult) => ({ fetch: (() => { throw new Error('no http'); }) as any, resolve: async () => { throw new Error('unused'); }, txt: async () => parent });

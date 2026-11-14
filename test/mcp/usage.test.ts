@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 import { connection } from './helpers';
 import { recordAgentUse, resolveMcpIdentity } from '../../src/auth/mcp-issuer';
 import { listAgentConnections } from '../../src/mcp/connections';

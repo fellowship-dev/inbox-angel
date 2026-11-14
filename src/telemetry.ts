@@ -13,7 +13,7 @@
 import type { TenantContext } from './tenancy/context';
 import { version } from '../package.json';
 
-const TELEMETRY_URL = 'https://telemetry.inboxangel.io/v1/events';
+const TELEMETRY_URL = 'https://telemetry.readysetmail.com/v1/events';
 
 // Typed event properties — keeps the payload intentional and auditable.
 export type TelemetryProps =

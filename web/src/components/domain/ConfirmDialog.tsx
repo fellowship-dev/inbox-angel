@@ -1,4 +1,4 @@
-import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@inbox-angel/ui';
+import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@ready-set-mail/ui';
 import type { ReactNode } from 'react';
 
 /** Confirmation before something that changes DNS or deletes data. The error stays inside the dialog. */

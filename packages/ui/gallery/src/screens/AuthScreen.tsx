@@ -1,4 +1,4 @@
-import { Alert, AuthLayout, Button, Checkbox, Field, FieldError, Input, Label } from "@inbox-angel/ui";
+import { Alert, AuthLayout, Button, Checkbox, Field, FieldError, Input, Label } from "@ready-set-mail/ui";
 import { useState, type FormEvent } from "react";
 import { SAMPLE_EMAIL } from "../sample";
 
@@ -20,7 +20,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "setup" }) {
 	return (
 		<AuthLayout
 			title={registering ? "Create your account" : "Sign in"}
-			description={registering ? "Set up your Inbox Angel instance. You will use these credentials to sign in." : undefined}
+			description={registering ? "Set up your Ready Set Mail instance. You will use these credentials to sign in." : undefined}
 		>
 			<form onSubmit={submit} className="space-y-4">
 				{registering ? (

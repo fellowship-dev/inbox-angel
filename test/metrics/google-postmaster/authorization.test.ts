@@ -1,6 +1,6 @@
 import { it, expect, vi, afterEach } from 'vitest';
-import { forWorkspace } from '@inbox-angel/db';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { makeEnv, setupOwner, req, ctx, BASE, inviteAndAccept } from '../../auth/helpers';
 import { handleGoogleMetricRoutes } from '../../../src/metrics/routes';
 import { AccessService } from '../../../src/access/service';

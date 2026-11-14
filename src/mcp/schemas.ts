@@ -5,7 +5,7 @@ export const domainInput = selector.extend({ domain: hostname });
 export const reportInput = domainInput.extend({ days: z.number().int().min(1).max(90).optional() });
 export const metricsInput = reportInput.extend({ source: z.enum(['dmarc', 'tls', 'google', 'inbox_placement']).optional() });
 export const outputSchema = z.object({
- schema: z.literal('inbox-angel-tool/v1'), summary: z.string(),
+ schema: z.literal('ready-set-mail-tool/v1'), summary: z.string(),
  data: z.record(z.string(), z.unknown()), evidence: z.array(z.object({ href: z.string(), label: z.string() })),
  error: z.object({ code: z.enum(['forbidden', 'invalid_input', 'not_found', 'unavailable', 'rate_limited']), message: z.string(), retryAfterSeconds: z.number().int().positive().optional() }).optional(),
 });
@@ -13,7 +13,7 @@ export type DomainInput = z.infer<typeof reportInput>;
 // Named result fields are stable; nested shared report fields remain additive across catalog releases.
 const resource = z.object({ workspaceId: z.string(), productId: z.string().optional(), domain: z.string().optional() });
 const coverage = z.object({ scope: z.literal('shared-domain'), product_attribution: z.literal(false), detail: z.string() });
-const report = z.object({ schema: z.literal('inbox-angel-health/v1'), domain: z.object({ id: z.number(), domain: z.string() }), generatedAt: z.string(), coverage, dns: z.record(z.string(),z.unknown()), analytics: z.record(z.string(),z.unknown()), sections: z.record(z.string(),z.unknown()), remediation: z.array(z.record(z.string(),z.unknown())), intake: z.record(z.string(),z.unknown()) });
+const report = z.object({ schema: z.literal('ready-set-mail-health/v1'), domain: z.object({ id: z.number(), domain: z.string() }), generatedAt: z.string(), coverage, dns: z.record(z.string(),z.unknown()), analytics: z.record(z.string(),z.unknown()), sections: z.record(z.string(),z.unknown()), remediation: z.array(z.record(z.string(),z.unknown())), intake: z.record(z.string(),z.unknown()) });
 export const toolOutputs = Object.freeze({
  whoami: outputSchema.extend({ data: z.object({ installation: z.string(), principalId: z.string(), kind: z.enum(['human','service']), grants: z.array(z.object({ workspaceId: z.string(), productId: z.string().optional(), domain: z.string().optional(), actions: z.array(z.string()), expiresAt: z.number() })) }) }),
  list_products: outputSchema.extend({ data: z.object({ products: z.array(z.object({id:z.string(),name:z.string(),workspaceId:z.string(),coverage:z.literal('shared-domain')})) }) }),

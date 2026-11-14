@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1, createTestD1, applyMigrations } from '@inbox-angel/db/testing';
-import { forWorkspace } from '@inbox-angel/db';
+import { createMigratedD1, createTestD1, applyMigrations } from '@ready-set-mail/db/testing';
+import { forWorkspace } from '@ready-set-mail/db';
 import { AccessService } from '../../src/access/service';
 import { resolveApiKey } from '../../src/auth/api-keys';
 import { authorizeResource, authorizedDomains } from '../../src/access/resolve';

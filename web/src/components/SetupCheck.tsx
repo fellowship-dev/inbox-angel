@@ -1,4 +1,4 @@
-import { Alert } from '@inbox-angel/ui';
+import { Alert } from '@ready-set-mail/ui';
 import { usePreflight } from '../lib/instance';
 import type { PreflightItem } from '../lib/types';
 

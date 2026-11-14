@@ -105,7 +105,7 @@ export function pageHeaders(base?: HeadersInit): Headers {
 
 /** The page shell. `title` and `body` are trusted markup built by this module; escape anything else before passing it. */
 export function agentPage(title: string, body: string): string {
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Inbox Angel</title><style>${css}</style></head><body><div class="wrap"><div class="brand">${LOGO}<span>Inbox Angel</span></div><main class="card">${body}</main></div></body></html>`;
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Ready Set Mail</title><style>${css}</style></head><body><div class="wrap"><div class="brand">${LOGO}<span>Ready Set Mail</span></div><main class="card">${body}</main></div></body></html>`;
 }
 
 const expiryDate = (now: number, days: number) => new Date((now + days * 86400) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -150,8 +150,8 @@ export function renderConsentPage(m: ConsentModel): string {
 /** Shown on /oauth/authorize when nobody (or an unverified hosted account) is signed in. */
 export function renderSignedOutPage(reason: 'signed_out' | 'unverified'): string {
  const body = reason === 'unverified'
-  ? `<h1>Confirm your email first</h1><p>An app asked to connect to your Inbox Angel account. Open the confirmation link we emailed you, then start the connection again from the app.</p>`
-  : `<h1>Sign in to continue</h1><p>An app asked to connect to your Inbox Angel account. Sign in to the dashboard in this browser, then come back to this tab and reload it. You will see exactly what the app is asking for before anything is shared.</p>`;
+  ? `<h1>Confirm your email first</h1><p>An app asked to connect to your Ready Set Mail account. Open the confirmation link we emailed you, then start the connection again from the app.</p>`
+  : `<h1>Sign in to continue</h1><p>An app asked to connect to your Ready Set Mail account. Sign in to the dashboard in this browser, then come back to this tab and reload it. You will see exactly what the app is asking for before anything is shared.</p>`;
  return agentPage(reason === 'unverified' ? 'Confirm your email' : 'Sign in', `${body}<div class="actions"><a class="button primary" href="/">Open the dashboard</a></div>`);
 }
 

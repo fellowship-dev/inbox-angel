@@ -4,7 +4,7 @@
 import { hostedServiceSentence, hostedServiceUrl, type HostedServiceEnv } from './hosted-service';
 import { mcpInstallation } from './mcp/discovery';
 
-const REPO = 'https://github.com/fellowship-dev/inbox-angel';
+const REPO = 'https://github.com/fellowship-dev/ready-set-mail';
 
 export interface LlmsTxtEnv extends HostedServiceEnv {
   BETTER_AUTH_URL?: string;
@@ -20,7 +20,7 @@ export function llmsTxtBody(env: LlmsTxtEnv): string {
     // No canonical HTTPS origin configured yet: say nothing about this installation's endpoint.
   }
   const lines = [
-    '# Inbox Angel',
+    '# Ready Set Mail',
     '',
     '> Checks a domain\'s SPF, DKIM and DMARC from live DNS, shows what to fix with the exact records to publish, ingests DMARC aggregate reports once report intake is configured, and offers an MCP server for agents. Open source (MIT), runs as a Cloudflare Worker.',
     '',

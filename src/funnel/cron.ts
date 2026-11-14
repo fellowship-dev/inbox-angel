@@ -1,6 +1,6 @@
 // Cron jobs of the email funnel. Called from src/cron.ts, one line each.
 
-import { funnelQueries } from '@inbox-angel/db';
+import { funnelQueries } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import type { TenantContext } from '../tenancy/context';
 import { runOnboardingSequence } from './sequence';

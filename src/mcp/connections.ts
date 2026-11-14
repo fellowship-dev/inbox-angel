@@ -1,7 +1,7 @@
 import { pageHeaders, renderConsentPage, renderConsentProblem, renderSignedOutPage, type ConsentModel } from './consent';
 import type { OAuthProviderOptions, OAuthHelpers } from '@cloudflare/workers-oauth-provider';
-import { accessLookups, authLookups, forWorkspace, workspaceLifecycle } from '@inbox-angel/db';
-import { normalizeDomainName } from '@inbox-angel/dns-checks';
+import { accessLookups, authLookups, forWorkspace, workspaceLifecycle } from '@ready-set-mail/db';
+import { normalizeDomainName } from '@ready-set-mail/dns-checks';
 import type { BoundEnv } from '../index';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { ACCESS_ACTIONS, validActions } from '../access/grant';
@@ -73,7 +73,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
  try {
   if (request.method === 'GET') {
    const authRequest = await api.parseAuthRequest(request);
-   if (authRequest.scope.some(s => s !== 'inbox-angel' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
+   if (authRequest.scope.some(s => s !== 'ready-set-mail' && s !== 'offline_access')) return Response.json({ error: 'invalid_scope' }, { status: 400 });
    const description = await api.describeConsent(authRequest), consent = await api.beginConsent(authRequest);
    const named = new Map((await workspaceLifecycle(env.DB).listForUser(user.id)).map(w => [w.id, w.name]));
    const workspaces: ConsentModel['workspaces'] = [];
@@ -120,7 +120,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     }
     for (const action of actions) await authorizeResource(env.DB, actor, action, s);
    }
-   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['inbox-angel'] });
+   const approved = await api.approveConsent(request, String(form.get('handle') ?? ''), { scope: ['ready-set-mail'] });
    const principalId = crypto.randomUUID(), workspaceId = selections[0]!.workspaceId, now = Math.floor(Date.now() / 1000), expiresAt = now + days * 86400;
    await forWorkspace(env.DB, workspaceId).access.principals.create({ id: principalId, name: `Agent ${approved.request.clientId}`.slice(0, 80), kind: 'human', user_id: user.id });
    try {
@@ -128,7 +128,7 @@ export async function handleMcpConnections(request: Request, env: BoundEnv, ctx:
     const local = mcpInstallation(env);
     const record: AgentConnection = { principalId, userId: user.id, workspaceId, clientId: approved.request.clientId, name: `Agent ${approved.request.clientId}`.slice(0, 80), createdAt: now, expiresAt };
     await forWorkspace(env.DB, workspaceId).settings.set(`${prefix}${principalId}`, JSON.stringify(record));
-    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['inbox-angel'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
+    const completed = await api.completeAuthorization({ request: approved.request, userId: user.id, scope: ['ready-set-mail'], props: { principalId, ...local }, metadata: { principalId }, revokeExistingGrants: false });
     const headers = new Headers(approved.headers); headers.set('Location', completed.redirectTo); headers.set('Cache-Control', 'no-store');
     return new Response(null, { status: 302, headers });
    } catch (error) {

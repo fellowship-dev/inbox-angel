@@ -4,7 +4,7 @@
 //   - the postal address (POSTAL_ADDRESS) in the footer.
 // Transactional mail (password reset, invites, the confirmation link itself) does not use this.
 
-import { funnelQueries } from '@inbox-angel/db';
+import { funnelQueries } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import { hostedEnabled } from '../hosted/config';
 import { postalAddress, publicBaseUrl } from '../funnel/config';
@@ -26,13 +26,13 @@ export async function unsubscribeUrl(env: BoundEnv, email: string): Promise<stri
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function footerText(unsubscribe: string | null, address: string | null): string {
-  const lines = ['', '--', address ? `Inbox Angel, ${address.replace(/\s*\n\s*/g, ', ')}` : 'Inbox Angel'];
+  const lines = ['', '--', address ? `Ready Set Mail, ${address.replace(/\s*\n\s*/g, ', ')}` : 'Ready Set Mail'];
   if (unsubscribe) lines.push(`Unsubscribe: ${unsubscribe}`);
   return lines.join('\n');
 }
 
 export function footerHtml(unsubscribe: string | null, address: string | null): string {
-  const parts = [`Inbox Angel${address ? `, ${esc(address).replace(/\s*\n\s*/g, ', ')}` : ''}`];
+  const parts = [`Ready Set Mail${address ? `, ${esc(address).replace(/\s*\n\s*/g, ', ')}` : ''}`];
   if (unsubscribe) parts.push(`<a href="${esc(unsubscribe)}" style="color:#6b7280;">Unsubscribe</a>`);
   return `<div style="max-width:600px;margin:0 auto;padding:12px 24px 24px;font-family:Arial,sans-serif;font-size:11px;color:#6b7280;text-align:center;">${parts.join(' &middot; ')}</div>`;
 }

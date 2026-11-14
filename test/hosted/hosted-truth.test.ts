@@ -1,7 +1,7 @@
 // Hosted (MODE=saas) never derives a reports domain or report address, the email check says plainly when it cannot work,
 // and onboarding-status reports the DMARC policy that applies (own or inherited) so the dashboard never offers a weaker one.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, signupVerified } from '../auth/helpers';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { HOSTED_ENV } from './world';
@@ -26,7 +26,7 @@ describe('hosted: no reports domain and no report address, ever', () => {
     // Wizard domain step: a claim, proven by TXT.
     const first = await json(await call(w.env, 'POST', '/api/settings/base-domain', { key: w.token, body: { domain: 'acme-agency.com' } }));
     expect(first.pending).toBe(true);
-    w.cf.doh['_inboxangel.acme-agency.com'] = [first.claim.txt_value];
+    w.cf.doh['_readysetmail.acme-agency.com'] = [first.claim.txt_value];
     expect((await call(w.env, 'POST', `/api/domains/claims/${first.claim.id}/verify`, { key: w.token, body: {} })).status).toBe(201);
 
     // Submitting the same (now verified) domain again in the wizard must not set up report addresses either.
@@ -36,7 +36,7 @@ describe('hosted: no reports domain and no report address, ever', () => {
 
     // A later domain through /add.
     const second = await json(await call(w.env, 'POST', '/api/domains', { key: w.token, body: { domain: 'client-shop.com' } }));
-    w.cf.doh['_inboxangel.client-shop.com'] = [second.claim.txt_value];
+    w.cf.doh['_readysetmail.client-shop.com'] = [second.claim.txt_value];
     const verified = await json(await call(w.env, 'POST', `/api/domains/claims/${second.claim.id}/verify`, { key: w.token, body: {} }));
     expect(verified.domain.rua_address).toBe('');
 

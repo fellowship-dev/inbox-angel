@@ -1,4 +1,4 @@
-import { Alert } from '@inbox-angel/ui';
+import { Alert } from '@ready-set-mail/ui';
 import { ApiError } from '../lib/api';
 import { HELP_PRIORITY, TalkToMax } from './TalkToMax';
 

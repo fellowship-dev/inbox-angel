@@ -4,14 +4,14 @@
 //  saas       a domain starts as a *claim* (table domain_claims, not `domains`) and becomes a domain when one of these holds:
 //               - parent    the workspace already verified a parent domain (`mail.acme.com` under `acme.com`)
 //               - cloudflare its zone is on the allow-list of one of the workspace's active Cloudflare connections
-//               - txt       the TXT record `_inboxangel.<domain>` holds the claim's token
+//               - txt       the TXT record `_readysetmail.<domain>` holds the claim's token
 //
 // Because `domains` only ever holds verified domains, its global UNIQUE(domain) means "the first workspace to verify
 // wins", and everything downstream of `domains` (reports, stats, check results, DNS writes, hosted records) never sees
 // a pending claim. Several workspaces may hold a pending claim on the same name at once; when one verifies, the
 // others are marked `lost`.
-import { claimLookups, type DomainClaimRow } from '@inbox-angel/db';
-import { createResolver, normalizeName, type Resolver } from '@inbox-angel/dns-checks';
+import { claimLookups, type DomainClaimRow } from '@ready-set-mail/db';
+import { createResolver, normalizeName, type Resolver } from '@ready-set-mail/dns-checks';
 import { logAudit } from '../audit/log';
 import { sendEvictionNotice } from '../auth/mail';
 import { loadTenant } from '../tenancy/load';
@@ -24,8 +24,11 @@ export type VerifiedVia = 'selfhost' | 'cloudflare' | 'txt' | 'parent' | 'existi
 /** Most unproven claims one workspace may hold at a time. */
 export const MAX_PENDING_CLAIMS = 25;
 
-export const CLAIM_TXT_LABEL = '_inboxangel';
-export const CLAIM_TXT_PREFIX = 'inboxangel-verify=';
+export const CLAIM_TXT_LABEL = '_readysetmail';
+export const CLAIM_TXT_PREFIX = 'readysetmail-verify=';
+/** The record a claim made before the rename to Ready Set Mail (2026-11-13) told its owner to publish. Still accepted; never shown. */
+export const LEGACY_CLAIM_TXT_LABEL = '_inboxangel'; // @legacy-name
+export const LEGACY_CLAIM_TXT_PREFIX = 'inboxangel-verify='; // @legacy-name
 
 export type Admission =
   | { kind: 'verified'; via: VerifiedVia }
@@ -96,13 +99,17 @@ async function provenByParent(tenant: TenantContext, domain: string): Promise<bo
   return false;
 }
 
-/** Is the claim's token published at `_inboxangel.<domain>`? Throws nothing: a lookup failure is reported as the reason. */
+/** Is the claim's token published at `_readysetmail.<domain>`? Throws nothing: a lookup failure is reported as the reason. */
 export async function provenByTxt(claim: DomainClaimRow, resolver: Resolver): Promise<{ ok: boolean; reason?: string }> {
   const res = await resolver.txt(claimTxtName(claim.domain));
   if (res.status === 'error') return { ok: false, reason: `DNS lookup failed (${res.error ?? 'error'}) — try again in a minute` };
   const want = CLAIM_TXT_PREFIX + claim.token;
-  const found = res.records.some(r => r.trim().replace(/^"|"$/g, '').trim() === want);
-  return found ? { ok: true } : { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
+  const holds = (records: string[], value: string) => records.some(r => r.trim().replace(/^"|"$/g, '').trim() === value);
+  if (holds(res.records, want)) return { ok: true };
+  // A claim made before the rename may already be published under the old record name: accept it too.
+  const legacy = await resolver.txt(`${LEGACY_CLAIM_TXT_LABEL}.${claim.domain}`);
+  if (legacy.status !== 'error' && holds(legacy.records, LEGACY_CLAIM_TXT_PREFIX + claim.token)) return { ok: true };
+  return { ok: false, reason: `TXT record ${claimTxtName(claim.domain)} = "${want}" not found yet (DNS changes can take a few minutes)` };
 }
 
 /** How long an evicted workspace can still export the report history of the domain it lost. */

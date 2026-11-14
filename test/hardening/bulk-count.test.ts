@@ -1,6 +1,6 @@
 // Item 7: a bulk import counts the workspace's domains once, not once per row.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 import { hosted, json, nxdomain } from './helpers';
 
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));

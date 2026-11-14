@@ -1,4 +1,4 @@
-# @inbox-angel/report
+# @ready-set-mail/report
 
 Email-authentication findings, the fix catalog, multi-resolver consensus and the report model with its three
 renderings (HTML, JSON, agent-prompt Markdown). Pure TypeScript source, no build: the worker, the CLI and the tests
@@ -10,7 +10,7 @@ Cross-checked report models for domains, one JSON line per domain. Read-only: pu
 no secrets, nothing published.
 
 Requirements: Node `^22.22.2 || ^24.15.0` (type stripping and `module.registerHooks`), and `npm ci` at the repo root
-so `@inbox-angel/dns-checks` and `tldts` resolve from its `node_modules`. `loader.mjs` maps extensionless relative
+so `@ready-set-mail/dns-checks` and `tldts` resolve from its `node_modules`. `loader.mjs` maps extensionless relative
 imports to their `.ts` files. Run from the repo root:
 
 ```sh
@@ -23,7 +23,7 @@ node --import ./packages/report/loader.mjs packages/report/cli.ts --in domains.t
 |---|---|
 | `<domain>...`, `--in <file>` | Domains, as arguments or whitespace-separated in a file. URLs, paths, ports and case are normalized to the registrable domain (`https://WWW.Example.com/x` -> `example.com`); duplicates run once. |
 | `--tokens <json>` | `{"domain": "token"}`. A domain's `reportUrl` is `<report-url-base><token>`; a domain without a token gets `reportUrl: null`. The CLI never generates tokens. |
-| `--report-url-base <url>` | Default `https://inboxangel.io/r/`. |
+| `--report-url-base <url>` | Default `https://readysetmail.com/r/`. |
 | `--blocks <file>` | JSON `{"domain": [{"id", "html"}]}`: trusted caller HTML (an offer, a DMARC-vendor note) inserted into that domain's HTML report after the fixes. The Markdown agent prompt never carries caller blocks. |
 | `--concurrency <n>` | Domains checked at once. Default 4. |
 

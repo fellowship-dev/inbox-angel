@@ -1,4 +1,4 @@
-import { Alert } from '@inbox-angel/ui';
+import { Alert } from '@ready-set-mail/ui';
 import { inheritanceVerdict } from '../../lib/dmarc';
 import type { ParentContext } from '../../lib/types';
 

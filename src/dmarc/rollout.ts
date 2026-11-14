@@ -4,7 +4,7 @@
 // which replaces the old pct= sampling as the intermediate signal. Each step is gated
 // behind a pass-rate threshold to prevent mail loss.
 
-import { parseDmarcTags as parseSharedTags } from '@inbox-angel/dns-checks/dmarc-tags';
+import { parseDmarcTags as parseSharedTags } from '@ready-set-mail/dns-checks/dmarc-tags';
 
 export type RolloutPolicy = 'none' | 'quarantine' | 'reject';
 

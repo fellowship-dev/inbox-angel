@@ -13,7 +13,7 @@ beforeAll(async () => {
 import { coreWorker } from './src/index.ts';
 import { withMcpAuthorization } from './src/auth/mcp-issuer.ts';
 import { createInboxMcpHandler } from './src/mcp/transport.ts';
-import { createResolver } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
 const resolver = createResolver({fetch: async () => ({ok:true,status:200,json:async()=>({Status:3}),text:async()=>'',headers:{get:()=>null}})});
 export default withMcpAuthorization(coreWorker,createInboxMcpHandler({reportOptions:{resolvers:[resolver,resolver],now:1792954800}}));`;
  const bundled = await build({ stdin: { contents: source, resolveDir: process.cwd(), sourcefile: 'runtime-u4.ts', loader: 'ts' }, bundle: true, format: 'esm', platform: 'browser', conditions: ['workerd','worker','browser'], external: ['cloudflare:*','node:*'], write: false });
@@ -31,7 +31,7 @@ export default withMcpAuthorization(coreWorker,createInboxMcpHandler({reportOpti
 afterAll(async()=>{await runtime?.dispose();});
 async function client(protocolVersion?: string) {
  const transport = new StreamableHTTPClientTransport(new URL(origin+'/mcp'), { authProvider: { token: async()=>key }, protocolVersion, fetch: async (input,init) => runtime.dispatchFetch(String(input),init) as unknown as Response });
- const c = new Client({name:'Inbox Angel headless acceptance',version:'1.0'}, { versionNegotiation: { mode: protocolVersion ? 'legacy' : { pin: '2026-07-28' } } });
+ const c = new Client({name:'Ready Set Mail headless acceptance',version:'1.0'}, { versionNegotiation: { mode: protocolVersion ? 'legacy' : { pin: '2026-07-28' } } });
  await c.connect(transport);
  expect(transport.protocolVersion).toBe(protocolVersion ?? '2026-07-28');
  return c;
@@ -44,7 +44,7 @@ describe('real Worker SDK compatibility',()=>{
   const reconnect = await client();
   const report=await reconnect.callTool({name:'get_email_report',arguments:{domain:'example.com'}});
   expect(report.isError).not.toBe(true);
-  expect(report.structuredContent).toMatchObject({data:{report:{schema:'inbox-angel-health/v1',sections:{google:{reason:'not_connected'}}}}});
+  expect(report.structuredContent).toMatchObject({data:{report:{schema:'ready-set-mail-health/v1',sections:{google:{reason:'not_connected'}}}}});
   expect((report.structuredContent as any).data.report.remediation.some((f:any)=>f.finding==='dmarc-missing')).toBe(true);
   const denied=await reconnect.callTool({name:'get_email_report',arguments:{domain:'foreign.example'}});
   expect(denied.isError).toBe(true);

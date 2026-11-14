@@ -18,7 +18,7 @@ const STABLE_FONTS = [
 
 function stableFonts(): Plugin {
 	return {
-		name: 'inbox-angel-stable-fonts',
+		name: 'ready-set-mail-stable-fonts',
 		apply: 'build',
 		generateBundle() {
 			for (const [pkg, file] of STABLE_FONTS) {

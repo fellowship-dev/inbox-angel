@@ -1,14 +1,14 @@
 # Cloudflare connections: OAuth and pasted tokens
 
-An Inbox Angel **workspace** (one per business: a Fellowship workspace, a separate Lexgo workspace…) can connect **one or more
+A Ready Set Mail **workspace** (one per business: a Fellowship workspace, a separate Lexgo workspace…) can connect **one or more
 Cloudflare accounts**. Each connection is either
 
-* **OAuth**: the user clicks *Connect Cloudflare*, consents at Cloudflare, and Inbox Angel keeps the access + refresh token; or
+* **OAuth**: the user clicks *Connect Cloudflare*, consents at Cloudflare, and Ready Set Mail keeps the access + refresh token; or
 * **token**: the user pastes a Cloudflare API token (fallback, and what self-hosters already use).
 
 Each **domain is linked to the connection that manages its zone**; every DNS/Email-Routing call for that domain uses that
 connection's token. Cloudflare consent is per Cloudflare *account*, not per zone, so after connecting the owner **picks the
-zones** Inbox Angel may manage, and every call outside that list is refused, whatever the token could do.
+zones** Ready Set Mail may manage, and every call outside that list is refused, whatever the token could do.
 
 Contents: [Operator setup](#operator-setup) · [Configuration](#configuration) · [How it works](#how-it-works) · [API](#api) ·
 [Self-host and the relay](#self-host-and-the-relay) · [Rotating TOKEN_ENCRYPTION_KEY](#rotating-token_encryption_key)
@@ -38,7 +38,7 @@ cannot be undone.
 1. Follow Cloudflare's public OAuth client documentation to register a **public client** (no client secret; PKCE `S256`).
 2. Redirect URI to register: `https://<your-host>/api/cloudflare/oauth/callback` (hosted: the production origin).
    The self-host relay uses a different one: see [below](#self-host-and-the-relay).
-3. Request the scopes Inbox Angel needs: read zones, edit DNS records, and (for the reports domain) Email Routing.
+3. Request the scopes Ready Set Mail needs: read zones, edit DNS records, and (for the reports domain) Email Routing.
    Use the exact scope names Cloudflare lists for those permissions.
 4. Copy the client id and the three endpoint URLs (authorize, token, revoke) **from Cloudflare's docs**: the code
    hardcodes none of them.
@@ -58,7 +58,7 @@ Worker vars (`wrangler.jsonc` `vars`) unless marked secret.
 | `CF_OAUTH_REVOKE_URL` | var | revocation endpoint (https). Without it, disconnecting cannot revoke the grant remotely and says so (`revoked_remote: false`) |
 | `CF_OAUTH_SCOPES` | var | scope names, space- or comma-separated |
 | `CF_OAUTH_REDIRECT_URI` | var, optional | default `<origin>/api/cloudflare/oauth/callback`; must be https (localhost excepted) |
-| `CF_OAUTH_RELAY_URL` | var, optional | self-host: send the OAuth redirect through the relay, e.g. `https://connect.inboxangel.io` |
+| `CF_OAUTH_RELAY_URL` | var, optional | self-host: send the OAuth redirect through the relay, e.g. `https://connect.readysetmail.com` |
 | `CF_OAUTH_RELAY_SECRET` | **secret**, relay deployment only | signs the relay's state; setting it turns that Worker into the relay |
 | `CF_OAUTH_RELAY_CALLBACK_PATH` | var, optional, relay only | only forward to this callback path |
 | `CF_OAUTH_RELAY_ALLOWED_HOSTS` | var, optional, relay only | comma-separated hostnames instances may forward to (registered instances); any other host is refused |
@@ -215,7 +215,7 @@ Self-hosters keep `CLOUDFLARE_API_TOKEN`: it works unchanged as the implicit con
 or OAuth connections (needs `TOKEN_ENCRYPTION_KEY`).
 
 A public OAuth client has fixed redirect URIs, but a self-hosted instance lives on any hostname. The optional **relay**
-(`connect.inboxangel.io`) is the one registered redirect URI. It holds no tokens and no state:
+(`connect.readysetmail.com`) is the one registered redirect URI. It holds no tokens and no state:
 
 ```
 instance ──► relay /relay/start?cb=<instance callback>&state=<instance state>&challenge=<PKCE challenge>
@@ -230,20 +230,20 @@ instance  ─► Cloudflare token endpoint: code + PKCE verifier (the verifier n
   a page that names the destination host ("Continue to ia.example.com") and forwards only after the user's explicit click
   (`POST /relay/confirm`, bound to the page by an HttpOnly cookie and an HMAC over the nonce, state and code). Without it the
   relay is a token-theft tool: `cb` is chosen by whoever builds the `/relay/start` link, so an attacker could send a victim
-  `relay/start?cb=https://evil.example/x&challenge=<attacker's PKCE challenge>`, the victim would consent to "Inbox Angel" at
+  `relay/start?cb=https://evil.example/x&challenge=<attacker's PKCE challenge>`, the victim would consent to "Ready Set Mail" at
   Cloudflare, the code would land on the attacker's host, and the attacker could redeem it with their own verifier and get DNS
   write on the victim's Cloudflare account. **Never deploy the relay without the confirmation page** (this code cannot be
   configured without it), and keep the page's wording about the destination intact.
 * **Registered hosts.** Set `CF_OAUTH_RELAY_ALLOWED_HOSTS=host1,host2` on the relay to accept only those instance hosts
   (checked at start, at the page and at the confirm). Recommended whenever the set of instances is known; unset means any
-  https host, with the confirmation page as the only protection. **The hosted relay deployment (`connect.inboxangel.io`) must
+  https host, with the confirmation page as the only protection. **The hosted relay deployment (`connect.readysetmail.com`) must
   set `CF_OAUTH_RELAY_ALLOWED_HOSTS`** (the hosted instance's host, plus any registered self-host instances) in addition to the
   confirmation page.
 * The relay verifies its HMAC and 10-minute expiry (`400` if tampered or expired), requires `cb` to be https with no
   credentials (and optionally a fixed path), and refuses plain-http access. It never logs a URL, code or state; responses
   are `no-store` / `no-referrer`, the page is not frameable. It can neither redeem a code nor see a token. A refusal from
   Cloudflare (`error=access_denied`) carries no authorization and is forwarded without the page.
-* **Instance config:** `CF_OAUTH_RELAY_URL=https://connect.inboxangel.io` plus the same `CF_OAUTH_CLIENT_ID`, endpoint
+* **Instance config:** `CF_OAUTH_RELAY_URL=https://connect.readysetmail.com` plus the same `CF_OAUTH_CLIENT_ID`, endpoint
   URLs, scopes and `TOKEN_ENCRYPTION_KEY`. `BETTER_AUTH_URL` is used for `cb` when set.
 * **Relay deployment:** the same Worker code with `CF_OAUTH_RELAY_SECRET` set (and the client id, authorize URL, scopes).
   When that secret is set `/relay/*` is served before anything else and needs no database. It is not deployed, and the code

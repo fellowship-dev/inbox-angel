@@ -40,7 +40,7 @@ export function buildFirstReportBody(
     'Now that the first one is in, you can expect daily reports from major mailbox providers.',
     '',
     '—',
-    'InboxAngel notifications',
+    'Ready Set Mail notifications',
   ];
 
   return lines.join('\n');
@@ -83,7 +83,7 @@ export async function sendFirstReportNotification(
 
   try {
     await tenant.env.SEND_EMAIL.send({
-      from: { name: 'InboxAngel', email: tenant.settings.fromEmail! },
+      from: { name: 'Ready Set Mail', email: tenant.settings.fromEmail! },
       to: [admin.email],
       subject,
       text: body,

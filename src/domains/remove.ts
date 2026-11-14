@@ -5,7 +5,7 @@ import { hostedEnabled } from '../hosted/config';
 import { deprovisionDomain } from '../dns/provision';
 import { logAudit } from '../audit/log';
 import type { TenantContext } from '../tenancy/context';
-import type { DomainRow } from '@inbox-angel/db';
+import type { DomainRow } from '@ready-set-mail/db';
 
 export type Actor = { id?: string | null; email?: string | null };
 

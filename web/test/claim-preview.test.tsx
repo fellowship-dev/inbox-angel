@@ -6,7 +6,7 @@ import { ClaimPreview } from '../src/components/domain/ClaimPreview';
 import type { ClaimPreviewData } from '../src/lib/claim-preview';
 import { fail, renderApp } from './render';
 
-const claim = { id: 4, domain: 'acme.io', status: 'pending' as const, txt_name: '_inboxangel.acme.io', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
+const claim = { id: 4, domain: 'acme.io', status: 'pending' as const, txt_name: '_readysetmail.acme.io', txt_value: 'readysetmail-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
 
 const view = (over: Partial<ClaimPreviewData> = {}): ClaimPreviewData => ({
 	domain: 'acme.io',
@@ -191,7 +191,7 @@ describe('ClaimPreview', () => {
 describe('ClaimCard and the preview', () => {
 	it('without the preview prop: no preview and no request', async () => {
 		const { calls } = renderApp(<ClaimCard claim={claim} />);
-		await screen.findByText('_inboxangel.acme.io');
+		await screen.findByText('_readysetmail.acme.io');
 		expect(screen.queryByText(/Public DNS for/)).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Check public DNS' })).toBeNull();
 		expect(calls.some((c) => c.path.includes('/preview'))).toBe(false);

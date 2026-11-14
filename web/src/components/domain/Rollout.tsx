@@ -1,4 +1,4 @@
-import { Alert, Badge, RecordBlock, cn, toast } from '@inbox-angel/ui';
+import { Alert, Badge, RecordBlock, cn, toast } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
@@ -107,7 +107,7 @@ export function Rollout({ domain }: { domain: Domain }) {
 					title={`Advance to ${label(r.next_step.policy, r.next_step.testing)}`}
 					description={
 						<>
-							Update the <code>_dmarc.{domain.domain}</code> TXT record to the value below at your DNS provider, then mark it as applied. Inbox Angel does not change DNS here.
+							Update the <code>_dmarc.{domain.domain}</code> TXT record to the value below at your DNS provider, then mark it as applied. Ready Set Mail does not change DNS here.
 						</>
 					}
 					confirmLabel="Mark as applied"

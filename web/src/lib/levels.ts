@@ -1,9 +1,9 @@
-import type { Finding, Level } from '@inbox-angel/ui';
+import type { Finding, Level } from '@ready-set-mail/ui';
 import { formatPercent, timeAgo } from './format';
 import type { DomainCheckSummary } from './types';
 
 /**
- * Where a domain stands, from what InboxAngel already knows (domain row + check summary).
+ * Where a domain stands, from what Ready Set Mail already knows (domain row + check summary).
  *
  *  - Level 0 Delivering:    mail goes out, but SPF or DMARC is missing, so receivers cannot verify it.
  *  - Level 1 Authenticated: SPF and a DMARC record exist; DMARC only monitors (p=none).

@@ -1,5 +1,5 @@
 // DomainReport fixtures: a port of unzip-inboxangel outreach-tools/tests/conftest.py make_rec / bimi_rec.
-import type { BimiLookup, DetectedProvider, DomainReport, SpfIssue } from '@inbox-angel/dns-checks';
+import type { BimiLookup, DetectedProvider, DomainReport, SpfIssue } from '@ready-set-mail/dns-checks';
 
 export const CHECKED = '2026-10-22T18:00:00.000Z';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 
 // cloudflare:email only exists in workerd — stand-in that records the constructor args.
 vi.mock('cloudflare:email', () => ({
@@ -42,7 +42,7 @@ describe('canary (Check Email) addressing', () => {
     const t = setup();
     const before = Math.floor(Date.now() / 1000);
     const s = await t.issue();
-    expect(s.email).toBe(`check+${s.token}@canary.inboxangel.io`);
+    expect(s.email).toBe(`check+${s.token}@canary.readysetmail.com`);
     expect(s.token).toMatch(/^[a-z2-7]{32}$/);
     expect(s.expires_at).toBeGreaterThanOrEqual(before + CANARY_TTL_SECONDS);
     const stored = t.rows('SELECT * FROM canary_tokens');
@@ -58,7 +58,7 @@ describe('canary (Check Email) addressing', () => {
     expect(m.setReject).not.toHaveBeenCalled();
     expect(m.reply).toHaveBeenCalledOnce();
     const reply = m.reply.mock.calls[0][0] as { from: string; to: string; raw: string };
-    expect(reply.from).toBe('noreply@canary.inboxangel.io');
+    expect(reply.from).toBe('noreply@canary.readysetmail.com');
     expect(reply.to).toBe('user@example.com');
     expect(reply.raw).toMatch(/In-Reply-To: <m1@example\.com>/i);
     expect(Buffer.from(reply.raw.match(/Subject: =\?utf-8\?B\?([^?]+)\?=/i)![1], 'base64').toString()).toBe('Email security check — example.com');
@@ -94,10 +94,10 @@ describe('canary (Check Email) addressing', () => {
   });
 
   it.each([
-    ['an unknown token', () => 'check+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@canary.inboxangel.io'],
-    ['a malformed token', () => 'check+short@canary.inboxangel.io'],
-    ['no token', () => 'check@canary.inboxangel.io'],
-    ['the wrong base address', () => 'rua+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@canary.inboxangel.io'],
+    ['an unknown token', () => 'check+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@canary.readysetmail.com'],
+    ['a malformed token', () => 'check+short@canary.readysetmail.com'],
+    ['no token', () => 'check@canary.readysetmail.com'],
+    ['the wrong base address', () => 'rua+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@canary.readysetmail.com'],
   ])('%s is rejected', async (_n, to) => {
     const t = setup();
     const m = await t.send(to());

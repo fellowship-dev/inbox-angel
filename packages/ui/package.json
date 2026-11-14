@@ -1,7 +1,7 @@
 {
-	"name": "@inbox-angel/ui",
+	"name": "@ready-set-mail/ui",
 	"version": "0.1.0",
-	"description": "Inbox Angel design system: tokens, Tailwind 4 theme and React components shared by the dashboard and the website.",
+	"description": "Ready Set Mail design system: tokens, Tailwind 4 theme and React components shared by the dashboard and the website.",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": [

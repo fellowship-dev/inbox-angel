@@ -1,6 +1,6 @@
-# @inbox-angel/db
+# @ready-set-mail/db
 
-Drizzle ORM schema, migrations and workspace-scoped typed queries for InboxAngel on Cloudflare D1.
+Drizzle ORM schema, migrations and workspace-scoped typed queries for Ready Set Mail on Cloudflare D1.
 
 * `src/schema.ts` — the schema (source of truth); see `SCHEMA.md`.
 * `/migrations/*.sql` — what `wrangler d1 migrations apply` runs; see `UPGRADING.md`.
@@ -9,7 +9,7 @@ Drizzle ORM schema, migrations and workspace-scoped typed queries for InboxAngel
 * `src/testing` — `createMigratedD1()`: a `node:sqlite`-backed D1 with all migrations applied, for tests.
 
 ```ts
-import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { forWorkspace, IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 const q = forWorkspace(env.DB, IMPLICIT_WORKSPACE_ID);
 const domains = await q.domains.list();

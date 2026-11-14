@@ -1,4 +1,4 @@
--- InboxAngel demo data cleanup
+-- Ready Set Mail demo data cleanup
 -- Removes all data seeded by scripts/seed-demo.ts (demo domains)
 -- Safe to run multiple times.
 

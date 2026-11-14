@@ -4,7 +4,7 @@
 import { AuthResultsHeader } from './parse-headers';
 import { DnsCheckResult } from './dns-check';
 import { retentionPolicy } from '../lifecycle/config';
-import type { Fix } from '@inbox-angel/report';
+import type { Fix } from '@ready-set-mail/report';
 import { recordFixes, SPF_FINDINGS } from './report-findings';
 
 export type OverallStatus = 'protected' | 'at_risk' | 'exposed';
@@ -152,7 +152,7 @@ function catalogSteps(fix: Fix): FixStep[] {
 const isSpfFix = (f: Fix) => (SPF_FINDINGS as readonly string[]).includes(f.finding);
 
 /**
- * The next record or setting for each problem. SPF and DMARC record fixes come from the @inbox-angel/report catalog
+ * The next record or setting for each problem. SPF and DMARC record fixes come from the @ready-set-mail/report catalog
  * (report-findings.ts), each only when the received message failed that protocol; the steps that depend on the
  * received message stay here: the lookup-failed retry, the SPF envelope domain, the DKIM signing domain and selector,
  * and the DMARC policy upgrade (skipped when a catalog DMARC fix already rewrites the record). A protected result gets
@@ -213,7 +213,7 @@ export function shareLinks(s: CheckSummary, siteUrl?: string | null): ShareLink[
   if (s.status !== 'protected') return [];
   const passed = [s.spfPass && 'SPF', s.dkimPass && 'DKIM', s.dmarcPass && 'DMARC'].filter(Boolean) as string[];
   const list = passed.length > 1 ? `${passed.slice(0, -1).join(', ')} and ${passed[passed.length - 1]}` : passed[0];
-  const text = `${s.domain} passes ${list} email authentication: checked with InboxAngel.${siteUrl ? ` ${siteUrl}` : ''}`;
+  const text = `${s.domain} passes ${list} email authentication: checked with Ready Set Mail.${siteUrl ? ` ${siteUrl}` : ''}`;
   const q = encodeURIComponent(text);
   return [
     { label: 'X', url: `https://x.com/intent/tweet?text=${q}` },
@@ -255,7 +255,7 @@ export function formatCheckReport(
 ): string {
   const domain = summary.domain;
   const lines: string[] = [
-    `InboxAngel Security Check — ${domain}`,
+    `Ready Set Mail Security Check — ${domain}`,
     '─'.repeat(48),
     '',
     STATUS_LINE[summary.status],
@@ -300,7 +300,7 @@ export function formatCheckReport(
   if (opts.enrolled) lines.push('', opts.enrolled.text, `Unsubscribe: ${opts.enrolled.unsubscribeUrl}`);
   lines.push('');
   lines.push('─'.repeat(48));
-  lines.push('This report was generated automatically by InboxAngel.');
+  lines.push('This report was generated automatically by Ready Set Mail.');
   lines.push('You received it because you sent an email to our check address.');
   lines.push(retentionSentence(opts));
   if (opts.siteUrl) lines.push(opts.siteUrl);

@@ -5,15 +5,15 @@
 //   _mta-sts.customer.com    CNAME  mta-sts.<id>.h.<zone>
 //   _smtp._tls.customer.com  CNAME  <id>._tlsrpt.h.<zone>
 //
-// Checked over DNS-over-HTTPS with @inbox-angel/dns-checks, whose four-way answer (ok / nodata / nxdomain /
+// Checked over DNS-over-HTTPS with @ready-set-mail/dns-checks, whose four-way answer (ok / nodata / nxdomain /
 // error) keeps "the DNS says no" apart from "we couldn't find out". Statuses:
 //   ok       the pointer is in place
 //   missing  nothing there
 //   wrong    something else is there (another target, or an SPF record without our include)
 //   error    the lookup failed; the previous answer should be kept by callers that can
 
-import { createResolver, isSpfRecord, normalizeName, parseSpfRecord, type Resolver } from '@inbox-angel/dns-checks';
-import type { PointerStatus } from '@inbox-angel/db';
+import { createResolver, isSpfRecord, normalizeName, parseSpfRecord, type Resolver } from '@ready-set-mail/dns-checks';
+import type { PointerStatus } from '@ready-set-mail/db';
 import { hostedNames } from './records';
 
 export interface PointerReport {

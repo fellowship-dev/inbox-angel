@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { makeTenant } from '../helpers/tenant';
 import { buildFirstReportBody, sendFirstReportNotification, ReportStats } from '../../src/notifications/first-report';
 
@@ -128,7 +128,7 @@ describe('sendFirstReportNotification', () => {
     await sendFirstReportNotification(tn(env), 'acme.com', STATS);
 
     const call = (env.SEND_EMAIL!.send as any).mock.calls[0][0];
-    expect(call.text).toContain('https://inbox-angel-worker.testaccount.workers.dev');
+    expect(call.text).toContain('https://ready-set-mail-worker.testaccount.workers.dev');
   });
 
   it('logs instead of sending when SEND_EMAIL binding is absent', async () => {

@@ -1,6 +1,6 @@
 ---
 name: domain-setup
-description: Use when onboarding or verifying a domain in hosted or self-hosted Inbox Angel through its MCP.
+description: Use when onboarding or verifying a domain in hosted or self-hosted Ready Set Mail through its MCP.
 ---
 
 Read ../../SETUP.md for the connection workflow. Call whoami first, then use list_products/list_domains to find the exact authorized resource. A domain grant does not authorize its parent, sibling or another workspace. If permission is missing, direct the owner to Settings to grant the specific hostname and actions. Do not obtain broader credentials through chat.

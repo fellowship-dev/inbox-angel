@@ -1,5 +1,5 @@
 url: https://inbox-angel-worker.fellowshipdev.workers.dev
-persona: inbox-angel-qa
+persona: ready-set-mail-qa
 
 smoketest:
   flows:
