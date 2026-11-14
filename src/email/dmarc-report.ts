@@ -19,6 +19,8 @@ import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
 import { ParseStop } from '../dmarc/types';
 import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { intakeLimits } from '../hosted/config';
+import { getMode } from '../tenancy/mode';
+import { reportCounting } from '../dmarc/counting';
 import { normalizeDomain } from '@inbox-angel/dns-checks';
 import { storeReport } from '../dmarc/store-report';
 import { carrierFromHeaders, decideTier, reporterInfo, type Carrier, type ReporterTier, type TierDecision } from '../dmarc/reporter-auth';
@@ -122,7 +124,10 @@ export async function handleDmarcReport(
   // 1b. Who sent it? The carrier (authenticated? which registry entries match?) is classified from the message alone; the tier is decided
   //     once the report's metadata is known. org_name/Submitter/subject never decide anything.
   const carrier = opts.carrier ?? carrierFromHeaders(authHeaders, tenant.env);
-  const maxBytes = opts.maxBytes ?? (carrier.class === 'registry' ? limits.maxDecompressedBytes : Math.min(limits.nonRegistryDecompressedBytes, limits.maxDecompressedBytes));
+  // A self-hosted server that counts every report (the default) has no one to defend against: its own mail provider sends the reports, and with AUTHSERV_*
+  // unset every one of them is "unauthenticated". Tier restrictions (records cap, IP lookups, decompression cap) apply where unrecognised mail does not count.
+  const unrestricted = getMode(tenant.env) !== 'saas' && reportCounting(tenant.env) === 'all';
+  const maxBytes = opts.maxBytes ?? (unrestricted || carrier.class === 'registry' ? limits.maxDecompressedBytes : Math.min(limits.nonRegistryDecompressedBytes, limits.maxDecompressedBytes));
   const dec: { v: TierDecision | null } = { v: null };
   const trace = (extra: Partial<ReportResult> = {}): Partial<ReportResult> => ({ tier: dec.v?.tier ?? null, identity: dec.v?.identity ?? null, reporter: dec.v?.identity ?? null, dkimOrg: carrier.dkimOrg, fromOrg: carrier.fromOrg, emailMatched: dec.v?.emailMatched ?? null, ...extra });
 
@@ -152,12 +157,12 @@ export async function handleDmarcReport(
     // Dedup AFTER the sender is classified, keyed on (domain, reporter identity, report id): a forger cannot squat a real reporter's id, and
     // an uncounted report never displaces a counted one.
     if (await tenant.scope.reports.isDuplicate(domain.id, decision.identity, info.report_id, decision.tier === 'counted')) throw new ParseStop('duplicate', 'duplicate');
-    const tierCap = decision.tier === 'unauthenticated' ? limits.unauthRecordsPerReport : decision.tier === 'unknown' ? limits.unknownRecordsPerReport : limits.recordsPerReport;
+    const tierCap = unrestricted ? limits.recordsPerReport : decision.tier === 'unauthenticated' ? limits.unauthRecordsPerReport : decision.tier === 'unknown' ? limits.unknownRecordsPerReport : limits.recordsPerReport;
     if (info.record_count > tierCap) throw new ParseStop('refused', 'too_many_records', `Report has ${info.record_count} records; the limit is ${tierCap}`);
     const over = opts.admitTier?.(decision.tier) ?? opts.admit?.(info.record_count) ?? null;
     if (over) throw new ParseStop('refused', over);
     // IP enrichment: a registry reporter gets the normal budget, an authenticated unknown a small one, an unauthenticated report none.
-    return decision.tier === 'unauthenticated' ? { enrich: false } : { enrich: true, maxNewIps: decision.tier === 'unknown' ? Math.min(limits.newIpsPerReport, limits.unknownNewIpsPerReport) : limits.newIpsPerReport };
+    return decision.tier === 'unauthenticated' && !unrestricted ? { enrich: false } : { enrich: true, maxNewIps: decision.tier === 'unknown' && !unrestricted ? Math.min(limits.newIpsPerReport, limits.unknownNewIpsPerReport) : limits.newIpsPerReport };
   };
 
   let report;

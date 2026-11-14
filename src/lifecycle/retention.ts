@@ -7,6 +7,7 @@
 
 import { lifecycleQueries, sweepLimits, type SweepResult } from '@inbox-angel/db';
 import { retentionPolicy, type RetentionEnv } from './config';
+import { reportCounting } from '../dmarc/counting';
 
 const DAY = 86400;
 const dayOf = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString().slice(0, 10);
@@ -26,10 +27,13 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
   const q = lifecycleQueries(env.DB);
   const limits = sweepLimits(opts.limits);
   const ago = (d: number) => now - d * DAY;
+  // Unauthenticated-tier reports are short-lived only where they never feed the numbers. With REPORT_COUNTING=all (the self-host default) they ARE the
+  // numbers (a server with AUTHSERV_* unset stores every report as unauthenticated), so they keep the normal window.
+  const unauthCutoff = reportCounting(env) === 'all' ? undefined : ago(p.unauthenticatedReportsDays);
 
   const report: RetentionReport = {};
   const sweeps: Array<[string, () => Promise<SweepResult>]> = [
-    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits, ago(p.unauthenticatedReportsDays))],
+    ['aggregate_reports', () => q.purgeAggregateReports(ago(p.reportsDays), limits, unauthCutoff)],
     ['tls_reports', () => q.purgeTlsReports(ago(p.tlsDays), limits)],
     // 0 days: raw XML is never stored, so clear anything still there
     ['raw_xml_cleared', () => q.clearRawXml(ago(p.rawDays), limits)],

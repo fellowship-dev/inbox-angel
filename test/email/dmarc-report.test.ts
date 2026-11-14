@@ -143,7 +143,7 @@ describe('handleDmarcReport — happy path', () => {
     await handleDmarcReport(makeMessage(), makeEnv());
 
     // parseDmarcEmail now takes (bytes, offline, db)
-    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), expect.objectContaining({ maxBytes: 1024 * 1024, maxRecords: 2_500, maxNewIps: 200, gate: expect.any(Function) })); // self-host, unauthenticated carrier: the non-registry decompression cap
+    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), expect.objectContaining({ maxBytes: 1.25 * 1024 * 1024, maxRecords: 2_500, maxNewIps: 200, gate: expect.any(Function) })); // self-host counting every report: no tier restriction (the registry cap)
   });
 
   it('calls storeReport with correct domain id', async () => {

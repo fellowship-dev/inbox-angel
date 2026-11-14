@@ -52,6 +52,23 @@ function seed() {
 
 const ids = (s: any, table: string, col = 'id') => (s.prepare(`SELECT ${col} AS v FROM ${table} ORDER BY 1`).all() as any[]).map(r => r.v);
 
+describe('unauthenticated reports (RETENTION_UNAUTHENTICATED_REPORTS_DAYS, default 30)', () => {
+  const rows = (mode: Record<string, string>) => {
+    const { db, s } = seed();
+    s.prepare("UPDATE aggregate_reports SET reporter_tier = 'unauthenticated' WHERE id IN (3, 4)").run();
+    s.prepare("UPDATE aggregate_reports SET created_at = ? WHERE id = 3").run(ago(31)); // inside the 13 months, past 30 days
+    return runRetention({ DB: db as any, ...mode }, { now: clock }).then(() => ids(s, 'aggregate_reports'));
+  };
+  it('are swept after 30 days where they never count (hosted, registry, authenticated)', async () => {
+    expect(await rows({ MODE: 'saas' })).toEqual([2, 4]);
+    expect(await rows({ REPORT_COUNTING: 'authenticated' })).toEqual([2, 4]);
+  });
+  it('keep the normal window with REPORT_COUNTING=all: there they are the numbers, and a server without AUTHSERV_* stores every report this way', async () => {
+    expect(await rows({})).toEqual([2, 3, 4]);
+    expect(await rows({ MODE: 'saas', REPORT_COUNTING: 'all' })).toEqual([2, 3, 4]);
+  });
+});
+
 describe('runRetention (self-host defaults)', () => {
   it('deletes exactly what is past its window, and keeps the rest', async () => {
     const { db, s, n } = seed();

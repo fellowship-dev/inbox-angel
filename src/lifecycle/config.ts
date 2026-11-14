@@ -5,6 +5,8 @@ import { getMode } from '../tenancy/mode';
 
 export interface RetentionEnv {
   MODE?: string;
+  /** registry | authenticated | all (src/dmarc/counting.ts): with `all`, unauthenticated reports keep the normal window. */
+  REPORT_COUNTING?: string;
   /** Aggregate (rua) report rows and their records. */
   RETENTION_REPORTS_DAYS?: string;
   RETENTION_TLS_DAYS?: string;
