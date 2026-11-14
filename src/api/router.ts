@@ -1,4 +1,4 @@
-// REST API router for InboxAngel Worker.
+// REST API router for Ready Set Mail Worker.
 // All /api/* routes require authentication: the WorkspaceResolver (default: sessionWorkspaceResolver,
 // src/auth/resolver.ts) turns the deprecated API_KEY, a per-user API key or a Better Auth session
 // into {workspace, user, role}, and the request acts on that workspace only. Members are read-only.
@@ -94,7 +94,7 @@ import { isCorsPath, preflight, withCors } from './cors';
 import { handleLeadRoutes, handlePublicFunnelRoute, isInstanceOwner } from '../funnel/routes';
 import { requestMonitorSubscription } from '../funnel/monitor-optin';
 import type { AuthedWorkspace } from '../auth/resolver';
-import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, authLookups, globalQueries, workspaceLifecycle, type DmarcFacts } from '@ready-set-mail/db';
 import { currentUser, passesCsrfCheck } from '../auth/session';
 import { keyedHash } from '../mail/tokens';
 import { getMode } from '../tenancy/mode';
@@ -103,7 +103,7 @@ import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../d
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
 import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
-import { PlanLimitError } from '@inbox-angel/db';
+import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitResponse } from '../hosted/plan-limits';
 import { claimPreviewResponse, dnsPreviewLimiter } from '../domains/claim-preview';
 import { getDomainReport } from '../reports/service';
@@ -118,10 +118,10 @@ import { logAudit } from '../audit/log';
 import { flattenSpf, restoreSpf, collectIps, buildFlatRecord } from '../email/spf-flattener';
 import { buildStepRecord, parseDmarcTags, planNextStep, stepIndexForRecord, stepIndexFromStored, stepIndexFor, toStored, PASS_RATE_THRESHOLD, ROLLOUT_SEQUENCE } from '../dmarc/rollout';
 import { lookupSpf, lookupDmarc, countSpfLookupsFromRecord } from '../email/dns-check';
-import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@inbox-angel/dns-checks';
+import { createResolver, isDkimRecord, normalizeDomainName, isDmarcRecord, isSpfRecord, scanDkimSelectors } from '@ready-set-mail/dns-checks';
 import { dmarcFactsFor, spfFromTxt } from '../email/dns-snapshot';
-import { getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
-import { decodeTxtData } from '@inbox-angel/dns-checks/txt';
+import { getAllDkimSelectors } from '@ready-set-mail/dns-checks/email-service-providers';
+import { decodeTxtData } from '@ready-set-mail/dns-checks/txt';
 import {
   provisionMtaSts,
   updateMtaStsTxtRecord,
@@ -445,7 +445,7 @@ async function _handleApi(
   // GET /api/version — compares running version against latest GitHub release
   // Cached for 24h per-instance via CF Cache API — one GitHub request per day max
   if (path === '/api/version' && method === 'GET') {
-    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/inbox-angel/main/package.json';
+    const GH_RAW = 'https://raw.githubusercontent.com/fellowship-dev/ready-set-mail/main/package.json';
     const cacheKey = new Request(GH_RAW);
     let latest: string | null = null;
     try {
@@ -468,7 +468,7 @@ async function _handleApi(
       current: version,
       latest,
       update_available: latest !== null && latest !== version,
-      release_url: 'https://github.com/fellowship-dev/inbox-angel/releases/latest',
+      release_url: 'https://github.com/fellowship-dev/ready-set-mail/releases/latest',
       // Only when HOSTED_SERVICE_URL is set on a self-hosted installation (src/hosted-service.ts).
       ...(hostedServiceUrl(env) ? { hosted_service_url: hostedServiceUrl(env) } : {}),
     });
@@ -1227,14 +1227,14 @@ async function _handleApi(
       return json({ ok: true, record: body.record, created: !existingId });
     }
 
-    // POST /api/setup/custom-domain — register inbox-angel.{BASE_DOMAIN} as CF Custom Domain
+    // POST /api/setup/custom-domain — register ready-set-mail.{BASE_DOMAIN} as CF Custom Domain
     if (path === '/api/setup/custom-domain' && method === 'POST') {
       if (!tenant.hasCloudflare()) return cfFailure(new CfNotConfiguredError());
       const bd = tenant.settings.baseDomain;
       if (!bd) return err('Base domain not configured', 400);
 
       const workerName = tenant.workerName;
-      const hostname = `inbox-angel.${bd}`;
+      const hostname = `ready-set-mail.${bd}`;
 
       // The hostname is on the base domain's zone.
       let cf: Awaited<ReturnType<typeof tenant.cfFor>>;

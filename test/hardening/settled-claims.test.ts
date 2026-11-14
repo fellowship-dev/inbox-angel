@@ -19,7 +19,7 @@ async function settled() {
   const add = async (domain: string, who = a) => (await json(await w.api(who, 'POST', '/api/domains', { domain }))).claim;
   const verify = (id: number, who = a) => w.api(who, 'POST', `/api/domains/claims/${id}/verify`, {});
   const claim = await add('acme.org');
-  provenDns('_inboxangel.acme.org', claim.txt_value);
+  provenDns('_readysetmail.acme.org', claim.txt_value);
   const first = await verify(claim.id);
   const list = async (who = a) => (await json(await w.api(who, 'GET', '/api/domains'))) as { domains: any[]; pending_claims: any[] };
   return { ...w, a, b, add, verify, claim, first, list };
@@ -74,7 +74,7 @@ describe('a settled claim', () => {
     expect(claim2.status).toBe('pending');
     expect((await w.list()).pending_claims.map((c: any) => c.domain)).toEqual(['acme.org']);
     expect(w.rows("SELECT id FROM domain_claims WHERE domain = 'acme.org'")).toHaveLength(1);
-    provenDns('_inboxangel.acme.org', claim2.txt_value);
+    provenDns('_readysetmail.acme.org', claim2.txt_value);
     const again = await w.verify(claim2.id);
     expect(again.status).toBe(201);
     expect((await w.verify(claim2.id)).status).toBe(200);
@@ -85,7 +85,7 @@ describe('a settled claim', () => {
     const id = (await json(w.first)).domain.id;
     await w.api(w.a, 'DELETE', `/api/domains/${id}`);
     const bClaim = await w.add('acme.org', w.b);
-    provenDns('_inboxangel.acme.org', bClaim.txt_value);
+    provenDns('_readysetmail.acme.org', bClaim.txt_value);
     expect((await w.verify(bClaim.id, w.b)).status).toBe(201);
     expect(w.rows('SELECT status FROM domain_claims WHERE id = ?', w.claim.id)).toEqual([{ status: 'pending' }]); // A's settled row is not rewritten
   });
