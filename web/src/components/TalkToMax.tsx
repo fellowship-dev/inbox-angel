@@ -1,11 +1,11 @@
-import { cn } from '@inbox-angel/ui';
+import { cn } from '@ready-set-mail/ui';
 import { ExternalLink, MessageCircle } from 'lucide-react';
 import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError } from '../lib/api';
 import { useHelpUrl } from '../lib/session';
 
 /** Said by every "Talk to Max" link to assistive tech and on hover: who, what for, and that it leaves the page. */
-export const TALK_TO_MAX_TITLE = 'Book a call with Max, who runs Inbox Angel, about your email setup. Opens in a new tab.';
+export const TALK_TO_MAX_TITLE = 'Book a call with Max, who runs Ready Set Mail, about your email setup. Opens in a new tab.';
 
 /**
  * The always-visible entry, for the app's top bars. Renders nothing unless the hosted service has a booking link,

@@ -2,7 +2,7 @@ import { delegatedKey } from './grant-fixture';
 import { describe, it, expect, vi } from 'vitest';
 
 import { call, makeEnv, setupOwner, req, ctx } from './helpers';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { handleApi } from '../../src/api/router';
 
 vi.mock('../../src/env-utils', async (importOriginal) => {

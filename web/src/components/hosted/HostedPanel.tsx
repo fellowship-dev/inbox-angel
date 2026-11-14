@@ -1,4 +1,4 @@
-import { Alert, Button } from '@inbox-angel/ui';
+import { Alert, Button } from '@ready-set-mail/ui';
 import { RefreshCw } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { hostedError, useHostedConfig, useHostedMutations, useHostedStatus, type HostedAddresses, type HostedStatus } from '../../lib/hosted';
@@ -38,7 +38,7 @@ function Panel({ domainId }: { domainId: number }) {
 		body = (
 			<div className="space-y-3 rounded-lg border border-line bg-surface-1 p-4">
 				<p className="text-sm text-ink-2">
-					Let Inbox Angel host your DMARC, SPF and TLS-RPT records. You add a few pointer records to your DNS once, and we keep the records behind them up to date. No more editing
+					Let Ready Set Mail host your DMARC, SPF and TLS-RPT records. You add a few pointer records to your DNS once, and we keep the records behind them up to date. No more editing
 					DNS when something changes.
 				</p>
 				<WriteButton onClick={() => setEnableOpen(true)}>Enable hosted records</WriteButton>
@@ -62,7 +62,7 @@ function Panel({ domainId }: { domainId: number }) {
 
 	return (
 		<div ref={panelRef} tabIndex={-1} className="outline-none" data-testid="hosted-panel">
-			<Section title="Hosted records" description="Inbox Angel publishes and maintains these records for you.">
+			<Section title="Hosted records" description="Ready Set Mail publishes and maintains these records for you.">
 				{addresses ? <AddressesAlert addresses={addresses} onDismiss={dismiss} /> : null}
 				{notice ? (
 					<Alert variant="info" title="Already enabled">
@@ -117,7 +117,7 @@ function Panel({ domainId }: { domainId: number }) {
 					if (!o) m.disable.reset();
 				}}
 				title="Disable hosted records?"
-				description="Inbox Angel removes the hosted DMARC, SPF, TLS-RPT and MTA-STS records. Remove the pointer records from your DNS too, otherwise they point at nothing and mail authentication will break."
+				description="Ready Set Mail removes the hosted DMARC, SPF, TLS-RPT and MTA-STS records. Remove the pointer records from your DNS too, otherwise they point at nothing and mail authentication will break."
 				confirmLabel={disableErr?.retryable ? 'Retry' : 'Disable hosted records'}
 				busyLabel="Disabling…"
 				variant="danger"

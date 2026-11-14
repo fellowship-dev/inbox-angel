@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldHint, Label, Textarea } from '@inbox-angel/ui';
+import { Alert, Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FieldHint, Label, Textarea } from '@ready-set-mail/ui';
 import { useId, useState } from 'react';
 import type { HostedErrorInfo } from '../../lib/hosted';
 
@@ -35,7 +35,7 @@ export function EnableDialog({
 				>
 					<DialogHeader>
 						<DialogTitle>Enable hosted records</DialogTitle>
-						<DialogDescription>Inbox Angel will publish your DMARC, SPF and TLS-RPT records. You add pointer records in your DNS once.</DialogDescription>
+						<DialogDescription>Ready Set Mail will publish your DMARC, SPF and TLS-RPT records. You add pointer records in your DNS once.</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-1.5">
 						<Label htmlFor={spfId}>SPF record (optional)</Label>
@@ -46,7 +46,7 @@ export function EnableDialog({
 						<Checkbox id={mtaId} checked={mta} onCheckedChange={(v) => setMta(v === true)} className="mt-0.5" />
 						<div className="space-y-0.5">
 							<Label htmlFor={mtaId}>Also host MTA-STS</Label>
-							<FieldHint>Needs MX records. Inbox Angel serves the policy and keeps the MX list fresh.</FieldHint>
+							<FieldHint>Needs MX records. Ready Set Mail serves the policy and keeps the MX list fresh.</FieldHint>
 						</div>
 					</div>
 					{error ? (

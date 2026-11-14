@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { SPF_PROVIDERS, DKIM_ONLY_PROVIDERS, detectProviders, matchDkimProvider, findUnsignedSpfProviders, getAllDkimSelectors } from '@inbox-angel/dns-checks/email-service-providers';
-import { extractIncludes, extractOtherMechanisms, buildSpfRecord } from '@inbox-angel/dns-checks/spf-record';
+import { SPF_PROVIDERS, DKIM_ONLY_PROVIDERS, detectProviders, matchDkimProvider, findUnsignedSpfProviders, getAllDkimSelectors } from '@ready-set-mail/dns-checks/email-service-providers';
+import { extractIncludes, extractOtherMechanisms, buildSpfRecord } from '@ready-set-mail/dns-checks/spf-record';
 
 describe('SPF_PROVIDERS', () => {
   it('has at least 15 known providers', () => {

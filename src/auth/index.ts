@@ -1,4 +1,4 @@
-// Better Auth on D1, via its Drizzle adapter on @inbox-angel/db.
+// Better Auth on D1, via its Drizzle adapter on @ready-set-mail/db.
 //
 //  - email + password always; GitHub / Google only when their client id + secret are set
 //  - sessions, credentials and reset tokens in D1 (migration 0013)
@@ -7,7 +7,7 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { bearer } from 'better-auth/plugins';
-import { betterAuthSchema, getDb, globalQueries } from '@inbox-angel/db';
+import { betterAuthSchema, getDb, globalQueries } from '@ready-set-mail/db';
 import { hashPassword, verifyPassword } from '../api/password';
 import { baseUrl, isSaas, oauthProviders, trustedOrigins, type AuthEnv } from './config';
 import { sendPasswordResetEmail, sendVerificationEmail } from './mail';
@@ -32,7 +32,7 @@ export async function createAuth(
   const saas = isSaas(env);
 
   return betterAuth({
-    appName: 'InboxAngel',
+    appName: 'Ready Set Mail',
     baseURL: origin,
     basePath: AUTH_BASE_PATH,
     secret: await authSecret(env),

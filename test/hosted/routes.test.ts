@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -15,7 +15,7 @@ import { HOSTED_ENV, quiet } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const ZONE = 'zone-h';
-const APEX = 'h.inboxangel.io';
+const APEX = 'h.readysetmail.com';
 
 async function setup() {
   const db = createMigratedD1();
@@ -30,7 +30,7 @@ async function setup() {
   const B = await signup('b@example.com');
   db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, ?, 'a-corp.com', 'x')").run(A.ws);
   db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (2, ?, 'b-corp.org', 'x')").run(B.ws);
-  const cf = stubCloudflare(new FakeCloudflare({ 'inboxangel.io': { id: ZONE } }));
+  const cf = stubCloudflare(new FakeCloudflare({ 'readysetmail.com': { id: ZONE } }));
   cf.doh['a-corp.com'] = ['v=spf1 include:_spf.example.net -all'];
   cf.doh['_spf.example.net'] = ['v=spf1 ip4:192.0.2.0/24 -all'];
   cf.mx['a-corp.com'] = ['10 mx1.mail.example.'];
@@ -52,7 +52,7 @@ describe('/api/domains/:id/hosted', () => {
     expect(enable.status).toBe(201);
     const { hosted, addresses } = await enable.json() as any;
     const names = hostedNames(hosted.hosted_id, APEX);
-    expect(addresses.rua).toMatch(/^rua\+[a-z2-7]{32}@rua\.inboxangel\.io$/);
+    expect(addresses.rua).toMatch(/^rua\+[a-z2-7]{32}@rua\.readysetmail\.com$/);
     expect(hosted.records).toEqual({ dmarc: names.dmarc, spf: names.spf, tls_rpt: names.tlsRpt, mta_sts: names.mtaSts });
     expect(t.rows('SELECT workspace_id FROM hosted_domains')).toEqual([{ workspace_id: t.A.ws }]);
     expect(t.rows("SELECT resource_name FROM audit_log WHERE action = 'hosted.enable'")).toEqual([{ resource_name: 'a-corp.com' }]);

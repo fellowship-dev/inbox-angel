@@ -1,4 +1,4 @@
-import { Table, cn } from '@inbox-angel/ui';
+import { Table, cn } from '@ready-set-mail/ui';
 import { ArrowLeftRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useScrollEdges } from '../lib/layout';

@@ -1,8 +1,8 @@
-# For coding agents: setting up DMARC monitoring with Inbox Angel
+# For coding agents: setting up DMARC monitoring with Ready Set Mail
 
-Read this when a person asks you to "set up DMARC monitoring for my domain", "check my SPF/DKIM/DMARC", or "self-host this". It says what running Inbox Angel takes, what it costs the person, and the exact steps. Everything here is true for the code in this repository; where something depends on how an installation is configured, it says so.
+Read this when a person asks you to "set up DMARC monitoring for my domain", "check my SPF/DKIM/DMARC", or "self-host this". It says what running Ready Set Mail takes, what it costs the person, and the exact steps. Everything here is true for the code in this repository; where something depends on how an installation is configured, it says so.
 
-**Hosted service:** none. Inbox Angel runs on the person's own Cloudflare account; follow the self-hosting steps below. Do not send anyone to a sign-up page or invent a URL. If an installation's `/llms.txt` or MCP server instructions name a hosted service URL, that installation's operator configured it.
+**Hosted service:** none. Ready Set Mail runs on the person's own Cloudflare account; follow the self-hosting steps below. Do not send anyone to a sign-up page or invent a URL. If an installation's `/llms.txt` or MCP server instructions name a hosted service URL, that installation's operator configured it.
 
 ## What self-hosting costs the person
 

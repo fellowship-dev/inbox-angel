@@ -12,7 +12,7 @@ vi.mock('cloudflare:email', () => ({
 import { handleFreeCheck, buildReplyRaw } from '../../src/email/free-check';
 import type { Env } from '../../src/index';
 import { makeTenant } from '../helpers/tenant';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -30,15 +30,15 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     CLOUDFLARE_ACCOUNT_ID: '',
     CLOUDFLARE_ZONE_ID: '',
     CLOUDFLARE_API_TOKEN: '',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-    FROM_EMAIL: 'check@reports.inboxangel.io',
+    REPORTS_DOMAIN: 'reports.readysetmail.com',
+    FROM_EMAIL: 'check@reports.readysetmail.com',
     ...overrides,
   };
 }
 
 /** The tenant a test env belongs to. */
 function tn(env: Env) {
-  return makeTenant({ db: env.DB, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
+  return makeTenant({ db: env.DB, settings: { reportsDomain: 'reports.readysetmail.com', fromEmail: 'check@reports.readysetmail.com' } });
 }
 
 function makeMessage(overrides: Partial<{
@@ -60,7 +60,7 @@ function makeMessage(overrides: Partial<{
   return {
     ...(overrides.raw !== undefined ? { raw: rawStream(overrides.raw) } : {}),
     from: overrides.from ?? 'user@example.com',
-    to: overrides.to ?? 'check@reports.inboxangel.io',
+    to: overrides.to ?? 'check@reports.readysetmail.com',
     headers,
     reply: vi.fn().mockResolvedValue(undefined),
     forward: vi.fn(),
@@ -138,7 +138,7 @@ describe('handleFreeCheck', () => {
     expect(message.reply).toHaveBeenCalledOnce();
     const reply = sentReply(message);
     expect(reply).not.toBeInstanceOf(ReadableStream);
-    expect(reply.from).toBe('check@reports.inboxangel.io');
+    expect(reply.from).toBe('check@reports.readysetmail.com');
     expect(reply.to).toBe('user@example.com');
     expect(typeof reply.raw).toBe('string');
   });
@@ -170,7 +170,7 @@ describe('handleFreeCheck', () => {
     await handleFreeCheck(message, tn(makeEnv()), 'test-token');
 
     const raw = decodeWords(sentReply(message).raw);
-    expect(raw).toMatch(/From: "?InboxAngel"? <check@reports\.inboxangel\.io>/);
+    expect(raw).toMatch(/From: "?Ready Set Mail"? <check@reports\.readysetmail\.com>/);
     expect(raw).toMatch(/To: <?user@example\.com>?/);
     expect(raw).toMatch(/Subject: Email security check — example\.com/);
     expect(raw).toContain('text/plain');
@@ -223,7 +223,7 @@ describe('handleFreeCheck', () => {
     mockDohEmpty();
     const message: ForwardableEmailMessage = {
       from: 'user@nodomain.com',
-      to: 'check@reports.inboxangel.io',
+      to: 'check@reports.readysetmail.com',
       headers: new Headers(), // no auth-results
       reply: vi.fn().mockResolvedValue(undefined),
       forward: vi.fn(),
@@ -276,7 +276,7 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
     const tenant = makeTenant({
       db,
       env: { ...(opts.binding === false ? {} : { SEND_EMAIL }), ...AUTHSERV, ...opts.env } as never,
-      settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' },
+      settings: { reportsDomain: 'reports.readysetmail.com', fromEmail: 'check@reports.readysetmail.com' },
     });
     const message = makeMessage({
       from: opts.from,
@@ -304,7 +304,7 @@ describe('handleFreeCheck: delivery when reply() is refused', () => {
     expect(sent).toHaveLength(1);
     const m = sent[0];
     expect(m.to).toEqual(['user@example.com']);
-    expect(m.from).toEqual({ name: 'InboxAngel', email: 'check@reports.inboxangel.io' });
+    expect(m.from).toEqual({ name: 'Ready Set Mail', email: 'check@reports.readysetmail.com' });
     expect(m.subject).toBe('Email security check — example.com');
     expect(m.text).toContain('example.com');
     expect(m.text).toContain('🚨');
@@ -406,7 +406,7 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
   function run(env: Record<string, unknown>, replyFails = false, trustedAuth = 'spf=pass smtp.mailfrom=user@example.com; dmarc=none header.from=example.com') {
     const sent: Array<{ replyTo?: string; text: string; html?: string }> = [];
     const SEND_EMAIL = { send: vi.fn(async (m: { replyTo?: string; text: string; html?: string }) => { sent.push(m); return { messageId: 'm' }; }) };
-    const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...AUTHSERV, ...env } as never, settings: { reportsDomain: 'reports.inboxangel.io', fromEmail: 'check@reports.inboxangel.io' } });
+    const tenant = makeTenant({ db: createMigratedD1(), env: { SEND_EMAIL, ...AUTHSERV, ...env } as never, settings: { reportsDomain: 'reports.readysetmail.com', fromEmail: 'check@reports.readysetmail.com' } });
     const message = makeMessage({
       authResults: 'mx.cloudflare.net; spf=none smtp.mailfrom=user@example.com; dmarc=none header.from=example.com',
       raw: rawWith(trustedAuth),
@@ -433,13 +433,13 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
 
   it('MAIL_REPLY_TO set: the reply carries that Reply-To, and so does the outbound fallback', async () => {
     mockDohEmpty();
-    const a = run({ MAIL_REPLY_TO: 'hello@inboxangel.io' });
+    const a = run({ MAIL_REPLY_TO: 'hello@readysetmail.com' });
     await a.done;
-    expect(raw(a.message)).toMatch(/^Reply-To: <?hello@inboxangel\.io>?\r?$/m);
+    expect(raw(a.message)).toMatch(/^Reply-To: <?hello@readysetmail\.com>?\r?$/m);
     mockDohEmpty();
-    const b = run({ MAIL_REPLY_TO: 'hello@inboxangel.io' }, true);
+    const b = run({ MAIL_REPLY_TO: 'hello@readysetmail.com' }, true);
     await b.done;
-    expect(b.sent[0].replyTo).toBe('hello@inboxangel.io');
+    expect(b.sent[0].replyTo).toBe('hello@readysetmail.com');
   });
 
   it('MAIL_REPLY_TO unset: no Reply-To on either path', async () => {
@@ -464,15 +464,15 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
 
   it('SITE_URL set: the marketing link points there', async () => {
     mockDohEmpty();
-    const b = run({ SITE_URL: 'https://inboxangel.io/' }, true);
+    const b = run({ SITE_URL: 'https://readysetmail.com/' }, true);
     await b.done;
-    expect(b.sent[0].text).toContain('https://inboxangel.io');
-    expect(b.sent[0].html).toContain('href="https://inboxangel.io"');
+    expect(b.sent[0].text).toContain('https://readysetmail.com');
+    expect(b.sent[0].html).toContain('href="https://readysetmail.com"');
   });
 
   it('BOOKING_URL set: "or we do it for you" points there in both bodies', async () => {
     mockDohEmpty();
-    const b = run({ BOOKING_URL: 'https://cal.example/max/30min', SITE_URL: 'https://inboxangel.io' }, true);
+    const b = run({ BOOKING_URL: 'https://cal.example/max/30min', SITE_URL: 'https://readysetmail.com' }, true);
     await b.done;
     expect(b.sent[0].text).toContain('Or we do it for you: https://cal.example/max/30min');
     expect(b.sent[0].html).toContain('href="https://cal.example/max/30min"');
@@ -481,7 +481,7 @@ describe('handleFreeCheck: replies reach the operator, links use SITE_URL', () =
 
 describe('buildReplyRaw', () => {
   it('omits In-Reply-To when the original had no Message-ID', () => {
-    const raw = buildReplyRaw({ name: 'InboxAngel', addr: 'check@reports.inboxangel.io' }, 'a@b.co', 'Hi', 'text', '<p>html</p>', null);
+    const raw = buildReplyRaw({ name: 'Ready Set Mail', addr: 'check@reports.readysetmail.com' }, 'a@b.co', 'Hi', 'text', '<p>html</p>', null);
     expect(raw).not.toMatch(/In-Reply-To/i);
   });
 });

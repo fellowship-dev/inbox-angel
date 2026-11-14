@@ -2,7 +2,7 @@
 // Judged from the Authentication-Results header the receiving MTA added. A report that fails (or has no such header)
 // is still stored, but flagged: anyone can mail a forged report to a rua address.
 
-import { organizationalDomain } from '@inbox-angel/dns-checks';
+import { organizationalDomain } from '@ready-set-mail/dns-checks';
 import { parseAuthResults } from '../email/parse-headers';
 import { proveSender, type AuthHeaders } from '../email/sender-proof';
 import type { AggregateReport } from './types';

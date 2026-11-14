@@ -1,10 +1,10 @@
-import { Button, CheckResult, CheckResultList } from '@inbox-angel/ui';
+import { Button, CheckResult, CheckResultList } from '@ready-set-mail/ui';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { SeverityBadge } from '../../../components/wizard/SeverityBadge';
 import { StepCard } from '../../../components/wizard/StepCard';
 import { StepNav } from '../../../components/wizard/StepNav';
 import { parseDmarcPolicy } from '../../../lib/dmarc-record';
-import { matchDkimProvider, type EmailProvider } from '@inbox-angel/dns-checks/email-service-providers';
+import { matchDkimProvider, type EmailProvider } from '@ready-set-mail/dns-checks/email-service-providers';
 import type { StepProps } from './SpfStep';
 import { DKIM_WILDCARD_LABEL, dkimWildcardSummary } from '../../../lib/dkim-wildcard';
 import { dkimSeverity, dnsErrorDetail, dnsErrorsFor, splitDkimSelectors, unsignedProviders } from './steps';

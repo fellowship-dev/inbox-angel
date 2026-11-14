@@ -1,4 +1,4 @@
-import { Alert, Button, FieldHint, Label, PageHeader, Textarea } from '@inbox-angel/ui';
+import { Alert, Button, FieldHint, Label, PageHeader, Textarea } from '@ready-set-mail/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { useState, type FormEvent } from 'react';

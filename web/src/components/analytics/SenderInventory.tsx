@@ -1,4 +1,4 @@
-import { Badge, EmptyState, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
+import { Badge, EmptyState, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@ready-set-mail/ui';
 import { CheckCircle2, Sparkles, XCircle, AlertTriangle } from 'lucide-react';
 import { fmtPct, senderName, type Alignment, type Sender } from '../../lib/analytics';
 import { formatNumber } from '../../lib/format';

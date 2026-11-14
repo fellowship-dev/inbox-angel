@@ -3,7 +3,7 @@
 //
 //   node --import ./packages/report/loader.mjs packages/report/cli.ts example.com other.io
 //   node --import ./packages/report/loader.mjs packages/report/cli.ts --in domains.txt \
-//     [--tokens '{"example.com":"<token>"}'] [--report-url-base https://inboxangel.io/r/] [--blocks blocks.json] [--concurrency 2]
+//     [--tokens '{"example.com":"<token>"}'] [--report-url-base https://readysetmail.com/r/] [--blocks blocks.json] [--concurrency 2]
 //
 // Per domain: checkDomain() once per public DoH resolver (Cloudflare, Google, NextDNS; NS and the DNS host come with each
 // run), then buildReport(). Each line is {schema, domain, model, html, md} (the JSON rendering is `model` itself), or
@@ -11,10 +11,10 @@
 // (`lookupFailed`, `grade.level: null`). One domain never aborts the batch. Public DNS only, read-only, no secrets.
 import { readFileSync, realpathSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { checkDomain, DOH_ENDPOINTS, organizationalDomain, type FetchLike } from '@inbox-angel/dns-checks';
+import { checkDomain, DOH_ENDPOINTS, organizationalDomain, type FetchLike } from '@ready-set-mail/dns-checks';
 import { buildReport, REPORT_SCHEMA, renderHtml, renderMarkdown, type CallerBlock } from './src/index';
 
-export const DEFAULT_REPORT_URL_BASE = 'https://inboxangel.io/r/';
+export const DEFAULT_REPORT_URL_BASE = 'https://readysetmail.com/r/';
 
 export interface RunDeps {
   /** DoH (and policy-file) fetch; defaults to the global fetch. */

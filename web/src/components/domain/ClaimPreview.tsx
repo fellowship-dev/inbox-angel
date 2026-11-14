@@ -1,4 +1,4 @@
-import { Alert, Button, CheckResult, CheckResultList, LevelCard, Skeleton } from '@inbox-angel/ui';
+import { Alert, Button, CheckResult, CheckResultList, LevelCard, Skeleton } from '@ready-set-mail/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { api, ApiError } from '../../lib/api';

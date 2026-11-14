@@ -1,5 +1,5 @@
 {
-	"name": "@inbox-angel/web",
+	"name": "@ready-set-mail/web",
 	"version": "0.1.0",
 	"private": true,
 	"license": "MIT",
@@ -11,8 +11,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@inbox-angel/dns-checks": "*",
-		"@inbox-angel/ui": "*",
+		"@ready-set-mail/dns-checks": "*",
+		"@ready-set-mail/ui": "*",
 		"@tanstack/react-query": "^5.104.5",
 		"jspdf": "^2.5.2",
 		"lucide-react": "^1.61.0",

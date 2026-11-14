@@ -478,7 +478,7 @@ describe('self-host failed lookup: no required authorization record when nothing
 
 describe('repeat verify', () => {
 	it('says "Already verified", not "Ownership verified"', async () => {
-		const claim = { id: 5, domain: 'acme-agency.com', status: 'pending', txt_name: '_inboxangel.acme-agency.com', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
+		const claim = { id: 5, domain: 'acme-agency.com', status: 'pending', txt_name: '_readysetmail.acme-agency.com', txt_value: 'readysetmail-verify=abc', created_at: 1, last_checked_at: null, last_error: null };
 		renderApp(<AddDomainPage />, {
 			status: HOSTED,
 			routes: {

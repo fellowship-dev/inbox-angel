@@ -1,6 +1,6 @@
 /* Entry point. In the consuming app:
      @import "tailwindcss";
-     @import "@inbox-angel/ui/styles.css";
+     @import "@ready-set-mail/ui/styles.css";
    Fonts are bundled (Geist Sans + Geist Mono, OFL-1.1) and resolved by your bundler: no CDN. */
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";

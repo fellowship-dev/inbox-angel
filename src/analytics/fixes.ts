@@ -2,8 +2,8 @@
 // the domain's mail it touches, and the concrete change (SPF include, DKIM setup with the provider's guide).
 // Provider facts (SPF include, DKIM selectors, guide URLs) come from the same registry the DNS checks use.
 
-import { extractIncludes, extractOtherMechanisms, existingQualifier, buildSpfRecord, lookupLevel } from '@inbox-angel/dns-checks/spf-record';
-import { identifySender } from '@inbox-angel/dns-checks/sender-providers';
+import { extractIncludes, extractOtherMechanisms, existingQualifier, buildSpfRecord, lookupLevel } from '@ready-set-mail/dns-checks/spf-record';
+import { identifySender } from '@ready-set-mail/dns-checks/sender-providers';
 import { pct, underOrg, type Sender } from './senders';
 
 export type FixKind = 'authorize-sender' | 'fix-dkim-alignment' | 'investigate-sender' | 'review-new-sender';
@@ -125,7 +125,7 @@ export function buildFixes(domain: FixDomain, senders: Sender[]): Fix[] {
         const lookups = domain.spf_lookup_count == null ? null : domain.spf_lookup_count + 1; // at least one lookup for the include itself
         const level = lookups === null ? null : lookupLevel(lookups);
         if (level === 'over') {
-          steps.push(`Do not add include:${include} yet: your SPF already uses ${domain.spf_lookup_count} of the 10 DNS lookups allowed, and this include would take it to ${lookups} or more, which makes SPF fail for everything. Flatten your SPF first (Inbox Angel's SPF flattening, or hosted SPF), then add it.`);
+          steps.push(`Do not add include:${include} yet: your SPF already uses ${domain.spf_lookup_count} of the 10 DNS lookups allowed, and this include would take it to ${lookups} or more, which makes SPF fail for everything. Flatten your SPF first (Ready Set Mail's SPF flattening, or hosted SPF), then add it.`);
         } else {
           steps.push(`Add include:${include} to the SPF record of ${domain.domain}${domain.spf_record ? '' : ' (there is none yet: publish one)'}.`);
           if (level === 'near') steps.push(`Careful: that brings SPF to about ${lookups} of the 10 lookups allowed (the include can cost more than one). Flatten SPF if it goes over.`);

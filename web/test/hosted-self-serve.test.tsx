@@ -113,7 +113,7 @@ describe('hosted sign-in, sign-up and check-your-email', () => {
 	});
 });
 
-const claim = (over = {}) => ({ id: 5, domain: 'acme.com', status: 'pending' as const, txt_name: '_inboxangel.acme.com', txt_value: 'inboxangel-verify=abc', created_at: 1, last_checked_at: null, last_error: null, ...over });
+const claim = (over = {}) => ({ id: 5, domain: 'acme.com', status: 'pending' as const, txt_name: '_readysetmail.acme.com', txt_value: 'readysetmail-verify=abc', created_at: 1, last_checked_at: null, last_error: null, ...over });
 
 describe('domain claim card', () => {
 	it('claimed elsewhere: Talk to Max replaces "contact support"', async () => {

@@ -1,6 +1,6 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { forWorkspace } from '@inbox-angel/db';
-import { createResolver } from '@inbox-angel/dns-checks';
+import { forWorkspace } from '@ready-set-mail/db';
+import { createResolver } from '@ready-set-mail/dns-checks';
 import { dohFetch } from '../../packages/dns-checks/test/helpers';
 import { makeTenant } from '../helpers/tenant';
 import { createInboxMcpHandler } from '../../src/mcp/transport';
@@ -19,7 +19,7 @@ export async function toolWorld() {
  const handler = createInboxMcpHandler({ reportOptions });
  async function connect() {
   const transport = new StreamableHTTPClientTransport(new URL(identity.resource), { fetch: async (url, init) => handler.fetch(new Request(url, init), tenant.env, { props: identity, waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext & { props: McpIdentity }) });
-  const client = new Client({ name: 'Inbox Angel headless acceptance', version: '1.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  const client = new Client({ name: 'Ready Set Mail headless acceptance', version: '1.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   await client.connect(transport);
   return client;
  }

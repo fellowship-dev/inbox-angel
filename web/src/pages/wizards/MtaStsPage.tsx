@@ -1,4 +1,4 @@
-import { Alert, Badge, Button } from '@inbox-angel/ui';
+import { Alert, Badge, Button } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -158,7 +158,7 @@ export function MtaStsPage() {
 								</div>
 							</Alert>
 						) : hostedMta ? (
-							<Alert variant="info" title="This domain's MTA-STS is hosted by Inbox Angel">
+							<Alert variant="info" title="This domain's MTA-STS is hosted by Ready Set Mail">
 								<p>
 									Hosted records manage MTA-STS for this domain, so it cannot be enabled here. To turn it on, enable hosted records with MTA-STS in{' '}
 									<Link to={back}>Hosted records on the domain page</Link>.

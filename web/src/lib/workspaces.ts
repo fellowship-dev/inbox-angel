@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from '@inbox-angel/ui';
+import { toast } from '@ready-set-mail/ui';
 import { api, errorMessage } from './api';
 import type { Role } from './types';
 import { hashFor, workspaceStore } from './workspace';

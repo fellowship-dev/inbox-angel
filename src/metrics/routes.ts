@@ -1,4 +1,4 @@
-import { forWorkspace } from '@inbox-angel/db';
+import { forWorkspace } from '@ready-set-mail/db';
 import { requireAuth, AuthError } from '../api/auth';
 import { baseUrl, type AuthEnv } from '../auth/config';
 import { authorizeResource } from '../access/resolve';

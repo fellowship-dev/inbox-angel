@@ -1,6 +1,6 @@
 // /api/workspaces: list, create, rename, leave, delete — and what switching between workspaces does to what a user sees.
 import { describe, it, expect, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { call, makeEnv, setupOwner, inviteAndAccept, signupVerified } from '../auth/helpers';
 import { delegatedKey } from '../auth/grant-fixture';
 import { HOSTED_ENV } from '../hosted/world';

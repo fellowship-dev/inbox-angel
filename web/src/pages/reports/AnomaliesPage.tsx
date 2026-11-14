@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader } from '@inbox-angel/ui';
+import { EmptyState, PageHeader } from '@ready-set-mail/ui';
 import { ReportsNotConnected, useReportsNotConnected } from '../../components/ReportsNotConnected';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2 } from 'lucide-react';

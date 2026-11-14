@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.setConfig({ testTimeout: 30_000 });
 import { gzipSync, zipSync, strToU8 } from 'fflate';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { resetSchemaReadyCache } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { resetSchemaReadyCache } from '@ready-set-mail/db';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -23,7 +23,7 @@ import { dnsFrom } from './dns';
 import { HOSTED_ENV, nxdomain, quiet, twoWorkspaces } from './world';
 
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -302,7 +302,7 @@ describe('reporter_auth', () => {
   it('is exposed by the reports queries (so the list/detail API carries it)', async () => {
     const w = await twoWorkspaces();
     await send(w, dmarcXml('a-corp.com', 'q'), AR('mx.cloudflare.net; dkim=pass header.d=google.com'));
-    const { forWorkspace } = await import('@inbox-angel/db');
+    const { forWorkspace } = await import('@ready-set-mail/db');
     expect((await forWorkspace(w.env.DB, 'ws_a').reports.recent())[0]).toMatchObject({ reporter_auth: 'pass', reporter_auth_domain: 'google.com' });
     expect(await forWorkspace(w.env.DB, 'ws_a').reports.getWithDomain(1)).toMatchObject({ reporter_auth: 'pass' });
   });
@@ -325,7 +325,7 @@ describe('hosted domains per workspace', () => {
   const resolver = dnsFrom({});
   it('refuses beyond the cap with a 429 and counts each workspace on its own', async () => {
     const w = await twoWorkspaces();
-    stubCloudflare(new FakeCloudflare({ 'inboxangel.io': { id: 'zone-h' } }));
+    stubCloudflare(new FakeCloudflare({ 'readysetmail.com': { id: 'zone-h' } }));
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'a2-corp.com', 'x')").run();
     const env = { ...HOSTED_ENV, HOSTED_MAX_DOMAINS_PER_WORKSPACE: '1' } as any;
     const tenant = (ws: string) => makeTenant({ db: w.db, workspaceId: ws, env });

@@ -4,7 +4,7 @@
  * acting on the implicit workspace. Request and cron code gets it from
  * `tenant.scope` (src/tenancy/context.ts).
  */
-import { forWorkspace, globalQueries, type WorkspaceScope, type DbLike } from '@inbox-angel/db';
+import { forWorkspace, globalQueries, type WorkspaceScope, type DbLike } from '@ready-set-mail/db';
 
 export type { WorkspaceScope };
 

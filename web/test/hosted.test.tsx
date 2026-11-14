@@ -12,9 +12,9 @@ import { fail, renderApp } from './render';
 const domain = { id: 1, domain: 'example.com', dmarc_policy: 'reject', rua_address: 'r@reports.test', parent_id: null, created_at: 1700000000, alerts_enabled: 1, is_default: 0 };
 const addresses = { rua: 'rua+SECRETTOKEN@intake.test', tls_rpt: 'tls+SECRETTOKEN@intake.test' };
 const pointers = [
-	{ purpose: 'dmarc', type: 'CNAME', name: '_dmarc.example.com', value: 'abc._dmarc.h.inboxangel.io' },
-	{ purpose: 'spf', type: 'TXT', name: 'example.com', value: 'include:abc._spf.h.inboxangel.io' },
-	{ purpose: 'tls_rpt', type: 'CNAME', name: '_smtp._tls.example.com', value: 'abc._tlsrpt.h.inboxangel.io' },
+	{ purpose: 'dmarc', type: 'CNAME', name: '_dmarc.example.com', value: 'abc._dmarc.h.readysetmail.com' },
+	{ purpose: 'spf', type: 'TXT', name: 'example.com', value: 'include:abc._spf.h.readysetmail.com' },
+	{ purpose: 'tls_rpt', type: 'CNAME', name: '_smtp._tls.example.com', value: 'abc._tlsrpt.h.readysetmail.com' },
 ];
 const status = (ps: Record<string, string | null> = {}, extra: Record<string, unknown> = {}) => ({
 	enabled: true,
@@ -137,7 +137,7 @@ describe('HostedPanel enable', () => {
 
 		const list = await screen.findByRole('list', { name: 'Pointer records' });
 		expect(within(list).getByText('_dmarc.example.com')).toBeInTheDocument();
-		expect(within(list).getByText('abc._dmarc.h.inboxangel.io')).toBeInTheDocument();
+		expect(within(list).getByText('abc._dmarc.h.readysetmail.com')).toBeInTheDocument();
 		expect(within(list).getAllByRole('button', { name: /^Copy/ }).length).toBeGreaterThanOrEqual(6);
 		expect(localStorage.getItem('ia_hosted')).toBeNull();
 		expect(JSON.stringify(Object.entries(localStorage))).not.toContain('SECRETTOKEN');
@@ -352,7 +352,7 @@ describe('MTA-STS wizard on a hosted domain', () => {
 		const enable = await screen.findByRole('button', { name: 'Enable MTA-STS' });
 		await waitFor(() => expect(enable).toBeEnabled());
 		await userEvent.click(enable);
-		expect(await screen.findByText("This domain's MTA-STS is hosted by Inbox Angel")).toBeInTheDocument();
+		expect(await screen.findByText("This domain's MTA-STS is hosted by Ready Set Mail")).toBeInTheDocument();
 		expect(screen.queryByText('Could not enable MTA-STS')).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Enable MTA-STS' })).not.toBeInTheDocument();
 		expect(screen.getByRole('link', { name: /Hosted records on the domain page/ })).toHaveAttribute('href', '/domains/3');

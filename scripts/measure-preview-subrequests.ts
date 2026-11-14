@@ -1,6 +1,6 @@
 // How many DNS-over-HTTPS subrequests does one claim preview cost? Counts the fetches `previewClaimDns` makes for each domain.
 // Usage: npx tsx scripts/measure-preview-subrequests.ts google.com gov.uk
-import { createResolver } from '@inbox-angel/dns-checks';
+import { createResolver } from '@ready-set-mail/dns-checks';
 import { previewClaimDns } from '../src/domains/claim-preview';
 
 const domains = process.argv.slice(2);

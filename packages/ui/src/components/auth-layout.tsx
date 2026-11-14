@@ -16,7 +16,7 @@ export interface AuthLayoutProps {
  * Sign-in / owner setup / reset frame. Phones: content starts at the top (keyboard-safe) and the card
  * runs edge to edge; from `sm` the card is centred and framed. One h1, the card title.
  */
-export function AuthLayout({ title, description, children, brandName = "Inbox Angel", className }: AuthLayoutProps) {
+export function AuthLayout({ title, description, children, brandName = "Ready Set Mail", className }: AuthLayoutProps) {
 	return (
 		<main className={cn("flex min-h-screen flex-col items-center bg-surface-0 px-0 py-8 text-ink-1 sm:justify-center sm:px-6 sm:py-14", className)}>
 			<div className="w-full max-w-md space-y-6">

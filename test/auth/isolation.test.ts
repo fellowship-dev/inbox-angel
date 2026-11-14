@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { WORKSPACE_OWNED_TABLES } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { WORKSPACE_OWNED_TABLES } from '@ready-set-mail/db';
 import { call, makeEnv, signupVerified } from './helpers';
 import { delegatedKey } from './grant-fixture';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
@@ -318,7 +318,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(JSON.stringify(body)).not.toMatch(/b-intake-hash-secret|b-rua-secret/);
-    expect(rows(w.db, 'SELECT workspace_id, rua_address FROM domains WHERE id = 1')).toEqual([{ workspace_id: w.A.workspaceId, rua_address: 'rua@rua.inboxangel.io' }]);
+    expect(rows(w.db, 'SELECT workspace_id, rua_address FROM domains WHERE id = 1')).toEqual([{ workspace_id: w.A.workspaceId, rua_address: 'rua@rua.readysetmail.com' }]);
     expect(rows(w.db, 'SELECT token_hash, rua_address FROM intake_tokens t JOIN domains d ON d.id = t.domain_id WHERE t.domain_id = 2')).toEqual([{ token_hash: 'b-intake-hash-secret', rua_address: 'b-rua-secret@reports.b.test' }]);
   });
 

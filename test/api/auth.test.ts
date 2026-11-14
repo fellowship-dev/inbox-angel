@@ -5,7 +5,7 @@ import type { AuthEnv } from '../../src/api/auth';
 const ENV: AuthEnv = { API_KEY: 'test-key-org_abc123' };
 
 function makeRequest(headers: Record<string, string> = {}): Request {
-  return new Request('https://api.inboxangel.com/api/domains', { headers });
+  return new Request('https://api.readysetmail.com/api/domains', { headers });
 }
 
 describe('requireAuth', () => {

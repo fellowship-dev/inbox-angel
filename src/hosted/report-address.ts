@@ -13,7 +13,7 @@
 // so never a pending or lost claim (those live in domain_claims), never an evicted row, and never a row whose
 // ownership was not proven ('legacy', from before ownership checks).
 
-import { createResolver, lookupDmarc, planReportAddress, type InheritedPlan, type ReportAddressPlan, type Resolver } from '@inbox-angel/dns-checks';
+import { createResolver, lookupDmarc, planReportAddress, type InheritedPlan, type ReportAddressPlan, type Resolver } from '@ready-set-mail/dns-checks';
 import type { TenantContext } from '../tenancy/context';
 import { logAudit } from '../audit/log';
 import { hostedConfig, hostedEnabled } from './config';

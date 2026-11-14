@@ -1,5 +1,5 @@
 {
-  "name": "@inbox-angel/dns-checks",
+  "name": "@ready-set-mail/dns-checks",
   "version": "0.1.0",
   "description": "Pure, runtime-agnostic email-authentication DNS checks (SPF, DKIM, DMARC, MTA-STS, BIMI) over DoH with an injectable fetch.",
   "license": "MIT",

@@ -12,7 +12,7 @@
 // 3. Tools that run a full live DNS check (about 45-60 DNS-over-HTTPS lookups per resolver, two resolvers, so
 //    roughly 90-120 Worker subrequests per call): a D1 counter, tighter than the request limit. Each count is a
 //    single conditional write, so simultaneous calls cannot pass the limit.
-import { globalQueries } from '@inbox-angel/db';
+import { globalQueries } from '@ready-set-mail/db';
 import type { BoundEnv } from '../index';
 import type { AccessSubject } from '../access/principal';
 import { getMode } from '../tenancy/mode';

@@ -1,4 +1,4 @@
-import { Card, CardContent } from '@inbox-angel/ui';
+import { Card, CardContent } from '@ready-set-mail/ui';
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 /** The card every wizard step lives in. The heading takes focus on mount so a step change is announced. */

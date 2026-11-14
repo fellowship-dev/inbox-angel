@@ -1,4 +1,4 @@
--- What InboxAngel last read from live DNS for each domain, stored so the overview can show it without a lookup per card.
+-- What Ready Set Mail last read from live DNS for each domain, stored so the overview can show it without a lookup per card.
 -- All columns are additive and nullable. Existing rows stay NULL: nothing has checked them yet.
 --
 -- dns_checked_at           unix seconds both SPF and DMARC were last read successfully. NULL: never.

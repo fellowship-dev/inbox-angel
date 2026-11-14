@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, CheckResult, CheckResultList, LevelCard, Skeleton } from '@inbox-angel/ui';
+import { Badge, Button, Card, CardContent, CheckResult, CheckResultList, LevelCard, Skeleton } from '@ready-set-mail/ui';
 import { Link } from 'react-router';
 import { sumStats, wizardProgress } from '../../lib/dmarc';
 import { useCheckSummary, useStats, useWizardState } from '../../lib/domain-queries';

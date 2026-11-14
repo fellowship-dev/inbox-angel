@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ConnectReports } from '../src/components/reports/ConnectReports';
 import { READ_ONLY_REASON } from '../src/lib/session';
 import { fail, renderApp } from './render';
-import { ownRecordFromInherited } from '@inbox-angel/dns-checks/dmarc-rua';
+import { ownRecordFromInherited } from '@ready-set-mail/dns-checks/dmarc-rua';
 import { inheritedCoverage, offerEnforcement, recordFor } from '../src/lib/dmarc-coverage';
 
 const ADDR = 'rua@rua.example.net';

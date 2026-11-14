@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Env } from '../../src/index';
-import { createMigratedD1, type TestD1 } from '@inbox-angel/db/testing';
-import { IMPLICIT_WORKSPACE_ID } from '@inbox-angel/db';
+import { createMigratedD1, type TestD1 } from '@ready-set-mail/db/testing';
+import { IMPLICIT_WORKSPACE_ID } from '@ready-set-mail/db';
 
 // Mock auth so all requests pass with userId = 'org_test'
 vi.mock('../../src/api/auth', () => ({
@@ -13,7 +13,7 @@ vi.mock('../../src/api/auth', () => ({
 
 // Mock DNS provisioning so router tests don't hit Cloudflare
 vi.mock('../../src/dns/provision', () => ({
-  provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', recordName: 'acme.com._report._dmarc.reports.inboxangel.io', manual: false }),
+  provisionDomain: vi.fn().mockResolvedValue({ recordId: 'cf-rec-1', recordName: 'acme.com._report._dmarc.reports.readysetmail.com', manual: false }),
   deprovisionDomain: vi.fn().mockResolvedValue(undefined),
   DnsProvisionError: class DnsProvisionError extends Error {
     constructor(msg: string) { super(msg); this.name = 'DnsProvisionError'; }
@@ -27,28 +27,28 @@ import * as dnsMod from '../../src/dns/provision';
 
 // ── Helpers ───────────────────────────────────────────────────
 
-const BASE = 'https://api.inboxangel.com';
+const BASE = 'https://api.readysetmail.com';
 
 type TestEnv = Env & { DB: TestD1 };
 
 function makeEnv(): TestEnv {
   const DB = createMigratedD1();
-  seedSettings(DB, { reports_domain: 'reports.inboxangel.io', from_email: 'check@reports.inboxangel.io' });
+  seedSettings(DB, { reports_domain: 'reports.readysetmail.com', from_email: 'check@reports.readysetmail.com' });
   return {
     DB,
     API_KEY: 'test-key',
     CLOUDFLARE_ACCOUNT_ID: '',
     CLOUDFLARE_ZONE_ID: '',
     CLOUDFLARE_API_TOKEN: '',
-    REPORTS_DOMAIN: 'reports.inboxangel.io',
-    FROM_EMAIL: 'check@reports.inboxangel.io',
+    REPORTS_DOMAIN: 'reports.readysetmail.com',
+    FROM_EMAIL: 'check@reports.readysetmail.com',
   } as unknown as TestEnv;
 }
 
 function seedDomain(env: TestEnv, d: { id: number; domain: string; dns_record_id?: string | null; parent_id?: number | null }) {
   env.DB.sqlite
     .prepare('INSERT INTO domains (id, workspace_id, domain, rua_address, dns_record_id, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(d.id, IMPLICIT_WORKSPACE_ID, d.domain, 'rua@reports.inboxangel.io', d.dns_record_id ?? null, d.parent_id ?? null);
+    .run(d.id, IMPLICIT_WORKSPACE_ID, d.domain, 'rua@reports.readysetmail.com', d.dns_record_id ?? null, d.parent_id ?? null);
 }
 
 function seedCheckResult(env: TestEnv, token: string, fromDomain = 'acme.com') {
@@ -120,7 +120,7 @@ describe('POST /api/check-sessions', () => {
     const body = await res.json() as any;
     expect(typeof body.token).toBe('string');
     // check+<token>@: the only local part the self-host email handler accepts for a free check
-    expect(body.email).toBe(`check+${body.token}@reports.inboxangel.io`);
+    expect(body.email).toBe(`check+${body.token}@reports.readysetmail.com`);
     expect(body.token).toMatch(/^[a-z2-7]{32}$/);
   });
 
@@ -217,7 +217,7 @@ describe('POST /api/domains', () => {
     expect(res.status).toBe(201);
     const body = await res.json() as any;
     expect(body.domain.domain).toBe('acme.com');
-    expect(body.rua_hint).toContain('rua=mailto:rua@reports.inboxangel.io');
+    expect(body.rua_hint).toContain('rua=mailto:rua@reports.readysetmail.com');
     expect(rows(env, 'SELECT domain, workspace_id FROM domains')).toEqual([{ domain: 'acme.com', workspace_id: IMPLICIT_WORKSPACE_ID }]);
   });
 
@@ -261,7 +261,7 @@ describe('POST /api/domains', () => {
   it('uses fixed rua address rua@REPORTS_DOMAIN', async () => {
     const res = await handleApi(req('POST', '/api/domains', { domain: 'my-company.io' }), makeEnv(), ctx);
     const body = await res.json() as any;
-    expect(body.rua_hint).toContain('rua=mailto:rua@reports.inboxangel.io');
+    expect(body.rua_hint).toContain('rua=mailto:rua@reports.readysetmail.com');
   });
 
   it('does not call provisionDomain on domain add (DNS deferred to wizard)', async () => {

@@ -1,18 +1,18 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "inbox-angel",
+  "name": "ready-set-mail",
   "version": "0.1.0",
   "description": "Agent workflows for email configuration, observed metrics and proposed fixes.",
   "author": {
     "name": "Fellowship"
   },
-  "repository": "https://github.com/fellowship-dev/inbox-angel",
+  "repository": "https://github.com/fellowship-dev/ready-set-mail",
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Inbox Angel",
+        "displayName": "Ready Set Mail",
         "shortDescription": "Email health for your agents",
-        "longDescription": "Inspect email configuration, read collected domain statistics and plan evidence-backed fixes through your own Inbox Angel installation.",
+        "longDescription": "Inspect email configuration, read collected domain statistics and plan evidence-backed fixes through your own Ready Set Mail installation.",
         "developerName": "Fellowship",
         "category": "Productivity",
         "capabilities": [

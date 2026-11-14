@@ -19,7 +19,7 @@ import {
   createResolver,
   buildFlatRecord,
   type CollectResult,
-} from '@inbox-angel/dns-checks';
+} from '@ready-set-mail/dns-checks';
 
 export { buildFlatRecord };
 export type { CollectResult };

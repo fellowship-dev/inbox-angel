@@ -12,7 +12,7 @@ import { resolvePolicyHost } from './hosted/policy-host';
 import { runHostedCron } from './hosted/cron';
 import { runCronForWorkspaces } from './cron';
 import { buildPolicyFile } from './email/mta-sts';
-import { assertSchemaReady, SchemaNotReadyError } from '@inbox-angel/db';
+import { assertSchemaReady, SchemaNotReadyError } from '@ready-set-mail/db';
 import { hostedServiceUrl, hostedServiceSentence } from './hosted-service';
 import { llmsTxt } from './llms-txt';
 
@@ -55,16 +55,16 @@ export interface Env {
   CF_OAUTH_REVOKE_URL?: string;
   CF_OAUTH_SCOPES?: string;          // space- or comma-separated scope names
   CF_OAUTH_REDIRECT_URI?: string;    // default: <origin>/api/cloudflare/oauth/callback
-  CF_OAUTH_RELAY_URL?: string;       // self-host: send the OAuth redirect through this relay (e.g. https://connect.inboxangel.io)
+  CF_OAUTH_RELAY_URL?: string;       // self-host: send the OAuth redirect through this relay (e.g. https://connect.readysetmail.com)
   CF_OAUTH_RELAY_SECRET?: string;    // secret, relay deployment only: signs the relay state; setting it turns this Worker into the relay
   // Worker config (vars in wrangler.jsonc)
-  WORKER_NAME?: string;          // defaults to "inbox-angel-worker"
+  WORKER_NAME?: string;          // defaults to "ready-set-mail-worker"
   MODE?: string;                 // "selfhost" (default) | "saas"
   // Hosted service (MODE=saas + SAAS_ENABLED=1), see docs/hosted.md
-  INTAKE_DOMAIN?: string;        // central report address domain, e.g. rua.inboxangel.io
+  INTAKE_DOMAIN?: string;        // central report address domain, e.g. rua.readysetmail.com
   HOSTED_CONNECT_REPORTS?: string; // who may connect reports to the fixed address: owner (default: OWNER_EMAIL's workspaces) | all
-  CANARY_DOMAIN?: string;        // anonymous free-check address domain, e.g. canary.inboxangel.io
-  HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. inboxangel.io
+  CANARY_DOMAIN?: string;        // anonymous free-check address domain, e.g. canary.readysetmail.com
+  HOSTED_RECORDS_ZONE?: string;  // zone holding the hosted records, e.g. readysetmail.com
   HOSTED_RECORDS_LABEL?: string; // single label every hosted record lives under (default "h")
   INTAKE_MAX_REPORTS_PER_DAY?: string; // per intake token and authenticated reporter domain (default 50)
   INTAKE_MAX_RECORDS_PER_REPORT?: string; // default 20000
@@ -82,8 +82,8 @@ export interface Env {
   HOSTED_RECORDS_TOKEN?: string; // secret: least-privilege DNS:Edit token for that one zone
   // Email funnel and compliance (docs/email-funnel.md)
   RESEND_API_KEY?: string;       // secret: Resend API key; the onboarding sequence is sent with Resend (Cloudflare Email Service is transactional-only)
-  MAIL_FROM?: string;            // sender address of funnel mail, e.g. max@inboxangel.io (default noreply@<CANARY_DOMAIN>)
-  MAIL_FROM_NAME?: string;       // display name of funnel mail (default "Inbox Angel")
+  MAIL_FROM?: string;            // sender address of funnel mail, e.g. max@readysetmail.com (default noreply@<CANARY_DOMAIN>)
+  MAIL_FROM_NAME?: string;       // display name of funnel mail (default "Ready Set Mail")
   MAIL_REPLY_TO?: string;        // where replies to funnel mail and to the free-check report go (a mailbox someone reads); no Reply-To when unset
   SITE_URL?: string;             // public marketing site (https), for links in the free-check report; no link when unset
   PUBLIC_BASE_URL?: string;      // public origin of this Worker, for unsubscribe and confirmation links (falls back to BETTER_AUTH_URL)
@@ -193,7 +193,7 @@ export function setupPage(env: Pick<Env, 'MODE' | 'HOSTED_SERVICE_URL'> = {}): R
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>InboxAngel — Setup Required</title>
+  <title>Ready Set Mail — Setup Required</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 24px; color: #1a1a1a; }
     h1 { font-size: 1.5rem; margin-bottom: 4px; }
@@ -206,11 +206,11 @@ export function setupPage(env: Pick<Env, 'MODE' | 'HOSTED_SERVICE_URL'> = {}): R
   </style>
 </head>
 <body>
-  <h1>🪄 InboxAngel</h1>
+  <h1>🪄 Ready Set Mail</h1>
   <div class="badge">Setup required</div>
   <p>Your Worker is running, but no D1 database is attached yet. Complete these steps to finish setup:</p>${hostedNote}
   <ol>
-    <li>Create a D1 database:<br><pre>wrangler d1 create inbox-angel</pre></li>
+    <li>Create a D1 database:<br><pre>wrangler d1 create ready-set-mail</pre></li>
     <li>Copy the <code>database_id</code> from the output and paste it into <code>wrangler.jsonc</code> under <code>d1_databases[0].database_id</code>.</li>
     <li>Set your API token:<br><pre>wrangler secret put CLOUDFLARE_API_TOKEN</pre>
       <small>DNS/routing operations use this token. Owner setup separately requires private installer proof; agents require installation-owned OAuth storage and a canonical HTTPS origin.</small>
@@ -219,7 +219,7 @@ export function setupPage(env: Pick<Env, 'MODE' | 'HOSTED_SERVICE_URL'> = {}): R
     <li>Deploy:<br><pre>npm run deploy</pre>Then visit the canonical dashboard, enter installer proof and create the owner. Domain enrollment and optional DNS/routing setup follow.</li>
   </ol>
   <div class="note">
-    Full setup guide: <a href="https://github.com/fellowship-dev/inbox-angel#self-hosting" target="_blank">github.com/fellowship-dev/inbox-angel</a>
+    Full setup guide: <a href="https://github.com/fellowship-dev/ready-set-mail#self-hosting" target="_blank">github.com/fellowship-dev/ready-set-mail</a>
   </div>
 </body>
 </html>`;

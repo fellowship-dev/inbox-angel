@@ -1,8 +1,8 @@
 // G1/G3: connecting a verified domain's reports to the fixed hosted address (rua@<INTAKE_DOMAIN>), through the real
 // router and the real inbound path. No token, no records zone, no free-check domain.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { forWorkspace, resetSchemaReadyCache } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { forWorkspace, resetSchemaReadyCache } from '@ready-set-mail/db';
 import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
 import { PEEK_BYTES, reportDomainCandidates, reportPrefix, scanPolicyDomain } from '../../src/hosted/fixed-address';
@@ -18,7 +18,7 @@ import { quiet } from './world';
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 
-const RUA = 'rua.inboxangel.io';
+const RUA = 'rua.readysetmail.com';
 const FIXED = `rua@${RUA}`;
 /** Report intake only: no records zone, no records token, no free-check domain. */
 const INTAKE_ONLY = { MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar', OWNER_EMAIL: 'a-owner@example.com', HOSTED_CONNECT_REPORTS: 'all' };
@@ -322,7 +322,7 @@ describe('report intake without the free check (G3)', () => {
     const w = await world(); // no CANARY_DOMAIN
     await w.connect(1);
     expect((await w.deliver(FIXED, 'a-corp.com', 'no-canary')).setReject).not.toHaveBeenCalled();
-    const check = fakeMessage('check+abcdefghijklmnopqrstuvwxyz234567@canary.inboxangel.io', 'Subject: hi\r\n\r\nhello');
+    const check = fakeMessage('check+abcdefghijklmnopqrstuvwxyz234567@canary.readysetmail.com', 'Subject: hi\r\n\r\nhello');
     await handleHostedEmail(check, w.env as any);
     expect(check.setReject).toHaveBeenCalledWith('Unknown recipient');
     const session = await call(w.env, 'POST', '/api/check-sessions', { body: {} });
@@ -331,7 +331,7 @@ describe('report intake without the free check (G3)', () => {
   });
 
   it('CANARY_DOMAIN alone: the free check still takes its mail; report mail is deferred (the sender retries) until INTAKE_DOMAIN is set', async () => {
-    const w = await world({ INTAKE_DOMAIN: '', CANARY_DOMAIN: 'canary.inboxangel.io' });
+    const w = await world({ INTAKE_DOMAIN: '', CANARY_DOMAIN: 'canary.readysetmail.com' });
     const session = await call(w.env, 'POST', '/api/check-sessions', { body: {} });
     expect(session.status).toBe(201);
     const { email } = await session.json() as { email: string };

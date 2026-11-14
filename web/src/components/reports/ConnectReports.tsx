@@ -1,4 +1,4 @@
-import { Alert, Button, RecordBlock, StatusDot, type StatusDotStatus } from '@inbox-angel/ui';
+import { Alert, Button, RecordBlock, StatusDot, type StatusDotStatus } from '@ready-set-mail/ui';
 import { RefreshCw } from 'lucide-react';
 import { useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';

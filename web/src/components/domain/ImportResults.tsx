@@ -1,4 +1,4 @@
-import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@inbox-angel/ui';
+import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@ready-set-mail/ui';
 import { AlertTriangle, CheckCircle2, Clock, Copy, XCircle } from 'lucide-react';
 import { Link } from 'react-router';
 import { PlanLimitNotice } from '../PlanLimitNotice';

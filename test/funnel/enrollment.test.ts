@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { hashEmail } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { hashEmail } from '@ready-set-mail/db';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -53,8 +53,8 @@ describe('enrolment on a hosted free check', () => {
 
     const text = replyText(m);
     expect(text).toContain(DISCLOSURE);
-    expect(text).toMatch(/Unsubscribe: https:\/\/app\.inboxangel\.io\/api\/unsubscribe\?t=/);
-    expect(text).toMatch(/List-Unsubscribe: <https:\/\/app\.inboxangel\.io\/api\/unsubscribe\?t=/i);
+    expect(text).toMatch(/Unsubscribe: https:\/\/app\.readysetmail\.com\/api\/unsubscribe\?t=/);
+    expect(text).toMatch(/List-Unsubscribe: <https:\/\/app\.readysetmail\.com\/api\/unsubscribe\?t=/i);
     expect(text).toMatch(/List-Unsubscribe-Post: List-Unsubscribe=One-Click/i);
   });
 

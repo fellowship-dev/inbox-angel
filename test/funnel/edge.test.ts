@@ -1,6 +1,6 @@
 // CORS and session rate limit, the self-host unknown-address drop, lead retention and the admin view.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 
 vi.mock('cloudflare:email', () => ({ EmailMessage: class { constructor(public from: string, public to: string, public raw: string) {} } }));
 vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
@@ -18,12 +18,12 @@ import { DAY, funnelWorld, quietLogs, T0 } from './world';
 beforeEach(() => { quietLogs(); nxdomain(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-const SITE = 'https://inboxangel.io';
+const SITE = 'https://readysetmail.com';
 
 function selfHost(extra: Record<string, unknown> = {}) {
   const db = createMigratedD1();
   db.sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'reports_domain', 'reports.acme.com')").run();
-  const env = makeEnv(db, { SITE_ORIGINS: `${SITE}, https://www.inboxangel.io/`, ...extra }) as any;
+  const env = makeEnv(db, { SITE_ORIGINS: `${SITE}, https://www.readysetmail.com/`, ...extra }) as any;
   const rows = (sql: string, ...p: unknown[]) => db.sqlite.prepare(sql).all(...p) as any[];
   return { db, env, env0: env, rows };
 }
@@ -34,7 +34,7 @@ const withOrigin = (env: any, method: string, path: string, origin: string | nul
 describe('CORS for the marketing site', () => {
   it('lets the SITE_ORIGINS call POST /api/check-sessions and GET /api/check-sessions/:token', async () => {
     const s = selfHost();
-    for (const origin of [SITE, 'https://www.inboxangel.io']) {
+    for (const origin of [SITE, 'https://www.readysetmail.com']) {
       const post = await withOrigin(s.env, 'POST', '/api/check-sessions', origin);
       expect(post.status).toBe(201);
       expect(post.headers.get('access-control-allow-origin')).toBe(origin);
@@ -60,7 +60,7 @@ describe('CORS for the marketing site', () => {
 
   it('gives no CORS headers to other origins, to a lookalike, with no SITE_ORIGINS, or with a wildcard', async () => {
     const s = selfHost();
-    for (const origin of ['https://evil.example', 'https://inboxangel.io.evil.example', 'http://inboxangel.io', null]) {
+    for (const origin of ['https://evil.example', 'https://readysetmail.com.evil.example', 'http://readysetmail.com', null]) {
       expect((await withOrigin(s.env, 'POST', '/api/check-sessions', origin)).headers.get('access-control-allow-origin'), String(origin)).toBeNull();
     }
     const none = selfHost({ SITE_ORIGINS: undefined });
@@ -179,7 +179,7 @@ describe('admin view (instance owner only)', () => {
     const body = await (await call(s.env, 'GET', '/api/leads', { key: owner })).json() as any;
     expect(body.delivery.enabled).toBe(false);
     expect(body.delivery.warnings.join(' ')).toMatch(/MAIL_REPLY_TO is not set/);
-    const set = selfHost({ MAIL_REPLY_TO: 'hello@inboxangel.io' });
+    const set = selfHost({ MAIL_REPLY_TO: 'hello@readysetmail.com' });
     const owner2 = await setupOwner(set.env);
     const body2 = await (await call(set.env, 'GET', '/api/leads', { key: owner2 })).json() as any;
     expect(body2.delivery.warnings.join(' ')).not.toMatch(/MAIL_REPLY_TO/);

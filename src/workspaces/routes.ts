@@ -4,7 +4,7 @@
 // without that header, and each handler checks the caller's membership (and role) in the workspace
 // in the path itself. A workspace the caller is not a member of answers 404, never 403, so ids
 // cannot be probed. Only signed-in users may use them (not API keys, not the instance key).
-import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle, type MembershipRole } from '@inbox-angel/db';
+import { IMPLICIT_WORKSPACE_ID, globalQueries, workspaceLifecycle, type MembershipRole } from '@ready-set-mail/db';
 import type { AuthContext } from '../api/auth';
 import { logAudit } from '../audit/log';
 import type { Env } from '../index';

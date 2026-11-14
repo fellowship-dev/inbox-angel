@@ -1,4 +1,4 @@
-import { Button, Toaster } from "@inbox-angel/ui";
+import { Button, Toaster } from "@ready-set-mail/ui";
 import { useEffect, useState } from "react";
 import { ComponentsPage } from "./ComponentsPage";
 import { DomainOverview } from "./screens/DomainOverview";

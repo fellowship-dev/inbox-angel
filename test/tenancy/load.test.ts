@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { loadTenant, refreshTenant } from '../../src/tenancy/load';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { seedSettings } from '../helpers/tenant';

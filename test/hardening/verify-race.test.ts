@@ -14,7 +14,7 @@ async function atCapMinusOne() {
   const a = await w.user('a@example.com');
   fillDomains(w.db, a.ws, 2);
   const { claim } = await json(await w.api(a, 'POST', '/api/domains', { domain: 'acme.org' }));
-  provenDns('_inboxangel.acme.org', claim.txt_value);
+  provenDns('_readysetmail.acme.org', claim.txt_value);
   const verify = () => w.api(a, 'POST', `/api/domains/claims/${claim.id}/verify`, {});
   const liveRows = () => w.rows("SELECT id FROM domains WHERE domain = 'acme.org' AND evicted_at IS NULL");
   return { ...w, a, claim, verify, liveRows };

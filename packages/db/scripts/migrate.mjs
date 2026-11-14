@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `npm run migrate` — the one way to move an InboxAngel database forward.
+ * `npm run migrate` — the one way to move an Ready Set Mail database forward.
  *
  *   node packages/db/scripts/migrate.mjs [--local | --remote] [--db <binding-or-name>] [--persist-to <dir>]
  *

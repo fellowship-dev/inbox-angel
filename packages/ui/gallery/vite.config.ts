@@ -7,7 +7,7 @@ export default defineConfig({
 	root: import.meta.dirname,
 	base: "./",
 	plugins: [react(), tailwindcss()],
-	resolve: { alias: { "@inbox-angel/ui": new URL("../src/index.ts", import.meta.url).pathname } },
+	resolve: { alias: { "@ready-set-mail/ui": new URL("../src/index.ts", import.meta.url).pathname } },
 	build: { outDir: "dist", emptyOutDir: true },
 	server: { port: 5199, host: "127.0.0.1" },
 	preview: { port: 5199, host: "127.0.0.1" },

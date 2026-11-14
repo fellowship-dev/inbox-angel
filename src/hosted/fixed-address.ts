@@ -8,9 +8,9 @@
 // The full parse later must find the same domain (src/email/dmarc-report.ts `expectedDomain`), or nothing is stored.
 
 import { Gunzip, Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate';
-import { normalizeDomain, organizationalDomain } from '@inbox-angel/dns-checks';
+import { normalizeDomain, organizationalDomain } from '@ready-set-mail/dns-checks';
 import type { BoundEnv } from '../index';
-import { forWorkspace, intakeLookups, type IntakeTarget } from '@inbox-angel/db';
+import { forWorkspace, intakeLookups, type IntakeTarget } from '@ready-set-mail/db';
 import { extractAttachmentBytes } from '../email/mime-extract';
 
 export const fixedReportAddress = (intakeDomain: string): string => `rua@${intakeDomain}`;

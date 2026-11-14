@@ -1,4 +1,4 @@
-import { IconButton, toast } from '@inbox-angel/ui';
+import { IconButton, toast } from '@ready-set-mail/ui';
 import { Copy } from 'lucide-react';
 
 /** A labelled, selectable value with a copy button (for values that are not a whole DNS record). */

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { build, factsOf, findingsOf, pctOf, type Finding } from '../src/index';
 import { CHECKED, GOOGLE, RESEND, SES, bimiRec, makeRec, type RecOptions } from './helpers';
-import type { DomainReport } from '@inbox-angel/dns-checks';
+import type { DomainReport } from '@ready-set-mail/dns-checks';
 
 const ids = (r: DomainReport): Record<string, Finding> => Object.fromEntries(findingsOf(r, CHECKED).map(f => [f.id, f]));
 const SPF = 'v=spf1 include:_spf.google.com ~all';

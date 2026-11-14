@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import type { BoundEnv } from '../../src/index';
 import { agentAvailability, instancePreflight } from '../../src/setup/preflight';
 import { call, inviteAndAccept, makeEnv, setupOwner, type TestDb } from '../auth/helpers';

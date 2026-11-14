@@ -1,7 +1,7 @@
 // A column added to an exported table must be decided on: exported, or excluded with a reason. Fails until it is.
 import { describe, it, expect } from 'vitest';
-import { createMigratedD1 } from '@inbox-angel/db/testing';
-import { EXPORT_COLUMNS, EXPORT_EXCLUDED, EXPORT_SETTING_KEYS } from '@inbox-angel/db';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
+import { EXPORT_COLUMNS, EXPORT_EXCLUDED, EXPORT_SETTING_KEYS } from '@ready-set-mail/db';
 
 describe('export column coverage', () => {
   const db = createMigratedD1();

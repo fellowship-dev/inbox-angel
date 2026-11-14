@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardContent, FieldError, Input, PageHeader, Skeleton, toast } from '@inbox-angel/ui';
+import { Badge, Button, Card, CardContent, FieldError, Input, PageHeader, Skeleton, toast } from '@ready-set-mail/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Moon, Sun } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
@@ -45,7 +45,7 @@ export function SettingsPage() {
 
 	return (
 		<div className="space-y-10">
-			<PageHeader title="Settings" description="Your account and this Inbox Angel instance." />
+			<PageHeader title="Settings" description="Your account and this Ready Set Mail instance." />
 			<ReadOnlyNotice />
 
 			<Section title="Account">
@@ -119,7 +119,7 @@ export function SettingsPage() {
 										<span className="text-ink-2">Using the default workers.dev address.</span>
 										{status?.base_domain ? (
 											<WriteButton size="sm" variant="secondary" loading={customDomain.isPending} onClick={() => customDomain.mutate()}>
-												Use inbox-angel.{status.base_domain}
+												Use ready-set-mail.{status.base_domain}
 											</WriteButton>
 										) : null}
 									</span>

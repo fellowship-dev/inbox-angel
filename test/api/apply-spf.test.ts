@@ -19,12 +19,12 @@ vi.mock('../../src/dns/provision', () => ({
   },
 }));
 
-import { createMigratedD1 } from '@inbox-angel/db/testing';
+import { createMigratedD1 } from '@ready-set-mail/db/testing';
 import { FakeCloudflare, stubCloudflare } from '../helpers/cf-fake';
 import { seedSettings } from '../helpers/tenant';
 import { handleApi } from '../../src/api/router';
 
-const BASE = 'https://api.inboxangel.com';
+const BASE = 'https://api.readysetmail.com';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
 const DOMAIN: Partial<Domain> = {

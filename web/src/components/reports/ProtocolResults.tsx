@@ -1,4 +1,4 @@
-import { Badge, CheckResult, CheckResultList } from '@inbox-angel/ui';
+import { Badge, CheckResult, CheckResultList } from '@ready-set-mail/ui';
 import { AlertTriangle, Check, Minus, ShieldCheck, X, XCircle } from 'lucide-react';
 import { dkimAdvice, dmarcAdvice, overallMeta, protocolStatus, spfAdvice, spfStatus } from '../../lib/reports';
 import { useHosted } from '../../lib/session';

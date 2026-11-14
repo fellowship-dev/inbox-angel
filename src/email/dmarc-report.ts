@@ -11,7 +11,7 @@ import { resolveDomain } from './resolve-domain';
 import { parseDmarcEmail, ParseEmailError } from '../dmarc/parse-email';
 import { coversDomain, type TokenDomain } from '../hosted/scope';
 import { MAX_REPORT_BYTES } from '../hosted/config';
-import { normalizeDomain } from '@inbox-angel/dns-checks';
+import { normalizeDomain } from '@ready-set-mail/dns-checks';
 import { storeReport } from '../dmarc/store-report';
 import { reporterAuth } from '../dmarc/reporter-auth';
 import { readAuthHeaders, type AuthHeaders } from './sender-proof';
@@ -125,7 +125,7 @@ export async function handleDmarcReport(
   }
   if (!domain) {
     console.warn('dmarc-report: no domain found for policy_domain', policyDomain);
-    message.setReject(`Unknown domain ${policyDomain} — not a registered InboxAngel inbox`);
+    message.setReject(`Unknown domain ${policyDomain} — not a registered Ready Set Mail inbox`);
     return { failure_count: 0 };
   }
 
