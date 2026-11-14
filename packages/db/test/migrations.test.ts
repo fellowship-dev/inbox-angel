@@ -58,10 +58,22 @@ describe('0009 claim_settled', () => {
 		applyMigrations(d.sqlite, { through: '0008_dns_checked_at.sql' });
 		d.sqlite.prepare("INSERT INTO workspaces (id, name) VALUES ('ws_x', 'X')").run();
 		d.sqlite.prepare("INSERT INTO domain_claims (workspace_id, domain, token) VALUES ('ws_x', 'acme.com', 't')").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0009_claim_settled.sql']);
+		expect(applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' })).toEqual(['0009_claim_settled.sql']);
 		expect(d.sqlite.prepare('SELECT domain, status, settled_at, settled_domain_id FROM domain_claims').all()).toEqual([{ domain: 'acme.com', status: 'pending', settled_at: null, settled_domain_id: null }]);
 		const cols = d.sqlite.prepare("SELECT name, \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domain_claims') WHERE name IN ('settled_at', 'settled_domain_id')").all() as any[];
 		expect(cols.map((c) => c.name).sort()).toEqual(['settled_at', 'settled_domain_id']);
 		expect(cols.every((c) => c.nn === 0 && c.dv === null)).toBe(true);
+	});
+});
+
+describe('0010 reports_connected_at', () => {
+	it('adds one nullable column: existing domains stay not connected', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0009_claim_settled.sql' });
+		d.sqlite.prepare("INSERT INTO domains (domain, rua_address) VALUES ('acme.com', '')").run();
+		expect(applyMigrations(d.sqlite)).toEqual(['0010_reports_connected_at.sql']);
+		expect(d.sqlite.prepare('SELECT domain, reports_connected_at FROM domains').all()).toEqual([{ domain: 'acme.com', reports_connected_at: null }]);
+		const cols = d.sqlite.prepare("SELECT \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name = 'reports_connected_at'").all() as any[];
+		expect(cols).toEqual([{ nn: 0, dv: null }]);
 	});
 });

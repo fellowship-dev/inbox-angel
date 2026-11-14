@@ -126,6 +126,8 @@ export const domains = sqliteTable(
 		dmarc_inherited_from: text('dmarc_inherited_from'),
 		/** Result of the last check that read both SPF and DMARC: 'ok' | 'nxdomain'. Kept when a later attempt fails, so the card can still say the domain did not resolve at that check. */
 		dns_last_good_status: text('dns_last_good_status'),
+		/** Unix seconds the domain's reports were connected to the hosted fixed address (0010). Null: not connected. */
+		reports_connected_at: integer('reports_connected_at'),
 	},
 	(t) => [
 		index('idx_domains_domain').on(t.domain),

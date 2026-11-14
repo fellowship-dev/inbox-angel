@@ -23,7 +23,8 @@ export type OwnPlan =
 export type ReportAddressPlan =
 	| OwnPlan
 	| { kind: 'multiple'; name: string; records: string[] }
-	| { kind: 'inherited'; from: string; parent_record: string; policy: string; parent_has_address: boolean; own: OwnPlan };
+	| { kind: 'invalid'; name: string; record: string; issues: string[] }
+	| { kind: 'inherited'; from: string; parent_record: string; policy: string; policy_tag: 'sp' | 'p'; parent_has_address: boolean; own: OwnPlan };
 
 export interface ReportAddressView {
 	available: true;
@@ -33,7 +34,10 @@ export interface ReportAddressView {
 	can_connect: boolean;
 	refusal: string | null;
 	address: string | null;
+	connected_at: number | null;
 	last_report_at: number | null;
+	reports_since_connect: number;
+	reports_before_connect: number;
 	state: ReportAddressState;
 	dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | null } | null;
 	parent?: { domain_id: number; domain: string; connected: boolean } | null;

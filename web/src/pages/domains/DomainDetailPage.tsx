@@ -11,6 +11,7 @@ import { DnsTools } from '../../components/domain/DnsTools';
 import { FailingSources } from '../../components/domain/FailingSources';
 import { HostedPanel } from '../../components/hosted/HostedPanel';
 import { ConnectReports } from '../../components/reports/ConnectReports';
+import { useReportIntakeEnabled } from '../../lib/report-address';
 import { Rollout } from '../../components/domain/Rollout';
 import { ListSkeleton, LoadError, PageSkeleton, ReadOnlyNotice, Section } from '../../components/states';
 import { invalidDmarcSp } from '../../lib/dmarc-record';
@@ -49,6 +50,8 @@ function LivePolicyBadge({ domain }: { domain: Domain }) {
 function SetupBanner({ domainId }: { domainId: number }) {
 	const q = useWizardState(domainId);
 	const { canWrite } = useSession();
+	// Hosted with report intake: the DMARC reports panel shows the address, so the self-host RUA section would repeat it.
+	const hostedReports = useReportIntakeEnabled();
 	if (!canWrite) return null; // read-only members cannot run the setup wizard
 	if (!q.data) return null; // a failed lookup of setup progress should not block the page
 	const { done, total, nextStep } = wizardProgress(q.data);
@@ -244,6 +247,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 
 			{/* Hosted with report intake: issue the address and follow it to the first report. Nothing elsewhere. */}
 			<ConnectReports domain={domain} />
+			{hostedReports ? null : (
 			<Section title="RUA reporting address" description={hasReportAddress(domain.rua_address) ? <>Add this to your <code>_dmarc.{domain.domain}</code> TXT record so receiving servers send DMARC reports here.</> : undefined}>
 				{hasReportAddress(domain.rua_address) ? (
 					<CopyField label="RUA" value={`rua=mailto:${domain.rua_address.trim()}`} />
@@ -251,6 +255,7 @@ function DomainDetail({ domain, all }: { domain: Domain; all: Domain[] }) {
 					<p className="text-sm text-ink-2">No reports address is configured for this domain, so there is no rua= value to add yet.</p>
 				)}
 			</Section>
+			)}
 
 			<Context domain={domain} all={all} />
 			<FailingSources domainId={domain.id} q={sources} />

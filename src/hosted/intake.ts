@@ -23,8 +23,7 @@ import { readAuthHeaders } from '../email/sender-proof';
 import { hostedConfig, hostedEnabled, intakeLimits, MAX_REPORT_BYTES, WELL_KNOWN_REPORTERS } from './config';
 import { hashToken, isTokenShaped, parseRecipient } from './tokens';
 import { handleCanaryEmail } from './canary';
-import { fixedReportAddress, peekPolicyDomain, reportDomainCandidates } from './fixed-address';
-import { ReportTooLargeError } from '../dmarc/extract-report';
+import { fixedReportAddress, peekPolicyDomain, reportDomainCandidates, workspaceMayConnectReports } from './fixed-address';
 
 /** A message whose setReject also logs why, so every rejection leaves a reason in the logs. */
 export function withRejectLog(message: ForwardableEmailMessage, fields: Record<string, unknown>): ForwardableEmailMessage {
@@ -71,20 +70,23 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
 
   let raw = message.raw;
   let target: IntakeTarget | null;
+  let peeked: string | null = null;
   if (kind === 'rua' && !rcpt.tag) {
     // The fixed address (src/hosted/fixed-address.ts): the report's own domain picks the target, before any allowance is used.
     const [forPeek, after] = raw.tee();
     raw = after;
-    let policyDomain: string | null;
     try {
-      policyDomain = await peekPolicyDomain(forPeek);
-    } catch (e) {
-      return reject(message, { ...base, kind }, e instanceof ReportTooLargeError ? 'Report is larger than 25 MiB once decompressed' : 'Invalid DMARC report: the attachment could not be read');
+      peeked = await peekPolicyDomain(forPeek);
+    } catch {
+      return reject(message, { ...base, kind }, 'Invalid DMARC report: the attachment could not be read');
     }
-    if (!policyDomain) return reject(message, { ...base, kind }, 'Invalid DMARC report: no policy_published domain');
-    target = await intakeLookups(env.DB).connectedForReport(reportDomainCandidates(policyDomain), fixedReportAddress(cfg.intakeDomain));
-    // Nobody proved this domain and connected its reports here: refused for good, nothing stored, no allowance touched.
-    if (!target) return reject(message, { ...base, kind }, `Unknown domain ${policyDomain}: reports for it are not connected here`);
+    if (!peeked) return reject(message, { ...base, kind }, 'Invalid DMARC report: no policy_published domain');
+    target = await intakeLookups(env.DB).connectedForReport(reportDomainCandidates(peeked), fixedReportAddress(cfg.intakeDomain));
+    // Nobody proved this domain and connected its reports here (or, under HOSTED_CONNECT_REPORTS=owner, the workspace is
+    // not the instance owner's): refused for good, nothing stored, no allowance touched.
+    if (!target || !(await workspaceMayConnectReports(env, target.workspace_id))) {
+      return reject(message, { ...base, kind }, `Unknown domain ${peeked}: reports for it are not connected here`);
+    }
   } else {
     if (!rcpt.tag || !isTokenShaped(rcpt.tag)) return reject(message, { ...base, kind }, 'Unknown intake token');
     const hash = await hashToken(rcpt.tag);
@@ -120,6 +122,8 @@ export async function handleHostedEmail(message: ForwardableEmailMessage, env: B
       authHeaders,
       maxBytes: MAX_REPORT_BYTES, maxRecords: limits.recordsPerReport, maxNewIps: limits.newIpsPerReport,
       token: { id: target.domain_id, domain: target.domain },
+      // The fixed address was routed by the peek: the full parse must find the very same domain.
+      ...(peeked ? { expectedDomain: peeked } : {}),
     });
     track(tenant, { event: 'report.received', failure_count });
   } else {

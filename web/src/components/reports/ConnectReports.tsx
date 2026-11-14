@@ -45,7 +45,7 @@ const STATE_DOT: Record<ReportAddressState, { status: StatusDotStatus; label: st
 	not_connected: { status: 'unknown', label: 'Reports not connected yet' },
 	not_published: { status: 'warn', label: 'Connected, record not published yet' },
 	waiting: { status: 'info', label: 'Published, waiting for the first report' },
-	receiving: { status: 'ok', label: 'Receiving reports' },
+	receiving: { status: 'ok', label: 'Reports received' },
 	unknown: { status: 'unknown', label: 'Connected, DNS check failed' },
 };
 
@@ -141,10 +141,13 @@ function StateLine({ s }: { s: ReportAddressView }) {
 	} else if (s.state === 'unknown') {
 		detail = <>We could not read the DMARC record just now, so we cannot say whether it lists the report address. The lookup failed; that does not mean the record is missing.</>;
 	}
+	const plural = (n: number) => (n === 1 ? '1 report' : `${n} reports`);
 	return (
 		<div className="space-y-1">
 			<StatusDot status={dot.status} label={dot.label} className="font-semibold" />
 			{detail ? <p className="text-sm text-ink-2">{detail}</p> : null}
+			{s.state !== 'receiving' && s.reports_since_connect > 0 ? <p className="text-sm text-ink-2">{plural(s.reports_since_connect)} received since connecting.</p> : null}
+			{s.reports_before_connect > 0 ? <p className="text-sm text-ink-2">{plural(s.reports_before_connect)} received before this connection.</p> : null}
 		</div>
 	);
 }
@@ -167,38 +170,46 @@ function PlanView({ plan, domain, parent }: { plan: ReportAddressPlan; domain: s
 			</Alert>
 		);
 	}
+	if (plan.kind === 'invalid') {
+		return (
+			<Alert variant="warning" title={`The DMARC record at ${plan.name} is not valid`}>
+				<p>
+					{plan.issues.join('. ')}. Receivers apply no policy from it. Fix it first, then check again to see the record to publish.
+				</p>
+				<p className="mt-2">
+					<Mono>{plan.record}</Mono>
+				</p>
+			</Alert>
+		);
+	}
 	if (plan.kind === 'inherited') {
+		const parentLink = parent ? <Link to={`/domains/${parent.domain_id}`}>{plan.from}</Link> : <>{plan.from}</>;
 		return (
 			<div className="space-y-3">
 				<p className="text-sm text-ink-2">
-					<Mono>{domain}</Mono> has no DMARC record of its own. It follows the record of <Mono>{plan.from}</Mono> (policy for subdomains: p={plan.policy}), and receivers send
-					its reports to the addresses listed there.
+					<Mono>{domain}</Mono> has no DMARC record of its own. It follows the record of <Mono>{plan.from}</Mono>, where{' '}
+					{plan.policy_tag === 'sp' ? <>sp={plan.policy} applies to its subdomains</> : <>p={plan.policy} applies to it and its subdomains</>}, and receivers send its reports to
+					the addresses listed there.
 				</p>
-				{plan.parent_has_address ? (
-					<Alert variant="warning" title={`${plan.from} lists this address`}>
-						Reports sent from that record are about {plan.from}, and this address only accepts reports about {domain}. They are refused. Connect reports on {plan.from}{' '}
-						instead, or publish the record below.
-					</Alert>
-				) : null}
-				<p className="text-sm text-ink-2">
-					{parent?.connected ? (
-						<>
-							<Link to={`/domains/${parent.domain_id}`}>{plan.from}</Link> is connected here, so once its record lists the report address, reports about {domain} arrive
-							with its reports.
-						</>
+				<p className="text-sm text-ink-2" data-testid="inherited-route">
+					{plan.parent_has_address ? (
+						parent?.connected ? (
+							<>{parentLink}&apos;s record lists the report address and {plan.from} is connected here, so reports about {domain} are filed with {plan.from}&apos;s reports.</>
+						) : parent ? (
+							<>{parentLink}&apos;s record lists the report address, but {plan.from} is not connected in this workspace, so those reports are refused. Connect reports on {parentLink} to receive them, including those about {domain}.</>
+						) : (
+							<>{plan.from}&apos;s record lists the report address, but {plan.from} is not in this workspace, so its reports, including those about {domain}, are not filed here. Add {plan.from} to this workspace and connect reports there to receive them.</>
+						)
+					) : parent?.connected ? (
+						<>{parentLink} is connected here, so once its record lists the report address, reports about {domain} arrive with its reports.</>
 					) : parent ? (
-						<>
-							To keep following {plan.from}, connect reports on <Link to={`/domains/${parent.domain_id}`}>{plan.from}</Link> instead. Reports about {domain} then arrive with
-							its reports.
-						</>
+						<>To keep following {plan.from}, connect reports on {parentLink} instead. Reports about {domain} then arrive with its reports.</>
 					) : (
-						<>
-							To keep following {plan.from}, add {plan.from} to this workspace and connect reports there instead. Reports about {domain} then arrive with its reports.
-						</>
+						<>To keep following {plan.from}, add {plan.from} to this workspace and connect reports there instead. Reports about {domain} then arrive with its reports.</>
 					)}
 				</p>
 				<p className="text-sm text-ink-2">
-					Or give {domain} a record of its own. It keeps the policy it has now (p={plan.policy}) and the addresses {plan.from} lists, but later changes to {plan.from}
+					Or give {domain} a record of its own. It keeps the policy it gets today ({plan.policy}) and the addresses {plan.from} lists, but later changes to {plan.from}
 					&apos;s record no longer apply to it.
 				</p>
 				<OwnPlanView plan={plan.own} domain={domain} inherited />
@@ -222,10 +233,7 @@ function OwnPlanView({ plan, domain, inherited = false }: { plan: OwnPlan; domai
 		return (
 			<div className="space-y-2">
 				{plan.current ? <Current record={plan.current} /> : null}
-				<RecordBlock
-					title={plan.current ? `Replace the TXT record at ${plan.name} with` : `Add this TXT record at your DNS provider`}
-					record={{ type: 'TXT', name: plan.name, value: plan.record }}
-				/>
+				<RecordToPublish replace={!!plan.current} name={plan.name} value={plan.record} />
 				<p className="text-sm text-ink-2">
 					{plan.current
 						? 'Only rua= changes: the policy and every other tag stay as they are.'
@@ -276,13 +284,34 @@ function ChooseView({ plan }: { plan: Extract<OwnPlan, { kind: 'choose' }> }) {
 				})}
 			</fieldset>
 			{picked ? (
-				<RecordBlock
-					title={plan.current ? `Replace the TXT record at ${plan.name} with` : 'Add this TXT record at your DNS provider'}
-					record={{ type: 'TXT', name: plan.name, value: picked.record }}
-				/>
+				<RecordToPublish replace={!!plan.current} name={plan.name} value={picked.record} />
 			) : (
 				<p className="text-sm text-ink-2">Choose an option to see the record to publish.</p>
 			)}
+		</div>
+	);
+}
+
+/** A TXT string holds at most 255 characters; a longer record is published as several quoted strings in one record. */
+export function txtStrings(value: string): string {
+	const parts: string[] = [];
+	for (let i = 0; i < value.length; i += 255) parts.push(`"${value.slice(i, i + 255)}"`);
+	return parts.join(' ');
+}
+
+function RecordToPublish({ replace, name, value }: { replace: boolean; name: string; value: string }) {
+	const long = value.length > 255;
+	return (
+		<div className="space-y-2">
+			<RecordBlock
+				title={replace ? `Replace the TXT record at ${name} with` : 'Add this TXT record at your DNS provider'}
+				record={{ type: 'TXT', name, value: long ? txtStrings(value) : value }}
+			/>
+			{long ? (
+				<p className="text-sm text-ink-2">
+					This record is longer than 255 characters, so it must be entered as the quoted strings shown, one after another in the same TXT record.
+				</p>
+			) : null}
 		</div>
 	);
 }

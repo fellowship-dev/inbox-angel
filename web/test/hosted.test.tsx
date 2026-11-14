@@ -68,6 +68,24 @@ describe('HostedPanel visibility', () => {
 	});
 });
 
+describe('Hosted report intake on the domain page', () => {
+	it('shows the DMARC reports panel and hides the self-host "RUA reporting address" section', async () => {
+		detail({
+			routes: detailRoutes({
+				'GET /api/hosted/config': { enabled: true, reports: true, records: false },
+				'GET /api/domains/1/report-address': { available: true, domain_id: 1, domain: 'example.com', managed_by: null, can_connect: true, refusal: null, address: null, connected_at: null, last_report_at: null, reports_since_connect: 0, reports_before_connect: 0, state: 'not_connected', dns: null, parent: null },
+			}),
+		});
+		expect(await screen.findByText('Reports not connected yet')).toBeInTheDocument();
+		expect(screen.queryByText('RUA reporting address')).not.toBeInTheDocument();
+		expect(screen.queryByText('Hosted records')).not.toBeInTheDocument(); // no records zone
+	});
+	it('self-host keeps the "RUA reporting address" section', async () => {
+		detail({ routes: detailRoutes({ 'GET /api/hosted/config': { enabled: false } }) });
+		expect(await screen.findByText('RUA reporting address')).toBeInTheDocument();
+	});
+});
+
 describe('HostedPanel enable', () => {
 	it('enables, shows the addresses once with pointers as record blocks, and drops them on dismiss', async () => {
 		let enabled = false;

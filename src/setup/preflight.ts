@@ -7,10 +7,11 @@ import type { BoundEnv } from '../index';
 import { mcpInstallation } from '../mcp/discovery';
 import { getMode } from '../tenancy/mode';
 import { bookingUrl, sequenceEnabled } from '../funnel/config';
+import { reportIntakePreflightItems } from '../hosted/report-intake-check';
 
 export interface PreflightItem {
   /** Stable id for tests and the UI key. */
-  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits';
+  id: 'mode' | 'auth_url' | 'oauth_storage' | 'booking_link' | 'mail_sender' | 'bot_check' | 'client_registration' | 'rate_limits' | 'report_intake';
   /** `action`: something does not work until it is fixed. `note`: works, but worth knowing. */
   severity: 'action' | 'note';
   /** The setting(s) to change, by name. */
@@ -116,5 +117,6 @@ export async function instancePreflight(env: BoundEnv, requestOrigin: string): P
     items.push({ id: 'booking_link', severity: 'note', setting: 'BOOKING_URL', message: 'No booking link is set (BOOKING_URL, an http or https address), so the day-14 follow-up email, which offers a call, is held until there is one.' });
   }
 
+  items.push(...reportIntakePreflightItems(env)); // hosted report intake (src/hosted/report-intake-check.ts)
   return { mode: hosted ? 'saas' : 'self-host', agents: agentAvailability(env), items };
 }

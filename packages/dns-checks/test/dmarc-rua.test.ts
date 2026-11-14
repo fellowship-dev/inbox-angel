@@ -93,7 +93,7 @@ describe('planReportAddress', () => {
     const parent = 'v=DMARC1; p=reject; sp=quarantine; rua=mailto:a@iana.test';
     const p = await plan({ 'TXT _dmarc.mail.iana.test': 'NODATA', 'TXT _dmarc.iana.test': [parent] }, 'mail.iana.test');
     expect(p).toEqual({
-      kind: 'inherited', from: 'iana.test', parent_record: parent, policy: 'quarantine', parent_has_address: false,
+      kind: 'inherited', from: 'iana.test', parent_record: parent, policy: 'quarantine', policy_tag: 'sp', parent_has_address: false,
       own: { kind: 'add', name: '_dmarc.mail.iana.test', current: null, record: `v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:a@iana.test,mailto:${OURS}`, created: true },
     });
   });
@@ -104,5 +104,16 @@ describe('planReportAddress', () => {
     if (p?.kind !== 'inherited') return;
     expect(p.policy).toBe('reject');
     expect(p.own.kind).toBe('choose');
+  });
+
+  it('an invalid record (no p=, or p= not a policy) is reported as invalid, with nothing proposed', async () => {
+    expect(await plan({ 'TXT _dmarc.bad.test': ['v=DMARC1; p=bogus; rua=mailto:a@x.com'] }, 'bad.test')).toMatchObject({ kind: 'invalid', name: '_dmarc.bad.test', record: 'v=DMARC1; p=bogus; rua=mailto:a@x.com', issues: [expect.stringMatching(/Invalid p=/)] });
+    expect(await plan({ 'TXT _dmarc.nop.test': ['v=DMARC1; rua=mailto:a@x.com'] }, 'nop.test')).toMatchObject({ kind: 'invalid', issues: [expect.stringMatching(/Missing required p=/)] });
+    expect(await plan({ 'TXT _dmarc.bad.test': ['v=DMARC1; sp=reject'] }, 'mail.bad.test')).toMatchObject({ kind: 'invalid', name: '_dmarc.bad.test' }); // inherited from an invalid parent
+  });
+
+  it('an inherited policy names its tag: p= when the parent sets no valid sp=', async () => {
+    const p = await plan({ 'TXT _dmarc.iana.test': ['v=DMARC1; p=reject'] }, 'mail.iana.test');
+    expect(p).toMatchObject({ kind: 'inherited', policy: 'reject', policy_tag: 'p' });
   });
 });

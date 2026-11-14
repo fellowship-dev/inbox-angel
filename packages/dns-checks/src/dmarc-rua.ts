@@ -4,7 +4,7 @@
 // published; only the rua= list changes. Receivers need only honour two rua= addresses (§6.2: "MUST support … at least
 // two"), so a record that already lists two never gets a third, or loses one, without the person choosing.
 
-import { readDmarcTag } from './dmarc-tags';
+import { parseDmarcTags, readDmarcTag } from './dmarc-tags';
 import type { DmarcLookup } from './dmarc';
 
 /** The address part of one rua= entry: no `mailto:`, no `!size` limit, lower-cased (compared case-insensitively). */
@@ -76,7 +76,9 @@ export type ReportAddressPlan =
   /** The record already lists two or more addresses: the person chooses what to replace (or to add a third anyway). */
   | { kind: 'choose'; name: string; current: string | null; existing: string[]; options: RecordOption[]; created: boolean }
   /** Several DMARC records at one name: receivers ignore them all (§6.6.3), so nothing can be added until one remains. */
-  | { kind: 'multiple'; name: string; records: string[] };
+  | { kind: 'multiple'; name: string; records: string[] }
+  /** The record that applies has no valid p= (missing or not none/quarantine/reject): it must be fixed before anything is added. */
+  | { kind: 'invalid'; name: string; record: string; issues: string[] };
 
 export interface InheritedPlan {
   kind: 'inherited';
@@ -84,16 +86,19 @@ export interface InheritedPlan {
   from: string;
   /** Its record, as published. */
   parent_record: string;
-  /** The policy this subdomain gets from it today. */
+  /** The policy this subdomain gets from it today, and the tag it comes from (sp= when the parent sets a valid one, else p=). */
   policy: string;
+  policy_tag: 'sp' | 'p';
   /** True when the parent's record already lists this address (reports for the parent are then refused: see the copy). */
   parent_has_address: boolean;
   /** A record of the subdomain's own that keeps that policy and adds the address. */
-  own: Exclude<ReportAddressPlan, { kind: 'multiple' }>;
+  own: OwnPlan;
 }
 
+export type OwnPlan = Extract<ReportAddressPlan, { kind: 'published' | 'add' | 'choose' }>;
+
 /** Ours added to `current` (or a fresh record), keeping the two-address rule: two or more entries mean a choice. */
-function addTo(name: string, current: string, address: string, created: boolean): Exclude<ReportAddressPlan, { kind: 'multiple' }> {
+function addTo(name: string, current: string, address: string, created: boolean): OwnPlan {
   if (recordHasAddress(current, address)) return created ? { kind: 'add', name, current: null, record: current, created } : { kind: 'published', name, record: current };
   const existing = ruaEntries(current);
   const shownCurrent = created ? null : current;
@@ -115,8 +120,12 @@ export function planReportAddress(lookup: DmarcLookup, address: string): ReportA
     return { kind: 'add', name: own, current: null, record: `v=DMARC1; p=none; rua=mailto:${address.trim()}`, created: true };
   }
   const record = lookup.record.raw;
+  // A record without a valid p= is not one to build on: say so, propose nothing.
+  if (!lookup.record.valid) return { kind: 'invalid', name: lookup.foundAt ?? own, record, issues: lookup.record.issues };
   if (!lookup.inherited) return addTo(own, record, address, false);
   const policy = lookup.record.subdomainPolicy;
+  const sp = parseDmarcTags(record)['sp']?.toLowerCase();
+  const policy_tag = sp === 'none' || sp === 'quarantine' || sp === 'reject' ? 'sp' as const : 'p' as const;
   // The subdomain's own record starts from the parent's tags; its rua= list starts as the parent's (they get these reports today).
   const base = ownRecordFromInherited(record, policy);
   return {
@@ -124,6 +133,7 @@ export function planReportAddress(lookup: DmarcLookup, address: string): ReportA
     from: lookup.organizationalDomain ?? lookup.domain,
     parent_record: record,
     policy,
+    policy_tag,
     parent_has_address: recordHasAddress(record, address),
     own: addTo(own, base, address, true),
   };

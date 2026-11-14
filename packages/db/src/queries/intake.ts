@@ -4,7 +4,7 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, inArray, isNull, max, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, ne, notInArray, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { getDb, type DbLike } from '../client';
 import { aggregateReports, domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
@@ -114,9 +114,9 @@ export function intakeQueries(db: Db, workspaceId: string) {
 			return db.delete(intakeTokens).where(forDomain(domainId)).run();
 		},
 
-		/** Set a live domain's report address (the hosted fixed address when reports are connected, '' when not). */
-		setAddress(domainId: number, address: string) {
-			return db.update(domains).set({ rua_address: address, updated_at: sql`unixepoch()` })
+		/** Connect a live domain's reports: its address becomes the hosted fixed address, and the connection starts now. */
+		connect(domainId: number, address: string, nowSeconds: number) {
+			return db.update(domains).set({ rua_address: address, reports_connected_at: nowSeconds, updated_at: sql`unixepoch()` })
 				.where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId), isNull(domains.evicted_at))).run();
 		},
 
@@ -124,18 +124,26 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		disconnect(domainId: number) {
 			return db.batch([
 				db.delete(intakeTokens).where(forDomain(domainId)),
-				db.update(domains).set({ rua_address: '', updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
+				db.update(domains).set({ rua_address: '', reports_connected_at: null, updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
 			]);
 		},
 
-		/** When the newest aggregate report for the domain was stored; null when none. */
-		lastReportAt(domainId: number) {
-			return db
-				.select({ at: max(aggregateReports.created_at) })
+		/**
+		 * Reports stored for the domain since `sinceSeconds` (count and newest), and how many were stored before it. With no
+		 * `sinceSeconds` (never connected through this column) every report counts as before.
+		 */
+		async reportsAround(domainId: number, sinceSeconds: number | null): Promise<{ since: number; last_since: number | null; before: number }> {
+			const since = sinceSeconds ?? Number.MAX_SAFE_INTEGER;
+			const r = await db
+				.select({
+					since: sql<number>`COALESCE(SUM(CASE WHEN ${aggregateReports.created_at} >= ${since} THEN 1 ELSE 0 END), 0)`,
+					last_since: sql<number | null>`MAX(CASE WHEN ${aggregateReports.created_at} >= ${since} THEN ${aggregateReports.created_at} END)`,
+					before: sql<number>`COALESCE(SUM(CASE WHEN ${aggregateReports.created_at} < ${since} THEN 1 ELSE 0 END), 0)`,
+				})
 				.from(aggregateReports)
 				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId)))
-				.get()
-				.then((r) => r?.at ?? null);
+				.get();
+			return { since: Number(r?.since ?? 0), last_since: r?.last_since ?? null, before: Number(r?.before ?? 0) };
 		},
 	};
 }
@@ -200,14 +208,16 @@ export function intakeLookups(dbLike: DbLike) {
 		/**
 		 * The fixed hosted address (`rua@<intake domain>`) carries no token, so the report's own domain picks the target.
 		 * `candidates` are the report's domain and its parents up to the organizational domain (built by the caller). The
-		 * most specific live, proven (not 'legacy') domain among them decides: its workspace owns these reports. It is the
-		 * target when it connected reports (`rua_address` is `address`); otherwise the nearest parent of the SAME workspace
-		 * that connected them is. Another workspace's parent never receives them. Names are globally unique.
+		 * most specific live, PROVEN domain among them decides: its workspace owns these reports. Proven means verified by
+		 * TXT, Cloudflare or self-host, or by 'parent' only while a proven parent of the same workspace is still live (a
+		 * subdomain admitted through a parent that has since gone proves nothing). It is the target when it connected
+		 * reports (`rua_address` is `address`); otherwise the nearest proven parent of the SAME workspace that connected them
+		 * is. Another workspace's parent never receives them. Names are globally unique.
 		 */
 		async connectedForReport(candidates: string[], address: string): Promise<IntakeTarget | null> {
 			if (candidates.length === 0) return null;
 			const rows = await db
-				.select({ workspace_id: domains.workspace_id, domain_id: domains.id, domain: domains.domain, rua_address: domains.rua_address })
+				.select({ workspace_id: domains.workspace_id, domain_id: domains.id, domain: domains.domain, rua_address: domains.rua_address, verified_via: domains.verified_via })
 				.from(domains)
 				.where(
 					/* workspace-scope-exempt: domains.domain is globally unique and identifies the workspace */
@@ -215,9 +225,17 @@ export function intakeLookups(dbLike: DbLike) {
 				)
 				.all();
 			rows.sort((a, b) => b.domain.length - a.domain.length);
-			const owner = rows[0];
+			// Every parent of a candidate is a candidate, so a 'parent' row's parents are all in `rows` (shortest last).
+			const proven = new Set<string>();
+			for (const r of [...rows].reverse()) {
+				const direct = r.verified_via !== 'parent';
+				const viaParent = rows.some((p) => p.workspace_id === r.workspace_id && proven.has(p.domain) && r.domain.endsWith(`.${p.domain}`));
+				if (direct || viaParent) proven.add(r.domain);
+			}
+			const live = rows.filter((r) => proven.has(r.domain));
+			const owner = live[0];
 			if (!owner) return null;
-			const hit = rows.find((r) => r.workspace_id === owner.workspace_id && (r.rua_address ?? '').trim().toLowerCase() === address.toLowerCase());
+			const hit = live.find((r) => r.workspace_id === owner.workspace_id && (r.rua_address ?? '').trim().toLowerCase() === address.toLowerCase());
 			return hit ? { workspace_id: hit.workspace_id, domain_id: hit.domain_id, domain: hit.domain } : null;
 		},
 

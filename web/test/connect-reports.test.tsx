@@ -16,7 +16,10 @@ const view = (over: Record<string, unknown> = {}) => ({
 	can_connect: true,
 	refusal: null,
 	address: null,
+	connected_at: null,
 	last_report_at: null,
+	reports_since_connect: 0,
+	reports_before_connect: 0,
 	state: 'not_connected',
 	dns: null,
 	...over,
@@ -94,6 +97,7 @@ describe('Connect reports', () => {
 				from: 'parent.test',
 				parent_record: 'v=DMARC1; p=reject',
 				policy: 'reject',
+				policy_tag: 'p',
 				parent_has_address: false,
 				own: { kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=reject; rua=mailto:${ADDR}`, created: true },
 			}),
@@ -123,10 +127,11 @@ describe('Connect reports', () => {
 		expect(await screen.findByText('Published, waiting for the first report')).toBeInTheDocument();
 		expect(screen.getByText(/Receivers send reports about once a day/)).toBeInTheDocument();
 		unmount();
-		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'receiving', last_report_at: NOW - 3600 }) });
-		expect(await screen.findByText('Receiving reports')).toBeInTheDocument();
+		show({ 'GET /api/domains/1/report-address': issued(pub, { state: 'receiving', last_report_at: NOW - 3600, reports_since_connect: 2, reports_before_connect: 3 }) });
+		expect(await screen.findByText('Reports received')).toBeInTheDocument();
 		expect(screen.getByText(/Last report received .*\(1 hour ago\)/)).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'Open the reports' })).toHaveAttribute('href', '/domains/1/reports');
+		expect(screen.getByText('3 reports received before this connection.')).toBeInTheDocument();
 	});
 
 	it('disconnect asks first, then calls the API', async () => {
@@ -193,11 +198,57 @@ describe('Connect reports', () => {
 	it('inherited, parent connected in this workspace: says the reports arrive with the parent, links to it', async () => {
 		show({
 			'GET /api/domains/1/report-address': issued(
-				{ kind: 'inherited', from: 'parent.test', parent_record: 'v=DMARC1; p=reject', policy: 'reject', parent_has_address: false, own: { kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=reject; rua=mailto:${ADDR}`, created: true } },
+				{ kind: 'inherited', from: 'parent.test', parent_record: 'v=DMARC1; p=reject', policy: 'reject', policy_tag: 'p', parent_has_address: false, own: { kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=reject; rua=mailto:${ADDR}`, created: true } },
 				{ parent: { domain_id: 9, domain: 'parent.test', connected: true } },
 			),
 		});
 		expect(await screen.findByText(/is connected here, so once its record lists the report address/)).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'parent.test' })).toHaveAttribute('href', '/domains/9');
+	});
+
+	const inherited = (over: Record<string, unknown>, parent: unknown) =>
+		issued(
+			{ kind: 'inherited', from: 'parent.test', parent_record: 'v=DMARC1; p=reject; sp=quarantine', policy: 'quarantine', policy_tag: 'sp', parent_has_address: false, own: { kind: 'add', name: '_dmarc.example.com', current: null, record: `v=DMARC1; p=quarantine; rua=mailto:${ADDR}`, created: true }, ...over },
+			{ parent },
+		);
+
+	it('inherited: names sp= when the parent sets it, and gives one true sentence for each case', async () => {
+		const cases: Array<[Record<string, unknown>, unknown, RegExp]> = [
+			[{ parent_has_address: true }, { domain_id: 9, domain: 'parent.test', connected: true }, /record lists the report address and parent\.test is connected here, so reports about example\.com are filed with parent\.test's reports/],
+			[{ parent_has_address: true }, { domain_id: 9, domain: 'parent.test', connected: false }, /is not connected in this workspace, so those reports are refused/],
+			[{ parent_has_address: true }, null, /is not in this workspace, so its reports, including those about example\.com, are not filed here/],
+			[{}, null, /add parent\.test to this workspace and connect reports there instead/],
+		];
+		for (const [over, parent, sentence] of cases) {
+			const { unmount } = show({ 'GET /api/domains/1/report-address': inherited(over, parent) });
+			const route = await screen.findByTestId('inherited-route');
+			expect(route.textContent).toMatch(sentence);
+			expect(screen.getByText(/sp=quarantine applies to its subdomains/)).toBeInTheDocument();
+			expect(screen.queryByText(/only accepts reports about/)).not.toBeInTheDocument();
+			unmount();
+		}
+	});
+
+	it('an invalid live record: says so, offers no record and no "only rua= changes"', async () => {
+		show({ 'GET /api/domains/1/report-address': issued({ kind: 'invalid', name: '_dmarc.example.com', record: 'v=DMARC1; p=bogus', issues: ['Invalid p= value "bogus"'] }) });
+		expect(await screen.findByText('The DMARC record at _dmarc.example.com is not valid')).toBeInTheDocument();
+		expect(screen.getByText(/Fix it first, then check again/)).toBeInTheDocument();
+		expect(screen.queryByText(/Only rua= changes/)).not.toBeInTheDocument();
+		expect(screen.queryByText('Replace the TXT record at _dmarc.example.com with')).not.toBeInTheDocument();
+	});
+
+	it('a record over 255 characters is shown as quoted strings and says why', async () => {
+		const long = `v=DMARC1; p=reject; rua=mailto:${'a'.repeat(240)}@x.test,mailto:${ADDR}`;
+		show({ 'GET /api/domains/1/report-address': issued({ kind: 'add', name: '_dmarc.example.com', current: 'v=DMARC1; p=reject', record: long, created: false }) });
+		expect(await screen.findByText(/longer than 255 characters/)).toBeInTheDocument();
+		expect(screen.getByText(`"${long.slice(0, 255)}" "${long.slice(255)}"`)).toBeInTheDocument();
+	});
+
+	it('reports received before connecting, or while the record is not published, are a note, not "received"', async () => {
+		show({ 'GET /api/domains/1/report-address': issued({ kind: 'add', name: '_dmarc.example.com', current: null, record: 'x', created: true }, { reports_since_connect: 1, reports_before_connect: 2 }) });
+		expect(await screen.findByText('Connected, record not published yet')).toBeInTheDocument();
+		expect(screen.getByText('1 report received since connecting.')).toBeInTheDocument();
+		expect(screen.getByText('2 reports received before this connection.')).toBeInTheDocument();
+		expect(screen.queryByText('Reports received')).not.toBeInTheDocument();
 	});
 });

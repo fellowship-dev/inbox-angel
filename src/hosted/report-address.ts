@@ -17,7 +17,9 @@ import { createResolver, lookupDmarc, planReportAddress, type InheritedPlan, typ
 import type { TenantContext } from '../tenancy/context';
 import { logAudit } from '../audit/log';
 import { hostedConfig, hostedEnabled } from './config';
-import { fixedReportAddress, isFixedReportAddress } from './fixed-address';
+import { fixedReportAddress, isFixedReportAddress, workspaceMayConnectReports } from './fixed-address';
+import { isDomainProven } from '../domains/ownership';
+import type { BoundEnv } from '../index';
 import { hashToken, intakeAddress, isTokenShaped, parseRecipient } from './tokens';
 
 export class ReportAddressError extends Error {
@@ -37,8 +39,9 @@ type Actor = { id?: string | null; email?: string | null };
 
 /**
  * not_connected: reports are not connected. not_published: connected, but the live DMARC record does not list the
- * address. waiting: listed, no report stored yet. receiving: at least one report is stored. unknown: connected, the
- * DNS lookup failed and no report is stored, so nothing can be said about the record.
+ * address. waiting: listed, no report stored since connecting. receiving: listed AND at least one report stored since
+ * connecting. unknown: connected, but the DNS lookup failed, so nothing can be said about the record.
+ * (Once forged-report weighting lands, "receiving" should also require a proven report.)
  */
 export type ReportAddressState = 'not_connected' | 'not_published' | 'waiting' | 'receiving' | 'unknown';
 
@@ -54,8 +57,12 @@ export interface ReportAddressView {
   refusal: string | null;
   /** The address to publish: the fixed hosted address (or a token address given earlier), once connected. */
   address: string | null;
-  /** When the newest report for this domain was stored. */
+  /** When the current connection began (null for an older token address). */
+  connected_at: number | null;
+  /** The newest report stored since the connection began, and how many; reports stored before it are counted apart. */
   last_report_at: number | null;
+  reports_since_connect: number;
+  reports_before_connect: number;
   state: ReportAddressState;
   /** The live DMARC check, made only when connected. `plan` is null when the lookup failed. */
   dns: { checked_at: number; error: string | null; plan: ReportAddressPlan | InheritedPlan | null } | null;
@@ -71,10 +78,13 @@ export function reportIntakeDomain(env: TenantContext['env']): string | null {
   return hostedConfig(env).intakeDomain ?? null;
 }
 
-const refusalFor = (domain: DomainRow): string | null =>
-  domain.verified_via === 'legacy'
-    ? `${domain.domain} was added before ownership checks. Remove it and add it again to prove that you control it, then connect reports.`
-    : null;
+/** Why this domain's reports cannot be connected, or null. Hosted records are handled by the callers. */
+async function refusalFor(tenant: TenantContext, domain: DomainRow): Promise<string | null> {
+  if (domain.verified_via === 'legacy') return `${domain.domain} was added before ownership checks. Remove it and add it again to prove that you control it, then connect reports.`;
+  if (!(await isDomainProven(tenant, domain))) return `${domain.domain} was added through a parent domain that is no longer in this workspace. Remove it and add it again to prove that you control it, then connect reports.`;
+  if (!(await workspaceMayConnectReports(tenant.env as BoundEnv, tenant.workspaceId))) return 'On this server, only the operator\'s workspaces can connect reports.';
+  return null;
+}
 
 /**
  * The domain's connected address: the fixed one, or a token address whose token is still the domain's current one
@@ -93,12 +103,13 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
   if (!intakeDomain) return { available: false };
   const managed_by = (await tenant.scope.hosted.get(domain.id)) ? 'hosted_records' as const : null;
   const address = managed_by ? null : await connectedAddress(tenant, domain, intakeDomain);
-  const refusal = managed_by ? 'Reports for this domain come through its hosted records.' : refusalFor(domain);
+  const refusal = managed_by ? 'Reports for this domain come through its hosted records.' : await refusalFor(tenant, domain);
+  const connected_at = address ? domain.reports_connected_at ?? null : null;
 
-  let last_report_at: number | null = null;
+  let counts = { since: 0, last_since: null as number | null, before: 0 };
   let dns: ReportAddressView['dns'] = null;
   if (address) {
-    last_report_at = await tenant.scope.intake.lastReportAt(domain.id);
+    counts = await tenant.scope.intake.reportsAround(domain.id, connected_at);
     const lookup = await lookupDmarc(deps.resolver ?? createResolver(), domain.domain);
     const checked_at = Math.floor((deps.now?.() ?? Date.now()) / 1000);
     dns = { checked_at, error: lookup.status === 'error' ? (lookup.error ?? 'DNS lookup failed') : null, plan: planReportAddress(lookup, address) };
@@ -109,14 +120,19 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
     if (row) parent = { domain_id: row.id, domain: row.domain, connected: !!(await connectedAddress(tenant, row, intakeDomain)) };
   }
 
+  // Evidence only: received means published in live DNS AND a report stored since this connection began.
   let state: ReportAddressState = 'not_connected';
   if (address) {
-    if (last_report_at !== null) state = 'receiving';
-    else if (!dns?.plan) state = 'unknown';
-    else state = dns.plan.kind === 'published' ? 'waiting' : 'not_published';
+    if (!dns?.plan) state = 'unknown';
+    else if (dns.plan.kind !== 'published') state = 'not_published';
+    else state = counts.since > 0 ? 'receiving' : 'waiting';
   }
 
-  return { available: true, domain_id: domain.id, domain: domain.domain, managed_by, can_connect: !refusal, refusal, address, last_report_at, state, dns, parent };
+  return {
+    available: true, domain_id: domain.id, domain: domain.domain, managed_by, can_connect: !refusal, refusal, address,
+    connected_at, last_report_at: counts.last_since, reports_since_connect: counts.since, reports_before_connect: counts.before,
+    state, dns, parent,
+  };
 }
 
 function requireIntake(tenant: TenantContext): string {
@@ -140,10 +156,10 @@ function audit(tenant: TenantContext, domain: DomainRow, action: string, actor: 
 export async function connectReports(tenant: TenantContext, domain: DomainRow, deps: ReportAddressDeps = {}, actor?: Actor, ctx?: ExecutionContext): Promise<{ created: boolean; status: ReportIntakeStatus }> {
   const intakeDomain = requireIntake(tenant);
   await assertNotHosted(tenant, domain);
-  const refusal = refusalFor(domain);
+  const refusal = await refusalFor(tenant, domain);
   if (refusal) throw new ReportAddressError(refusal, 403);
   if (await connectedAddress(tenant, domain, intakeDomain)) return { created: false, status: await reportAddressStatus(tenant, domain, deps) };
-  await tenant.scope.intake.setAddress(domain.id, fixedReportAddress(intakeDomain));
+  await tenant.scope.intake.connect(domain.id, fixedReportAddress(intakeDomain), Math.floor((deps.now?.() ?? Date.now()) / 1000));
   audit(tenant, domain, 'reports.connect', actor, ctx);
   const fresh = (await tenant.scope.domains.getById(domain.id)) ?? domain;
   return { created: true, status: await reportAddressStatus(tenant, fresh, deps) };

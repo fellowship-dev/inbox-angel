@@ -5,7 +5,10 @@ import { createMigratedD1 } from '@inbox-angel/db/testing';
 import { forWorkspace, resetSchemaReadyCache } from '@inbox-angel/db';
 import worker from '../../src/index';
 import { handleHostedEmail } from '../../src/hosted/intake';
-import { reportDomainCandidates } from '../../src/hosted/fixed-address';
+import { PEEK_BYTES, reportDomainCandidates, reportPrefix, scanPolicyDomain } from '../../src/hosted/fixed-address';
+import { handleDmarcReport } from '../../src/email/dmarc-report';
+import { loadTenant } from '../../src/tenancy/load';
+import { reportIntakePreflightItems } from '../../src/hosted/report-intake-check';
 import { generateToken, hashToken } from '../../src/hosted/tokens';
 import { call, inviteAndAccept, makeEnv, signupVerified } from '../auth/helpers';
 import { dmarcXml, fakeMessage, gzipReportMime, mimeWithAttachment, tlsRptJson, tlsRptMime, zipReportMime } from '../helpers/mail';
@@ -18,7 +21,7 @@ vi.mock('../../src/telemetry', () => ({ track: vi.fn() }));
 const RUA = 'rua.inboxangel.io';
 const FIXED = `rua@${RUA}`;
 /** Report intake only: no records zone, no records token, no free-check domain. */
-const INTAKE_ONLY = { MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar' };
+const INTAKE_ONLY = { MODE: 'saas', SAAS_ENABLED: '1', INTAKE_DOMAIN: RUA, AUTHSERV_ID: 'mx.cloudflare.net', AUTHSERV_HEADER: 'ar', OWNER_EMAIL: 'a-owner@example.com', HOSTED_CONNECT_REPORTS: 'all' };
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 
 /** Live DNS for the router's resolver: TXT answers by name; anything else (and IP enrichment) is NXDOMAIN. */
@@ -237,7 +240,8 @@ describe('token addresses keep working', () => {
     await forWorkspace(w.env.DB as any, w.A.ws).intake.set(1, await hashToken(token), Math.floor(Date.now() / 1000));
     w.db.sqlite.prepare('UPDATE domains SET rua_address = ? WHERE id = 1').run(`rua+${token}@${RUA}`);
     expect((await w.deliver(`rua+${token}@${RUA}`, 'a-corp.com', 'tok')).setReject).not.toHaveBeenCalled();
-    expect(await w.status(1)).toMatchObject({ address: `rua+${token}@${RUA}`, state: 'receiving' });
+    // An older token address has no connection time: its reports count as before this connection, never as "received".
+    expect(await w.status(1)).toMatchObject({ address: `rua+${token}@${RUA}`, state: 'not_published', reports_since_connect: 0, reports_before_connect: 1 });
     // Disconnecting stops the token too.
     expect((await w.disconnect(1)).status).toBe(200);
     expect((await w.deliver(`rua+${token}@${RUA}`, 'a-corp.com', 'tok-2')).setReject).toHaveBeenCalledWith('Unknown intake token');
@@ -336,5 +340,161 @@ describe('report intake without the free check (G3)', () => {
     const report = fakeMessage(FIXED, gzipReportMime(dmarcXml('a-corp.com')));
     await expect(handleHostedEmail(report, w.env as any)).rejects.toThrow(/INTAKE_DOMAIN/);
     expect(report.setReject).not.toHaveBeenCalled();
+  });
+});
+
+const xmlWith = (policyBlock: string, records = '') => `<?xml version="1.0"?>
+<feedback>
+  <report_metadata><org_name>google.com</org_name><email>noreply@google.com</email><report_id>${Math.random().toString(36).slice(2)}</report_id>
+    <date_range><begin>1529366400</begin><end>1529452799</end></date_range></report_metadata>
+  <policy_published>${policyBlock}<adkim>r</adkim><aspf>r</aspf><p>none</p><pct>100</pct></policy_published>
+  ${records}
+</feedback>`;
+const record = (headerFrom: string) => `<record><row><source_ip>199.230.200.36</source_ip><count>3</count><policy_evaluated><disposition>none</disposition><dkim>fail</dkim><spf>pass</spf></policy_evaluated></row><identifiers><header_from>${headerFrom}</header_from></identifiers><auth_results><spf><domain>${headerFrom}</domain><result>pass</result></spf></auth_results></record>`;
+
+describe('review blockers (fixed address)', () => {
+  it('1a. the reviewer’s quadratic input (29,127 opening policy_published tags, gzipped) is refused in milliseconds', async () => {
+    const w = await world();
+    await w.connect(1);
+    const hostile = gzipSync(strToU8('<?xml version="1.0"?><feedback>' + '<policy_published>'.repeat(29127)));
+    const m = fakeMessage(FIXED, mimeWithAttachment(hostile, 'r.xml.gz', 'application/gzip'));
+    const t0 = performance.now();
+    await handleHostedEmail(m, w.env as any);
+    const ms = performance.now() - t0;
+    console.info(`[measure] quadratic input: ${hostile.length} B gzip, refused in ${ms.toFixed(1)} ms`);
+    expect(m.setReject).toHaveBeenCalledWith('Invalid DMARC report: no policy_published domain');
+    expect(ms).toBeLessThan(250); // was 28.9 s; a few ms in practice, with headroom for a loaded CI runner
+    // The scanner alone, on a full 64 KiB of the same pattern, stays linear.
+    const t1 = performance.now();
+    expect(scanPolicyDomain('<feedback>' + '<policy_published>'.repeat(4000))).toBeNull();
+    expect(performance.now() - t1).toBeLessThan(50);
+    expect(w.stored()).toEqual([]);
+    expect(w.rows('SELECT * FROM intake_usage')).toEqual([]);
+  });
+
+  it('1b. a decompression bomb costs at most the 64 KiB peek: inflation stops there', async () => {
+    const w = await world();
+    await w.connect(1);
+    const bomb = gzipSync(new Uint8Array(24 * 1024 * 1024).fill(0x20), { level: 9 });
+    const t0 = performance.now();
+    const prefix = reportPrefix(bomb);
+    const peekMs = performance.now() - t0;
+    expect(prefix.length).toBe(PEEK_BYTES);
+    const m = fakeMessage(FIXED, mimeWithAttachment(bomb, 'r.xml.gz', 'application/gzip'));
+    const heap0 = process.memoryUsage().heapUsed;
+    const t1 = performance.now();
+    await handleHostedEmail(m, w.env as any);
+    const ms = performance.now() - t1;
+    const heapMb = (process.memoryUsage().heapUsed - heap0) / 1048576;
+    console.info(`[measure] bomb: ${bomb.length} B gzip of 24 MiB; peek ${peekMs.toFixed(1)} ms; refused in ${ms.toFixed(1)} ms; heap delta ${heapMb.toFixed(1)} MB`);
+    expect(m.setReject).toHaveBeenCalledOnce();
+    expect(ms).toBeLessThan(250);
+    expect(w.stored()).toEqual([]);
+  });
+
+  it('2. a subdomain admitted through its parent stops owning reports when the parent goes; the new owner of the parent gets them', async () => {
+    const w = await world();
+    await w.connect(1);
+    await w.connect(5); // mail.a-corp.com, verified via parent
+    expect((await call(w.env, 'DELETE', '/api/domains/1', { key: w.A.token })).status).toBe(204);
+    expect(w.rows('SELECT verified_via FROM domains WHERE id = 5')).toEqual([{ verified_via: 'legacy' }]); // demoted at the source
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (9, ?, 'a-corp.com', ?, 'txt')").run(w.B.ws, FIXED);
+    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'after-move')).setReject).not.toHaveBeenCalled();
+    expect(w.stored()).toEqual([{ workspace_id: w.B.ws, domain_id: 9, report_id: 'after-move' }]);
+  });
+
+  it('2b. even without the source fix (a row left verified via a parent that is gone), intake and connect treat it as unproven', async () => {
+    const w = await world();
+    await w.connect(1);
+    await w.connect(5);
+    w.db.sqlite.prepare('DELETE FROM domains WHERE id = 1').run(); // bypasses the demotion
+    expect(w.rows('SELECT verified_via FROM domains WHERE id = 5')).toEqual([{ verified_via: 'parent' }]);
+    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'orphan')).setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain mail\.a-corp\.com/));
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (9, ?, 'a-corp.com', ?, 'txt')").run(w.B.ws, FIXED);
+    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'to-b')).setReject).not.toHaveBeenCalled();
+    expect(w.stored()).toEqual([{ workspace_id: w.B.ws, domain_id: 9, report_id: 'to-b' }]);
+    w.db.sqlite.prepare("UPDATE domains SET rua_address = '' WHERE id = 5").run();
+    const again = await w.connect(5);
+    expect(again.res.status).toBe(403);
+    expect(again.body.error).toMatch(/added through a parent domain that is no longer in this workspace/);
+  });
+
+  it('3. a comment-hidden domain cannot steer routing: the peek reads the real one; a peek/parse mismatch stores nothing', async () => {
+    const w = await world();
+    await w.connect(1);
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (7, ?, 'shop.a-corp.com', ?, 'txt')").run(w.B.ws, FIXED);
+    const xml = xmlWith('<!--<domain>a-corp.com</domain>--><domain>shop.a-corp.com</domain>', record('shop.a-corp.com'));
+    const m = fakeMessage(FIXED, gzipReportMime(xml));
+    await handleHostedEmail(m, w.env as any);
+    expect(m.setReject).not.toHaveBeenCalled();
+    expect(w.rows('SELECT workspace_id, domain_id FROM aggregate_reports')).toEqual([{ workspace_id: w.B.ws, domain_id: 7 }]);
+    // CDATA and processing instructions are read as a parser reads them.
+    expect(scanPolicyDomain('<?xml version="1.0"?><feedback><policy_published><?pi <domain>x.com</domain>?><domain><![CDATA[a-corp.com]]></domain></policy_published></feedback>')).toBe('a-corp.com');
+    expect(scanPolicyDomain('<!DOCTYPE feedback [<!ENTITY d "a-corp.com">]><feedback><policy_published><domain>&d;</domain></policy_published></feedback>')).toBeNull();
+    // Should the full parse ever read another domain than the peek, the report is refused and nothing is stored.
+    const tenant = await loadTenant(w.env as any, { workspaceId: w.A.ws });
+    const mm = fakeMessage(FIXED, gzipReportMime(dmarcXml('a-corp.com', 'mismatch')));
+    await handleDmarcReport(mm, tenant, { token: { id: 1, domain: 'a-corp.com' }, expectedDomain: 'mail.a-corp.com' });
+    expect(mm.setReject).toHaveBeenCalledWith('Invalid DMARC report: the policy domain could not be read consistently');
+    expect(w.rows("SELECT * FROM aggregate_reports WHERE report_id = 'mismatch'")).toEqual([]);
+  });
+
+  it('4. a record about another domain (header_from) refuses the whole report, on the fixed address and on token addresses', async () => {
+    const w = await world();
+    await w.connect(1);
+    const xml = xmlWith('<domain>a-corp.com</domain>', record('a-corp.com') + record('b-corp.org'));
+    const m = fakeMessage(FIXED, gzipReportMime(xml));
+    await handleHostedEmail(m, w.env as any);
+    expect(m.setReject).toHaveBeenCalledWith('Invalid DMARC report: a record is about b-corp.org, not a-corp.com');
+    const token = generateToken();
+    await forWorkspace(w.env.DB as any, w.A.ws).intake.set(5, await hashToken(token), Math.floor(Date.now() / 1000));
+    const t = fakeMessage(`rua+${token}@${RUA}`, gzipReportMime(xmlWith('<domain>mail.a-corp.com</domain>', record('b-corp.org'))));
+    await handleHostedEmail(t, w.env as any);
+    expect(t.setReject).toHaveBeenCalledOnce();
+    // a subdomain's records under its parent's report are fine
+    const ok = fakeMessage(FIXED, gzipReportMime(xmlWith('<domain>a-corp.com</domain>', record('a-corp.com') + record('news.a-corp.com'))));
+    await handleHostedEmail(ok, w.env as any);
+    expect(ok.setReject).not.toHaveBeenCalled();
+    expect(w.stored()).toHaveLength(1);
+  });
+
+  it('5. "received" needs a report since this connection AND the address in live DNS; earlier reports are counted apart', async () => {
+    const w = await world();
+    await w.connect(1);
+    expect((await w.deliver(FIXED, 'a-corp.com', 'forged-or-early')).setReject).not.toHaveBeenCalled();
+    expect(await w.status(1)).toMatchObject({ state: 'not_published', reports_since_connect: 1, reports_before_connect: 0 }); // not in DNS: not "received"
+    await w.disconnect(1);
+    w.db.sqlite.prepare('UPDATE aggregate_reports SET created_at = created_at - 60').run();
+    await w.connect(1);
+    expect(await w.status(1)).toMatchObject({ state: 'not_published', reports_since_connect: 0, reports_before_connect: 1, last_report_at: null });
+    txt['_dmarc.a-corp.com'] = [`v=DMARC1; p=none; rua=mailto:${FIXED}`];
+    expect(await w.status(1)).toMatchObject({ state: 'waiting', reports_before_connect: 1 });
+    expect((await w.deliver(FIXED, 'a-corp.com', 'after')).setReject).not.toHaveBeenCalled();
+    expect(await w.status(1)).toMatchObject({ state: 'receiving', reports_since_connect: 1, reports_before_connect: 1 });
+  });
+
+  it('6. HOSTED_CONNECT_REPORTS=owner (the default): only the instance owner’s workspaces connect or receive', async () => {
+    const w = await world({ HOSTED_CONNECT_REPORTS: '' });
+    expect((await w.connect(1)).res.status).toBe(201); // A is OWNER_EMAIL's workspace
+    const b = await w.connect(2, w.B.token);
+    expect(b.res.status).toBe(403);
+    expect(b.body.error).toBe("On this server, only the operator's workspaces can connect reports.");
+    expect(await w.status(2, w.B.token)).toMatchObject({ can_connect: false, refusal: "On this server, only the operator's workspaces can connect reports." });
+    w.db.sqlite.prepare('UPDATE domains SET rua_address = ? WHERE id = 2').run(FIXED); // even if B were connected
+    expect((await w.deliver(FIXED, 'b-corp.org', 'b-blocked')).setReject).toHaveBeenCalledWith(expect.stringMatching(/Unknown domain b-corp\.org/));
+    expect((await w.deliver(FIXED, 'a-corp.com', 'a-ok')).setReject).not.toHaveBeenCalled();
+    const none = await world({ HOSTED_CONNECT_REPORTS: 'owner', OWNER_EMAIL: '' });
+    expect((await none.connect(1)).res.status).toBe(403);
+  });
+
+  it('6b. the setup check names the intake settings, never their values', () => {
+    const env = (e: Record<string, string>) => ({ MODE: 'saas', SAAS_ENABLED: '1', ...e }) as any;
+    expect(reportIntakePreflightItems(env({})).map(i => i.setting)).toEqual(['INTAKE_DOMAIN']);
+    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'everyone' })).map(i => [i.severity, i.setting])).toEqual([
+      ['action', 'HOSTED_CONNECT_REPORTS'], ['action', 'HOSTED_CONNECT_REPORTS, OWNER_EMAIL'], ['note', 'AUTHSERV_ID, AUTHSERV_HEADER'], ['note', 'INTAKE_MAX_RECORDS_PER_REPORT'],
+    ]);
+    expect(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, HOSTED_CONNECT_REPORTS: 'all', AUTHSERV_ID: 'x', AUTHSERV_HEADER: 'ar', INTAKE_MAX_RECORDS_PER_REPORT: '900' }))).toEqual([]);
+    expect(JSON.stringify(reportIntakePreflightItems(env({ INTAKE_DOMAIN: RUA, OWNER_EMAIL: 'secret-owner@x.test' })))).not.toContain('secret-owner');
+    expect(reportIntakePreflightItems({ MODE: 'selfhost' } as any)).toEqual([]);
   });
 });

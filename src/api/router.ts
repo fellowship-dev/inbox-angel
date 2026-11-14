@@ -105,7 +105,7 @@ import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
-import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
+import { admitDomain, claimView, demoteOrphanedSubdomains, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@inbox-angel/db';
 import { planLimitResponse } from '../hosted/plan-limits';
@@ -267,6 +267,9 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
   }
 
   await tenant.scope.domains.delete(id);
+  // Subdomains admitted only through this domain are no longer proven by anything (src/domains/ownership.ts).
+  const orphaned = await demoteOrphanedSubdomains(tenant);
+  if (orphaned.length) console.warn(`[domains] ${orphaned.length} subdomain(s) of ${domain.domain} lost their proof and are now unproven`);
 
   logAudit(tenant, {
     actor_id: actor?.id ?? null, actor_email: actor?.email ?? null, actor_type: 'user',

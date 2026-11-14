@@ -31,6 +31,11 @@ export interface ReportOptions {
   token?: TokenDomain;
   /** The topmost results headers, when the caller has already read them (hosted intake does, to pick the allowance). */
   authHeaders?: AuthHeaders;
+  /**
+   * Hosted fixed address: the policy domain the intake routed this report by (read before the full parse). The parsed
+   * policy_published domain must be exactly this, or the report is refused and nothing is stored.
+   */
+  expectedDomain?: string;
 }
 
 export async function handleDmarcReport(
@@ -89,6 +94,21 @@ export async function handleDmarcReport(
   // 3. Resolve domain from the policy_domain in the report
   const policyDomain = report.policy_published.domain;
   let domain;
+  if (opts.expectedDomain !== undefined && normalizeDomain(policyDomain) !== opts.expectedDomain) {
+    console.warn('dmarc-report: policy domain differs from the one the report was routed by');
+    message.setReject('Invalid DMARC report: the policy domain could not be read consistently');
+    return { failure_count: 0 };
+  }
+  // Hosted: every record must be about the report's own domain or a subdomain of it (as TLS-RPT does for policy domains,
+  // one record about anything else refuses the whole report, and nothing is stored).
+  if (opts.token) {
+    const stray = report.records.find((r) => !coversDomain(policyDomain, r.identifiers?.header_from ?? ''));
+    if (stray) {
+      console.warn('dmarc-report: a record header_from is outside the report domain', policyDomain);
+      message.setReject(`Invalid DMARC report: a record is about ${stray.identifiers?.header_from || 'no domain'}, not ${policyDomain}`);
+      return { failure_count: 0 };
+    }
+  }
   if (opts.token) {
     // Hosted: the token's domain or a subdomain of it. Filed under the token's domain, unless the subdomain is itself
     // a verified domain of the same workspace (the scoped lookup never sees another workspace's domains).
