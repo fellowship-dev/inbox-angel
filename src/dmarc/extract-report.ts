@@ -178,3 +178,12 @@ export function extractReport(content: Uint8Array | ArrayBuffer | string, opts: 
     throw new ParserError(`Invalid archive file: ${e}`);
   }
 }
+
+/**
+ * Decompress and read a report with a HARD cap on what is produced (not on what the archive claims): throws `ReportTooLargeError` past `limit`
+ * bytes. Callers pick the limit by carrier class (src/dmarc/reporter-auth.ts): `intakeLimits(env).maxDecompressedBytes` for a registry sender,
+ * `nonRegistryDecompressedBytes` for anyone else. Also refuses an oversized gzip header, nested archives and archives with more than 2 entries.
+ */
+export function extractReportCapped(content: Uint8Array | ArrayBuffer | string, limit: number): string {
+  return extractReport(content, { maxBytes: limit });
+}

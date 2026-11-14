@@ -35,6 +35,36 @@ const today = () => new Date().toISOString().slice(0, 10);
 interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 'counted' | 'unknown' | 'unauthenticated' | null; reporter: string | null; dkim_org: string | null; from_org: string | null; email_matched: boolean | null; dedup: 'new' | 'duplicate' | 'superseded' | null; records: number | null }
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
+type IntakeQueries = ReturnType<typeof forWorkspace>['intake'];
+
+/**
+ * Charge the pre-decompression caps for one message, in order: instance, workspace, address and the carrier class's own total (one D1 batch,
+ * `consumeQuota`), then the sending organisation's own allowance (`consumeReporter`: a registry reporter by its id, an authenticated unknown
+ * by its DKIM organisation, an unauthenticated sender by the forgeable envelope-sender domain it claims). Call it AFTER `carrierFromHeaders` and
+ * BEFORE decompressing or parsing anything. `reason` is null when the message may proceed, else the reason code of the cap that refused it (what is
+ * counted is given back, so a refused message uses nothing). `quota` carries the stored-records counters for the later per-report checks. What to do with the reason is the caller's: hosted intake accepts-and-drops a registry
+ * reporter and answers 5xx to anyone else.
+ */
+export async function chargeIntakeCaps(
+  q: IntakeQueries,
+  m: { domainId: number; workspaceId: string; day: string; rawSize: number; envelopeFrom?: string | null; carrier: Carrier },
+  limits: ReturnType<typeof intakeLimits>,
+): Promise<{ reason: ReasonCode | null; quota: Awaited<ReturnType<IntakeQueries['consumeQuota']>> }> {
+  const { carrier } = m;
+  const quota = await q.consumeQuota(m.domainId, m.day, m.rawSize, carrier.class, {
+    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unknownTotal: limits.unknownReportsPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
+  });
+  const refuse = (reason: ReasonCode) => ({ reason, quota });
+  if (!quota.ok) return refuse(({ address: 'cap_address_day', unknown: 'cap_unknown_day', unauth: 'cap_unauth_total_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
+  const claimed = '~' + (m.envelopeFrom?.split('@').pop()?.trim().toLowerCase() || '');
+  const bucket = carrier.class === 'registry' ? carrier.candidates[0].id : carrier.class === 'authenticated' ? (carrier.dkimOrg ?? carrier.fromOrg!) : claimed;
+  const perReports = carrier.class === 'registry' ? limits.reportsPerDay : carrier.class === 'authenticated' ? limits.unknownReportsPerReporterPerDay : limits.unauthReportsPerDay;
+  const perBytes = carrier.class === 'unauthenticated' ? limits.unauthBytesPerDay : limits.bytesPerDay;
+  if (await q.consumeReporter(m.domainId, m.day, bucket, m.rawSize, perReports, perBytes)) return { reason: null, quota };
+  await q.releaseQuota(m.domainId, m.day, m.rawSize, [`a:${m.domainId}`, `k:${m.domainId}`, `u:${m.domainId}`, `w:${m.workspaceId}`, '*']);
+  return refuse(carrier.class === 'authenticated' ? 'cap_unknown_reporter_day' : carrier.class === 'unauthenticated' ? 'cap_unauth_day' : 'cap_address_day');
+}
+
 export async function handleHostedEmail(message: ForwardableEmailMessage, env: BoundEnv): Promise<void> {
   const started = Date.now();
   const seen: Seen = { kind: 'other', ws: null, dom: null, tier: null, reporter: null, dkim_org: null, from_org: null, email_matched: null, dedup: null, records: null };
@@ -117,23 +147,8 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
     return { outcome: 'accepted', reason: 'over_cap_accepted_dropped' };
   };
 
-  const quota = await q.consumeQuota(target.domain_id, day, message.rawSize, carrier.class, {
-    address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unknownTotal: limits.unknownReportsPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
-  });
-  if (!quota.ok) {
-    return overCap(({ address: 'cap_address_day', unknown: 'cap_unknown_day', unauth: 'cap_unauth_total_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
-  }
-  // The sending organisation's own allowance: a registry reporter by its id, an authenticated unknown by its DKIM organisation, an
-  // unauthenticated sender by the (forgeable) envelope-sender domain it claims.
-  const claimed = '~' + (message.from?.split('@').pop()?.trim().toLowerCase() || '');
-  const bucket = carrier.class === 'registry' ? registryId! : carrier.class === 'authenticated' ? (carrier.dkimOrg ?? carrier.fromOrg!) : claimed;
-  const perReports = carrier.class === 'registry' ? limits.reportsPerDay : carrier.class === 'authenticated' ? limits.unknownReportsPerReporterPerDay : limits.unauthReportsPerDay;
-  const perBytes = carrier.class === 'unauthenticated' ? limits.unauthBytesPerDay : limits.bytesPerDay;
-  const ok = await q.consumeReporter(target.domain_id, day, bucket, message.rawSize, perReports, perBytes);
-  if (!ok) {
-    await q.releaseQuota(target.domain_id, day, message.rawSize, [`a:${target.domain_id}`, `k:${target.domain_id}`, `u:${target.domain_id}`, `w:${target.workspace_id}`, '*']);
-    return overCap(carrier.class === 'authenticated' ? 'cap_unknown_reporter_day' : carrier.class === 'unauthenticated' ? 'cap_unauth_day' : 'cap_address_day');
-  }
+  const { reason: capped, quota } = await chargeIntakeCaps(q, { domainId: target.domain_id, workspaceId: target.workspace_id, day, rawSize: message.rawSize, envelopeFrom: message.from, carrier }, limits);
+  if (capped) return overCap(capped);
 
   const body = new Proxy(message, { get: (t, p) => (p === 'raw' ? rest : Reflect.get(t, p, t) instanceof Function ? (Reflect.get(t, p, t) as Function).bind(t) : Reflect.get(t, p, t)) });
   const tenant = await loadTenant(env, { workspaceId: target.workspace_id });
