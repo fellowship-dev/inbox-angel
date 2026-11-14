@@ -32,6 +32,7 @@ vi.mock('../../src/dmarc/store-report', () => ({
 }));
 
 import { handleDmarcReport, StorageFailure } from '../../src/email/dmarc-report';
+import { carrierFromHeaders } from '../../src/dmarc/reporter-auth';
 import * as mimeExtract from '../../src/email/mime-extract';
 import * as resolveDomainMod from '../../src/email/resolve-domain';
 import * as parseEmailMod from '../../src/dmarc/parse-email';
@@ -94,8 +95,8 @@ function makeMessage(overrides: Partial<{
 
 function makeEnv() {
   const tenant = makeTenant({ db: {} });
-  // the gate asks D1 whether the report is already stored, and a storage failure is counted for the owner: stub both
-  tenant.scope.reports.findReportId = vi.fn().mockResolvedValue(null);
+  // the gate asks D1 whether the report is already stored (per domain, reporter identity, report id), and a storage failure is counted for the owner: stub both
+  tenant.scope.reports.isDuplicate = vi.fn().mockResolvedValue(false);
   tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(1);
   return tenant;
 }
@@ -108,7 +109,7 @@ beforeEach(() => {
   vi.mocked(resolveDomainMod.resolveDomain).mockResolvedValue(DOMAIN);
   // the real parser calls the gate once the report's header is known; the mock does the same
   vi.mocked(parseEmailMod.parseDmarcEmail).mockImplementation(async (_bytes, _offline, _db, opts) => {
-    await (opts as { gate?: (i: unknown) => Promise<void> }).gate?.({ report_id: REPORT.report_metadata.report_id, policy_domain: REPORT.policy_published.domain, org_name: REPORT.report_metadata.org_name, record_count: REPORT.records.length });
+    await (opts as { gate?: (i: unknown) => Promise<void> }).gate?.({ report_id: REPORT.report_metadata.report_id, policy_domain: REPORT.policy_published.domain, report_email: REPORT.report_metadata.org_email, record_count: REPORT.records.length });
     return REPORT;
   });
   vi.mocked(storeReportMod.storeReport).mockResolvedValue({ stored: true, reportId: 42 });
@@ -142,7 +143,7 @@ describe('handleDmarcReport — happy path', () => {
     await handleDmarcReport(makeMessage(), makeEnv());
 
     // parseDmarcEmail now takes (bytes, offline, db)
-    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), expect.objectContaining({ maxBytes: 1.25 * 1024 * 1024, maxRecords: 2_500, maxNewIps: 200, gate: expect.any(Function) })); // self-host: generous but bounded
+    expect(parseEmailMod.parseDmarcEmail).toHaveBeenCalledWith(fakeBytes, false, expect.anything(), expect.objectContaining({ maxBytes: 1024 * 1024, maxRecords: 2_500, maxNewIps: 200, gate: expect.any(Function) })); // self-host, unauthenticated carrier: the non-registry decompression cap
   });
 
   it('calls storeReport with correct domain id', async () => {
@@ -286,11 +287,46 @@ describe('handleDmarcReport — error paths', () => {
 
   it('a report already stored is a duplicate: accepted, not stored again, nothing enriched', async () => {
     const tenant = makeEnv();
-    tenant.scope.reports.findReportId = vi.fn().mockResolvedValue(7);
+    tenant.scope.reports.isDuplicate = vi.fn().mockResolvedValue(true);
     const message = makeMessage();
     const result = await handleDmarcReport(message, tenant);
     expect(result).toMatchObject({ outcome: 'duplicate', reason: 'duplicate' });
     expect(storeReportMod.storeReport).not.toHaveBeenCalled();
     expect(message.setReject).not.toHaveBeenCalled();
+  });
+});
+
+// ── Three-tier flow ───────────────────────────────────────────
+
+describe('handleDmarcReport — tiers', () => {
+  const googleCarrier = () => carrierFromHeaders(
+    { ar: 'mx.test; dkim=pass header.d=google.com; spf=pass', from: 'noreply-dmarc-support@google.com' } as never,
+    { AUTHSERV_ID: 'mx.test', AUTHSERV_HEADER: 'ar' },
+  );
+
+  it('an unauthenticated carrier is stored but not counted, keyed on the ~unauth identity', async () => {
+    const tenant = makeEnv();
+    const result = await handleDmarcReport(makeMessage(), tenant);
+    expect(result).toMatchObject({ outcome: 'accepted', tier: 'unauthenticated', identity: '~unauth' });
+    expect(tenant.scope.reports.isDuplicate).toHaveBeenCalledWith(1, '~unauth', 'report-abc-001', false);
+    expect(vi.mocked(storeReportMod.storeReport).mock.calls[0][5]).toMatchObject({ tier: 'unauthenticated', identity: '~unauth', domain: null });
+  });
+
+  it('an authenticated registry carrier whose report email is accepted is counted', async () => {
+    const carrier = googleCarrier();
+    expect(carrier.class).toBe('registry');
+    const tenant = makeEnv();
+    const result = await handleDmarcReport(makeMessage(), tenant, { carrier });
+    // the mock gate reports noreply@google.com, which Google's entry does not accept: not counted
+    expect(result).toMatchObject({ outcome: 'accepted', tier: 'unknown', identity: 'google', emailMatched: false });
+
+    vi.mocked(parseEmailMod.parseDmarcEmail).mockImplementation(async (_b, _o, _d, opts) => {
+      await (opts as { gate?: (i: unknown) => Promise<unknown> }).gate?.({ report_id: 'r2', policy_domain: 'acme.com', report_email: 'noreply-dmarc-support@google.com', record_count: 0 });
+      return REPORT;
+    });
+    const counted = await handleDmarcReport(makeMessage(), tenant, { carrier });
+    expect(counted).toMatchObject({ outcome: 'accepted', tier: 'counted', identity: 'google', emailMatched: true });
+    expect(tenant.scope.reports.isDuplicate).toHaveBeenLastCalledWith(1, 'google', 'r2', true);
+    expect(vi.mocked(storeReportMod.storeReport).mock.calls.at(-1)![5]).toMatchObject({ tier: 'counted', identity: 'google', knownAs: 'Google', auth: 'pass' });
   });
 });

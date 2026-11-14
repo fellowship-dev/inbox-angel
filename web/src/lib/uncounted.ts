@@ -1,26 +1,35 @@
 /**
  * What the dashboard must say besides the numbers, as pure helpers over the server's fields (src/reports/visibility.ts):
  *
- *   report_counting  'known' | 'authenticated' | 'all': which stored reports feed the numbers on this page
+ *   report_counting  'registry' | 'authenticated' | 'all': which stored reports feed the numbers on this page
  *   counting_note    why nothing can be counted right now (AUTHSERV_* not set while the mode needs authentication), or null
- *   unrecognised     stored reports from senders we do not recognise (authenticated but not a known reporter, or not authenticated), any mode
- *   uncounted        the part of `unrecognised` that is left out of the numbers in this mode (empty in 'all' mode)
+ *   unrecognised     stored reports from senders we do not recognise (authenticated but not a registry reporter, or not authenticated), any mode
+ *   uncounted        the part of `unrecognised` that is left out of the numbers in this mode (empty in 'all' mode), split `unknown` / `unauthenticated`
+ *   reporters        who the counted numbers come from: `attribution` ("from 12 reports by Google, Microsoft"), `counted[]`, `major` (Google or Microsoft counted)
  *   intake           mail that reached the report address and was not stored, and any limit currently in force
  *
  * They are on `GET /api/domains/:id/stats`, `/check-summary` and `/analytics`. A page that shows "no reports" (or a healthy rate)
  * must ask `emptyReportsState()` first: it never answers `none` while reports were left out or lost.
- * Three tiers decide what a report is (src/dmarc/reporter-auth.ts): counted (authenticated AND a known reporter), received but not
- * counted (authenticated, not known), refused (not authenticated: never stored, so never shown).
+ * Three tiers decide what a report is (src/dmarc/reporter-auth.ts): counted (authenticated AND a registry reporter), received but not counted
+ * (authenticated, not in the registry), received but not counted (not authenticated). Refused reports (malformed, not a report, not your domain) are never stored.
  */
 
-export type ReportCounting = 'known' | 'authenticated' | 'all';
+export type ReportCounting = 'registry' | 'authenticated' | 'all';
 export type ReporterTier = 'counted' | 'unknown' | 'unauthenticated';
 
 export interface UncountedInfo {
 	reports: number;
 	messages: number;
 	latest_at: number | null;
+	unknown?: number;
+	unauthenticated?: number;
 	by_reporter: Array<{ reporter: string; reports: number }>;
+}
+
+export interface ReportersInfo {
+	counted: Array<{ reporter: string; label: string; reports: number; messages: number }>;
+	attribution: string | null;
+	major: boolean;
 }
 
 export interface IntakeInfo {
@@ -36,15 +45,31 @@ export interface ReportVisibilityFields {
 	counting_note?: string | null;
 	unrecognised?: UncountedInfo;
 	uncounted?: UncountedInfo;
+	reporters?: ReportersInfo;
 	intake?: IntakeInfo;
 }
 
-/** "3 reports from senders we do not recognise are not counted." — or null when nothing is left out. */
+/** "3 reports from senders we do not recognise are not counted." — or null when nothing is left out. Reports whose sender was not authenticated get their own sentence. */
 export function uncountedNotice(v: ReportVisibilityFields | null | undefined): string | null {
-	const n = v?.uncounted?.reports ?? 0;
-	if (n <= 0) return null;
-	if (v?.report_counting === 'authenticated') return n === 1 ? '1 report from a sender that could not be authenticated is not counted.' : `${n} reports from senders that could not be authenticated are not counted.`;
-	return n === 1 ? '1 report from a sender we do not recognise is not counted.' : `${n} reports from senders we do not recognise are not counted.`;
+	const u = v?.uncounted;
+	const n = u?.reports ?? 0;
+	if (!u || n <= 0) return null;
+	const unauth = u.unauthenticated ?? 0;
+	const unknown = u.unknown ?? n - unauth;
+	const parts: string[] = [];
+	if (unknown > 0) parts.push(unknown === 1 ? '1 report from a sender we do not recognise is not counted.' : `${unknown} reports from senders we do not recognise are not counted.`);
+	if (unauth > 0) parts.push(unauth === 1 ? '1 report from a sender that could not be authenticated is not counted.' : `${unauth} reports from senders that could not be authenticated are not counted.`);
+	return parts.join(' ') || null;
+}
+
+/** Who the counted numbers come from, e.g. "from 12 reports by Google, Microsoft" — every percentage on a page names this. Null when nothing is counted. */
+export function countedReporters(v: ReportVisibilityFields | null | undefined): string | null {
+	return v?.reporters?.attribution ?? null;
+}
+
+/** "Safe to enforce" advice needs a counted Google or Microsoft report; false is the reason to hold it back. */
+export function hasMajorReporter(v: ReportVisibilityFields | null | undefined): boolean {
+	return v?.reporters?.major === true;
 }
 
 /** For a server that counts every report ('all'): how many counted reports come from senders we do not recognise. Null otherwise. */
@@ -99,29 +124,30 @@ export function reporterLabel(r: { reporter_tier?: ReporterTier | null; reporter
 
 /** The line under the report table: which reports the numbers on this page include. */
 export function countingBasisNote(mode: ReportCounting | undefined): string | null {
-	if (mode === 'known') return 'Only reports from known reporters are counted.';
+	if (mode === 'registry') return 'Only reports from known reporters are counted.';
 	if (mode === 'authenticated') return 'Only reports from authenticated senders are counted.';
 	if (mode === 'all') return 'Every stored report is counted, authenticated or not.';
 	return null;
 }
 
-// ── instance owner: the unknown reporters list ───────────────
+// ── instance owner: reporter candidates ─────────────────────
 
-export interface UnknownReporterRow { reporter: string; reports: number; first_seen: number; last_seen: number }
-export interface UnknownReportersResponse {
-	reporters: UnknownReporterRow[];
-	known: Array<{ org: string; kind: 'address' | 'domain'; value: string }>;
+export interface ReporterCandidate {
+	dkim_org: string; from_domain: string; org_name: string | null; report_email: string | null;
+	reports: number; workspaces: number; days: number; first_seen: string; last_seen: string;
+}
+export interface ReporterCandidatesResponse {
+	candidates: ReporterCandidate[];
+	registry: Array<{ id: string; label: string }>;
 	issues: string[];
+	since: string;
 }
 
-/** One line for the instance owner: "3 senders we do not recognise sent reports (12 in total); latest: x.example." Null when there are none. */
-export function unknownReportersSummary(r: UnknownReportersResponse | null | undefined): string | null {
-	const rows = r?.reporters ?? [];
+/** One line for the instance owner: "3 authenticated senders are not in the registry (12 reports in total); latest: x.example." Null when there are none. */
+export function candidatesSummary(r: ReporterCandidatesResponse | null | undefined): string | null {
+	const rows = r?.candidates ?? [];
 	if (!rows.length) return null;
 	const total = rows.reduce((n, x) => n + x.reports, 0);
-	const latest = [...rows].sort((a, b) => b.last_seen - a.last_seen)[0].reporter;
-	return `${rows.length} ${rows.length === 1 ? 'sender' : 'senders'} we do not recognise sent reports (${total} in total); latest: ${latest}.`;
+	const latest = [...rows].sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))[0]!.dkim_org;
+	return `${rows.length} authenticated ${rows.length === 1 ? 'sender is' : 'senders are'} not in the registry (${total} ${total === 1 ? 'report' : 'reports'} in total); latest: ${latest}.`;
 }
-
-/** The setting to paste to count a reporter: `address:dmarc@example.org`. The owner decides; nothing is added automatically. */
-export const knownReporterSetting = (kind: 'address' | 'domain', value: string) => `INTAKE_KNOWN_REPORTERS=${kind}:${value.trim().toLowerCase()}`;

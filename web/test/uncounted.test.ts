@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { countingBasisNote, emptyReportsMessage, emptyReportsState, intakeNotice, reporterLabel, uncountedNotice, uncountedReporters, type ReportVisibilityFields } from '../src/lib/uncounted';
+import { candidatesSummary, countedReporters, hasMajorReporter, countingBasisNote, emptyReportsMessage, emptyReportsState, intakeNotice, reporterLabel, uncountedNotice, uncountedReporters, type ReportVisibilityFields } from '../src/lib/uncounted';
 
 const none = { reports: 0, messages: 0, latest_at: null, by_reporter: [] };
 const intakeOk = { status: 'ok' as const, limit: null, notice: null, not_processed: { messages: 0, last_at: null, reasons: [] } };
-const v = (o: Partial<ReportVisibilityFields>): ReportVisibilityFields => ({ report_counting: 'proven', uncounted: none, unverified: none, intake: intakeOk, ...o });
+const v = (o: Partial<ReportVisibilityFields>): ReportVisibilityFields => ({ report_counting: 'registry', uncounted: none, unrecognised: none, intake: intakeOk, ...o });
 
 describe('uncountedNotice', () => {
 	it('says plainly how many reports are left out', () => {
-		expect(uncountedNotice(v({ uncounted: { ...none, reports: 3 } }))).toBe('3 reports from senders we could not verify are not counted.');
-		expect(uncountedNotice(v({ uncounted: { ...none, reports: 1 } }))).toBe('1 report from a sender we could not verify is not counted.');
+		expect(uncountedNotice(v({ uncounted: { ...none, reports: 3 } }))).toBe('3 reports from senders we do not recognise are not counted.');
+		expect(uncountedNotice(v({ uncounted: { ...none, reports: 1 } }))).toBe('1 report from a sender we do not recognise is not counted.');
+		expect(uncountedNotice(v({ uncounted: { ...none, reports: 3, unknown: 2, unauthenticated: 1 } }))).toBe('2 reports from senders we do not recognise are not counted. 1 report from a sender that could not be authenticated is not counted.');
 	});
 	it('says nothing when nothing is left out, or the server sent nothing', () => {
 		expect(uncountedNotice(v({}))).toBeNull();
@@ -29,8 +30,8 @@ describe('emptyReportsState: never "no reports" while reports were left out or l
 	});
 	it('only unverified reports arrived', () => {
 		const x = v({ uncounted: { ...none, reports: 2 } });
-		expect(emptyReportsState(0, x)).toBe('only_unverified');
-		expect(emptyReportsMessage(0, x)).toBe('No counted reports yet. 2 reports from senders we could not verify are not counted.');
+		expect(emptyReportsState(0, x)).toBe('only_unrecognised');
+		expect(emptyReportsMessage(0, x)).toBe('No counted reports yet. 2 reports from senders we do not recognise are not counted.');
 	});
 	it('reports that could not be processed are shown instead of "no reports"', () => {
 		const x = v({ intake: { ...intakeOk, status: 'not_processed', notice: '2 reports received for this domain could not be processed', not_processed: { messages: 2, last_at: 5, reasons: [] } } });
@@ -52,15 +53,27 @@ describe('emptyReportsState: never "no reports" while reports were left out or l
 });
 
 describe('labels', () => {
-	it('reporterLabel says who the sender was verified as', () => {
-		expect(reporterLabel({ reporter_auth: 'pass', reporter_auth_domain: 'google.com' })).toBe('Verified sender: google.com');
-		expect(reporterLabel({ reporter_auth: 'fail', reporter_auth_domain: 'google.com' })).toBe('Sender could not be verified as google.com');
-		expect(reporterLabel({ reporter_auth: 'none', org_name: 'x.example' })).toBe('Sender not verified (this server cannot verify senders yet)');
-		expect(reporterLabel({ reporter_auth: null })).toBe('Received before senders were verified');
+	it('reporterLabel says what the tier decided', () => {
+		expect(reporterLabel({ reporter_tier: 'counted', reporter_known_as: 'Google' })).toBe('Known reporter: Google');
+		expect(reporterLabel({ reporter_tier: 'unknown', reporter_auth_domain: 'x.example' })).toBe('Authenticated sender we do not recognise: x.example');
+		expect(reporterLabel({ reporter_tier: 'unauthenticated' })).toBe('Sender could not be authenticated');
+		expect(reporterLabel({ reporter_tier: null })).toBe('Received before senders were checked');
 	});
 	it('countingBasisNote', () => {
-		expect(countingBasisNote('proven')).toBe('Only reports from verified senders are counted.');
-		expect(countingBasisNote('all')).toBe('Every stored report is counted, verified or not.');
+		expect(countingBasisNote('registry')).toBe('Only reports from known reporters are counted.');
+		expect(countingBasisNote('all')).toBe('Every stored report is counted, authenticated or not.');
 		expect(countingBasisNote(undefined)).toBeNull();
+	});
+	it('names the reporters behind every percentage, and whether a major receiver is among them', () => {
+		const x = v({ reporters: { counted: [], attribution: 'from 12 reports by Google, Microsoft', major: true } });
+		expect(countedReporters(x)).toBe('from 12 reports by Google, Microsoft');
+		expect(hasMajorReporter(x)).toBe(true);
+		expect(countedReporters(v({}))).toBeNull();
+		expect(hasMajorReporter(v({}))).toBe(false);
+	});
+	it('candidatesSummary', () => {
+		const c = (dkim_org: string, reports: number, last_seen: string) => ({ dkim_org, from_domain: dkim_org, org_name: null, report_email: null, reports, workspaces: 1, days: 1, first_seen: last_seen, last_seen });
+		expect(candidatesSummary({ candidates: [c('a.example', 2, '2026-11-01'), c('b.example', 1, '2026-11-03')], registry: [], issues: [], since: '' })).toBe('2 authenticated senders are not in the registry (3 reports in total); latest: b.example.');
+		expect(candidatesSummary({ candidates: [], registry: [], issues: [], since: '' })).toBeNull();
 	});
 });
