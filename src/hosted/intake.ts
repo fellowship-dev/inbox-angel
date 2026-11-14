@@ -36,7 +36,7 @@ interface Seen { kind: IntakeKind; ws: string | null; dom: number | null; tier: 
 interface Verdict { outcome: Outcome; reason: ReasonCode }
 
 /** The caps the instance owner is told about: storage and daily limits at address, workspace and instance level. */
-export const SETUP_CAPS: ReadonlySet<ReasonCode> = new Set<ReasonCode>(['cap_address_day', 'cap_workspace_day', 'cap_instance_day', 'cap_address_records', 'cap_workspace_storage', 'cap_instance_storage']);
+export const isSetupCap = (reason: ReasonCode): boolean => /^cap_(address_day|workspace_day|instance_day|address_records|workspace_storage|instance_storage)$/.test(reason);
 
 type IntakeQueries = ReturnType<typeof forWorkspace>['intake'];
 
@@ -143,7 +143,7 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
 
   const registryId = carrier.candidates[0]?.id ?? null;
   /** Instance-wide counter of the storage and daily caps that stopped mail (the owner's setup check reads it); best effort. */
-  const noteCap = (reason: ReasonCode) => (SETUP_CAPS.has(reason) ? globals.capObservations.note(reason, day).catch(() => undefined) : undefined);
+  const noteCap = (reason: ReasonCode) => (isSetupCap(reason) ? globals.capObservations.note(reason, day).catch(() => undefined) : undefined);
   /** A registry reporter over a cap is accepted and dropped, not refused: whether Google/Microsoft stop sending after a 5xx is unverified. */
   const overCap = async (reason: ReasonCode): Promise<Verdict> => {
     await noteCap(reason);
