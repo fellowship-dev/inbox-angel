@@ -320,6 +320,9 @@ export interface AuthStatus {
   /** Self-host only, present when HOSTED_SERVICE_URL is set: the hosted free tier's https URL. */
   hosted_service_url?: string;
   signup_open: boolean;
+  /** False when the instance cannot sign anybody in (hosted without bot protection); `signup_unavailable_reason` says why, for sign-up and sign-in alike. */
+  signin_available: boolean;
+  signup_unavailable_reason?: 'bot_protection_not_configured';
   oauth_providers: string[];
   prefill: { name: string; email: string };
   telemetry_default: boolean;

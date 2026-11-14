@@ -215,6 +215,8 @@ CREATE TABLE `domain_claims` (
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`last_checked_at` integer,
 	`last_error` text,
+	`settled_at` integer,
+	`settled_domain_id` integer,
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "domain_claims_status_check" CHECK("domain_claims"."status" IN ('pending', 'lost'))
 );

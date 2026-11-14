@@ -36,6 +36,16 @@ export function AuthPage({ initialMode }: { initialMode?: 'signup' } = {}) {
 	const [verifyFor, setVerifyFor] = useState<string | null>(null);
 
 	if (!status) return null;
+	// Hosted without bot protection: the server refuses every sign-up and sign-in, so offer no form for either. Visitors
+	// get a plain sentence; the reason stays machine-readable in /api/auth/status (signup_unavailable_reason) for operators.
+	if (status.signin_available === false) {
+		return (
+			<AuthLayout title="Inbox Angel">
+				<Alert variant="info">Sign-up and sign-in aren't open here.</Alert>
+				<TalkToMax className="text-center" lead="Want to get started?" about="about your domains" />
+			</AuthLayout>
+		);
+	}
 	const hosted = status.mode === 'saas';
 	// The installer-proof screen is self-host only: the hosted service never asks a registrant for one.
 	const mode: Mode = !status.configured && !hosted ? 'setup' : creating && status.signup_open ? 'signup' : 'signin';
