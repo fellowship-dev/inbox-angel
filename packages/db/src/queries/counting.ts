@@ -15,5 +15,6 @@ export type CountingMode = 'registry' | 'authenticated' | 'all';
 export function counted(alias: string, mode: CountingMode): SQL {
 	if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) throw new Error('bad alias');
 	if (mode === 'all') return sql`1 = 1`;
-	return mode === 'authenticated' ? sql.raw(`${alias}.reporter_auth = 'pass'`) : sql.raw(`${alias}.reporter_tier = 'counted'`);
+	// COALESCE: a legacy row (NULL column) is plainly "not counted", so NOT (counted) selects it (NOT NULL would be NULL and drop it).
+	return mode === 'authenticated' ? sql.raw(`COALESCE(${alias}.reporter_auth, '') = 'pass'`) : sql.raw(`COALESCE(${alias}.reporter_tier, '') = 'counted'`);
 }

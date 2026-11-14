@@ -236,7 +236,7 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 				.innerJoin(domains, and(eq(domains.id, aggregateReports.domain_id), eq(domains.workspace_id, workspaceId), isNull(domains.evicted_at)))
 				// Reports that do not count never push ones that do out of "latest N".
 				.where(eq(aggregateReports.workspace_id, workspaceId))
-				.orderBy(...(counting === 'all' ? [] : [sql`(${aggregateReports.reporter_auth} = 'pass') DESC`]), desc(aggregateReports.date_begin))
+				.orderBy(...(counting === 'all' ? [] : [sql`(${C('aggregate_reports')}) DESC`]), desc(aggregateReports.date_begin))
 				.limit(limit)
 				.all()
 				.then((rows) => rows.map((x) => ({ ...x.r, domain: x.domain })));
