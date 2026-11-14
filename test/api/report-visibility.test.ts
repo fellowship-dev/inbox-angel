@@ -40,7 +40,7 @@ describe('GET /api/domains/:id/stats and /check-summary', () => {
     const { body } = await get(w.env, '/api/domains/1/stats?days=30');
     expect(body.stats.reduce((n: number, r: any) => n + r.total, 0)).toBe(100);
     expect(body.report_counting).toBe('registry');
-    expect(body.uncounted).toMatchObject({ reports: 2, messages: 950, unknown: 1, unauthenticated: 1, by_reporter: [{ reporter: 'forger.example', reports: 2 }] });
+    expect(body.uncounted).toMatchObject({ reports: 2, messages: 950, unknown: 1, unauthenticated: 1, by_reporter: [{ reporter: 'forger.example', reports: 1 }, { reporter: 'unverified sender', reports: 1, unverified: true, claims: 'forger.example' }] });
     expect(body.unrecognised).toMatchObject({ reports: 2, unknown: 1, unauthenticated: 1 });
     expect(body.intake).toMatchObject({ status: 'ok', notice: null });
     const cs = (await get(w.env, '/api/domains/1/check-summary')).body;

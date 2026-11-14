@@ -512,7 +512,7 @@ describe('domain page for a name that does not resolve', () => {
 					'GET /api/domains/7/onboarding-status': onboarding({ nxdomain }, none),
 					'GET /api/domains/7/dns-check': { found: false, has_rua: false, current_record: null, cf_managed: false },
 					'GET /api/domains/7/wizard-state': wizard,
-					'GET /api/hosted/config': { enabled: true },
+					'GET /api/hosted/config': { enabled: true, reports: false, records: true },
 					'GET /api/domains/7/hosted': { enabled: false },
 				},
 			},

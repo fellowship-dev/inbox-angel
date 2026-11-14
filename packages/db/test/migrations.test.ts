@@ -73,11 +73,23 @@ describe('0010 intake hardening', () => {
 		d.sqlite.prepare("INSERT INTO domains (id, domain, rua_address) VALUES (1, 'acme.com', 'r@x')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, reporter_auth) VALUES (1, 'google.com', 'r1', 1, 2, 5, 5, 'pass')").run();
 		d.sqlite.prepare("INSERT INTO aggregate_reports (domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count) VALUES (1, 'old.example', 'r2', 1, 2, 5, 5)").run();
-		expect(applyMigrations(d.sqlite)).toEqual(['0010_intake_hardening.sql']);
+		expect(applyMigrations(d.sqlite, { through: '0010_intake_hardening.sql' })).toEqual(['0010_intake_hardening.sql']);
 		expect(d.sqlite.prepare('SELECT report_id, reporter_auth, reporter_auth_reason, ingest_token, record_count FROM aggregate_reports ORDER BY report_id').all()).toEqual([
 			{ report_id: 'r1', reporter_auth: 'pass', reporter_auth_reason: null, ingest_token: null, record_count: null },
 			{ report_id: 'r2', reporter_auth: null, reporter_auth_reason: null, ingest_token: null, record_count: null },
 		]);
 		for (const t of ['intake_quota', 'workspace_storage', 'intake_failures']) expect(d.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get()).toEqual({ n: 0 });
+	});
+});
+
+describe('0011 reports_connected_at', () => {
+	it('adds one nullable column: existing domains stay not connected', () => {
+		const d = createTestD1();
+		applyMigrations(d.sqlite, { through: '0010_intake_hardening.sql' });
+		d.sqlite.prepare("INSERT INTO domains (domain, rua_address) VALUES ('acme.com', '')").run();
+		expect(applyMigrations(d.sqlite)).toEqual(['0011_reports_connected_at.sql']);
+		expect(d.sqlite.prepare('SELECT domain, reports_connected_at FROM domains').all()).toEqual([{ domain: 'acme.com', reports_connected_at: null }]);
+		const cols = d.sqlite.prepare("SELECT \"notnull\" AS nn, dflt_value AS dv FROM pragma_table_info('domains') WHERE name = 'reports_connected_at'").all() as any[];
+		expect(cols).toEqual([{ nn: 0, dv: null }]);
 	});
 });

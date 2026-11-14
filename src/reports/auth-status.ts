@@ -59,6 +59,25 @@ const CAP_TEXT = {
   cap_workspace_storage: 'a workspace\'s stored-records limit (INTAKE_MAX_WORKSPACE_RECORDS)',
   cap_address_day: 'a report address\'s daily message limit (INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY)',
   cap_address_records: 'a report address\'s daily stored-records limit (INTAKE_MAX_ADDRESS_RECORDS_PER_DAY)',
+  cap_uncounted_workspace_day: 'a workspace\'s daily limit for uncounted reports (INTAKE_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY)',
+  cap_uncounted_instance_day: 'the instance-wide daily limit for uncounted reports (INTAKE_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY)',
+  cap_uncounted_address_records: 'a report address\'s daily uncounted-records limit (INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY)',
+  cap_uncounted_workspace_storage: 'a workspace\'s uncounted-records limit (INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS)',
+  cap_uncounted_instance_storage: 'the instance-wide uncounted-records limit (INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS)',
+  cap_unattributed_sender_day: 'one sender\'s daily limit for reports about domains nobody connected (INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY)',
+  cap_unattributed_total_day: 'the daily limit for reports about domains nobody connected (INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY)',
+  fixed_address_busy: 'the shared report address\'s per-minute limit on reports it reads (INTAKE_MAX_FIXED_PEEKS_PER_MINUTE); authenticated senders were deferred, unauthenticated ones refused',
+} as const;
+
+/** The setting behind each cap the setup check names. */
+const CAP_SETTING = {
+  cap_instance_day: 'INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY', cap_instance_storage: 'INTAKE_MAX_INSTANCE_RECORDS', cap_workspace_day: 'INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY',
+  cap_workspace_storage: 'INTAKE_MAX_WORKSPACE_RECORDS', cap_address_day: 'INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY', cap_address_records: 'INTAKE_MAX_ADDRESS_RECORDS_PER_DAY',
+  cap_uncounted_workspace_day: 'INTAKE_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY', cap_uncounted_instance_day: 'INTAKE_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY',
+  cap_uncounted_address_records: 'INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY', cap_uncounted_workspace_storage: 'INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS',
+  cap_uncounted_instance_storage: 'INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS',
+  cap_unattributed_sender_day: 'INTAKE_MAX_UNATTRIBUTED_PER_SENDER_PER_DAY', cap_unattributed_total_day: 'INTAKE_MAX_UNATTRIBUTED_MESSAGES_PER_DAY',
+  fixed_address_busy: 'INTAKE_MAX_FIXED_PEEKS_PER_MINUTE',
 } as const;
 
 /**
@@ -90,7 +109,7 @@ export async function intakeSetupFindings(
   const hit = caps.filter((c) => Number(c.messages) > 0).map((c) => c.scope.slice(4));
   if (hit.length) {
     const names = hit.map((r) => (CAP_TEXT as Record<string, string>)[r] ?? r);
-    out.push({ id: 'intake', severity: 'note', setting: hit.map((r) => ({ cap_instance_day: 'INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY', cap_instance_storage: 'INTAKE_MAX_INSTANCE_RECORDS', cap_workspace_day: 'INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY', cap_workspace_storage: 'INTAKE_MAX_WORKSPACE_RECORDS', cap_address_day: 'INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY', cap_address_records: 'INTAKE_MAX_ADDRESS_RECORDS_PER_DAY' } as Record<string, string>)[r] ?? r).join(', '), message: `In the last 3 days report mail was stopped by ${names.join('; ')}. Mail from known reporters was accepted and dropped; other senders were refused. Raise the limit if this is legitimate traffic.` });
+    out.push({ id: 'intake', severity: 'note', setting: hit.map((r) => (CAP_SETTING as Record<string, string>)[r] ?? r).join(', '), message: `In the last 3 days report mail was stopped by ${names.join('; ')}. Mail from known reporters was accepted and dropped; other senders were refused. Raise the limit if this is legitimate traffic.` });
   }
   return out;
 }

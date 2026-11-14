@@ -90,6 +90,43 @@ export async function provenByCloudflare(tenant: TenantContext, domain: string):
   return false;
 }
 
+type ProofRow = { id: number; domain: string; verified_via: string };
+
+/**
+ * Which rows of a workspace are proven: verified directly (TXT, Cloudflare, self-host), or through a parent that is itself
+ * proven and still in the workspace. 'legacy' rows are never proven.
+ */
+export function provenDomainIds(rows: ProofRow[]): Set<number> {
+  const byLength = [...rows].sort((a, b) => a.domain.length - b.domain.length);
+  const proven = new Set<number>();
+  const provenNames = new Set<string>();
+  for (const r of byLength) {
+    if (r.verified_via === 'legacy') continue;
+    const ok = r.verified_via !== 'parent' || [...provenNames].some((p) => r.domain.endsWith(`.${p}`));
+    if (ok) { proven.add(r.id); provenNames.add(r.domain); }
+  }
+  return proven;
+}
+
+/** Is this live domain of the workspace still proven (see provenDomainIds)? */
+export async function isDomainProven(tenant: TenantContext, domain: ProofRow): Promise<boolean> {
+  if (domain.verified_via === 'legacy') return false;
+  if (domain.verified_via !== 'parent') return true;
+  return provenDomainIds(await tenant.scope.domains.list()).has(domain.id);
+}
+
+/**
+ * After a domain leaves a workspace: subdomains that were admitted only through it (verified_via 'parent' with no other
+ * proven parent left) become unproven ('legacy'), so they stop counting as owned and the real zone owner can prove them.
+ */
+export async function demoteOrphanedSubdomains(tenant: TenantContext): Promise<number[]> {
+  const rows = await tenant.scope.domains.list();
+  const proven = provenDomainIds(rows);
+  const orphans = rows.filter((r) => r.verified_via === 'parent' && !proven.has(r.id)).map((r) => r.id);
+  await tenant.scope.domains.markUnproven(orphans);
+  return orphans;
+}
+
 async function provenByParent(tenant: TenantContext, domain: string): Promise<boolean> {
   const labels = domain.split('.');
   for (let i = 1; i <= labels.length - 2; i++) {

@@ -84,7 +84,7 @@ describe('mail that is not a DMARC report is refused cleanly, with a specific re
     ['a mistyped local part', () => ({ to: `postmaster+x@${RUA}` }), 'bad_recipient', 'Unknown recipient'],
     ['an address that cannot be parsed', () => ({ to: 'nonsense' }), 'bad_recipient', 'Unknown recipient'],
     ['another host', () => ({ to: 'rua+x@reports.acme.com' }), 'wrong_host', 'Unknown recipient'],
-    ['no token', () => ({ to: `rua@${RUA}` }), 'unknown_token', 'Unknown intake token'],
+    ['no token (the fixed address): a domain whose reports nobody connected', () => ({ to: `rua@${RUA}` }), 'domain_not_connected', 'Report is for a domain whose reports are not connected to this address'],
     ['a malformed token', () => ({ to: `rua+short@${RUA}` }), 'unknown_token', 'Unknown intake token'],
     ['an unknown token', () => ({ to: `rua+${generateToken()}@${RUA}` }), 'unknown_token', 'Unknown intake token'],
     ['a message over the raw cap (2 MiB by default)', (w) => ({ to: `rua+${w.tokenA}@${RUA}`, rawSize: 3 * 1024 * 1024 }), 'raw_too_large', 'Report is larger than 2 MiB'],

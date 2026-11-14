@@ -62,7 +62,7 @@ export function ReportBrowserPage() {
 			</div>
 
 			{reportsOff ? (
-				<ReportsNotConnected domain={filterName} />
+				<ReportsNotConnected domain={filterName} domainId={scope === 'domain' ? domain?.id : undefined} />
 			) : loading ? (
 				<ListSkeleton rows={5} label="Loading reports" />
 			) : q.isError ? (

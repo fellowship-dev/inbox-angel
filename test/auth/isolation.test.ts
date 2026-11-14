@@ -135,6 +135,12 @@ const ROUTES: Route[] = [
   { method: 'POST', path: '/api/domains/2/hosted/rotate-token', body: {}, kind: 'denied' },
   { method: 'POST', path: '/api/domains/2/hosted/verify', body: {}, kind: 'denied' },
   { method: 'GET', path: '/api/domains/1/hosted', kind: 'scoped' },
+  // report addresses without hosted records (MODE=saas): src/hosted/report-address-routes.ts
+  { method: 'GET', path: '/api/domains/2/report-address', kind: 'denied' },
+  { method: 'POST', path: '/api/domains/2/report-address', body: {}, kind: 'denied' },
+  { method: 'DELETE', path: '/api/domains/2/report-address', kind: 'denied' },
+  { method: 'GET', path: '/api/domains/1/report-address', kind: 'scoped' },
+  { method: 'POST', path: '/api/domains/1/report-address', body: {}, kind: 'scoped', note: 'A\'s own row predates ownership checks: refused, and nothing of B is touched' },
   // analytics (src/analytics/routes.ts): read-only rollups of the caller's own reports
   { method: 'GET', path: '/api/analytics?days=90', kind: 'scoped' },
   { method: 'GET', path: '/api/domains/1/analytics', kind: 'scoped' },
@@ -293,6 +299,27 @@ describe('two hosted workspaces: A cannot reach B', () => {
     expect(documented.length).toBe(5);
     const covered = ROUTES.filter(r => r.kind === 'denied').map(r => `${r.method} ${r.path}`);
     expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+  });
+
+  it('table covers every route of the report-address module (add new routes here)', () => {
+    const src = readFileSync(join(__dirname, '../../src/hosted/report-address-routes.ts'), 'utf8');
+    const documented = [...src.matchAll(/^\/\/\s+(GET|POST|PUT|DELETE)\s+(\/api\/\S+)/gm)].map(m => `${m[1]} ${m[2].replace(':id', '2')}`);
+    expect(documented.length).toBe(3);
+    const covered = ROUTES.filter(r => r.kind === 'denied').map(r => `${r.method} ${r.path}`);
+    expect(documented.filter(d => !covered.includes(d))).toEqual([]);
+  });
+
+  it('connecting reports: B’s token hash and address never reach A, and nothing of B changes', async () => {
+    const w = await world();
+    w.db.sqlite.prepare("UPDATE domains SET verified_via = 'txt' WHERE id = 1").run();
+    vi.stubGlobal('fetch', async () => Response.json({ Status: 3 })); // live DMARC lookup: no record
+    (w.env as any).HOSTED_CONNECT_REPORTS = 'all'; // the default lets only OWNER_EMAIL's workspaces connect
+    const res = await call(w.env, 'POST', '/api/domains/1/report-address', { key: w.A.token, body: {} });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(JSON.stringify(body)).not.toMatch(/b-intake-hash-secret|b-rua-secret/);
+    expect(rows(w.db, 'SELECT workspace_id, rua_address FROM domains WHERE id = 1')).toEqual([{ workspace_id: w.A.workspaceId, rua_address: 'rua@rua.readysetmail.com' }]);
+    expect(rows(w.db, 'SELECT token_hash, rua_address FROM intake_tokens t JOIN domains d ON d.id = t.domain_id WHERE t.domain_id = 2')).toEqual([{ token_hash: 'b-intake-hash-secret', rua_address: 'b-rua-secret@reports.b.test' }]);
   });
 
   it('table covers every route of the analytics module (add new routes here)', () => {

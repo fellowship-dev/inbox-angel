@@ -51,6 +51,22 @@ describe('hosted: no reports domain and no report address, ever', () => {
   });
 });
 
+describe('hosted: the one exception is an explicit Connect reports', () => {
+  it('only POST /api/domains/:id/report-address sets an address (the fixed one), and DELETE clears it again', async () => {
+    const w = await hosted({ HOSTED_CONNECT_REPORTS: 'all' });
+    const added = await json(await call(w.env, 'POST', '/api/domains', { key: w.token, body: { domain: 'client-shop.com' } }));
+    w.cf.doh['_readysetmail.client-shop.com'] = [added.claim.txt_value];
+    const verified = await json(await call(w.env, 'POST', `/api/domains/claims/${added.claim.id}/verify`, { key: w.token, body: {} }));
+    expect(verified.domain.rua_address).toBe('');
+    const id = verified.domain.id as number;
+    expect((await call(w.env, 'POST', `/api/domains/${id}/report-address`, { key: w.token, body: {} })).status).toBe(201);
+    expect(w.rows('SELECT rua_address FROM domains WHERE id = ?', id)).toEqual([{ rua_address: `rua@${HOSTED_ENV.INTAKE_DOMAIN}` }]);
+    expect(w.rows("SELECT key FROM settings WHERE workspace_id = ? AND key IN ('reports_domain', 'base_domain', 'from_email')", w.ws)).toEqual([]);
+    expect((await call(w.env, 'DELETE', `/api/domains/${id}/report-address`, { key: w.token })).status).toBe(200);
+    expect(w.rows('SELECT rua_address FROM domains WHERE id = ?', id)).toEqual([{ rua_address: '' }]);
+  });
+});
+
 describe('onboarding-status: the DMARC policy that applies', () => {
   const domainRow = (w: Awaited<ReturnType<typeof hosted>>, name: string) => {
     w.db.sqlite.prepare("INSERT INTO domains (domain, rua_address, workspace_id, verified_via) VALUES (?, '', ?, 'txt')").run(name, w.ws);

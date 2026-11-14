@@ -114,7 +114,7 @@ export function ReportDetailPage() {
 		return (
 			<div className="space-y-6">
 				{header(date ? formatDayWithRelative(date) : 'Report')}
-				<ReportsNotConnected domain={domain?.domain} />
+				<ReportsNotConnected domain={domain?.domain} domainId={domain?.id} />
 			</div>
 		);
 	}

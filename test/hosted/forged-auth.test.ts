@@ -88,7 +88,9 @@ describe('a genuine google.com signature stays counted', () => {
   ])('%s', async (_n, header) => {
     const w = await twoWorkspaces();
     const token = await own(w, 'ueber.net');
-    await deliver(w, token, withAr(header));
+    // Two dkim results come from two signatures (google.com and 1e100.net): the message carries both, as Google's mail does.
+    const twoSignatures = withAr(header).replace(/^DKIM-Signature:/im, 'DKIM-Signature: v=1; a=rsa-sha256; d=1e100.net; s=20230601; bh=x; b=x\r\nDKIM-Signature:');
+    await deliver(w, token, twoSignatures);
     expect(rows(w)).toEqual([{ t: 'counted', i: 'google', k: 'Google', a: 'pass', r: null }]);
     expect(log()).toMatchObject({ tier: 'counted', reporter: 'google', dkim_org: 'google.com' });
   });
