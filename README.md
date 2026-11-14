@@ -162,6 +162,8 @@ The schema is managed by `packages/db` migrations; the Worker no longer changes 
 2. Run `npm run migrate` before serving the new Worker. The wrapper applies unapplied migration files through Wrangler.
 3. Convert retired broad credentials to owner-issued finite grants and credentials. Current access/metrics migrations are additive; no data reset is required. Preserve a database/Worker backup pair for rollback.
 
+An existing installation keeps its Worker by deploying under the name it already has: set `name` and the `WORKER_NAME` var in `wrangler.jsonc` to what you deployed before (an installation from before the rename is usually `inbox-angel-worker`; the database is still the one you created, whatever its name), and keep your own `database_id` and `OAUTH_KV` id. Deploying under a different name creates a second Worker next to the old one instead of updating it. <!-- @legacy-name: the pre-rename worker name is real -->
+
 Until migrated, the Worker answers 503 and inbound email is refused for retry. Details, rollback and edge cases: [packages/db/UPGRADING.md](packages/db/UPGRADING.md).
 
 ## Stack
