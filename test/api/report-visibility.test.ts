@@ -25,45 +25,46 @@ function world(extra: Record<string, string> = {}) {
   seedSettings(DB, { reports_domain: 'reports.inboxangel.io', from_email: 'check@reports.inboxangel.io' });
   DB.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (1, ?, 'acme.com', 'rua@reports.inboxangel.io')").run(IMPLICIT_WORKSPACE_ID);
   const begin = Math.floor((NOW - 2 * 86400) / 86400) * 86400;
-  const rep = (id: number, auth: string | null, total: number, org: string) => DB.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth) VALUES (?, 1, ?, ?, ?, ?, ?, ?, 0, ?, ?)").run(id, org, `r${id}`, begin, begin + 86399, total, total, IMPLICIT_WORKSPACE_ID, auth);
+  // tier: counted (authenticated + registry), unknown (authenticated, not in the registry), unauthenticated
+  const rep = (id: number, tier: 'counted' | 'unknown' | 'unauthenticated', total: number, org: string) => DB.sqlite.prepare("INSERT INTO aggregate_reports (id, domain_id, org_name, report_id, date_begin, date_end, total_count, pass_count, fail_count, workspace_id, reporter_auth, reporter_tier) VALUES (?, 1, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)").run(id, org, `r${id}`, begin, begin + 86399, total, total, IMPLICIT_WORKSPACE_ID, tier === 'unauthenticated' ? 'none' : 'pass', tier);
   return { env: { DB, API_KEY: 'k', ...extra } as unknown as Env & { DB: TestD1 }, DB, rep };
 }
 const get = async (env: any, path: string) => { const res = await handleApi(new Request(`https://x.test${path}`, { headers: { 'x-api-key': 'k' } }), env, ctx); return { res, body: await res.clone().json().catch(() => null) as any, text: await res.text() }; };
 
 describe('GET /api/domains/:id/stats and /check-summary', () => {
-  it('proven mode: counted numbers, plus what was left out, by reporter', async () => {
-    const w = world({ REPORT_COUNTING: 'proven' });
-    w.rep(1, 'pass', 100, 'google.com');
-    w.rep(2, 'none', 900, 'forger.example');
-    w.rep(3, 'fail', 50, 'forger.example');
+  it('registry mode: counted numbers, plus what was left out, by reporter', async () => {
+    const w = world({ REPORT_COUNTING: 'registry' });
+    w.rep(1, 'counted', 100, 'google.com');
+    w.rep(2, 'unknown', 900, 'forger.example');
+    w.rep(3, 'unauthenticated', 50, 'forger.example');
     const { body } = await get(w.env, '/api/domains/1/stats?days=30');
     expect(body.stats.reduce((n: number, r: any) => n + r.total, 0)).toBe(100);
-    expect(body.report_counting).toBe('proven');
-    expect(body.uncounted).toMatchObject({ reports: 2, messages: 950, by_reporter: [{ reporter: 'forger.example', reports: 2 }] });
-    expect(body.unverified.reports).toBe(2);
+    expect(body.report_counting).toBe('registry');
+    expect(body.uncounted).toMatchObject({ reports: 2, messages: 950, unknown: 1, unauthenticated: 1, by_reporter: [{ reporter: 'forger.example', reports: 2 }] });
+    expect(body.unrecognised).toMatchObject({ reports: 2, unknown: 1, unauthenticated: 1 });
     expect(body.intake).toMatchObject({ status: 'ok', notice: null });
     const cs = (await get(w.env, '/api/domains/1/check-summary')).body;
     expect(cs.total_messages).toBe(100);
     expect(cs.uncounted.reports).toBe(2);
   });
 
-  it('only unverified reports: zero counted, and the fields say reports exist', async () => {
-    const w = world({ REPORT_COUNTING: 'proven' });
-    w.rep(1, 'none', 900, 'forger.example');
+  it('only uncounted reports: zero counted, and the fields say reports exist', async () => {
+    const w = world({ REPORT_COUNTING: 'registry' });
+    w.rep(1, 'unauthenticated', 900, 'forger.example');
     const { body } = await get(w.env, '/api/domains/1/stats?days=30');
     expect(body.stats).toEqual([]);
     expect(body.uncounted.reports).toBe(1);
   });
 
-  it('all mode (the self-host default): everything counted, nothing "uncounted", the unverified figure still reported', async () => {
+  it('all mode (the self-host default): everything counted, nothing "uncounted", the unrecognised figure still reported', async () => {
     const w = world();
-    w.rep(1, 'pass', 100, 'google.com');
-    w.rep(2, 'none', 900, 'x.example');
+    w.rep(1, 'counted', 100, 'google.com');
+    w.rep(2, 'unknown', 900, 'x.example');
     const { body } = await get(w.env, '/api/domains/1/stats?days=30');
     expect(body.report_counting).toBe('all');
     expect(body.stats.reduce((n: number, r: any) => n + r.total, 0)).toBe(1000);
     expect(body.uncounted.reports).toBe(0);
-    expect(body.unverified.reports).toBe(1);
+    expect(body.unrecognised).toMatchObject({ reports: 1, unknown: 1, unauthenticated: 0 });
   });
 
   it('reports that could not be stored are visible, so the page cannot say "no reports"', async () => {
@@ -87,13 +88,13 @@ describe('GET /api/domains/:id/stats and /check-summary', () => {
 
 describe('GET /api/reports and the CSV export label what counts', () => {
   it('each report says whether it counts; no internal ingest id leaks', async () => {
-    const w = world({ REPORT_COUNTING: 'proven' });
-    w.rep(1, 'pass', 100, 'google.com');
-    w.rep(2, 'none', 900, 'x.example');
+    const w = world({ REPORT_COUNTING: 'registry' });
+    w.rep(1, 'counted', 100, 'google.com');
+    w.rep(2, 'unknown', 900, 'x.example');
     w.DB.sqlite.prepare("UPDATE aggregate_reports SET ingest_token = 'secret-attempt-id' WHERE id = 1").run();
     const { body, text } = await get(w.env, '/api/reports');
-    expect(body.report_counting).toBe('proven');
-    expect(body.reports[0]).toMatchObject({ report_id: 'r1', counted: true }); // proven first
+    expect(body.report_counting).toBe('registry');
+    expect(body.reports[0]).toMatchObject({ report_id: 'r1', counted: true }); // counted first
     expect(body.reports.find((r: any) => r.report_id === 'r2').counted).toBe(false);
     expect(text).not.toContain('secret-attempt-id');
     const csv = (await get(w.env, '/api/domains/1/export')).text;

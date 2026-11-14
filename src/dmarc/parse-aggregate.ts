@@ -107,6 +107,8 @@ const ELEMENTS_PER_RECORD = 20;
 
 /** Refuse pathological nesting or element counts before the parser builds a tree (parsedmarc advisories: depth and node bombs). Linear, no tree. */
 export function checkXmlShape(xml: string, maxElements: number): void {
+  // XML 1.0 forbids these; a NUL in a stored value breaks downstream databases and exporters (parsedmarc GHSA-fxr7-7h9q-v949).
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(xml)) throw new ReportRejected('xml_invalid', 'Report contains control characters');
   const text = xml.includes('<!--') ? xml.replace(/<!--[\s\S]*?-->/g, '') : xml;
   const re = /<(\/?)([A-Za-z_][^\s>/]*)[^>]*?(\/?)>/g;
   let depth = 0;

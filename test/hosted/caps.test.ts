@@ -20,6 +20,11 @@ import { nxdomain, quiet, twoWorkspaces, NOW } from './world';
 const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const RUA = 'rua.inboxangel.io';
 const GOOGLE = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=google.com header.s=s1' } };
+// An authenticated sender that is not in the registry (tier unknown): over a cap it is refused with a 5xx. A registry reporter (GOOGLE) over a cap is accepted and dropped.
+const OTHER = { headers: { 'authentication-results': 'mx.cloudflare.net; dkim=pass header.d=other.example header.s=s1' }, from: 'noreply-dmarc-support@other.example' };
+/** The MIME's From header is Google's; an "other.example" message needs its own From header to be authenticated (DKIM organisation = From organisation). */
+const mimeFor = (xml: string, from?: string) => (from?.endsWith('@other.example') ? gzipReportMime(xml).replace('From: noreply-dmarc-support@google.com', `From: ${from}`) : gzipReportMime(xml));
+const otherReport = (domain: string, id: string, n: number) => reportWithDistinctIps(domain, id, n).replaceAll('google.com', 'other.example');
 const today = () => new Date().toISOString().slice(0, 10);
 
 beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
@@ -28,7 +33,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 type World = Awaited<ReturnType<typeof twoWorkspaces>>;
 async function send(w: World, xml: string, o: { token?: string; env?: Record<string, string>; from?: string; headers?: Record<string, string> } = {}) {
   resetSchemaReadyCache();
-  const m = fakeMessage(`rua+${o.token ?? w.tokenA}@${RUA}`, gzipReportMime(xml), { headers: o.headers ?? GOOGLE.headers, ...(o.from ? { from: o.from } : {}) });
+  const m = fakeMessage(`rua+${o.token ?? w.tokenA}@${RUA}`, mimeFor(xml, o.from), { headers: o.headers ?? GOOGLE.headers, ...(o.from ? { from: o.from } : {}) });
   await worker.email(m, { ...w.env, ...(o.env ?? {}) } as any, ctx);
   return m;
 }
@@ -47,14 +52,24 @@ async function secondAddress(w: World) {
 describe('messages per address per day', () => {
   it('the next message is refused for good, nothing is stored, the owner is told, and other addresses are unaffected', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY: '2' });
-    for (const id of ['r1', 'r2']) expect((await send(w, dmarcXml('a-corp.com', id))).setReject).not.toHaveBeenCalled();
-    const over = await send(w, dmarcXml('a-corp.com', 'r3'));
+    for (const id of ['r1', 'r2']) expect((await send(w, dmarcXml('a-corp.com', id, 'other.example'), OTHER)).setReject).not.toHaveBeenCalled();
+    const over = await send(w, dmarcXml('a-corp.com', 'r3', 'other.example'), OTHER);
     expect(over.setReject).toHaveBeenCalledWith('Daily intake limit for this address reached; try again tomorrow');
-    expect(rows(w, 'SELECT report_id FROM aggregate_reports ORDER BY id').map((r) => r.report_id)).toEqual(['r1', 'r2']);
+    expect(rows(w, 'SELECT report_id FROM aggregate_reports ORDER BY id').map((r) => r.report_id)).toEqual(['other.example|r1', 'other.example|r2']);
     expect(failures(w)).toEqual([{ domain_id: 1, reason: 'cap_address_day', messages: 1 }]);
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"outcome":"refused","reason":"cap_address_day"'));
     // the other workspace's address is not affected
     expect((await send(w, dmarcXml('b-corp.org', 'rb'), { token: w.tokenB })).setReject).not.toHaveBeenCalled();
+  });
+
+  it('a registry reporter over the cap is accepted and dropped (no 5xx), nothing is stored, the owner is told', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY: '2' });
+    for (const id of ['r1', 'r2']) expect((await send(w, dmarcXml('a-corp.com', id))).setReject).not.toHaveBeenCalled();
+    const over = await send(w, dmarcXml('a-corp.com', 'r3'));
+    expect(over.setReject).not.toHaveBeenCalled();
+    expect(rows(w, 'SELECT report_id FROM aggregate_reports ORDER BY id').map((r) => r.report_id)).toEqual(['r1', 'r2']);
+    expect(failures(w)).toEqual([{ domain_id: 1, reason: 'over_cap_accepted_dropped', messages: 1 }]);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('"outcome":"accepted","reason":"over_cap_accepted_dropped"'));
   });
 
   it('a refused message gives its count back, so a flood of refusals cannot use up the address\'s allowance', async () => {
@@ -66,14 +81,16 @@ describe('messages per address per day', () => {
   });
 });
 
-describe('unproven mail per address per day, over every claimed sender', () => {
-  it('a forger cannot multiply her allowance by claiming many sender domains; proven reporters are untouched', async () => {
+describe('unauthenticated mail per address per day, over every claimed sender', () => {
+  it('a forger cannot multiply her allowance by claiming many sender domains; registry reporters are untouched', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY: '3', INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '10', INTAKE_MAX_UNAUTH_SENDERS_PER_DAY: '100' });
     for (let i = 0; i < 3; i++) expect((await send(w, dmarcXml('a-corp.com', 'f' + i), { headers: {}, from: `x@sender${i}.example` })).setReject).not.toHaveBeenCalled();
     const over = await send(w, dmarcXml('a-corp.com', 'f3'), { headers: {}, from: 'x@sender3.example' });
     expect(over.setReject).toHaveBeenCalledWith('Daily intake limit for this address reached; try again tomorrow');
-    expect(failures(w)).toEqual([{ domain_id: 1, reason: 'cap_unauth_day', messages: 1 }]);
-    expect((await send(w, dmarcXml('a-corp.com', 'real', 'google.com'))).setReject).not.toHaveBeenCalled(); // proven: its own allowance
+    expect(over.setReject).toHaveBeenCalledOnce();
+    expect(failures(w)).toEqual([]); // the unauthenticated-total cap is refused but not an owner-visible marker
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"outcome":"refused","reason":"cap_unauth_total_day"'));
+    expect((await send(w, dmarcXml('a-corp.com', 'real', 'google.com'))).setReject).not.toHaveBeenCalled(); // registry: its own allowance
   });
 });
 
@@ -81,19 +98,19 @@ describe('messages per workspace and per instance per day', () => {
   it('workspace: two addresses of one workspace share its cap; another workspace is unaffected', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY: '2' });
     const t2 = await secondAddress(w);
-    expect((await send(w, dmarcXml('a-corp.com', 'w1'))).setReject).not.toHaveBeenCalled();
-    expect((await send(w, dmarcXml('a2-corp.com', 'w2'), { token: t2 })).setReject).not.toHaveBeenCalled();
-    const over = await send(w, dmarcXml('a-corp.com', 'w3'));
+    expect((await send(w, dmarcXml('a-corp.com', 'w1', 'other.example'), OTHER)).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('a2-corp.com', 'w2', 'other.example'), { ...OTHER, token: t2 })).setReject).not.toHaveBeenCalled();
+    const over = await send(w, dmarcXml('a-corp.com', 'w3', 'other.example'), OTHER);
     expect(over.setReject).toHaveBeenCalledWith('Daily intake limit for this account reached; try again tomorrow');
     expect(failures(w)).toEqual([{ domain_id: 1, reason: 'cap_workspace_day', messages: 1 }]);
-    expect((await send(w, dmarcXml('b-corp.org', 'wb'), { token: w.tokenB })).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('b-corp.org', 'wb', 'other.example'), { ...OTHER, token: w.tokenB })).setReject).not.toHaveBeenCalled();
   });
 
   it('instance: one tenant cannot use the whole day\'s capacity of the shared service', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY: '2' });
-    expect((await send(w, dmarcXml('a-corp.com', 'i1'))).setReject).not.toHaveBeenCalled();
-    expect((await send(w, dmarcXml('b-corp.org', 'i2'), { token: w.tokenB })).setReject).not.toHaveBeenCalled();
-    const over = await send(w, dmarcXml('a-corp.com', 'i3'));
+    expect((await send(w, dmarcXml('a-corp.com', 'i1', 'other.example'), OTHER)).setReject).not.toHaveBeenCalled();
+    expect((await send(w, dmarcXml('b-corp.org', 'i2', 'other.example'), { ...OTHER, token: w.tokenB })).setReject).not.toHaveBeenCalled();
+    const over = await send(w, dmarcXml('a-corp.com', 'i3', 'other.example'), OTHER);
     expect(over.setReject).toHaveBeenCalledWith('The service is receiving more reports than it can take today; try again tomorrow');
     expect(failures(w)).toEqual([{ domain_id: 1, reason: 'cap_instance_day', messages: 1 }]);
   });
@@ -102,20 +119,20 @@ describe('messages per workspace and per instance per day', () => {
 describe('stored records: per address per day, per workspace, per instance', () => {
   it('workspace: once it holds its cap, newer reports are refused and not stored; the state says so', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_WORKSPACE_RECORDS: '5' });
-    expect((await send(w, reportWithDistinctIps('a-corp.com', 's1', 3))).setReject).not.toHaveBeenCalled();
-    const over = await send(w, reportWithDistinctIps('a-corp.com', 's2', 3)); // 3 + 3 > 5
+    expect((await send(w, otherReport('a-corp.com', 's1', 3), OTHER)).setReject).not.toHaveBeenCalled();
+    const over = await send(w, otherReport('a-corp.com', 's2', 3), OTHER); // 3 + 3 > 5
     expect(over.setReject).toHaveBeenCalledWith('Report storage limit for this account reached');
-    expect(rows(w, 'SELECT report_id FROM aggregate_reports').map((r) => r.report_id)).toEqual(['s1']);
+    expect(rows(w, 'SELECT report_id FROM aggregate_reports').map((r) => r.report_id)).toEqual(['other.example|s1']);
     expect(n(w, 'report_records')).toBe(3);
     expect(failures(w)).toEqual([{ domain_id: 1, reason: 'cap_workspace_storage', messages: 1 }]);
-    expect((await send(w, reportWithDistinctIps('b-corp.org', 'sb', 3), { token: w.tokenB })).setReject).not.toHaveBeenCalled(); // another workspace
+    expect((await send(w, otherReport('b-corp.org', 'sb', 3), { ...OTHER, token: w.tokenB })).setReject).not.toHaveBeenCalled(); // another workspace
     // a small report that still fits is accepted
-    expect((await send(w, reportWithDistinctIps('a-corp.com', 's3', 2))).setReject).not.toHaveBeenCalled();
+    expect((await send(w, otherReport('a-corp.com', 's3', 2), OTHER)).setReject).not.toHaveBeenCalled();
   });
 
   it('visible: the dashboard fields read "Report storage limit reached; newer reports are not being stored"', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_WORKSPACE_RECORDS: '3' });
-    await send(w, reportWithDistinctIps('a-corp.com', 's1', 3));
+    await send(w, otherReport('a-corp.com', 's1', 3), OTHER);
     const tenant = makeTenant({ db: w.db, workspaceId: 'ws_a', env: { ...w.env, INTAKE_MAX_WORKSPACE_RECORDS: '3' } as any, mode: 'saas' });
     const v = await reportVisibility(tenant, 1, 0);
     expect(v.intake).toMatchObject({ status: 'limited', limit: 'workspace_storage', notice: 'Report storage limit reached; newer reports are not being stored' });
@@ -123,8 +140,8 @@ describe('stored records: per address per day, per workspace, per instance', () 
 
   it('instance: counted across workspaces', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_INSTANCE_RECORDS: '5' });
-    await send(w, reportWithDistinctIps('a-corp.com', 'a1', 3));
-    const over = await send(w, reportWithDistinctIps('b-corp.org', 'b1', 3), { token: w.tokenB });
+    await send(w, otherReport('a-corp.com', 'a1', 3), OTHER);
+    const over = await send(w, otherReport('b-corp.org', 'b1', 3), { ...OTHER, token: w.tokenB });
     expect(over.setReject).toHaveBeenCalledWith('The service has reached its report storage limit');
     expect(n(w, 'aggregate_reports')).toBe(1);
     expect(failures(w)).toEqual([{ domain_id: 2, reason: 'cap_instance_storage', messages: 1 }]);
@@ -132,10 +149,19 @@ describe('stored records: per address per day, per workspace, per instance', () 
 
   it('address per day: stored records, not messages', async () => {
     const w = await twoWorkspaces({ INTAKE_MAX_ADDRESS_RECORDS_PER_DAY: '4' });
-    await send(w, reportWithDistinctIps('a-corp.com', 'd1', 3));
-    const over = await send(w, reportWithDistinctIps('a-corp.com', 'd2', 3));
+    await send(w, otherReport('a-corp.com', 'd1', 3), OTHER);
+    const over = await send(w, otherReport('a-corp.com', 'd2', 3), OTHER);
     expect(over.setReject).toHaveBeenCalledWith('Daily report-record limit for this address reached; try again tomorrow');
     expect(rows(w, "SELECT records FROM intake_quota WHERE scope = 'a:1'")).toEqual([{ records: 3 }]);
+  });
+
+  it('a registry reporter over a storage cap is accepted and dropped: not stored, the owner is told', async () => {
+    const w = await twoWorkspaces({ INTAKE_MAX_WORKSPACE_RECORDS: '5' });
+    expect((await send(w, reportWithDistinctIps('a-corp.com', 's1', 3))).setReject).not.toHaveBeenCalled();
+    const over = await send(w, reportWithDistinctIps('a-corp.com', 's2', 3)); // 3 + 3 > 5
+    expect(over.setReject).not.toHaveBeenCalled();
+    expect(rows(w, 'SELECT report_id FROM aggregate_reports').map((r) => r.report_id)).toEqual(['s1']);
+    expect(failures(w)).toEqual([{ domain_id: 1, reason: 'over_cap_accepted_dropped', messages: 1 }]);
   });
 
   it('a duplicate counts as a message received but adds no stored records, in any counter', async () => {
@@ -161,25 +187,33 @@ describe('a report that is too big for its sender\'s standing', () => {
   });
 });
 
-describe('thousands of tiny messages: the caps hold and each refusal is cheap', () => {
-  it('500 messages to one address with a cap of 20: 20 accepted, the rest refused, bounded queries per message', async () => {
-    const w = await twoWorkspaces({ INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY: '20' });
-    const counter = countingD1(w.db as any, 1_000_000);
-    const env = { ...w.env, DB: counter.db } as any;
-    let accepted = 0;
-    let worstRefused = 0;
-    for (let i = 0; i < 500; i++) {
-      resetSchemaReadyCache();
-      const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'tiny' + i)), GOOGLE);
-      counter.reset(1_000_000);
-      await worker.email(m, env, ctx);
-      if (m.setReject.mock.calls.length === 0) accepted++; else worstRefused = Math.max(worstRefused, counter.count);
-    }
-    expect(accepted).toBe(20);
-    expect(n(w, 'aggregate_reports')).toBe(20);
-    expect(worstRefused).toBeLessThanOrEqual(12); // schema check, token, two consume batches, marker...
-    expect(rows(w, "SELECT messages FROM intake_failures WHERE reason = 'cap_address_day'")).toEqual([{ messages: 480 }]); // one row, a counter: a flood cannot grow it
-  }, 60_000);
+describe('thousands of tiny messages: the caps hold and each over-cap message is cheap', () => {
+  // A registry reporter (Google) is accepted-and-dropped over the cap; any other sender is refused with a 5xx. Both cost a bounded number of queries.
+  for (const [name, sender, dropped] of [['registry reporter: 20 stored, the rest accepted and dropped', GOOGLE, true], ['non-registry sender: 20 stored, the rest refused', OTHER, false]] as const) {
+    it(`500 messages to one address with a cap of 20, ${name}`, async () => {
+      const w = await twoWorkspaces({ INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY: '20', INTAKE_MAX_UNKNOWN_REPORTS_PER_REPORTER_PER_DAY: '1000', INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY: '1000' });
+      const counter = countingD1(w.db as any, 1_000_000);
+      const env = { ...w.env, DB: counter.db } as any;
+      let stored = 0;
+      let rejected = 0;
+      let worstOver = 0;
+      for (let i = 0; i < 500; i++) {
+        resetSchemaReadyCache();
+        const org = dropped ? 'google.com' : 'other.example';
+        const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, mimeFor(dmarcXml('a-corp.com', 'tiny' + i, org), dropped ? undefined : OTHER.from), { headers: sender.headers, ...('from' in sender ? { from: sender.from } : {}) });
+        counter.reset(1_000_000);
+        await worker.email(m, env, ctx);
+        if (m.setReject.mock.calls.length) rejected++;
+        if (i >= 20) worstOver = Math.max(worstOver, counter.count);
+      }
+      stored = n(w, 'aggregate_reports');
+      expect(stored).toBe(20);
+      expect(rejected).toBe(dropped ? 0 : 480);
+      expect(worstOver).toBeLessThanOrEqual(12); // schema check, token, two consume batches, marker...
+      const reason = dropped ? 'over_cap_accepted_dropped' : 'cap_address_day';
+      expect(rows(w, 'SELECT messages FROM intake_failures WHERE reason = ?', reason)).toEqual([{ messages: 480 }]); // one row, a counter: a flood cannot grow it
+    }, 60_000);
+  }
 });
 
 describe('retention of the counters (the single 0 4 * * * cron), bounded per run', () => {

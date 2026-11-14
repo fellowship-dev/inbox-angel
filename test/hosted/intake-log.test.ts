@@ -38,11 +38,11 @@ async function deliver(w: World, to: string, mime: string, o: { rawSize?: number
 }
 
 describe('one structured line per message', () => {
-  it('accepted: outcome, reason, proven, reporter domain, size, records, duration, internal ids; nothing else', async () => {
+  it('accepted: outcome, reason, tier, reporter id, carrier orgs, size, records, duration, internal ids; nothing else', async () => {
     const w = await twoWorkspaces();
     const m = await deliver(w, `rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'log1')));
     const [line] = lines();
-    expect(line).toEqual({ evt: 'intake', v: 1, kind: 'rua', outcome: 'accepted', reason: 'ok', proven: true, reporter: 'google.com', size: m.rawSize, records: 1, ms: expect.any(Number), ws: 'ws_a', dom: 1 });
+    expect(line).toEqual({ evt: 'intake', v: 1, kind: 'rua', outcome: 'accepted', reason: 'ok', tier: 'counted', reporter: 'google', dkim_org: 'google.com', from_org: 'google.com', email_matched: true, dedup: 'new', size: m.rawSize, records: 1, ms: expect.any(Number), ws: 'ws_a', dom: 1 });
     expect(line.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -64,10 +64,10 @@ describe('one structured line per message', () => {
     expect(lines().map((l) => `${l.outcome}:${l.reason}`)).toEqual(['accepted:ok', 'duplicate:duplicate']);
   });
 
-  it('unproven mail says so; with AUTHSERV unset nothing is proven', async () => {
+  it('unauthenticated mail says so; with AUTHSERV unset nothing is authenticated', async () => {
     const w = await twoWorkspaces({ AUTHSERV_ID: '', AUTHSERV_HEADER: '' });
     await deliver(w, `rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'u')));
-    expect(lines()[0]).toMatchObject({ outcome: 'accepted', proven: false, reporter: 'google.com' });
+    expect(lines()[0]).toMatchObject({ outcome: 'accepted', tier: 'unauthenticated', dkim_org: null, email_matched: null });
   });
 
   it('TLS-RPT and the anonymous check are logged with their kind', async () => {
