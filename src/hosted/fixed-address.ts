@@ -131,7 +131,7 @@ export function scanPolicyDomain(xml: string): string | null {
 /** The report's policy domain from the raw message: attachment → first PEEK_BYTES → linear scan. Throws when unreadable. */
 export async function peekPolicyDomain(raw: ReadableStream<Uint8Array>): Promise<string | null> {
   const prefix = reportPrefix(await extractAttachmentBytes(raw));
-  return scanPolicyDomain(new TextDecoder('utf-8', { fatal: false }).decode(prefix));
+  return scanPolicyDomain(new TextDecoder().decode(prefix));
 }
 
 /**

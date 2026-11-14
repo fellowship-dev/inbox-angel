@@ -32,8 +32,8 @@ describe('instance preflight', () => {
 
  it('hosted mode needs the bot check and a mail sender to open sign-up, and a booking link for the follow-up email', async () => {
   const hosted = env({ MODE: 'saas', SAAS_ENABLED: '1', OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN });
-  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'action:rate_limits', 'note:booking_link']);
-  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max' });
+  expect(await ids(hosted)).toEqual(['action:mail_sender', 'action:bot_check', 'action:rate_limits', 'note:booking_link', 'note:report_intake']);
+  const ready = env({ MODE: 'saas', SAAS_ENABLED: '1', ...limiters, OAUTH_KV: kv, BETTER_AUTH_URL: ORIGIN, SEND_EMAIL: sendEmail, TURNSTILE_SECRET_KEY: 'x', TURNSTILE_SITE_KEY: 'y', BOOKING_URL: 'https://cal.example/max', INTAKE_DOMAIN: 'rua.example.com', HOSTED_CONNECT_REPORTS: 'all', AUTHSERV_ID: 'mx.example.com', AUTHSERV_HEADER: 'ar', INTAKE_MAX_RECORDS_PER_REPORT: '900' });
   (ready.DB as unknown as TestDb).sqlite.prepare("INSERT INTO settings (workspace_id, key, value) VALUES ('ws_default', 'base_domain', 'example.com')").run();
   expect(await ids(ready)).toEqual([]);
  });

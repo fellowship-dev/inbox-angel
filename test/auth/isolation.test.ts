@@ -313,6 +313,7 @@ describe('two hosted workspaces: A cannot reach B', () => {
     const w = await world();
     w.db.sqlite.prepare("UPDATE domains SET verified_via = 'txt' WHERE id = 1").run();
     vi.stubGlobal('fetch', async () => Response.json({ Status: 3 })); // live DMARC lookup: no record
+    (w.env as any).HOSTED_CONNECT_REPORTS = 'all'; // the default lets only OWNER_EMAIL's workspaces connect
     const res = await call(w.env, 'POST', '/api/domains/1/report-address', { key: w.A.token, body: {} });
     expect(res.status).toBe(201);
     const body = await res.json() as any;
