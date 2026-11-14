@@ -13,6 +13,7 @@ describe('intake limits: hosted defaults', () => {
       unknownReportsPerReporterPerDay: 5, unknownReportsPerDay: 20, unknownRecordsPerReport: 1_000, unknownNewIpsPerReport: 10,
       unauthReportsPerDay: 5, unauthBytesPerDay: 10 * MiB, unauthTotalReportsPerDay: 10, unauthRecordsPerReport: 200,
       nonRegistryDecompressedBytes: 1 * MiB,
+      uncountedWorkspaceMessagesPerDay: 100, uncountedInstanceMessagesPerDay: 2_000, uncountedAddressRecordsPerDay: 5_000, uncountedWorkspaceRecords: 20_000, uncountedInstanceRecords: 500_000,
       addressMessagesPerDay: 500, addressRecordsPerDay: 200_000,
       workspaceMessagesPerDay: 2_000, workspaceRecords: 1_000_000,
       instanceMessagesPerDay: 50_000, instanceRecords: 10_000_000,
@@ -36,6 +37,12 @@ describe('retention and counting defaults', () => {
   it('counters 8 days, failure markers 90 days, reports 13 months', () => {
     expect(retentionPolicy({})).toMatchObject({ intakeCounterDays: 8, intakeFailureDays: 90, reportsDays: 395 });
     expect(retentionPolicy({ RETENTION_INTAKE_COUNTERS_DAYS: '3', RETENTION_INTAKE_FAILURES_DAYS: '30' })).toMatchObject({ intakeCounterDays: 3, intakeFailureDays: 30 });
+  });
+  it('uncounted reports (unknown and unauthenticated tiers) are kept 30 days; the new name wins, the old one is still honoured', () => {
+    expect(retentionPolicy({})).toMatchObject({ uncountedReportsDays: 30 });
+    expect(retentionPolicy({ RETENTION_UNAUTHENTICATED_REPORTS_DAYS: '10' })).toMatchObject({ uncountedReportsDays: 10 });
+    expect(retentionPolicy({ RETENTION_UNAUTHENTICATED_REPORTS_DAYS: '10', RETENTION_UNCOUNTED_REPORTS_DAYS: '7' })).toMatchObject({ uncountedReportsDays: 7 });
+    expect(retentionPolicy({ RETENTION_UNCOUNTED_REPORTS_DAYS: 'x', RETENTION_UNAUTHENTICATED_REPORTS_DAYS: '12' })).toMatchObject({ uncountedReportsDays: 12 });
   });
   it('REPORT_COUNTING: registry hosted, all self-host', () => {
     expect([reportCounting({ MODE: 'saas' }), reportCounting({})]).toEqual(['registry', 'all']);

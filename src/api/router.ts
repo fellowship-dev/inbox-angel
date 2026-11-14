@@ -285,8 +285,8 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
 function withCounted<T extends { reporter_auth: string | null; reporter_tier?: string | null; reporter_identity?: string | null; report_id?: string; ingest_token?: string | null }>(tenant: TenantContext, r: T): Omit<T, 'ingest_token'> & { counted: boolean } {
   const { ingest_token: _ingest, ...rest } = r;
   const counted = tenant.scope.counting === 'all' ? true : tenant.scope.counting === 'authenticated' ? r.reporter_auth === 'pass' : r.reporter_tier === 'counted';
-  // an uncounted report is stored as '<identity>|<id from the report>': show the id the report carried
-  const report_id = r.report_id && r.reporter_identity && r.reporter_tier !== 'counted' ? r.report_id.slice(r.report_id.indexOf('|') + 1) : r.report_id;
+  // stored as '<identity>|<id from the report>' (every tier); a plain id is a legacy row
+  const report_id = r.report_id && r.reporter_identity && r.report_id.startsWith(r.reporter_identity + '|') ? r.report_id.slice(r.reporter_identity.length + 1) : r.report_id;
   return { ...rest, ...(report_id !== undefined ? { report_id } : {}), counted };
 }
 

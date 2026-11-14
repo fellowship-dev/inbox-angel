@@ -47,10 +47,10 @@ export interface ReportOptions {
   /** The topmost results headers, when the caller has already read them (hosted intake does, to pick the allowance). */
   authHeaders?: AuthHeaders;
   /**
-   * Called with the report's record count once its domain is known and it is not a duplicate: return a reason to refuse it (a cap
-   * on stored records), else null. Nothing was enriched or stored yet.
+   * Called with the report's record count and tier once its domain is known and it is not a duplicate: return a reason to refuse it (a cap
+   * on stored records: counted and uncounted reports have separate budgets), else null. Nothing was enriched or stored yet.
    */
-  admit?: (recordCount: number) => ReasonCode | null;
+  admit?: (recordCount: number, tier: ReporterTier) => ReasonCode | null;
   /** The clock, unix seconds (tests). */
   now?: number;
   /** The carrier, when the caller has already classified it (hosted intake does, to pick caps and the decompression limit). Absent: decided here. */
@@ -86,6 +86,8 @@ export interface ReportResult {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+/** The caps on stored records: when one of them stops a COUNTED report the owner is told, by reporter and first drop time. */
+const STORAGE_CAPS: ReadonlySet<string> = new Set(['cap_address_records', 'cap_workspace_storage', 'cap_instance_storage']);
 
 export async function handleDmarcReport(
   message: ForwardableEmailMessage,
@@ -159,7 +161,7 @@ export async function handleDmarcReport(
     if (await tenant.scope.reports.isDuplicate(domain.id, decision.identity, info.report_id, decision.tier === 'counted')) throw new ParseStop('duplicate', 'duplicate');
     const tierCap = unrestricted ? limits.recordsPerReport : decision.tier === 'unauthenticated' ? limits.unauthRecordsPerReport : decision.tier === 'unknown' ? limits.unknownRecordsPerReport : limits.recordsPerReport;
     if (info.record_count > tierCap) throw new ParseStop('refused', 'too_many_records', `Report has ${info.record_count} records; the limit is ${tierCap}`);
-    const over = opts.admitTier?.(decision.tier) ?? opts.admit?.(info.record_count) ?? null;
+    const over = opts.admitTier?.(decision.tier) ?? opts.admit?.(info.record_count, decision.tier) ?? null;
     if (over) throw new ParseStop('refused', over);
     // IP enrichment: a registry reporter gets the normal budget, an authenticated unknown a small one, an unauthenticated report none.
     return decision.tier === 'unauthenticated' && !unrestricted ? { enrich: false } : { enrich: true, maxNewIps: decision.tier === 'unknown' && !unrestricted ? Math.min(limits.newIpsPerReport, limits.unknownNewIpsPerReport) : limits.newIpsPerReport };
@@ -191,7 +193,10 @@ export async function handleDmarcReport(
       if (err.outcome === 'duplicate') return result('duplicate', 'duplicate', trace({ dedup: 'duplicate' }));
       // A registry reporter over a cap: accepted, not stored, counted for the owner, never a 5xx (see ReportOptions.dropOverCap).
       if ((opts.dropOverCap || carrier.class === 'registry') && dec.v?.tier === 'counted' && err.code.startsWith('cap_') && found.domain) {
-        await tenant.scope.intake.markFailure(found.domain.id, today(), 'over_cap_accepted_dropped', Math.floor(Date.now() / 1000)).catch(() => 0);
+        const at = opts.now ?? Math.floor(Date.now() / 1000);
+        await tenant.scope.intake.markFailure(found.domain.id, today(), 'over_cap_accepted_dropped', at).catch(() => 0);
+        // The COUNTED storage budget is full: say so loudly, once per reporter, with the time of the first drop (src/reports/visibility.ts, the setup check).
+        if (STORAGE_CAPS.has(err.code)) await tenant.scope.intake.markDrop(found.domain.id, dec.v.identity, dec.v.knownAs ?? dec.v.identity, at).catch(() => undefined);
         return result('accepted', 'over_cap_accepted_dropped', trace());
       }
       return refuse(err.code as ReasonCode, err.message === err.code ? REASONS[err.code as ReasonCode] : err.message, trace());

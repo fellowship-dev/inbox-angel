@@ -35,7 +35,11 @@ async function own(w: World, domain: string) {
   await forWorkspace(w.env.DB, 'ws_a').intake.set(id, await hashToken(token), NOW);
   return token;
 }
-const log = () => [...(console.log as any).mock.calls, ...(console.warn as any).mock.calls].map((c: any[]) => String(c[0])).filter((l: string) => l.startsWith('{"evt":"intake"')).map((l: string) => JSON.parse(l)).at(-1);
+/** The last structured intake line, in call order (accepted lines go to console.log, refused ones to console.warn). */
+const log = () => {
+  const calls = [console.log, console.warn].flatMap((f: any) => f.mock.calls.map((c: any[], i: number) => ({ line: String(c[0]), order: f.mock.invocationCallOrder[i] })));
+  return calls.filter((c) => c.line.startsWith('{"evt":"intake"')).sort((x, y) => x.order - y.order).map((c) => JSON.parse(c.line)).at(-1);
+};
 async function deliver(w: World, token: string, eml: string) {
   resetSchemaReadyCache();
   const m = fakeMessage(`rua+${token}@${RUA}`, eml, { from: 'noreply-dmarc-support@google.com', headers: {} });

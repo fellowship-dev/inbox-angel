@@ -7,6 +7,7 @@
  *     and every statement is a short fixed SQL text with 1–5 parameters.
  */
 import { sql, type SQL } from 'drizzle-orm';
+import { isUncountedTier } from './intake';
 
 /** Largest JSON text bound to one statement. D1's limit is 2,000,000 bytes per string/value; we stay at half of it. */
 export const JSON_PARAM_MAX_BYTES = 1_000_000;
@@ -54,8 +55,8 @@ export interface StoreReportInput {
 	};
 	records: RecordTuple[];
 	/**
-	 * Set for a COUNTED report: the report's own id. Uncounted reports sharing it (same domain) are deleted in the same batch, with their records,
-	 * and the storage counters given back: a counted report supersedes an uncounted one, never the reverse.
+	 * Set for a COUNTED report: the report's own id (without the '<identity>|' prefix of report.report_id). Uncounted reports sharing it (same domain) are
+	 * deleted in the same batch, with their records, and their (uncounted) storage counters given back: a counted report supersedes an uncounted one, never the reverse.
 	 */
 	supersedeXmlId?: string;
 	/** Random id of this attempt (links the records to the row this batch inserted). */
@@ -70,12 +71,15 @@ export function storeStatements(i: StoreReportInput): SQL[] {
 	const ws = i.workspaceId;
 	const mine = sql`domain_id = ${i.domainId} AND report_id = ${r.report_id} AND ingest_token = ${i.ingestToken}`;
 	const out: SQL[] = [];
+	// Two separate storage budgets: counted reports (and legacy rows with no tier) and uncounted ones (tier unknown/unauthenticated).
+	const unc = isUncountedTier(r.reporter_tier);
 	if (i.supersedeXmlId !== undefined) {
 		const x = i.supersedeXmlId;
 		const sib = sql`domain_id = ${i.domainId} AND reporter_identity IS NOT NULL AND reporter_tier <> 'counted' AND substr(report_id, instr(report_id, '|') + 1) = ${x}`;
 		out.push(
-			sql`UPDATE workspace_storage SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})), reports = MAX(0, reports - (SELECT COUNT(*) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE workspace_id = ${ws}`,
-			sql`UPDATE intake_quota SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE scope = '*' AND day = 'total'`,
+			// the superseded rows are uncounted: their budget is the uncounted one
+			sql`UPDATE workspace_storage SET uncounted_records = MAX(0, uncounted_records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})), uncounted_reports = MAX(0, uncounted_reports - (SELECT COUNT(*) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE workspace_id = ${ws}`,
+			sql`UPDATE intake_quota SET records = MAX(0, records - (SELECT COALESCE(SUM(record_count), 0) FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib})) WHERE scope = '*u' AND day = 'total'`,
 			sql`DELETE FROM aggregate_reports WHERE workspace_id = ${ws} AND ${sib}`,
 		);
 	}
@@ -93,14 +97,21 @@ export function storeStatements(i: StoreReportInput): SQL[] {
 			FROM json_each(${chunk}) j JOIN (SELECT id FROM aggregate_reports WHERE workspace_id = ${ws} AND ${mine}) a`);
 	}
 	const exists = sql`EXISTS (SELECT 1 FROM aggregate_reports WHERE workspace_id = ${ws} AND ${mine})`;
+	const n = i.records.length;
 	out.push(
-		sql`INSERT INTO workspace_storage (workspace_id, reports, records) SELECT ${ws}, 1, ${i.records.length} WHERE ${exists}
-			ON CONFLICT(workspace_id) DO UPDATE SET reports = reports + 1, records = records + excluded.records`,
-		sql`INSERT INTO intake_quota (scope, day, records) SELECT ${'a:' + i.domainId}, ${i.day}, ${i.records.length} WHERE ${exists}
+		unc
+			? sql`INSERT INTO workspace_storage (workspace_id, uncounted_reports, uncounted_records) SELECT ${ws}, 1, ${n} WHERE ${exists}
+				ON CONFLICT(workspace_id) DO UPDATE SET uncounted_reports = uncounted_reports + 1, uncounted_records = uncounted_records + excluded.uncounted_records`
+			: sql`INSERT INTO workspace_storage (workspace_id, reports, records) SELECT ${ws}, 1, ${n} WHERE ${exists}
+				ON CONFLICT(workspace_id) DO UPDATE SET reports = reports + 1, records = records + excluded.records`,
+		// records stored today for this address: its own counter per budget ('a:' counted, 'ua:' uncounted)
+		sql`INSERT INTO intake_quota (scope, day, records) SELECT ${(unc ? 'ua:' : 'a:') + i.domainId}, ${i.day}, ${n} WHERE ${exists}
 			ON CONFLICT(scope, day) DO UPDATE SET records = records + excluded.records`,
-		// instance-wide stored records (STORED_ROW in intake.ts: scope '*', day 'total')
-		sql`INSERT INTO intake_quota (scope, day, records) SELECT '*', 'total', ${i.records.length} WHERE ${exists}
+		// instance-wide stored records, per budget (STORED_ROW / UNCOUNTED_ROW in intake.ts)
+		sql`INSERT INTO intake_quota (scope, day, records) SELECT ${unc ? '*u' : '*'}, 'total', ${n} WHERE ${exists}
 			ON CONFLICT(scope, day) DO UPDATE SET records = records + excluded.records`,
 	);
+	// A counted report stored again clears the owner-visible "reports from X were not stored" state of that reporter on this address.
+	if (r.reporter_tier === 'counted' && r.reporter_identity) out.push(sql`DELETE FROM intake_drops WHERE workspace_id = ${ws} AND domain_id = ${i.domainId} AND reporter = ${r.reporter_identity} AND ${exists}`);
 	return out;
 }

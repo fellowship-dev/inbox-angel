@@ -10,14 +10,21 @@
 --                                         'unknown' (authenticated, self-consistent, not in the registry: stored, not counted) or
 --                                         'unauthenticated' (stored, not counted, 30-day retention). NULL: stored before 0010.
 -- aggregate_reports.reporter_identity     who the intake took the sender to be: the registry id, else the authenticated organisational domain,
---                                         else '~unauth'. NULL: stored before 0010. When set, report_id holds '<identity>|<id from the report>'
---                                         (the existing UNIQUE(domain_id, report_id) therefore dedups per reporter: a forger cannot squat a real
---                                         reporter's report id, and a counted report supersedes an uncounted one with the same id).
+--                                         else '~unauth'. NULL: stored before 0010. When set, report_id holds '<identity>|<id from the report>' for
+--                                         EVERY tier, counted included (the existing UNIQUE(domain_id, report_id) therefore dedups per reporter: two
+--                                         known reporters may reuse one report id, a forger cannot squat a real reporter's id, and a counted report
+--                                         supersedes an uncounted one with the same id). A plain report_id with identity NULL, or with the identity
+--                                         set by an earlier build, is a legacy row: still recognised as a duplicate on redelivery.
 -- aggregate_reports.reporter_known_as     the registry entry's label ('Google'), for 'counted'.--
 -- intake_quota        counters per scope and UTC day: 'a:<domain_id>' (one report address), 'k:<domain_id>' (all mail from unknown
 --                     reporters to one address), 'w:<workspace_id>', '*' (the whole instance). Not tenant data: a counter, no content.
--- workspace_storage   report_records rows a workspace holds right now (the storage cap compares against it), kept in step by the
---                     store batch and the retention sweep, recounted by the daily job.
+-- workspace_storage   report_records rows a workspace holds right now, in two separate budgets: records/reports (COUNTED reports; NULL-tier legacy
+--                     reports too) and uncounted_records/uncounted_reports (tier 'unknown' or 'unauthenticated', which have their own, much smaller
+--                     cap so a stranger's reports can never use up the room a known reporter's report needs). Kept in step by the store batch and
+--                     the retention sweep, recounted by the daily job. The instance totals are intake_quota rows ('*','total') and ('*u','total').
+-- intake_drops        COUNTED reports that were accepted but not stored because the counted budget was full: one row per (domain, reporter) with the
+--                     first drop time, so the owner reads "reports from Google since <time> were not stored". Cleared when a report from that
+--                     reporter is stored again.
 -- reporter_candidate_days  authenticated senders that are not in the registry, instance-wide, per day and workspace: DKIM organisation, From,
 --                     the report's own org_name and email. The instance owner reads it as candidates for the registry (distinct workspaces,
 --                     days seen, last seen). No report content, no customer address. Never promoted automatically.
@@ -43,7 +50,20 @@ CREATE TABLE workspace_storage (
   workspace_id TEXT PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   reports INTEGER NOT NULL DEFAULT 0,
   records INTEGER NOT NULL DEFAULT 0,
+  uncounted_reports INTEGER NOT NULL DEFAULT 0,
+  uncounted_records INTEGER NOT NULL DEFAULT 0,
   reconciled_at INTEGER
+);
+
+CREATE TABLE intake_drops (
+  domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+  reporter TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  messages INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (domain_id, reporter)
 );
 
 CREATE TABLE intake_failures (

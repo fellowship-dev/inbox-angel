@@ -198,6 +198,17 @@ export function globalQueries(dbLike: DbLike) {
 		},
 
 		/**
+		 * Known reporters whose COUNTED reports were dropped for want of storage (intake_drops), across the instance, for the owner's setup check:
+		 * per reporter the FIRST drop time and how many addresses are affected. Only drops seen at or after `sinceSeconds`.
+		 */
+		drops: {
+			since: (sinceSeconds: number) =>
+				db.all<{ reporter: string; label: string; first_at: number; domains: number; messages: number }>(sql`
+					SELECT reporter, MAX(label) AS label, MIN(first_at) AS first_at, COUNT(*) AS domains, SUM(messages) AS messages
+					FROM intake_drops WHERE last_at >= ${sinceSeconds} GROUP BY reporter ORDER BY first_at, reporter`),
+		},
+
+		/**
 		 * What inbound report mail carried, instance-wide, per day: a counter per kind in intake_quota (scope 'auth:<kind>'), no address.
 		 * Kinds: present (an authentication header of the trusted kind), absent (none), foreign (a header, another authserv-id), ok (authenticated).
 		 */

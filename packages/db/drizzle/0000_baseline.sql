@@ -314,6 +314,19 @@ CREATE TABLE `hosted_zones` (
 	`checked_at` integer
 );
 --> statement-breakpoint
+CREATE TABLE `intake_drops` (
+	`domain_id` integer NOT NULL,
+	`reporter` text NOT NULL,
+	`workspace_id` text NOT NULL,
+	`label` text NOT NULL,
+	`first_at` integer NOT NULL,
+	`last_at` integer NOT NULL,
+	`messages` integer DEFAULT 0 NOT NULL,
+	PRIMARY KEY(`domain_id`, `reporter`),
+	FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `intake_failures` (
 	`domain_id` integer NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -648,6 +661,8 @@ CREATE TABLE `workspace_storage` (
 	`workspace_id` text PRIMARY KEY NOT NULL,
 	`reports` integer DEFAULT 0 NOT NULL,
 	`records` integer DEFAULT 0 NOT NULL,
+	`uncounted_reports` integer DEFAULT 0 NOT NULL,
+	`uncounted_records` integer DEFAULT 0 NOT NULL,
 	`reconciled_at` integer,
 	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade
 );

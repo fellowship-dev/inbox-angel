@@ -56,15 +56,16 @@ export async function chargeIntakeCaps(
   const { carrier } = m;
   const quota = await q.consumeQuota(m.domainId, m.day, m.rawSize, carrier.class, {
     address: limits.addressMessagesPerDay, workspace: limits.workspaceMessagesPerDay, instance: limits.instanceMessagesPerDay, unknownTotal: limits.unknownReportsPerDay, unauthTotal: limits.unauthTotalReportsPerDay,
+    uncountedWorkspace: limits.uncountedWorkspaceMessagesPerDay, uncountedInstance: limits.uncountedInstanceMessagesPerDay,
   });
   const refuse = (reason: ReasonCode) => ({ reason, quota });
-  if (!quota.ok) return refuse(({ address: 'cap_address_day', unknown: 'cap_unknown_day', unauth: 'cap_unauth_total_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day' } as const)[quota.refusedBy!]);
+  if (!quota.ok) return refuse(({ address: 'cap_address_day', unknown: 'cap_unknown_day', unauth: 'cap_unauth_total_day', workspace: 'cap_workspace_day', instance: 'cap_instance_day', uncounted_workspace: 'cap_uncounted_workspace_day', uncounted_instance: 'cap_uncounted_instance_day' } as const)[quota.refusedBy!]);
   const claimed = '~' + (m.envelopeFrom?.split('@').pop()?.trim().toLowerCase() || '');
   const bucket = carrier.class === 'registry' ? carrier.candidates[0].id : carrier.class === 'authenticated' ? (carrier.dkimOrg ?? carrier.fromOrg!) : claimed;
   const perReports = carrier.class === 'registry' ? limits.reportsPerDay : carrier.class === 'authenticated' ? limits.unknownReportsPerReporterPerDay : limits.unauthReportsPerDay;
   const perBytes = carrier.class === 'unauthenticated' ? limits.unauthBytesPerDay : limits.bytesPerDay;
   if (await q.consumeReporter(m.domainId, m.day, bucket, m.rawSize, perReports, perBytes)) return { reason: null, quota };
-  await q.releaseQuota(m.domainId, m.day, m.rawSize, [`a:${m.domainId}`, `k:${m.domainId}`, `u:${m.domainId}`, `w:${m.workspaceId}`, '*']);
+  await q.releaseQuota(m.domainId, m.day, m.rawSize);
   return refuse(carrier.class === 'authenticated' ? 'cap_unknown_reporter_day' : carrier.class === 'unauthenticated' ? 'cap_unauth_day' : 'cap_address_day');
 }
 
@@ -168,10 +169,14 @@ async function intake(message: ForwardableEmailMessage, env: BoundEnv, seen: See
       maxRecords: limits.recordsPerReport,
       maxNewIps: limits.newIpsPerReport,
       token: { id: target.domain_id, domain: target.domain },
-      admit: (n) =>
-        quota.addressRecordsToday + n > limits.addressRecordsPerDay ? 'cap_address_records'
-        : quota.workspaceRecords + n > limits.workspaceRecords ? 'cap_workspace_storage'
-        : quota.instanceRecords + n > limits.instanceRecords ? 'cap_instance_storage' : null,
+      // Two separate storage budgets (the report's tier is known once its metadata is): counted reports, and uncounted ones with their own, much smaller caps.
+      admit: (n, tier) => tier === 'counted'
+        ? (quota.addressRecordsToday + n > limits.addressRecordsPerDay ? 'cap_address_records'
+          : quota.workspaceRecords + n > limits.workspaceRecords ? 'cap_workspace_storage'
+          : quota.instanceRecords + n > limits.instanceRecords ? 'cap_instance_storage' : null)
+        : (quota.uncountedAddressRecordsToday + n > limits.uncountedAddressRecordsPerDay ? 'cap_uncounted_address_records'
+          : quota.uncountedWorkspaceRecords + n > limits.uncountedWorkspaceRecords ? 'cap_uncounted_workspace_storage'
+          : quota.uncountedInstanceRecords + n > limits.uncountedInstanceRecords ? 'cap_uncounted_instance_storage' : null),
     });
     Object.assign(seen, { records: result.records, tier: result.tier, reporter: result.identity ?? result.reporter, dedup: result.dedup ?? null, email_matched: result.emailMatched ?? null });
     if (result.outcome === 'accepted' || result.outcome === 'duplicate') track(tenant, { event: 'report.received', failure_count: result.failure_count });

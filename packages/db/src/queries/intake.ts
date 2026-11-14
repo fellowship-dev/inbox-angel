@@ -12,8 +12,10 @@ import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
 
-/** Scope and day of the instance-wide count of stored records (intake_quota): `day` is not a date, so no daily sweep matches it. */
+/** Scope and day of the instance-wide count of stored COUNTED records (intake_quota): `day` is not a date, so no daily sweep matches it. */
 export const STORED_ROW = { scope: '*', day: 'total' } as const;
+/** The same for UNCOUNTED records (reports of tier unknown/unauthenticated): their own instance budget. */
+export const UNCOUNTED_ROW = { scope: '*u', day: 'total' } as const;
 
 export interface QuotaLimits {
 	/** Messages per UTC day to one report address (domain). */
@@ -26,17 +28,27 @@ export interface QuotaLimits {
 	unknownTotal: number;
 	/** Messages that could not be authenticated, per UTC day to one address, over every claimed sender. */
 	unauthTotal: number;
+	/** Messages from uncounted senders (unknown or unauthenticated), per UTC day to one workspace / to the whole instance: charged INSTEAD of the counted workspace and instance message caps. */
+	uncountedWorkspace: number;
+	uncountedInstance: number;
 }
-export type QuotaScope = 'address' | 'unknown' | 'unauth' | 'workspace' | 'instance';
+export type QuotaScope = 'address' | 'unknown' | 'unauth' | 'workspace' | 'instance' | 'uncounted_workspace' | 'uncounted_instance';
 export interface QuotaResult {
 	ok: boolean;
 	/** The first cap that refused the message (nothing was counted then). */
 	refusedBy?: QuotaScope;
-	/** Stored records counted so far today for this address, for this workspace, and for the instance (live rows, not per day). */
+	/** COUNTED records stored so far today for this address, held by this workspace, and held by the instance (live rows, not per day). */
 	addressRecordsToday: number;
 	workspaceRecords: number;
 	instanceRecords: number;
+	/** The same for UNCOUNTED reports: their own, separate figures. */
+	uncountedAddressRecordsToday: number;
+	uncountedWorkspaceRecords: number;
+	uncountedInstanceRecords: number;
 }
+/** A stored-records budget: counted reports (and legacy rows) or uncounted ones (tier 'unknown' / 'unauthenticated'). */
+export const isUncountedTier = (tier: string | null | undefined) => tier === 'unknown' || tier === 'unauthenticated';
+export interface DropRow { reporter: string; label: string; first_at: number; last_at: number; messages: number }
 export interface FailureRow { reason: string; messages: number; last_at: number }
 
 /** The usage row that totals, per token and day, what reporters with no standing (not well known) have used. */
@@ -100,36 +112,59 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		},
 
 		/**
-		 * Count one message against the address, workspace and instance daily caps (and, for an unknown reporter, the address's unknown-reporter
-		 * total) in ONE batch: each is a conditional upsert that counts nothing once its cap is reached. When any refuses, the ones that
-		 * counted are given back (a second batch). Also returns the stored-records figures the post-parse checks need.
+		 * Count one message against its daily caps in ONE batch: each is a conditional upsert that counts nothing once its cap is reached. When any
+		 * refuses, the ones that counted are given back (a second batch). Also returns the stored-records figures the post-parse checks need.
+		 *   registry carrier       the COUNTED caps: address, workspace, instance
+		 *   authenticated unknown  the address's unknown-reporter total, then the UNCOUNTED workspace and instance caps
+		 *   unauthenticated        the address's unauthenticated total, then the UNCOUNTED workspace and instance caps
+		 * Uncounted mail is never charged to the counted message caps, so it cannot use them up.
 		 */
 		async consumeQuota(domainId: number, day: string, bytes: number, carrierClass: 'registry' | 'authenticated' | 'unauthenticated', lim: QuotaLimits): Promise<QuotaResult> {
-			const scopes: Array<[QuotaScope, string, number]> = [['address', `a:${domainId}`, lim.address], ['workspace', `w:${workspaceId}`, lim.workspace], ['instance', '*', lim.instance]];
-			if (carrierClass === 'authenticated') scopes.splice(1, 0, ['unknown', `k:${domainId}`, lim.unknownTotal]);
-			if (carrierClass === 'unauthenticated') scopes.splice(1, 0, ['unauth', `u:${domainId}`, lim.unauthTotal]);
+			const scopes: Array<[QuotaScope, string, number]> = carrierClass === 'registry'
+				? [['address', `a:${domainId}`, lim.address], ['workspace', `w:${workspaceId}`, lim.workspace], ['instance', '*', lim.instance]]
+				: [carrierClass === 'authenticated' ? ['unknown', `k:${domainId}`, lim.unknownTotal] : ['unauth', `u:${domainId}`, lim.unauthTotal],
+					['uncounted_workspace', `n:${workspaceId}`, lim.uncountedWorkspace], ['uncounted_instance', 'n:*', lim.uncountedInstance]];
 			const up = (scope: string, max: number) => sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, ${bytes})
 				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1, bytes = intake_quota.bytes + excluded.bytes WHERE intake_quota.messages < ${max}`;
 			const res = await batchStatements(db, [
 				...scopes.map(([, scope, max]) => up(scope, max)),
 				sql`SELECT records FROM intake_quota WHERE scope = ${'a:' + domainId} AND day = ${day}`,
-				sql`SELECT records FROM workspace_storage WHERE workspace_id = ${workspaceId}`,
+				sql`SELECT records, uncounted_records FROM workspace_storage WHERE workspace_id = ${workspaceId}`,
 				sql`SELECT records FROM intake_quota WHERE scope = ${STORED_ROW.scope} AND day = ${STORED_ROW.day}`,
+				sql`SELECT records FROM intake_quota WHERE scope = ${'ua:' + domainId} AND day = ${day}`,
+				sql`SELECT records FROM intake_quota WHERE scope = ${UNCOUNTED_ROW.scope} AND day = ${UNCOUNTED_ROW.day}`,
 			]);
 			const n = scopes.length;
 			const counted = scopes.map((_, i) => (res[i]?.meta?.changes ?? 0) > 0);
-			const rec = (i: number) => Number(((res[n + i]?.results ?? []) as Array<{ records: number }>)[0]?.records ?? 0);
-			const figures = { addressRecordsToday: rec(0), workspaceRecords: rec(1), instanceRecords: rec(2) };
+			const rows = (i: number) => ((res[n + i]?.results ?? []) as Array<Record<string, number>>)[0];
+			const figures = {
+				addressRecordsToday: Number(rows(0)?.records ?? 0), workspaceRecords: Number(rows(1)?.records ?? 0), instanceRecords: Number(rows(2)?.records ?? 0),
+				uncountedAddressRecordsToday: Number(rows(3)?.records ?? 0), uncountedWorkspaceRecords: Number(rows(1)?.uncounted_records ?? 0), uncountedInstanceRecords: Number(rows(4)?.records ?? 0),
+			};
 			const refused = counted.findIndex((c) => !c);
 			if (refused < 0) return { ok: true, ...figures };
 			await this.releaseQuota(domainId, day, bytes, scopes.filter((_, i) => counted[i]).map(([, scope]) => scope));
 			return { ok: false, refusedBy: scopes[refused][0], ...figures };
 		},
 
-		/** Give back what consumeQuota counted for a message that was then refused by a later check. `scopes` default: all four. */
-		async releaseQuota(domainId: number, day: string, bytes: number, scopes: string[] = [`a:${domainId}`, `k:${domainId}`, `u:${domainId}`, `w:${workspaceId}`, '*']): Promise<void> {
+		/** Give back what consumeQuota counted for a message that was then refused by a later check. `scopes` default: every scope it may have used. */
+		async releaseQuota(domainId: number, day: string, bytes: number, scopes: string[] = [`a:${domainId}`, `k:${domainId}`, `u:${domainId}`, `w:${workspaceId}`, '*', `n:${workspaceId}`, 'n:*']): Promise<void> {
 			if (!scopes.length) return;
 			await batchStatements(db, scopes.map((scope) => sql`UPDATE intake_quota SET messages = MAX(0, messages - 1), bytes = MAX(0, bytes - ${bytes}) WHERE scope = ${scope} AND day = ${day}`));
+		},
+
+		/**
+		 * A COUNTED report was accepted and not stored because the counted budget is full. One row per (domain, reporter) keeps the FIRST drop time
+		 * ("reports from Google since <time> were not stored"); it is cleared when a report from that reporter is stored again (the store batch).
+		 */
+		async markDrop(domainId: number, reporter: string, label: string, nowSeconds: number): Promise<void> {
+			await db.run(sql`INSERT INTO intake_drops (domain_id, reporter, workspace_id, label, first_at, last_at, messages) VALUES (${domainId}, ${reporter}, ${workspaceId}, ${label}, ${nowSeconds}, ${nowSeconds}, 1)
+				ON CONFLICT(domain_id, reporter) DO UPDATE SET messages = intake_drops.messages + 1, last_at = excluded.last_at, label = excluded.label WHERE intake_drops.workspace_id = ${workspaceId}`);
+		},
+
+		/** Reporters whose counted reports were dropped for want of storage on this address, last drop at or after `sinceSeconds`. */
+		drops(domainId: number, sinceSeconds: number): Promise<DropRow[]> {
+			return db.all<DropRow>(sql`SELECT reporter, label, first_at, last_at, messages FROM intake_drops WHERE workspace_id = ${workspaceId} AND domain_id = ${domainId} AND last_at >= ${sinceSeconds} ORDER BY first_at, reporter`);
 		},
 
 		/** Count one message that reached this address and was not stored (visible to the owner). Returns today's count for the reason. */

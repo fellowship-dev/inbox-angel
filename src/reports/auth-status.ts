@@ -3,6 +3,7 @@
 
 import { globalQueries } from '@ready-set-mail/db';
 import { reportCounting } from '../dmarc/counting';
+import { storageDropText, utcMinute } from './visibility';
 
 export type AuthStatusKind = 'ok' | 'no_traffic' | 'unconfigured' | 'no_results' | 'foreign_authserv' | 'unauthenticated_only';
 
@@ -78,6 +79,11 @@ export async function intakeSetupFindings(
     } else if (status.kind === 'foreign_authserv') {
       out.push({ id: 'intake', severity: 'action', setting: 'AUTHSERV_ID', message: 'Inbound report mail carries authentication results, but not from the AUTHSERV_ID you set, so no report can be counted. Set AUTHSERV_ID to the authserv-id logged for a real report email.' });
     }
+  }
+  // A COUNTED report that could not be stored because the counted budget is full: loud, per known reporter, from the first drop time.
+  const drops = await globalQueries(env.DB).drops.since(nowSeconds - 14 * 86400).catch(() => []);
+  for (const d of drops) {
+    out.push({ id: 'intake', severity: 'action', setting: 'INTAKE_MAX_WORKSPACE_RECORDS, INTAKE_MAX_INSTANCE_RECORDS, INTAKE_MAX_ADDRESS_RECORDS_PER_DAY', message: `${storageDropText(d.label, utcMinute(d.first_at))}. ${d.domains === 1 ? 'One report address is' : `${d.domains} report addresses are`} affected; raise the storage limit or free room.` });
   }
   const since = new Date((nowSeconds - 3 * 86400) * 1000).toISOString().slice(0, 10);
   const caps = await globalQueries(env.DB).capObservations.since(since).catch(() => []);

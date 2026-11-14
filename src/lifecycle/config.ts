@@ -21,7 +21,9 @@ export interface RetentionEnv {
   RETENTION_INTAKE_COUNTERS_DAYS?: string;
   /** "Reports we could not store" markers the owner reads. Default 90. */
   RETENTION_INTAKE_FAILURES_DAYS?: string;
-  /** Reports from senders that could not be authenticated (stored, never counted). Default 30. */
+  /** Reports that are stored but never counted (tier 'unknown' or 'unauthenticated'). Default 30. */
+  RETENTION_UNCOUNTED_REPORTS_DAYS?: string;
+  /** The earlier name of RETENTION_UNCOUNTED_REPORTS_DAYS (when it covered only unauthenticated reports): honoured when the new one is unset. */
   RETENTION_UNAUTHENTICATED_REPORTS_DAYS?: string;
 }
 
@@ -37,7 +39,8 @@ export interface RetentionPolicy {
   evictedDays: number;
   intakeCounterDays: number;
   intakeFailureDays: number;
-  unauthenticatedReportsDays: number;
+  /** Reports of tier unknown or unauthenticated. A reporter an owner later promotes becomes tier 'counted' and leaves this sweep. */
+  uncountedReportsDays: number;
 }
 
 /** 13 months, as days (365 + 30). */
@@ -67,6 +70,6 @@ export function retentionPolicy(env: RetentionEnv): RetentionPolicy {
     evictedDays: days(env.RETENTION_EVICTED_DAYS, 30),
     intakeCounterDays: days(env.RETENTION_INTAKE_COUNTERS_DAYS, 8),
     intakeFailureDays: days(env.RETENTION_INTAKE_FAILURES_DAYS, 90),
-    unauthenticatedReportsDays: days(env.RETENTION_UNAUTHENTICATED_REPORTS_DAYS, 30),
+    uncountedReportsDays: days(env.RETENTION_UNCOUNTED_REPORTS_DAYS, days(env.RETENTION_UNAUTHENTICATED_REPORTS_DAYS, 30)),
   };
 }

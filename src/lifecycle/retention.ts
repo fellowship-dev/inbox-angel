@@ -27,9 +27,9 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
   const q = lifecycleQueries(env.DB);
   const limits = sweepLimits(opts.limits);
   const ago = (d: number) => now - d * DAY;
-  // Unauthenticated-tier reports are short-lived only where they never feed the numbers. With REPORT_COUNTING=all (the self-host default) they ARE the
-  // numbers (a server with AUTHSERV_* unset stores every report as unauthenticated), so they keep the normal window.
-  const unauthCutoff = reportCounting(env) === 'all' ? undefined : ago(p.unauthenticatedReportsDays);
+  // Uncounted-tier reports (unknown or unauthenticated) are short-lived only where they never feed the numbers. With REPORT_COUNTING=all (the self-host
+  // default) they ARE the numbers (a server with AUTHSERV_* unset stores every report as unauthenticated), so they keep the normal window.
+  const unauthCutoff = reportCounting(env) === 'all' ? undefined : ago(p.uncountedReportsDays);
 
   const report: RetentionReport = {};
   const sweeps: Array<[string, () => Promise<SweepResult>]> = [
@@ -51,6 +51,7 @@ export async function runRetention(env: RetentionEnv & { DB: D1Database }, opts:
     // Intake counters: daily caps need only today and yesterday; the failure markers live longer so an owner can see them.
     ['intake_counters', () => q.purgeIntakeCounters(dayOf(ago(p.intakeCounterDays)), limits)],
     ['intake_failures', () => q.purgeIntakeFailures(dayOf(ago(p.intakeFailureDays)), limits)],
+    ['intake_drops', () => q.purgeIntakeDrops(ago(p.intakeFailureDays), limits)],
     ['reporter_candidates', () => q.purgeReporterCandidates(dayOf(ago(p.intakeFailureDays)), limits)],
     // Last: recount a few workspaces' stored records (repairs drift, counts data stored before the counters existed).
     ['storage_reconciled', () => q.reconcileStorage(limits)],

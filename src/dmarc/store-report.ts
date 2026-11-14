@@ -91,8 +91,10 @@ export async function storeReport(
     domainId,
     report: {
       org_name: meta.org_name,
-      // A counted report keeps the report's own id; an uncounted one is stored as '<identity>|<id>' (so it can neither squat nor displace a counted one).
-      report_id: reporter?.tier === 'counted' ? meta.report_id : `${reporter?.identity ?? '~unauth'}|${meta.report_id}`,
+      // Every report with a reporter identity is stored as '<identity>|<id>' (the registry id for a counted report): the unique key is (domain, reporter,
+      // report id), so two known reporters may reuse one id and a forger cannot squat a real reporter's id. A report with no reporter (callers outside the
+      // intake) keeps its plain id, like every row stored before 0010.
+      report_id: reporter ? `${reporter.identity}|${meta.report_id}` : meta.report_id,
       date_begin: isoToUnix(meta.begin_date),
       date_end: isoToUnix(meta.end_date),
       total_count: total,

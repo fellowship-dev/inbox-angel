@@ -177,13 +177,19 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
 		},
 
 		/**
-		 * Is this report already stored? Identity-aware (checked AFTER the sender is classified): a COUNTED report (stored under its own id) is a
-		 * duplicate of any report with that id; an uncounted one is a duplicate of the same reporter's report with that id, or of a counted/legacy
-		 * report with that id (an uncounted forgery never displaces a counted report). Uncounted reports are stored as '<identity>|<id>'.
+		 * Is this report already stored? Keyed on (domain, reporter identity, report id) and checked AFTER the sender is classified. Every report with
+		 * an identity is stored as '<identity>|<id>' (the registry id for a counted report), so two known reporters may reuse one report id.
+		 *   - the same identity's report with that id is a duplicate (redelivery);
+		 *   - a LEGACY row, stored under the plain report id (before 0010 or by a build that kept counted reports plain), is a duplicate when its
+		 *     identity is unknown (NULL) or the same: it cannot be told apart from this reporter's own report;
+		 *   - an UNCOUNTED report is also a duplicate of any counted report or plain-id row with that id (a forgery never displaces or doubles a counted report).
 		 */
 		async isDuplicate(domainId: number, identity: string, xmlId: string, counted: boolean): Promise<boolean> {
+			const mine = sql`report_id = ${identity + '|' + xmlId}`;
+			const legacy = counted ? sql`(report_id = ${xmlId} AND (reporter_identity IS NULL OR reporter_identity = ${identity}))` : sql`report_id = ${xmlId}`;
+			const countedElsewhere = counted ? sql`` : sql` OR (reporter_tier = 'counted' AND substr(report_id, instr(report_id, '|') + 1) = ${xmlId})`;
 			const rows = await db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId}
-				AND (report_id = ${xmlId}${counted ? sql`` : sql` OR report_id = ${identity + '|' + xmlId}`})`);
+				AND (${mine} OR ${legacy}${countedElsewhere})`);
 			return (rows[0]?.n ?? 0) > 0;
 		},
 
@@ -486,7 +492,7 @@ export function reportQueries(db: Db, workspaceId: string, counting: CountingMod
     /** Bounded source references; summary and observed dates cover the entire selected range. */
     async evidence(domainId: number, since: number, until: number) {
       const [dmarc, tls, dmarcSummary, tlsSummary, dmarcDates, tlsDates] = await Promise.all([
-        db.all<ReportEvidenceRow>(sql`SELECT id, CASE WHEN reporter_identity IS NULL OR reporter_tier = 'counted' THEN report_id ELSE substr(report_id, instr(report_id, '|') + 1) END AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_count, pass_count, fail_count FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')} ORDER BY date_begin DESC, id DESC LIMIT 201`),
+        db.all<ReportEvidenceRow>(sql`SELECT id, CASE WHEN reporter_identity IS NOT NULL AND substr(report_id, 1, length(reporter_identity) + 1) = reporter_identity || '|' THEN substr(report_id, length(reporter_identity) + 2) ELSE report_id END AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_count, pass_count, fail_count FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')} ORDER BY date_begin DESC, id DESC LIMIT 201`),
         db.all<ReportEvidenceRow>(sql`SELECT id, NULL AS source_report_id, org_name AS reporter, date_begin, date_end, created_at, total_success + total_failure AS total_count, total_success AS pass_count, total_failure AS fail_count FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} ORDER BY date_begin DESC, id DESC LIMIT 201`),
         db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM aggregate_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until} AND ${C('aggregate_reports')}`),
         db.all<EvidenceSummaryRow>(sql`SELECT COUNT(*) AS report_count, MAX(date_end) AS latest_period_end, MAX(created_at) AS latest_received_at FROM tls_reports WHERE workspace_id = ${A} AND domain_id = ${domainId} AND date_begin >= ${since} AND date_begin <= ${until}`),

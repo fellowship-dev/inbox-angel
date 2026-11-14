@@ -34,8 +34,10 @@ export interface ReportersInfo {
 
 export interface IntakeInfo {
 	status: 'ok' | 'limited' | 'not_processed';
-	limit: 'workspace_storage' | 'instance_storage' | 'address_day' | 'workspace_day' | null;
+	limit: 'workspace_storage' | 'instance_storage' | 'address_day' | 'workspace_day' | 'counted_storage_dropped' | null;
 	notice: string | null;
+	/** Known reporters whose counted reports were not stored for want of storage; times are ISO 8601 (UTC). */
+	dropped?: Array<{ reporter: string; label: string; since: string; last_at: string; messages: number; text: string }>;
 	not_processed: { messages: number; last_at: number | null; reasons: Array<{ reason: string; messages: number; last_at: number; text: string }> };
 }
 
@@ -85,9 +87,27 @@ export function uncountedReporters(v: ReportVisibilityFields | null | undefined)
 	return rows.length ? `From ${rows.map((r) => `${r.reporter} (${r.reports})`).join(', ')}` : null;
 }
 
-/** Plain sentence for a storage limit or reports that could not be processed; null when all is well. */
-export function intakeNotice(v: ReportVisibilityFields | null | undefined): string | null {
-	return v?.intake?.notice ?? null;
+/** A time the server sent as ISO 8601, in the user's locale and time zone (both default to the browser's). */
+export function formatWhen(iso: string, opts: { locale?: string; timeZone?: string } = {}): string {
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return iso;
+	return d.toLocaleString(opts.locale, { dateStyle: 'medium', timeStyle: 'short', ...(opts.timeZone ? { timeZone: opts.timeZone } : {}) });
+}
+
+/** "Report storage limit reached; reports from Google since 14 Nov 2026, 03:12 were not stored", the time in the user's locale and time zone. */
+export function storageDropNotice(d: { label: string; since: string }, opts: { locale?: string; timeZone?: string } = {}): string {
+	return `Report storage limit reached; reports from ${d.label} since ${formatWhen(d.since, opts)} were not stored`;
+}
+
+/** One sentence per reporter whose counted reports were not stored (empty when none). */
+export function storageDropNotices(v: ReportVisibilityFields | null | undefined, opts: { locale?: string; timeZone?: string } = {}): string[] {
+	return (v?.intake?.dropped ?? []).map((d) => storageDropNotice(d, opts));
+}
+
+/** Plain sentence for a storage limit or reports that could not be processed; null when all is well. Known reporters' dropped reports are named, with the time localised. */
+export function intakeNotice(v: ReportVisibilityFields | null | undefined, opts: { locale?: string; timeZone?: string } = {}): string | null {
+	const drops = storageDropNotices(v, opts);
+	return drops.length ? drops.join('. ') : v?.intake?.notice ?? null;
 }
 
 /** Why a page that shows no counted numbers is empty. Never `none` while reports were left out or lost. */

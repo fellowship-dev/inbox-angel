@@ -30,6 +30,11 @@ export interface HostedEnv {
   INTAKE_MAX_WORKSPACE_RECORDS?: string;
   INTAKE_MAX_INSTANCE_MESSAGES_PER_DAY?: string;
   INTAKE_MAX_INSTANCE_RECORDS?: string;
+  INTAKE_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY?: string;
+  INTAKE_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY?: string;
+  INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY?: string;
+  INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS?: string;
+  INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS?: string;
   INTAKE_MAX_DECOMPRESSED_BYTES?: string;
   INTAKE_MAX_RAW_BYTES?: string;
   INTAKE_MAX_STORAGE_RETRIES_PER_DAY?: string;
@@ -109,6 +114,24 @@ export const DEFAULT_MAX_UNAUTH_REPORTS_PER_DAY = 5;
 export const DEFAULT_MAX_UNAUTH_BYTES_PER_DAY = 10 * 1024 * 1024;
 export const DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY = 10;
 export const DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT = 200;
+/**
+ * UNCOUNTED STORAGE BUDGETS. Reports that are stored but never counted (tier unknown or unauthenticated) have their OWN budgets, separate from the
+ * counted ones above, so a stranger's mail can never use up the room a known reporter's report needs (the security review reproduced four attacker
+ * DKIM domains filling a workspace cap, after which Google's report was accepted and dropped). Counted storage counts only counted reports.
+ * Sized for what the tier is for (finding candidates for the registry, showing "N reports we could not verify are not counted"), far below the counted
+ * budgets: a genuine unknown receiver's report for a small domain is tens of records, 5,000 records a day per address is some fifty such reports,
+ * and with a 30-day retention a workspace holds at most 20,000 (2% of the counted cap) and the instance 500,000 (5% of its cap).
+ */
+/** Messages per UTC day from uncounted senders to one workspace (the per-address totals are INTAKE_MAX_UNKNOWN_REPORTS_PER_DAY and INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY). */
+export const DEFAULT_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY = 100;
+/** Messages per UTC day from uncounted senders to the whole instance. */
+export const DEFAULT_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY = 2_000;
+/** Uncounted records stored per UTC day for one report address. */
+export const DEFAULT_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY = 5_000;
+/** Uncounted records one workspace may hold. */
+export const DEFAULT_MAX_UNCOUNTED_WORKSPACE_RECORDS = 20_000;
+/** Uncounted records the whole instance may hold. */
+export const DEFAULT_MAX_UNCOUNTED_INSTANCE_RECORDS = 500_000;
 /** Decompression cap for any sender that is not a registry reporter. */
 export const DEFAULT_MAX_NONREGISTRY_DECOMPRESSED_BYTES = 1024 * 1024;
 /** Messages per UTC day to one report address (token), whatever the sender. */
@@ -155,6 +178,12 @@ export interface IntakeLimits {
   unauthRecordsPerReport: number;
   /** Decompression cap for senders that are not registry reporters (registry reporters get maxDecompressedBytes). */
   nonRegistryDecompressedBytes: number;
+  /** Uncounted budgets (reports of tier unknown/unauthenticated), separate from the counted ones. */
+  uncountedWorkspaceMessagesPerDay: number;
+  uncountedInstanceMessagesPerDay: number;
+  uncountedAddressRecordsPerDay: number;
+  uncountedWorkspaceRecords: number;
+  uncountedInstanceRecords: number;
   addressMessagesPerDay: number;
   addressRecordsPerDay: number;
   workspaceMessagesPerDay: number;
@@ -182,6 +211,11 @@ export function intakeLimits(env: HostedEnv): IntakeLimits {
     unauthTotalReportsPerDay: positive(env.INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY, DEFAULT_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY),
     unauthRecordsPerReport: positive(env.INTAKE_MAX_UNAUTH_RECORDS_PER_REPORT, DEFAULT_MAX_UNAUTH_RECORDS_PER_REPORT),
     nonRegistryDecompressedBytes: Math.min(positive(env.INTAKE_MAX_NONREGISTRY_DECOMPRESSED_BYTES, DEFAULT_MAX_NONREGISTRY_DECOMPRESSED_BYTES), MAX_REPORT_BYTES),
+    uncountedWorkspaceMessagesPerDay: positive(env.INTAKE_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY, DEFAULT_MAX_UNCOUNTED_WORKSPACE_MESSAGES_PER_DAY),
+    uncountedInstanceMessagesPerDay: positive(env.INTAKE_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY, DEFAULT_MAX_UNCOUNTED_INSTANCE_MESSAGES_PER_DAY),
+    uncountedAddressRecordsPerDay: positive(env.INTAKE_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY, DEFAULT_MAX_UNCOUNTED_ADDRESS_RECORDS_PER_DAY),
+    uncountedWorkspaceRecords: positive(env.INTAKE_MAX_UNCOUNTED_WORKSPACE_RECORDS, DEFAULT_MAX_UNCOUNTED_WORKSPACE_RECORDS),
+    uncountedInstanceRecords: positive(env.INTAKE_MAX_UNCOUNTED_INSTANCE_RECORDS, DEFAULT_MAX_UNCOUNTED_INSTANCE_RECORDS),
     addressMessagesPerDay: positive(env.INTAKE_MAX_ADDRESS_MESSAGES_PER_DAY, DEFAULT_MAX_ADDRESS_MESSAGES_PER_DAY),
     addressRecordsPerDay: positive(env.INTAKE_MAX_ADDRESS_RECORDS_PER_DAY, DEFAULT_MAX_ADDRESS_RECORDS_PER_DAY),
     workspaceMessagesPerDay: positive(env.INTAKE_MAX_WORKSPACE_MESSAGES_PER_DAY, DEFAULT_MAX_WORKSPACE_MESSAGES_PER_DAY),

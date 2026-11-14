@@ -164,7 +164,7 @@ export const aggregateReports = sqliteTable(
 		reporter_tier: text('reporter_tier'),
 		/** Organisation of the known-reporters entry that matched, for 'counted'. */
 		reporter_known_as: text('reporter_known_as'),
-		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>'. Null: stored before 0010. */
+		/** The registry id, else the authenticated organisational domain, else '~unauth'; report_id then holds '<identity>|<id from the report>' (every tier; a plain id is a legacy row). Null: stored before 0010. */
 		reporter_identity: text('reporter_identity'),
 		/** Random id of the storing attempt; the report's records are joined on it inside one db.batch() (0010). Null: stored before 0010. */
 		ingest_token: text('ingest_token'),
@@ -751,6 +751,7 @@ export const WORKSPACE_OWNED_TABLES = [
 	'domain_claims',
 	'intake_usage',
 	'workspace_storage',
+	'intake_drops',
 	'intake_failures',
 	'reporter_candidate_days',
 ] as const;
@@ -828,13 +829,30 @@ export const reporterCandidateDays = sqliteTable(
 	(t) => [primaryKey({ columns: [t.dkim_org, t.from_address, t.report_email, t.workspace_id, t.day] }), index('idx_reporter_candidate_days_day').on(t.day)],
 );
 
-/** report_records rows a workspace holds right now: what the storage cap compares against. */
+/** report_records rows a workspace holds right now, as two budgets: counted (and legacy) reports, and uncounted ones (tier 'unknown'/'unauthenticated'), each with its own cap. */
 export const workspaceStorage = sqliteTable('workspace_storage', {
 	workspace_id: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
 	reports: integer('reports').notNull().default(0),
 	records: integer('records').notNull().default(0),
+	uncounted_reports: integer('uncounted_reports').notNull().default(0),
+	uncounted_records: integer('uncounted_records').notNull().default(0),
 	reconciled_at: integer('reconciled_at'),
 });
+
+/** Counted reports accepted but not stored because the counted budget was full: one row per domain and reporter, with the first drop time. */
+export const intakeDrops = sqliteTable(
+	'intake_drops',
+	{
+		domain_id: integer('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+		reporter: text('reporter').notNull(),
+		workspace_id: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+		label: text('label').notNull(),
+		first_at: integer('first_at').notNull(),
+		last_at: integer('last_at').notNull(),
+		messages: integer('messages').notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.domain_id, t.reporter] })],
+);
 
 /** Mail that reached a report address and was not stored: one counter row per domain, UTC day and reason. */
 export const intakeFailures = sqliteTable(

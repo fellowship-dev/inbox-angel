@@ -76,13 +76,13 @@ describe('per-token caps (a counted registry reporter over a cap is accepted and
     const over = await send(w, dmarcXml('a-corp.com', 'r3'), GOOGLE);
     expect(over.setReject).not.toHaveBeenCalled();
     expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 1 }]);
-    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['r1', 'r2']);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['google|r1', 'google|r2']);
     expect(w.rows('SELECT domain_id, workspace_id, reporter, reports FROM intake_usage')).toEqual([{ domain_id: 1, workspace_id: 'ws_a', reporter: 'google', reports: 2 }]);
 
     const b = fakeMessage(`rua+${w.tokenB}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'rb')), GOOGLE);
     await handleHostedEmail(b, w.env);
     expect(b.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT report_id FROM aggregate_reports WHERE domain_id = 2')).toEqual([{ report_id: 'rb' }]);
+    expect(w.rows('SELECT report_id FROM aggregate_reports WHERE domain_id = 2')).toEqual([{ report_id: 'google|rb' }]);
   });
 
   it('a new UTC day starts a new allowance', async () => {
@@ -92,10 +92,10 @@ describe('per-token caps (a counted registry reporter over a cap is accepted and
       vi.setSystemTime(new Date('2030-01-01T23:00:00Z'));
       expect((await send(w, dmarcXml('a-corp.com', 'd1'), GOOGLE)).setReject).not.toHaveBeenCalled();
       expect((await send(w, dmarcXml('a-corp.com', 'd1b'), GOOGLE)).setReject).not.toHaveBeenCalled(); // dropped
-      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['d1']);
+      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['google|d1']);
       vi.setSystemTime(new Date('2030-01-02T00:01:00Z'));
       expect((await send(w, dmarcXml('a-corp.com', 'd2'), GOOGLE)).setReject).not.toHaveBeenCalled();
-      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['d1', 'd2']);
+      expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['google|d1', 'google|d2']);
     } finally { vi.useRealTimers(); }
   });
 
@@ -103,7 +103,7 @@ describe('per-token caps (a counted registry reporter over a cap is accepted and
     const w = await twoWorkspaces({ INTAKE_MAX_BYTES_PER_DAY: '1000' });
     for (const [id, rawSize] of [['b1', 600], ['b2', 600], ['b3', 400], ['b4', 1]] as const) expect((await send(w, dmarcXml('a-corp.com', id), { ...GOOGLE, rawSize })).setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT reports, bytes FROM intake_usage')).toEqual([{ reports: 2, bytes: 1000 }]); // b3 fits exactly
-    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['b1', 'b3']);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['google|b1', 'google|b3']);
     expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 2 }]);
   });
 
@@ -186,7 +186,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect(over.setReject.mock.calls[0][0]).toMatch(/Daily intake limit/);
     const g = await GRPT(w, 'genuine');
     expect(g.setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT report_id, reporter_auth, reporter_auth_domain, reporter_tier FROM aggregate_reports WHERE report_id = 'genuine'")).toEqual([{ report_id: 'genuine', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_tier: 'counted' }]);
+    expect(w.rows("SELECT report_id, reporter_auth, reporter_auth_domain, reporter_tier FROM aggregate_reports WHERE report_id = 'google|genuine'")).toEqual([{ report_id: 'google|genuine', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_tier: 'counted' }]);
     expect(usage(w)).toEqual([{ reporter: 'google', reports: 1 }, { reporter: '~spam.example', reports: 3 }]);
   });
 
@@ -195,7 +195,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect((await send(w, dmarcXml('a-corp.com', 'j1'), { rawSize: 900, from: 'x@spam.example' })).setReject).not.toHaveBeenCalled();
     expect((await send(w, dmarcXml('a-corp.com', 'j2'), { rawSize: 200, from: 'x@spam.example' })).setReject).toHaveBeenCalledOnce();
     expect((await GRPT(w, 'genuine', { ...GOOGLE, rawSize: 1_500_000 })).setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['~unauth|j1', 'genuine']);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['~unauth|j1', 'google|genuine']);
   });
 
   it('a registry reporter at its own cap does not block another registry reporter', async () => {
@@ -203,7 +203,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     for (const id of ['g1', 'g2', 'g3']) expect((await GRPT(w, id)).setReject).not.toHaveBeenCalled(); // g3 accepted and dropped
     expect((await sendMs(w, 'm1')).setReject).not.toHaveBeenCalled();
     expect(usage(w)).toEqual([{ reporter: 'google', reports: 2 }, { reporter: 'microsoft', reports: 1 }]);
-    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['g1', 'g2', 'm1']);
+    expect(w.rows('SELECT report_id FROM aggregate_reports ORDER BY id').map(r => r.report_id)).toEqual(['google|g1', 'google|g2', 'microsoft|m1']);
     expect(dropped(w)).toEqual([{ reason: 'over_cap_accepted_dropped', messages: 1 }]);
   });
 
@@ -227,7 +227,7 @@ describe('the intake allowance: junk cannot exhaust genuine reports', () => {
     expect(w.rows("SELECT COUNT(*) AS n FROM aggregate_reports WHERE reporter_tier = 'unknown'")).toEqual([{ n: 3 }]);
     expect((await GRPT(w, 'g1')).setReject).not.toHaveBeenCalled();
     expect((await sendMs(w, 'm1')).setReject).not.toHaveBeenCalled();
-    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted' ORDER BY id")).toEqual([{ report_id: 'g1' }, { report_id: 'm1' }]);
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted' ORDER BY id")).toEqual([{ report_id: 'google|g1' }, { report_id: 'microsoft|m1' }]);
   });
 
   it('unauthenticated senders share one total per address: past it the next is refused, whoever it claims to be', async () => {
@@ -300,7 +300,7 @@ describe('forged Authentication-Results cannot make a report look authenticated'
     for (let i = 0; i < 5; i++) await send(w, dmarcXml('a-corp.com', 'forged' + i), { rawHeaderLines: ['Authentication-Results: mx.cloudflare.net; dkim=none', 'Authentication-Results: ' + FORGED] });
     expect((await send(w, dmarcXml('a-corp.com', 'genuine'), GOOGLE)).setReject).not.toHaveBeenCalled();
     expect(w.rows("SELECT reports FROM intake_usage WHERE reporter = 'google'")).toEqual([{ reports: 1 }]);
-    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'genuine' }]);
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'google|genuine' }]);
   });
 
   it('an uncounted report neither squats nor displaces a real reporter’s report id', async () => {
@@ -310,10 +310,10 @@ describe('forged Authentication-Results cannot make a report look authenticated'
     await send(w, dmarcXml('a-corp.com', 'same-id'), forged);
     expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports')).toEqual([{ report_id: '~unauth|same-id', reporter_tier: 'unauthenticated' }]);
     expect((await send(w, dmarcXml('a-corp.com', 'same-id'), GOOGLE)).setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports')).toEqual([{ report_id: 'same-id', reporter_tier: 'counted' }]);
+    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports')).toEqual([{ report_id: 'google|same-id', reporter_tier: 'counted' }]);
     // google first: a later uncounted report with that id is a duplicate (not stored), the counted one is untouched
     await send(w, dmarcXml('a-corp.com', 'same-id'), forged);
-    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports ORDER BY id')).toEqual([{ report_id: 'same-id', reporter_tier: 'counted' }]);
+    expect(w.rows('SELECT report_id, reporter_tier FROM aggregate_reports ORDER BY id')).toEqual([{ report_id: 'google|same-id', reporter_tier: 'counted' }]);
   });
 });
 
@@ -330,14 +330,14 @@ describe('policy_published must be the token’s domain or a subdomain', () => {
   it('files a subdomain under the token’s domain', async () => {
     const w = await twoWorkspaces();
     expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-1'), GOOGLE)).setReject).not.toHaveBeenCalled();
-    expect(filed(w)).toEqual([{ domain_id: 1, report_id: 'sub-1' }]);
+    expect(filed(w)).toEqual([{ domain_id: 1, report_id: 'google|sub-1' }]);
   });
 
   it('files a subdomain under its own row when it is a verified domain of the same workspace', async () => {
     const w = await twoWorkspaces();
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address) VALUES (3, 'ws_a', 'mail.a-corp.com', 'x')").run();
     expect((await send(w, dmarcXml('mail.a-corp.com', 'sub-2'), GOOGLE)).setReject).not.toHaveBeenCalled();
-    expect(filed(w)).toEqual([{ domain_id: 3, report_id: 'sub-2' }]);
+    expect(filed(w)).toEqual([{ domain_id: 3, report_id: 'google|sub-2' }]);
   });
 
   it('does not use a subdomain verified in a different workspace', async () => {
@@ -361,7 +361,7 @@ describe('reporter_auth, reporter_tier and the tier decision', () => {
     await send(w, dmarcXml('a-corp.com', 'd'), AR('mx.cloudflare.net; dmarc=pass header.from=google.com'));
     await send(w, dmarcXml('a-corp.com', 'n'));
     expect(stored(w)).toEqual([
-      { report_id: 'k', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_auth_reason: null, reporter_tier: 'counted' },
+      { report_id: 'google|k', reporter_auth: 'pass', reporter_auth_domain: 'google.com', reporter_auth_reason: null, reporter_tier: 'counted' },
       { report_id: '~unauth|s', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
       { report_id: '~unauth|f1', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
       { report_id: '~unauth|f2', reporter_auth: 'fail', reporter_auth_domain: null, reporter_auth_reason: 'not_authenticated', reporter_tier: 'unauthenticated' },
@@ -483,7 +483,8 @@ describe('a token’s daily totals survive reporters coming and going', () => {
     expect((await sendUnknown(w, 'one.example', 'b2', { rawSize: 800 })).setReject).toHaveBeenCalledOnce();
     expect(w.rows("SELECT reporter, reports, bytes FROM intake_usage WHERE reporter = 'one.example'")).toEqual([{ reporter: 'one.example', reports: 1, bytes: 800 }]);
     expect(quota(w, 'k:1')).toEqual([{ messages: 1, bytes: 800 }]);
-    expect(quota(w, 'a:1')).toEqual([{ messages: 1, bytes: 800 }]);
+    expect(quota(w, 'a:1')).toEqual([]); // uncounted mail is not charged to the counted address counter
+    expect(quota(w, 'n:ws_a')).toEqual([{ messages: 1, bytes: 800 }]);
   });
 
   it('registry reporters are outside the unknown total: junk reporters exhausting it cannot block google', async () => {
@@ -491,7 +492,7 @@ describe('a token’s daily totals survive reporters coming and going', () => {
     for (let i = 0; i < 4; i++) await sendUnknown(w, `cheap${i}.example`, 'j' + i);
     expect((await send(w, dmarcXml('a-corp.com', 'g1'), dkimHdr('google.com'))).setReject).not.toHaveBeenCalled();
     expect(quota(w, 'k:1')).toEqual([expect.objectContaining({ messages: 2 })]);
-    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'g1' }]);
+    expect(w.rows("SELECT report_id FROM aggregate_reports WHERE reporter_tier = 'counted'")).toEqual([{ report_id: 'google|g1' }]);
   });
 
   it('defaults', () => {

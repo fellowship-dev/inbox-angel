@@ -177,7 +177,7 @@ describe('duplicate report ids', () => {
   it('are idempotent: one report, its records once, accepted every time', async () => {
     const w = await twoWorkspaces();
     for (let i = 0; i < 3; i++) expect((await deliver(w, gzipReportMime(xml({ id: 'same' })))).setReject).not.toHaveBeenCalled();
-    expect(reports(w)).toEqual(['same']);
+    expect(reports(w)).toEqual(['google|same']);
     expect(w.rows('SELECT COUNT(*) AS n FROM report_records')[0].n).toBe(1);
     expect(w.rows('SELECT records FROM workspace_storage WHERE workspace_id = ?', 'ws_a')).toEqual([{ records: 1 }]);
     expect(lastLog()).toBeUndefined(); // accepted lines are info level (console.log), checked in intake-log.test.ts
@@ -188,7 +188,7 @@ describe('duplicate report ids', () => {
     await deliver(w, gzipReportMime(xml({ id: 'same' })));
     const m = fakeMessage(`rua+${w.tokenB}@${RUA}`, gzipReportMime(xml({ id: 'same', domain: 'b-corp.org' })), GOOGLE);
     await worker.email(m, w.env as any, ctx);
-    expect(w.rows('SELECT domain_id, report_id FROM aggregate_reports ORDER BY domain_id')).toEqual([{ domain_id: 1, report_id: 'same' }, { domain_id: 2, report_id: 'same' }]);
+    expect(w.rows('SELECT domain_id, report_id FROM aggregate_reports ORDER BY domain_id')).toEqual([{ domain_id: 1, report_id: 'google|same' }, { domain_id: 2, report_id: 'google|same' }]);
   });
 });
 

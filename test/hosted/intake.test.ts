@@ -69,8 +69,8 @@ describe('DMARC aggregate reports', () => {
     expect(a.setReject).not.toHaveBeenCalled();
     expect(b.setReject).not.toHaveBeenCalled();
     expect(w.rows('SELECT workspace_id, domain_id, report_id FROM aggregate_reports ORDER BY domain_id')).toEqual([
-      { workspace_id: 'ws_a', domain_id: 1, report_id: 'ra' },
-      { workspace_id: 'ws_b', domain_id: 2, report_id: 'rb' },
+      { workspace_id: 'ws_a', domain_id: 1, report_id: 'google|ra' },
+      { workspace_id: 'ws_b', domain_id: 2, report_id: 'google|rb' },
     ]);
     expect(w.rows('SELECT DISTINCT workspace_id FROM report_records ORDER BY 1').map(r => r.workspace_id)).toEqual(['ws_a', 'ws_b']);
   });
@@ -133,7 +133,7 @@ describe('DMARC aggregate reports', () => {
     const m3 = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('a-corp.com', 'raw25')), { rawSize: 20 * 1024 * 1024 });
     await handleHostedEmail(m3, { ...w.env, INTAKE_MAX_RAW_BYTES: String(25 * 1024 * 1024) } as any);
     expect(m3.setReject).not.toHaveBeenCalled(); // an operator can raise it to Cloudflare's own 25 MiB ceiling
-    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'raw25' }]);
+    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'google|raw25' }]);
   }, BIG_REPORT_TIMEOUT);
 
   it('accepts a report just under the 25 MiB ceiling when the operator raises the decompressed cap to it', async () => {
@@ -142,7 +142,7 @@ describe('DMARC aggregate reports', () => {
     const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, mimeWithAttachment(gzipSync(strToU8(big)), 'r.xml.gz', 'application/gzip'));
     await handleHostedEmail(m, w.env);
     expect(m.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'big' }]);
+    expect(w.rows('SELECT report_id FROM aggregate_reports')).toEqual([{ report_id: 'google|big' }]);
   }, BIG_REPORT_TIMEOUT);
 });
 
@@ -166,7 +166,7 @@ describe('what a token may file', () => {
     const ok = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(dmarcXml('A-Corp.com', 'eq-1')));
     await handleHostedEmail(ok, w.env);
     expect(ok.setReject).not.toHaveBeenCalled();
-    expect(w.rows('SELECT domain_id, report_id FROM aggregate_reports')).toEqual([{ domain_id: 1, report_id: 'eq-1' }]);
+    expect(w.rows('SELECT domain_id, report_id FROM aggregate_reports')).toEqual([{ domain_id: 1, report_id: 'google|eq-1' }]);
   });
 
   it('domain A’s token cannot file for domain B of the same workspace, nor for a parent', async () => {
@@ -258,7 +258,7 @@ describe('saas has no default workspace', () => {
     const w = await twoWorkspaces();
     const m = fakeMessage(`rua+${w.tokenB}@${RUA}`, gzipReportMime(dmarcXml('b-corp.org', 'via-worker')));
     await worker.email(m, w.env as any, ctx);
-    expect(w.rows('SELECT workspace_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_b', report_id: 'via-worker' }]);
+    expect(w.rows('SELECT workspace_id, report_id FROM aggregate_reports')).toEqual([{ workspace_id: 'ws_b', report_id: 'google|via-worker' }]);
   });
 
   it('a database that is not migrated yet throws (the sender retries) instead of rejecting', async () => {
