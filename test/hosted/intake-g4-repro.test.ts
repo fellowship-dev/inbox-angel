@@ -35,13 +35,13 @@ beforeEach(() => { quiet(); nxdomain(); resetSchemaReadyCache(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 /** Deliver one message through the real email() export, with `env.DB` replaced by a counting binding. */
-async function deliver(n: number, o: { wrap?: (db: D1Database) => D1Database; limit?: number; env?: Record<string, string>; reportId?: string; world?: Awaited<ReturnType<typeof twoWorkspaces>> } = {}) {
+async function deliver(n: number, o: { wrap?: (db: D1Database) => D1Database; limit?: number; env?: Record<string, string>; reportId?: string; headers?: Record<string, string>; world?: Awaited<ReturnType<typeof twoWorkspaces>> } = {}) {
   resetSchemaReadyCache(); // the schema check (1 query) runs on a cold isolate, so it is part of the invocation
   const limit = o.limit ?? D1_PAID_LIMIT;
   const w = o.world ?? await twoWorkspaces(o.env);
   const counter = countingD1(w.db as unknown as D1Database, limit);
   const env = { ...w.env, ...(o.env ?? {}), DB: (o.wrap ?? ((d) => d))(counter.db) } as any;
-  const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(reportWithDistinctIps('a-corp.com', o.reportId ?? `big-${n}`, n)), GOOGLE);
+  const m = fakeMessage(`rua+${w.tokenA}@${RUA}`, gzipReportMime(reportWithDistinctIps('a-corp.com', o.reportId ?? `big-${n}`, n)), o.headers ? { headers: o.headers } : GOOGLE);
   counter.reset(limit); // seeding is not part of the invocation
   let threw: unknown = null;
   await worker.email(m, env, ctx).catch((e: unknown) => { threw = e; });
@@ -184,14 +184,41 @@ describe('G4: a storage failure is never accepted and dropped', () => {
     expect(count(retry.w, 'report_records')).toBe(3);
   });
 
-  it('after INTAKE_MAX_STORAGE_RETRIES_PER_DAY failures the message is refused for good instead of retried again', async () => {
+  it('a known reporter\'s report is NEVER refused for good because of our storage failures: it throws every time (the sender may retry) and the owner sees the count', async () => {
     const env = { INTAKE_MAX_STORAGE_RETRIES_PER_DAY: '1' };
-    const first = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: 'stuck' });
-    expect(first.threw).toBeInstanceOf(StorageFailure);
-    const second = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: 'stuck', world: first.w });
-    expect(second.threw).toBeNull();
-    expect(second.m.setReject).toHaveBeenCalledWith('Report could not be stored after repeated attempts');
-    expect(second.w.rows('SELECT messages FROM intake_failures')).toEqual([{ messages: 2 }]);
+    let world: Awaited<ReturnType<typeof twoWorkspaces>> | undefined;
+    for (let i = 0; i < 4; i++) {
+      const r = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: 'stuck', world });
+      world = r.w;
+      expect(r.threw, `attempt ${i + 1}`).toBeInstanceOf(StorageFailure);
+      expect(r.m.setReject).not.toHaveBeenCalled();
+    }
+    expect(world!.rows('SELECT reason, messages FROM intake_failures')).toEqual([{ reason: 'storage_failed', messages: 4 }]);
+  });
+
+  it('an uncounted sender\'s report that keeps failing is refused for good, counted PER MESSAGE: an outage does not turn other reports of the domain into refusals', async () => {
+    const env = { INTAKE_MAX_STORAGE_RETRIES_PER_DAY: '2', INTAKE_MAX_UNAUTH_REPORTS_PER_DAY: '1000', INTAKE_MAX_UNAUTH_TOTAL_REPORTS_PER_DAY: '1000' };
+    const unauth = { headers: { 'x-sender': 'nobody' } };
+    // twenty failures of OTHER messages (an outage) ...
+    let world: Awaited<ReturnType<typeof twoWorkspaces>> | undefined;
+    for (let i = 0; i < 20; i++) {
+      const r = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: `outage-${i}`, world, ...unauth });
+      world = r.w;
+      expect(r.threw, `outage ${i}`).toBeInstanceOf(StorageFailure); // each message is on its first failure: retried, not refused
+    }
+    // ... then one message that keeps failing: two attempts are retried, the third is refused for good
+    const tries: unknown[] = [];
+    let last: Awaited<ReturnType<typeof deliver>> | undefined;
+    for (let i = 0; i < 3; i++) { last = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: 'stuck', world, ...unauth }); tries.push(last.threw); }
+    expect(tries[0]).toBeInstanceOf(StorageFailure);
+    expect(tries[1]).toBeInstanceOf(StorageFailure);
+    expect(tries[2]).toBeNull();
+    expect(last!.m.setReject).toHaveBeenCalledWith('Report could not be stored after repeated attempts');
+    // a different message of the same domain, same day, is still retried rather than refused
+    const other = await deliver(3, { wrap: failWrites('aggregate_reports'), env, reportId: 'fresh', world, ...unauth });
+    expect(other.threw).toBeInstanceOf(StorageFailure);
+    // the owner-visible count still counts every failure
+    expect(world!.rows("SELECT messages FROM intake_failures WHERE reason = 'storage_failed'")).toEqual([{ messages: 20 + 3 + 1 }]);
   });
 
   it('running out of the invocation\'s query budget in the middle of storing cannot leave a half-stored report either', async () => {

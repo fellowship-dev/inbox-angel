@@ -86,6 +86,11 @@ export interface ReportResult {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+/** A short hash naming one message (domain, reporter identity, report id) for the per-message failure counter; no report content is kept. */
+async function messageKey(domainId: number, identity: string, reportId: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${domainId}|${identity}|${reportId}`));
+  return [...new Uint8Array(digest).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 /** The caps on stored records: when one of them stops a COUNTED report the owner is told, by reporter and first drop time. */
 const STORAGE_CAPS: ReadonlySet<string> = new Set(['cap_address_records', 'cap_workspace_storage', 'cap_instance_storage']);
 
@@ -234,11 +239,15 @@ export async function handleDmarcReport(
     console.error('dmarc-report: D1 storage failed for domain', domain.id, err instanceof Error ? err.message : err);
     // Nothing of the report was stored (one transaction). Count it where the owner can see it; this is best effort and
     // must not hide the original failure.
-    let failuresToday = 1;
-    try { failuresToday = await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* the marker is a courtesy */ }
-    if (failuresToday > limits.storageRetriesPerDay) {
-      // The same failure again and again: stop the sender from retrying a message we cannot store.
-      return refuse('storage_failed_repeatedly', REASONS.storage_failed_repeatedly, known);
+    try { await tenant.scope.intake.markFailure(domain.id, today(), 'storage_failed', Math.floor(Date.now() / 1000)); } catch { /* the marker is a courtesy */ }
+    // A report that keeps failing is refused for good ONLY when its sender is not a known reporter, and counted PER MESSAGE (domain + reporter identity +
+    // report id): one database outage must not turn every later report of the domain into a permanent refusal, and a known reporter's report is never
+    // refused because of OUR storage failure (it is retried; the owner sees the failure count). Self-host counting every report is not defended either.
+    if (tierDecision.tier !== 'counted' && !unrestricted) {
+      const key = await messageKey(domain.id, tierDecision.identity, report.report_metadata.report_id);
+      let failuresOfThisMessage = 1;
+      try { failuresOfThisMessage = await tenant.scope.intake.noteStorageFailure(key, today()); } catch { /* best effort */ }
+      if (failuresOfThisMessage > limits.storageRetriesPerDay) return refuse('storage_failed_repeatedly', REASONS.storage_failed_repeatedly, known);
     }
     throw new StorageFailure(known, err);
   }

@@ -275,14 +275,28 @@ describe('handleDmarcReport — error paths', () => {
     expect(tenant.scope.intake.markFailure).toHaveBeenCalledWith(1, expect.stringMatching(/^\d{4}-\d\d-\d\d$/), 'storage_failed', expect.any(Number));
   });
 
-  it('refuses for good once the same domain has failed too often today, so a stuck failure is not retried for days', async () => {
+  it('an uncounted sender\'s message that has failed too often today is refused for good (the counter is per message, not per domain)', async () => {
     vi.mocked(storeReportMod.storeReport).mockRejectedValue(new Error('D1 unavailable'));
-    const tenant = makeEnv();
-    tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(21);
+    const tenant = makeTenant({ db: {}, mode: 'saas', env: { MODE: 'saas' } as any });
+    tenant.scope.reports.isDuplicate = vi.fn().mockResolvedValue(false);
+    tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(500); // a domain-wide count is NOT what decides
+    tenant.scope.intake.noteStorageFailure = vi.fn().mockResolvedValue(21);
     const message = makeMessage();
     const result = await handleDmarcReport(message, tenant);
     expect(result).toMatchObject({ outcome: 'refused', reason: 'storage_failed_repeatedly' });
     expect(message.setReject).toHaveBeenCalledWith('Report could not be stored after repeated attempts');
+    expect(tenant.scope.intake.noteStorageFailure).toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f]{24}$/), expect.stringMatching(/^\d{4}-\d\d-\d\d$/));
+  });
+
+  it('a domain with many failures of OTHER messages does not refuse this one', async () => {
+    vi.mocked(storeReportMod.storeReport).mockRejectedValue(new Error('D1 unavailable'));
+    const tenant = makeTenant({ db: {}, mode: 'saas', env: { MODE: 'saas' } as any });
+    tenant.scope.reports.isDuplicate = vi.fn().mockResolvedValue(false);
+    tenant.scope.intake.markFailure = vi.fn().mockResolvedValue(500);
+    tenant.scope.intake.noteStorageFailure = vi.fn().mockResolvedValue(1);
+    const message = makeMessage();
+    await expect(handleDmarcReport(message, tenant)).rejects.toBeInstanceOf(StorageFailure);
+    expect(message.setReject).not.toHaveBeenCalled();
   });
 
   it('a report already stored is a duplicate: accepted, not stored again, nothing enriched', async () => {

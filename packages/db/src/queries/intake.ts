@@ -167,6 +167,17 @@ export function intakeQueries(db: Db, workspaceId: string) {
 			return db.all<DropRow>(sql`SELECT reporter, label, first_at, last_at, messages FROM intake_drops WHERE workspace_id = ${workspaceId} AND domain_id = ${domainId} AND last_at >= ${sinceSeconds} ORDER BY first_at, reporter`);
 		},
 
+		/**
+		 * Count one failed attempt to store ONE message (key: a hash of domain + reporter identity + report id) on `day`: the counter that lets an
+		 * uncounted sender's report that fails forever be refused for good, without one outage turning every later report of the domain into a
+		 * refusal. A row in intake_quota (scope `sf:<key>`, a hash, no content), swept with the other daily counters. Returns this message's failures today.
+		 */
+		async noteStorageFailure(key: string, day: string): Promise<number> {
+			const rows = await db.all<{ messages: number }>(sql`INSERT INTO intake_quota (scope, day, messages) VALUES (${'sf:' + key}, ${day}, 1)
+				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1 RETURNING messages`);
+			return rows[0]?.messages ?? 1;
+		},
+
 		/** Count one message that reached this address and was not stored (visible to the owner). Returns today's count for the reason. */
 		async markFailure(domainId: number, day: string, reason: string, nowSeconds: number): Promise<number> {
 			const rows = await db.all<{ messages: number }>(sql`INSERT INTO intake_failures (domain_id, workspace_id, day, reason, messages, last_at)
