@@ -115,7 +115,11 @@ export async function handleDmarcReport(
     const p = normalizeDomain(policyDomain);
     if (!coversDomain(opts.token.domain, p)) domain = null;
     else if (p === normalizeDomain(opts.token.domain)) domain = await tenant.scope.domains.getById(opts.token.id);
-    else domain = (await tenant.scope.domains.getByName(p)) ?? (await tenant.scope.domains.getById(opts.token.id));
+    else {
+      // The subdomain's own row only while its ownership is proven; an unproven ('legacy') row never receives reports.
+      const own = await tenant.scope.domains.getByName(p);
+      domain = own && own.verified_via !== 'legacy' ? own : await tenant.scope.domains.getById(opts.token.id);
+    }
   } else {
     domain = await resolveDomain(tenant, policyDomain);
   }

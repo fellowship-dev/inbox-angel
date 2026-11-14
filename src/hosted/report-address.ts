@@ -80,7 +80,7 @@ export function reportIntakeDomain(env: TenantContext['env']): string | null {
 
 /** Why this domain's reports cannot be connected, or null. Hosted records are handled by the callers. */
 async function refusalFor(tenant: TenantContext, domain: DomainRow): Promise<string | null> {
-  if (domain.verified_via === 'legacy') return `${domain.domain} was added before ownership checks. Remove it and add it again to prove that you control it, then connect reports.`;
+  if (domain.verified_via === 'legacy') return `Ownership of ${domain.domain} is not proven in this workspace. Remove it and add it again to prove that you control it, then connect reports.`;
   if (!(await isDomainProven(tenant, domain))) return `${domain.domain} was added through a parent domain that is no longer in this workspace. Remove it and add it again to prove that you control it, then connect reports.`;
   if (!(await workspaceMayConnectReports(tenant.env as BoundEnv, tenant.workspaceId))) return 'On this server, only the operator\'s workspaces can connect reports.';
   return null;
@@ -102,8 +102,10 @@ export async function reportAddressStatus(tenant: TenantContext, domain: DomainR
   const intakeDomain = reportIntakeDomain(tenant.env);
   if (!intakeDomain) return { available: false };
   const managed_by = (await tenant.scope.hosted.get(domain.id)) ? 'hosted_records' as const : null;
-  const address = managed_by ? null : await connectedAddress(tenant, domain, intakeDomain);
   const refusal = managed_by ? 'Reports for this domain come through its hosted records.' : await refusalFor(tenant, domain);
+  // A refused domain (unproven, or a workspace HOSTED_CONNECT_REPORTS does not admit) receives nothing: not connected,
+  // whatever its stored address says.
+  const address = managed_by || refusal ? null : await connectedAddress(tenant, domain, intakeDomain);
   const connected_at = address ? domain.reports_connected_at ?? null : null;
 
   let counts = { since: 0, last_since: null as number | null, before: 0 };

@@ -277,7 +277,7 @@ describe('who may connect, and for what', () => {
     expect((await w.connect(4)).res.status).toBe(404); // evicted
     const legacy = await w.connect(3);
     expect(legacy.res.status).toBe(403);
-    expect(legacy.body.error).toMatch(/added before ownership checks/);
+    expect(legacy.body.error).toBe('Ownership of legacy-a.com is not proven in this workspace. Remove it and add it again to prove that you control it, then connect reports.');
     expect(await w.status(3)).toMatchObject({ can_connect: false, refusal: expect.stringMatching(/prove that you control it/) });
     expect(w.rows('SELECT id, rua_address FROM domains WHERE id IN (3, 4)')).toEqual([{ id: 3, rua_address: '' }, { id: 4, rua_address: '' }]);
   });
@@ -401,6 +401,17 @@ describe('review blockers (fixed address)', () => {
     w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (9, ?, 'a-corp.com', ?, 'txt')").run(w.B.ws, FIXED);
     expect((await w.deliver(FIXED, 'mail.a-corp.com', 'after-move')).setReject).not.toHaveBeenCalled();
     expect(w.stored()).toEqual([{ workspace_id: w.B.ws, domain_id: 9, report_id: 'after-move' }]);
+    expect(await w.status(5)).toMatchObject({ can_connect: false, address: null, state: 'not_connected' }); // the demoted row shows as refused, not connected
+  });
+
+  it('2c. a demoted subdomain row never receives reports, even when its workspace proves the parent again', async () => {
+    const w = await world();
+    await w.connect(1);
+    await w.connect(5);
+    expect((await call(w.env, 'DELETE', '/api/domains/1', { key: w.A.token })).status).toBe(204);
+    w.db.sqlite.prepare("INSERT INTO domains (id, workspace_id, domain, rua_address, verified_via) VALUES (10, ?, 'a-corp.com', ?, 'txt')").run(w.A.ws, FIXED);
+    expect((await w.deliver(FIXED, 'mail.a-corp.com', 'readded')).setReject).not.toHaveBeenCalled();
+    expect(w.stored()).toEqual([{ workspace_id: w.A.ws, domain_id: 10, report_id: 'readded' }]); // under the proven parent, not the legacy row
   });
 
   it('2b. even without the source fix (a row left verified via a parent that is gone), intake and connect treat it as unproven', async () => {
