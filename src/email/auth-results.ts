@@ -23,6 +23,14 @@
 //     the receiver whose semantics we verified. (Method versions, "dkim/1=pass", are accepted when numeric; they do not change the result.)
 //   - "none" in place of the results (no-result) yields no methods.
 //   - A property that appears twice inside one resinfo fails closed (which one the receiver meant is unknowable).
+//   - TOLERANCE. A bare "word=value" inside a resinfo (a receiver's extension such as "action=none", which RFC 8601 does not define) is
+//     not refused: it and the rest of THAT resinfo, up to the next top-level ";" (quotes and comments respected), are skipped, and the
+//     method's result and the properties read before it are kept. Skipping can lose a pass (a header.d after the extension is dropped)
+//     but can never create one: a method is still only read right after a top-level ";", and what is skipped could equally have been
+//     written as a well-formed "ptype.word=value". Anything else unreadable still fails the whole header closed.
+//   - What no tokenizer can catch: a receiver that copies a sender-chosen value unquoted, so the sender's ";" starts a resinfo the
+//     receiver never wrote. The hosted intake does not believe a carrier whose envelope sender could do that (guardEnvelope,
+//     src/dmarc/reporter-auth.ts).
 //   - FAILS CLOSED for the whole header, with the reason in `detail`: longer than MAX_HEADER_CHARS; NUL or any other control character
 //     (anything below 0x20 except tab, and 0x7F), a stray CR/LF; unbalanced quotes or parentheses; comment nesting over MAX_COMMENT_DEPTH;
 //     more than MAX_RESULTS results or MAX_PROPS properties in one; a character outside the grammar (non-ASCII, "\" or ")" outside a quoted
@@ -52,6 +60,8 @@ export interface AuthResultInfo {
   props: Record<string, string>;
   /** Text of the comments inside this resinfo (the receiver's free text: p=reject dis=none), capped. */
   comments: string[];
+  /** True when a bare "word=value" extension and the rest of this resinfo were skipped (see TOLERANCE). */
+  skipped?: boolean;
 }
 
 export type AuthResultsFailure = 'too_long' | 'unsupported_version' | 'malformed';
@@ -207,6 +217,19 @@ export function tokenizeAuthResults(header: string): AuthResultsParse {
           i++; cfws(comments);
           info.reason = value();
           continue;
+        }
+        if (at() === 0x3d) {
+          // A bare "word=value" extension (see TOLERANCE): skip the rest of this resinfo, failing closed on any structural error.
+          for (;;) {
+            const c = at();
+            if (c === -1 || c === 0x3b) break;
+            if (c === 0x22) { quoted(); continue; }
+            if (c === 0x28) { cfws(); continue; }
+            if (c === 0x29 || c === 0x5c) stop('stray characters in a skipped extension');
+            i++;
+          }
+          info.skipped = true;
+          break;
         }
         if (at() !== 0x2e) stop('"." expected after the property type');
         i++; cfws(comments);

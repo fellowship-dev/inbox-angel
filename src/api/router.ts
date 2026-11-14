@@ -83,6 +83,7 @@ import { handleAccessRoutes } from '../access/routes';
 import { handleGoogleMetricRoutes } from '../metrics/routes';
 import { handleKeyRoutes, isKeyRoute } from '../auth/key-routes';
 import { handleHostedRoutes } from '../hosted/routes';
+import { handleReportAddressRoutes } from '../hosted/report-address-routes';
 import { handleAnalyticsRoutes } from '../analytics/routes';
 import { reportVisibility, reporterMix } from '../reports/visibility';
 import { handleUnknownReporterRoutes } from '../reports/unknown-reporters';
@@ -106,7 +107,7 @@ import { getMode } from '../tenancy/mode';
 import { deprovisionDomain, provisionDomain } from '../dns/provision';
 import { parseDomainList, bulkInsertDomains, REPORTS_DOMAIN_MISSING } from '../domains/bulk';
 import { removeAuthRecord, removeHostedRecords } from '../domains/remove';
-import { admitDomain, claimView, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
+import { admitDomain, claimView, demoteOrphanedSubdomains, listClaims, settleClaims, verifyClaim } from '../domains/ownership';
 import { DomainServiceError, assertDomainRoom, domainCap, domainRefusal, enrollDomain, commitVerifiedDomain, resumeExistingDomain } from '../domains/service';
 import { PlanLimitError } from '@ready-set-mail/db';
 import { planLimitResponse } from '../hosted/plan-limits';
@@ -268,6 +269,9 @@ export async function deleteDomain(tenant: TenantContext, domainId: string, acto
   }
 
   await tenant.scope.domains.delete(id);
+  // Subdomains admitted only through this domain are no longer proven by anything (src/domains/ownership.ts).
+  const orphaned = await demoteOrphanedSubdomains(tenant);
+  if (orphaned.length) console.warn(`[domains] ${orphaned.length} subdomain(s) of ${domain.domain} lost their proof and are now unproven`);
 
   logAudit(tenant, {
     actor_id: actor?.id ?? null, actor_email: actor?.email ?? null, actor_type: 'user',
@@ -1989,6 +1993,10 @@ async function _handleApi(
     // /api/cloudflare/* and /api/domains/:id/connection — Cloudflare connections (owner/admin)
     const connectionResponse = await handleConnectionRoutes(request, tenant, ctx, { role: workspace.role, user: userBySession });
     if (connectionResponse) return connectionResponse;
+
+    // /api/domains/:id/report-address — a report address without hosted records (MODE=saas with INTAKE_DOMAIN)
+    const reportAddressResponse = await handleReportAddressRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });
+    if (reportAddressResponse) return reportAddressResponse;
 
     // /api/domains/:id/hosted — hosted records (MODE=saas only)
     const hostedResponse = await handleHostedRoutes(request, tenant, ctx, { id: userBySession?.id, email: userBySession?.email });

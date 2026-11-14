@@ -1,7 +1,8 @@
 // /api/domains/:id/hosted — the domain's hosted records (MODE=saas, SAAS_ENABLED=1). Tenant-scoped like every
 // other route: the domain is looked up through the caller's workspace, so another workspace's id is a 404.
 //
-// Also GET /api/hosted/config: { enabled }, whether the hosted UI applies (MODE=saas and SAAS_ENABLED=1). No domain, no tenant data.
+// Also GET /api/hosted/config: { enabled, reports, records }: whether the hosted UI applies (MODE=saas and SAAS_ENABLED=1),
+// whether report addresses can be issued (INTAKE_DOMAIN) and whether hosted records can (HOSTED_RECORDS_ZONE). No domain, no tenant data.
 //   GET    /api/domains/:id/hosted               status: record names, the pointers to add, their verification, Level inputs
 //   POST   /api/domains/:id/hosted               enable { spf_record?, mta_sts? } → status + intake addresses (shown once)
 //   DELETE /api/domains/:id/hosted               remove the hosted records
@@ -11,7 +12,7 @@
 // Writes need an admin (the router's member read-only rule already applies to everything but GET).
 
 import type { TenantContext } from '../tenancy/context';
-import { hostedEnabled } from './config';
+import { hostedConfig, hostedEnabled } from './config';
 import { disableHosted, enableHosted, hostedStatus, HostedError, rotateHostedToken, verifyDomainPointers, type HostedDeps } from './service';
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -29,7 +30,9 @@ export async function handleHostedRoutes(
   const path = new URL(request.url).pathname;
   // GET /api/hosted/config — lets the dashboard decide whether to show the hosted UI. Never an error, never a secret.
   if (path === '/api/hosted/config' && request.method.toUpperCase() === 'GET') {
-    return json({ enabled: hostedEnabled(tenant.env) });
+    const enabled = hostedEnabled(tenant.env);
+    const cfg = hostedConfig(tenant.env);
+    return json({ enabled, reports: enabled && !!cfg.intakeDomain, records: enabled && !!cfg.intakeDomain && !!cfg.recordsZone });
   }
   const m = path.match(ROUTE);
   if (!m) return null;

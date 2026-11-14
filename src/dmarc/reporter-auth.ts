@@ -84,6 +84,22 @@ export function carrierFromHeaders(headers: AuthHeaders | undefined, env: Authse
   return { class: candidates.length ? 'registry' : 'authenticated', authenticated: true, reason: null, presence: 'present', from, fromOrg, dkimOrg, via, candidates };
 }
 
+/**
+ * An envelope sender the receiver may have copied unquoted into its own results header (`smtp.mailfrom=`): a ";" there starts a new
+ * resinfo the receiver never wrote ("x;dkim=pass header.d=google.com;arc=none smtp.x=y@attacker.example"), which no tokenizer can tell
+ * from a real one. A sender whose envelope address holds anything outside an unquoted dot-atom address (";", spaces, quotes,
+ * parentheses, backslashes, commas or control characters) is therefore not believed: the carrier is unauthenticated, reason
+ * `authres_malformed`. Real reporters' envelope senders are plain addresses. The null sender (empty) is safe.
+ */
+export function envelopeIsPlain(envelopeFrom: string | null | undefined): boolean {
+  return !envelopeFrom || /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@-]+$/.test(envelopeFrom);
+}
+
+export function guardEnvelope(carrier: Carrier, envelopeFrom: string | null | undefined): Carrier {
+  if (envelopeIsPlain(envelopeFrom) || !carrier.authenticated) return carrier;
+  return { ...carrier, class: 'unauthenticated', authenticated: false, reason: 'authres_malformed', via: null, candidates: [], detail: 'envelope sender is not a plain address' };
+}
+
 /** Classify the carrier of a raw message: reads (and cancels) a stream of its headers, then `carrierFromHeaders`. */
 export async function authenticateCarrier(raw: ReadableStream<Uint8Array> | null | undefined, env: AuthservEnv): Promise<{ carrier: Carrier; headers: AuthHeaders }> {
   const headers = await readAuthHeaders(raw);

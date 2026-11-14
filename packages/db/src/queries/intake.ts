@@ -4,10 +4,10 @@
  * it turns a token (from an inbound address) or a hosted id (from a policy hostname) into the
  * workspace and domain it belongs to, and returns nothing else.
  */
-import { and, count, eq, isNull, gt, lt, or, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, ne, gt, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../client';
 import { batchStatements, getDb, type DbLike } from '../client';
-import { domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
+import { aggregateReports, domains, hostedDomains, intakeTokens, intakeUsage } from '../schema';
 
 /** How long the previous token keeps working after a rotation (receivers cache the rua address). */
 export const TOKEN_ROTATION_GRACE_SECONDS = 72 * 3600;
@@ -212,6 +212,41 @@ export function intakeQueries(db: Db, workspaceId: string) {
 		delete(domainId: number) {
 			return db.delete(intakeTokens).where(forDomain(domainId)).run();
 		},
+
+		/** Connect a live domain's reports: its address becomes the hosted fixed address, and the connection starts now. */
+		connect(domainId: number, address: string, nowSeconds: number) {
+			return db.update(domains).set({ rua_address: address, reports_connected_at: nowSeconds, updated_at: sql`unixepoch()` })
+				.where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId), isNull(domains.evicted_at))).run();
+		},
+
+		/** Disconnect in one batch: the address is cleared and any token of the domain (current and previous hash) stops working. */
+		disconnect(domainId: number) {
+			return db.batch([
+				db.delete(intakeTokens).where(forDomain(domainId)),
+				db.update(domains).set({ rua_address: '', reports_connected_at: null, updated_at: sql`unixepoch()` }).where(and(eq(domains.workspace_id, workspaceId), eq(domains.id, domainId))),
+			]);
+		},
+
+		/**
+		 * Reports stored for the domain since `sinceSeconds`: all of them, the COUNTED ones (reporter_tier 'counted': an authenticated
+		 * registry reporter) and the newest counted one; and how many were stored before it. With no `sinceSeconds` (never connected
+		 * through this column) every report counts as before.
+		 */
+		async reportsAround(domainId: number, sinceSeconds: number | null): Promise<{ since: number; counted_since: number; last_counted_since: number | null; before: number }> {
+			const since = sinceSeconds ?? Number.MAX_SAFE_INTEGER;
+			const isCounted = sql`COALESCE(${aggregateReports.reporter_tier}, '') = 'counted'`;
+			const r = await db
+				.select({
+					since: sql<number>`COALESCE(SUM(CASE WHEN ${aggregateReports.created_at} >= ${since} THEN 1 ELSE 0 END), 0)`,
+					counted_since: sql<number>`COALESCE(SUM(CASE WHEN ${aggregateReports.created_at} >= ${since} AND ${isCounted} THEN 1 ELSE 0 END), 0)`,
+					last_counted_since: sql<number | null>`MAX(CASE WHEN ${aggregateReports.created_at} >= ${since} AND ${isCounted} THEN ${aggregateReports.created_at} END)`,
+					before: sql<number>`COALESCE(SUM(CASE WHEN ${aggregateReports.created_at} < ${since} THEN 1 ELSE 0 END), 0)`,
+				})
+				.from(aggregateReports)
+				.where(and(eq(aggregateReports.workspace_id, workspaceId), eq(aggregateReports.domain_id, domainId)))
+				.get();
+			return { since: Number(r?.since ?? 0), counted_since: Number(r?.counted_since ?? 0), last_counted_since: r?.last_counted_since ?? null, before: Number(r?.before ?? 0) };
+		},
 	};
 }
 
@@ -259,6 +294,24 @@ export interface IntakeTarget { workspace_id: string; domain_id: number; domain:
 export function intakeLookups(dbLike: DbLike) {
 	const db = getDb(dbLike);
 	return {
+		/**
+		 * The fixed hosted address's UNATTRIBUTED budget, charged before anything of a message is decompressed (its workspace is not known yet):
+		 * per sending organisation (`f:s:<bucket>`) and per carrier class (`f:<class>`), per UTC day, in intake_quota. It never touches a
+		 * workspace's or the instance's own counted or uncounted budgets, so mail for domains nobody connected cannot use those up.
+		 * Atomic per scope (conditional upsert); when either refuses, what counted is given back. Returns the refusing scope, or null.
+		 */
+		async consumeUnattributed(day: string, bucket: { scope: string; max: number }, total: { scope: string; max: number }): Promise<'sender' | 'total' | null> {
+			const up = (scope: string, max: number) => sql`INSERT INTO intake_quota (scope, day, messages, bytes) VALUES (${scope}, ${day}, 1, 0)
+				ON CONFLICT(scope, day) DO UPDATE SET messages = intake_quota.messages + 1 WHERE intake_quota.messages < ${max}`;
+			const res = await batchStatements(db, [up(bucket.scope, bucket.max), up(total.scope, total.max)]);
+			const okSender = (res[0]?.meta?.changes ?? 0) > 0;
+			const okTotal = (res[1]?.meta?.changes ?? 0) > 0;
+			if (okSender && okTotal) return null;
+			const giveBack = [okSender ? bucket.scope : null, okTotal ? total.scope : null].filter((x): x is string => !!x);
+			if (giveBack.length) await batchStatements(db, giveBack.map((scope) => sql`UPDATE intake_quota SET messages = MAX(0, messages - 1) WHERE scope = ${scope} AND day = ${day}`));
+			return okSender ? 'total' : 'sender';
+		},
+
 		/** The domain a token (as hashed from an inbound address) belongs to: the current token, or the previous one within its grace. */
 		resolveToken: (tokenHash: string, nowSeconds: number): Promise<IntakeTarget | null> =>
 			db
@@ -271,6 +324,40 @@ export function intakeLookups(dbLike: DbLike) {
 				)
 				.get()
 				.then((r) => r ?? null),
+
+		/**
+		 * The fixed hosted address (`rua@<intake domain>`) carries no token, so the report's own domain picks the target.
+		 * `candidates` are the report's domain and its parents up to the organizational domain (built by the caller). The
+		 * most specific live, PROVEN domain among them decides: its workspace owns these reports. Proven means verified by
+		 * TXT, Cloudflare or self-host, or by 'parent' only while a proven parent of the same workspace is still live (a
+		 * subdomain admitted through a parent that has since gone proves nothing). It is the target when it connected
+		 * reports (`rua_address` is `address`); otherwise the nearest proven parent of the SAME workspace that connected them
+		 * is. Another workspace's parent never receives them. Names are globally unique.
+		 */
+		async connectedForReport(candidates: string[], address: string): Promise<IntakeTarget | null> {
+			if (candidates.length === 0) return null;
+			const rows = await db
+				.select({ workspace_id: domains.workspace_id, domain_id: domains.id, domain: domains.domain, rua_address: domains.rua_address, verified_via: domains.verified_via })
+				.from(domains)
+				.where(
+					/* workspace-scope-exempt: domains.domain is globally unique and identifies the workspace */
+					and(inArray(domains.domain, candidates), isNull(domains.evicted_at), ne(domains.verified_via, 'legacy')),
+				)
+				.all();
+			rows.sort((a, b) => b.domain.length - a.domain.length);
+			// Every parent of a candidate is a candidate, so a 'parent' row's parents are all in `rows` (shortest last).
+			const proven = new Set<string>();
+			for (const r of [...rows].reverse()) {
+				const direct = r.verified_via !== 'parent';
+				const viaParent = rows.some((p) => p.workspace_id === r.workspace_id && proven.has(p.domain) && r.domain.endsWith(`.${p.domain}`));
+				if (direct || viaParent) proven.add(r.domain);
+			}
+			const live = rows.filter((r) => proven.has(r.domain));
+			const owner = live[0];
+			if (!owner) return null;
+			const hit = live.find((r) => r.workspace_id === owner.workspace_id && (r.rua_address ?? '').trim().toLowerCase() === address.toLowerCase());
+			return hit ? { workspace_id: hit.workspace_id, domain_id: hit.domain_id, domain: hit.domain } : null;
+		},
 
 		/** The domain behind an opaque hosted id (the label in `mta-sts.<id>.h.<zone>`). */
 		hostedById: (hostedId: string): Promise<IntakeTarget | null> =>

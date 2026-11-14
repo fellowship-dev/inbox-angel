@@ -62,6 +62,11 @@ export interface ReportOptions {
   dropOverCap?: boolean;
   /** Caps on the report's tier, after the tier is known (records stored, unauthenticated records): return a reason to refuse. */
   admitTier?: (tier: ReporterTier) => ReasonCode | null;
+  /**
+   * Hosted fixed address: the policy domain the intake routed this report by (read before the full parse). The parsed policy_published
+   * domain must be exactly this, or the report is refused and nothing is stored.
+   */
+  expectedDomain?: string;
 }
 
 export interface ReportResult {
@@ -144,13 +149,18 @@ export async function handleDmarcReport(
   let policyDomain = '';
   const gate = async (info: { report_id: string; policy_domain: string; report_email: string | null; record_count: number }) => {
     policyDomain = info.policy_domain;
+    if (opts.expectedDomain !== undefined && normalizeDomain(info.policy_domain) !== opts.expectedDomain) throw new ParseStop('refused', 'report_domain_mismatch');
     if (opts.token) {
       // Hosted: the token's domain or a subdomain of it. Filed under the token's domain, unless the subdomain is itself
       // a verified domain of the same workspace (the scoped lookup never sees another workspace's domains).
       const p = normalizeDomain(info.policy_domain);
       if (!coversDomain(opts.token.domain, p)) found.domain = null;
       else if (p === normalizeDomain(opts.token.domain)) found.domain = await tenant.scope.domains.getById(opts.token.id);
-      else found.domain = (await tenant.scope.domains.getByName(p)) ?? (await tenant.scope.domains.getById(opts.token.id));
+      else {
+        // The subdomain's own row only while its ownership is proven; an unproven ('legacy') row never receives reports.
+        const own = await tenant.scope.domains.getByName(p);
+        found.domain = own && own.verified_via !== 'legacy' ? own : await tenant.scope.domains.getById(opts.token.id);
+      }
     } else {
       found.domain = await resolveDomain(tenant, info.policy_domain);
     }
@@ -217,6 +227,12 @@ export async function handleDmarcReport(
 
   const domain = found.domain!;
   const tierDecision = dec.v!;
+
+  // Hosted: every record must be about the report's own domain or a subdomain of it. As TLS-RPT does for policy domains, one record
+  // about anything else refuses the whole report, and nothing is stored.
+  if (opts.token && report.records.some((r) => !coversDomain(report.policy_published.domain, r.identifiers?.header_from ?? ''))) {
+    return refuse('record_domain_mismatch', REASONS.record_domain_mismatch, trace({ records: report.records.length }));
+  }
   const reporter: ReporterInfo = reporterInfo(carrier, tierDecision);
 
   // Authenticated, self-consistent, not in the registry: a CANDIDATE for the registry. Listed for the instance owner and logged on every message.

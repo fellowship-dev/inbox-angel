@@ -61,7 +61,7 @@ export function ExplorePage() {
 			</div>
 
 			{reportsOff ? (
-				<ReportsNotConnected domain={domain?.domain} />
+				<ReportsNotConnected domain={domain?.domain} domainId={domain?.id} />
 			) : q.isPending ? (
 				<ListSkeleton rows={4} label="Loading sources" />
 			) : q.isError ? (

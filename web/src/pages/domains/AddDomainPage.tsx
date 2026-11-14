@@ -99,7 +99,7 @@ function HostedVerified({ domain, resumed = false }: { domain: AddDomainResult['
 					</Badge>
 				}
 			/>
-			<ReportsNotConnected domain={domain.domain} />
+			<ReportsNotConnected domain={domain.domain} domainId={domain.id} />
 			<div className="flex flex-col gap-2 sm:flex-row">
 				<Button asChild>
 					<Link to={`/domains/${domain.id}/setup`}>Check its records</Link>
