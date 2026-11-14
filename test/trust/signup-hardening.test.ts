@@ -106,6 +106,7 @@ describe('2. sign-in failures are throttled per address', () => {
     const w = hosted();
     await signupVerified(w.env, 'real@example.com', 'right-password-1');
     for (let i = 0; i < SIGNIN_FAILURE_LIMIT; i++) await call(w.env, 'POST', '/api/auth/login', { body: { email: 'real@example.com', password: 'wrong-password-x' }, ...ip() });
+    expect((await call(w.env, 'POST', '/api/auth/login', { body: { email: 'real@example.com', password: 'right-password-1' }, ...ip() })).status).toBe(429);
     await call(w.env, 'POST', '/api/auth/forgot', { body: { email: 'real@example.com' }, ...ip() });
     const link = ((w.send.mock.calls.at(-1) as any)[0].text as string).match(/#\/reset\/([A-Za-z0-9_-]+)/)![1];
     expect((await call(w.env, 'POST', '/api/auth/reset', { body: { token: link, password: 'new-password-123' }, ...ip() })).status).toBe(200);
@@ -179,7 +180,9 @@ describe('one pct= refresh per domain, however many views at once', () => {
     const id = w.rows("SELECT id FROM domains WHERE domain = 'acme.com'")[0].id;
     const zone: Zone = { 'TXT acme.com': ['v=spf1 -all'], 'TXT _dmarc.acme.com': ['v=DMARC1; p=reject'] };
     const calls: string[] = [];
-    vi.stubGlobal('fetch', dohFetch(zone, calls));
+    // DNS answers take a moment, as they do for real, so the five views genuinely overlap
+    const doh = dohFetch(zone, calls);
+    vi.stubGlobal('fetch', async (u: string) => { await new Promise(r => setTimeout(r, 25)); return doh(u); });
     const waits = (ctx.waitUntil as any).mock.calls.length;
     await Promise.all(Array.from({ length: 5 }, () => call(w.env, 'GET', `/api/domains/${id}/check-summary`, { key: token })));
     const started = (ctx.waitUntil as any).mock.calls.slice(waits).map((c: any[]) => c[0]);
