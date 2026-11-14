@@ -4,7 +4,7 @@ import { expect, request as apiRequest, test } from '@playwright/test';
 import { signIn } from './support/session';
 import { ensureDomain } from './support/db';
 
-const DOMAIN = 'e2e-corp.test';
+const DOMAIN = 'e2e-corp.example.com'; // special-use names (.test) are refused by the domain rule
 test.describe.configure({ mode: 'serial' });
 // Password/one-time credentials must never be captured in Playwright traces or artifacts.
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
